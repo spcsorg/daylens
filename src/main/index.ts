@@ -116,6 +116,13 @@ if (!gotTheLock) {
 // Pin taskbar icon correctly on Windows
 app.setAppUserModelId(APP_USER_MODEL_ID)
 
+// TEMP (local verification only — do not commit): enable Chrome DevTools
+// Protocol when DAYLENS_CDP_PORT is set, so the Apps view can be driven and
+// screenshotted headlessly even with the screen locked.
+if (process.env.DAYLENS_CDP_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.DAYLENS_CDP_PORT)
+}
+
 if (process.platform === 'linux' && SMOKE_TEST) {
   app.disableHardwareAcceleration()
   app.commandLine.appendSwitch('no-sandbox')

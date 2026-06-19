@@ -27,3 +27,4 @@ tests/ai-bench/.last-results.json
 
 # overnight verification runtime logs
 logs/
+.gstack/

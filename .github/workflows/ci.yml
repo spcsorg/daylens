@@ -18,6 +18,8 @@ jobs:
       # Native modules are not needed for a type-only check, so skip the
       # postinstall electron-rebuild step to keep CI fast and reliable.
       - run: npm ci --ignore-scripts
+      - name: Audit production dependencies
+        run: npm run audit:prod
       - run: npm run typecheck
 
   lint:

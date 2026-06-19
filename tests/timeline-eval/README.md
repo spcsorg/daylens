@@ -6,7 +6,7 @@ Run:
 npm run timeline:eval
 ```
 
-To regenerate the real founder baseline from the local Daylens database:
+To regenerate the real user baseline from the local Daylens database:
 
 ```bash
 npm run timeline:eval:export-founder
@@ -14,20 +14,20 @@ npm run timeline:eval:export-founder
 
 The exporter reads expected totals from `founder-truth.json`; it never derives
 the target from the sessions it is testing. Those values are manually
-transcribed from the live proof screenshots and remain fixed until the founder
+transcribed from the live proof screenshots and remain fixed until the user
 confirms or corrects them. Regeneration preserves timestamps, durations,
 categories, and behavior-relevant public identities while replacing local
 paths, personal names, email/account content, private hosts, and unrelated page
-titles with deterministic fixture aliases. The runner rejects a founder fixture
+titles with deterministic fixture aliases. The runner rejects a user fixture
 if those sensitive patterns reappear.
 
-The founder fixture is intentionally marked `expectedToFailOnCurrentMain`. The
+The user fixture is intentionally marked `expectedToFailOnCurrentMain`. The
 normal eval command still exits successfully for CI and packet quality gates, but
 the fixture stays visibly red in the report. To prove the baseline catches the
 current real-day defects, run:
 
 ```bash
-npm run timeline:eval -- --strict founder-real phase0-contract
+npm run timeline:eval -- --strict
 ```
 
 That strict command should exit nonzero until the later truth packets make all
@@ -43,7 +43,7 @@ eight Phase 0 contracts pass:
 8. Week chart, day-row, recap, and review-source consistency.
 
 `phase0-contract-witnesses.json` supplies privacy-safe gap and system-noise
-inputs that are not guaranteed to occur in the exported founder week.
+inputs that are not guaranteed to occur in the exported user week.
 
 The harness is offline and hermetic. Each fixture seeds an in-memory SQLite
 database with raw app sessions, optional browser/page evidence, optional

@@ -13,6 +13,7 @@
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" \"packages/**/*.ts\" --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "knip": "knip",
     "depcheck": "depcheck",
     "contract:check": "node scripts/check-remote-contract.mjs",
@@ -88,6 +89,6 @@
   },
   "overrides": {
     "lodash": "4.18.1",
-    "protobufjs": "7.5.9"
+    "protobufjs": "7.6.3"
   }
 }
