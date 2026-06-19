@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { AIWrappedNarrative, AppCategory, DayTimelinePayload, WebsiteSummary, WrappedPeriodFacts, WrappedPeriodNarrative, WrappedNarrativeResult } from '@shared/types'
 import { blockActiveSeconds } from '@shared/blockDuration'
-import { dateStringFromMs, dayBounds, formatTime, todayString } from '../lib/format'
+import { dateStringFromMs, dayBounds, todayString } from '../lib/format'
 import { ipc } from '../lib/ipc'
 import type { BrowserContext, FocusByPeriod, IdentityConfidence, WrappedQuality } from '../lib/wrappedFacts'
 import {
@@ -282,7 +282,7 @@ function isLikelyLeisureDay(d: WrappedData): boolean {
 }
 
 function buildWrapSlidePlan(narrative: AIWrappedNarrative, d: WrappedData): WrapSlidePlan[] {
-  const leisureDay = isLikelyLeisureDay(d)
+  const leisureDay = narrative.isLeisureDay ?? isLikelyLeisureDay(d)
   const slides: WrapSlidePlan[] = [
     { id: 'shape', body: narrative.lead, theme: DEFAULT_THEME },
   ]
@@ -418,61 +418,6 @@ function SlideTooEarly({ d, theme, onClose }: { d: WrappedData; theme: SlideThem
   )
 }
 
-function morningLead(d: WrappedData, aiTeaser: string | null): string {
-  if (aiTeaser) return aiTeaser
-  if (d.quality === 'empty' || d.quality === 'tooEarly') return 'Not much was tracked yesterday, so the signal is thin. Start fresh today.'
-  if (d.focusPct >= 65) return `Yesterday, ${d.focusPct}% of your tracked time stayed focused. That is a clean signal to protect today.`
-  if (d.peakBlock && d.peakBlock.durationSeconds >= 45 * 60) {
-    return `Your clearest stretch ran ${formatTime(d.peakBlock.startTime)} to ${formatTime(d.peakBlock.endTime)}. That window is worth defending.`
-  }
-  if (d.browserContext && !d.browserContext.isWorkRelevant) {
-    return `Yesterday leaned heavy on the browser. ${d.browserContext.interpretation} Start today with a clear thread.`
-  }
-  if (d.totalSeconds >= 5 * 3600) return `You tracked ${formatDurationShort(d.totalSeconds)} yesterday across ${d.blockCount} work session${d.blockCount !== 1 ? 's' : ''}.`
-  if (d.topApp) return `${d.topApp.appName} carried the strongest signal yesterday. The full recap has the shape of the day.`
-  return 'Yesterday left enough signal for a useful read on what to carry into today.'
-}
-
-function SlideMorningGreeting({
-  d,
-  userName,
-  aiTeaser,
-}: {
-  d: WrappedData
-  userName: string | null
-  aiTeaser: string | null
-}) {
-  const name = userName?.trim()
-  return (
-    <SlideLeft>
-      <h1 style={{
-        fontSize: name ? 72 : 68,
-        fontWeight: 860,
-        lineHeight: 1.02,
-        letterSpacing: '-0.03em',
-        color: '#fffaf0',
-        margin: 0,
-        textShadow: '0 14px 48px rgba(0,0,0,0.42)',
-      }}>
-        {name ? `Good morning, ${name}.` : 'Good morning.'}
-      </h1>
-      <p style={{
-        fontSize: 22,
-        fontWeight: 430,
-        lineHeight: 1.55,
-        color: 'rgba(255,250,240,0.72)',
-        margin: '24px 0 0',
-        maxWidth: '42ch',
-        textShadow: '0 10px 32px rgba(0,0,0,0.5)',
-      }}>
-        {morningLead(d, aiTeaser)}
-      </p>
-    </SlideLeft>
-  )
-}
-
-// ─── Distraction Cost ─────────────────────────────────────────────────────────
-
 // ─── Week-wrap slides ─────────────────────────────────────────────────────────
 
 interface WeekDay {
@@ -496,29 +441,26 @@ function useWeekData(enabled: boolean, anchorDate: string): WeekSummary | null {
     const [y, m, d] = anchorDate.split('-').map(Number)
     const anchorMs = new Date(y, m - 1, d).getTime()
     const dates = Array.from({ length: 14 }, (_, i) =>
-      dateStringFromMs(anchorMs - (13 - i) * 86_400_000)
+      dateStringFromMs(anchorMs - (13 - i) * 86_400_000),
     )
 
-    Promise.all(dates.map(date => ipc.db.getTimelineDay(date).catch(() => null)))
-      .then(payloads => {
-        const process = (p: DayTimelinePayload | null, dateStr: string): WeekDay => {
-          const [py, pm, pd] = dateStr.split('-').map(Number)
+    ipc.db.getWrapAggregatesForDates(dates)
+      .then((aggregates) => {
+        const toWeekDay = (day: typeof aggregates[number]): WeekDay => {
+          const [py, pm, pd] = day.date.split('-').map(Number)
           const dayLabel = new Date(py, pm - 1, pd).toLocaleDateString('en-US', { weekday: 'short' })
-          if (!p || p.totalSeconds === 0) {
-            return { dateStr, dayLabel, totalSeconds: 0, dominantCategory: 'development', longestBlockSec: 0 }
-          }
-          const longestBlockSec = p.blocks.reduce(
-            (mx, b) => Math.max(mx, blockActiveSeconds(b)), 0
-          )
           return {
-            dateStr, dayLabel,
-            totalSeconds: p.totalSeconds,
-            dominantCategory: deriveData(p).dominantCategory,
-            longestBlockSec,
+            dateStr: day.date,
+            dayLabel,
+            totalSeconds: day.totalSeconds,
+            dominantCategory: day.dominantCategory === 'unknown' ? 'development' : day.dominantCategory,
+            longestBlockSec: day.totalSeconds,
           }
         }
-        const all = payloads.map((p, i) => process(p, dates[i]))
-        setSummary({ thisWeek: all.slice(7), lastWeek: all.slice(0, 7) })
+        setSummary({
+          thisWeek: aggregates.slice(7).map(toWeekDay),
+          lastWeek: aggregates.slice(0, 7).map(toWeekDay),
+        })
       })
       .catch(() => {})
   }, [enabled, anchorDate])
@@ -570,7 +512,6 @@ function SlideWeekChart({ week, theme, aiLine = null }: { week: WeekDay[]; theme
 export default function DayWrapped({
   data,
   onClose,
-  userName = null,
 }: {
   data: DayTimelinePayload
   threadId: number | null
@@ -591,7 +532,6 @@ export default function DayWrapped({
   const narrative = narrativeState.status === 'ready' || narrativeState.status === 'non_ai'
     ? narrativeState.narrative
     : null
-  const aiTeaser = narrative?.lead ?? null
   const aiNudge = narrative?.nudge ?? null
 
   useEffect(() => {
@@ -700,7 +640,11 @@ export default function DayWrapped({
   }, [d, isMorning, narrative])
 
   const SLIDE_COUNT = isMorning
-    ? (narrative ? (aiNudge ? 2 : 1) : 1)
+    ? narrativeState.status === 'unavailable' || narrativeState.status === 'loading'
+      ? 1
+      : narrative
+        ? (aiNudge ? 2 : 1)
+        : 1
     : narrativeState.status === 'unavailable'
       ? 1
       : d.quality === 'empty' || d.quality === 'tooEarly'
@@ -827,13 +771,21 @@ export default function DayWrapped({
 
         {isMorning ? (
           <>
-            {slideIndex === 0 && (
-              narrative
-                ? <SlideNarrativeCard body={narrative.lead} theme={theme} />
-                : <SlideMorningGreeting d={d} userName={userName} aiTeaser={aiTeaser} />
-            )}
-            {aiNudge && slideIndex === 1 && (
-              <SlideNarrativeCard body={aiNudge} theme={theme} />
+            {narrativeState.status === 'unavailable' ? (
+              <SlideProviderRequired onClose={onClose} />
+            ) : narrativeState.status === 'loading' ? (
+              <SlideCenter>
+                <p style={{ fontSize: 22, color: 'rgba(255,255,255,0.6)', margin: 0 }}>Writing your brief…</p>
+              </SlideCenter>
+            ) : (
+              <>
+                {slideIndex === 0 && narrative && (
+                  <SlideNarrativeCard body={narrative.lead} theme={theme} />
+                )}
+                {aiNudge && slideIndex === 1 && (
+                  <SlideNarrativeCard body={aiNudge} theme={theme} />
+                )}
+              </>
             )}
           </>
         ) : narrativeState.status === 'unavailable' ? (

@@ -27,6 +27,8 @@ import type {
   BreakRecommendation,
   DayTimelinePayload,
   DistractionCostPayload,
+  WeekWrapAggregateBundle,
+  WeekDayWrapAggregate,
   FocusReflectionSavePayload,
   FocusSession,
   FocusStartPayload,
@@ -130,6 +132,10 @@ const api = {
     getTimelineDay: (date: string): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.GET_TIMELINE_DAY, date),
     rebuildTimelineDay: (date: string): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.REBUILD_TIMELINE_DAY, date),
     getRecapRange: (dates: string[]): Promise<DayTimelinePayload[]> => ipcRenderer.invoke(IPC.DB.GET_RECAP_RANGE, dates),
+    getWeekWrapAggregates: (weekStart: string): Promise<WeekWrapAggregateBundle> =>
+      ipcRenderer.invoke(IPC.DB.GET_WEEK_WRAP_AGGREGATES, weekStart),
+    getWrapAggregatesForDates: (dates: string[]): Promise<WeekDayWrapAggregate[]> =>
+      ipcRenderer.invoke(IPC.DB.GET_WRAP_AGGREGATES_FOR_DATES, dates),
     getDistractionCost: (): Promise<DistractionCostPayload> => ipcRenderer.invoke(IPC.DB.GET_DISTRACTION_COST),
     getAppSummaries: (days?: number): Promise<AppUsageSummary[]> => ipcRenderer.invoke(IPC.DB.GET_APP_SUMMARIES, days),
     getAppSummariesForDate: (date: string): Promise<AppUsageSummary[]> => ipcRenderer.invoke(IPC.DB.GET_APP_SUMMARIES_FOR_DATE, date),

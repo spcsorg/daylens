@@ -937,6 +937,29 @@ export interface AIWrappedNarrative {
   /** Tracks whether this came from a validated AI response or the deterministic fallback. */
   source: 'ai' | 'fallback'
   factsHash: string
+  /** Set from deterministic facts — drives 2-card leisure-day collapse in the UI. */
+  isLeisureDay?: boolean
+}
+
+export interface WeekDayWrapAggregate {
+  date: string
+  totalSeconds: number
+  workSeconds: number
+  leisureSeconds: number
+  source: 'frozen' | 'live'
+  dominantWorkSubject: string | null
+  dominantCategory: AppCategory | 'unknown'
+}
+
+export interface WeekWrapAggregateBundle {
+  weekStart: string
+  weekEnd: string
+  days: WeekDayWrapAggregate[]
+  totalSeconds: number
+  workSeconds: number
+  leisureSeconds: number
+  daysWithActivity: number
+  frozenDayCount: number
 }
 
 export type WrappedNarrativeResult =
@@ -1359,6 +1382,8 @@ export const IPC = {
     MERGE_TIMELINE_EPISODES: 'db:merge-timeline-episodes',
     GET_DISTRACTION_COST: 'db:get-distraction-cost',
     GET_RECAP_RANGE: 'db:get-recap-range',
+    GET_WEEK_WRAP_AGGREGATES: 'db:get-week-wrap-aggregates',
+    GET_WRAP_AGGREGATES_FOR_DATES: 'db:get-wrap-aggregates-for-dates',
   },
   DEBUG: {
     GET_INFO: 'debug:get-info',

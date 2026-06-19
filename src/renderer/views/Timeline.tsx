@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from '
 import { useSearchParams } from 'react-router-dom'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { ANALYTICS_EVENT, blockCountBucket, trackedTimeBucket } from '@shared/analytics'
-import type { AIDaySummaryResult, AppCategory, DayTimelinePayload, TimelineGapSegment, TimelineSegment, WorkContextBlock } from '@shared/types'
+import type { AIDaySummaryResult, AISurfaceSummary, AppCategory, DayTimelinePayload, TimelineGapSegment, TimelineSegment, WorkContextBlock } from '@shared/types'
 import { blockActiveSeconds, blockDisplayedActiveSeconds } from '@shared/blockDuration'
 import { isArtifactCompatibleWithBlockCategory, naturalizeLabel, userVisibleBlockLabel } from '@shared/blockLabel'
 import { isTrustedTimelineBlock } from '@shared/timelineReview'
@@ -1043,18 +1043,53 @@ function WeekView({
 }) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null)
   const [hoveredStack, setHoveredStack] = useState<{ date: string; category: AppCategory; seconds: number } | null>(null)
+  const [weekReview, setWeekReview] = useState<AISurfaceSummary | null>(null)
+  const [weekReviewLoading, setWeekReviewLoading] = useState(false)
+  const [weekReviewError, setWeekReviewError] = useState<string | null>(null)
   const weekStart = getWeekStart(selectedDate)
   const today = todayString()
   const includesToday = Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index)).includes(today)
 
-  const weekResource = useProjectionResource<WeekDaySummary[]>({
+  useEffect(() => {
+    let cancelled = false
+    setWeekReview(null)
+    setWeekReviewError(null)
+    void ipc.ai.getWeekReview(weekStart)
+      .then((review) => { if (!cancelled) setWeekReview(review) })
+      .catch(() => { if (!cancelled) setWeekReview(null) })
+    return () => { cancelled = true }
+  }, [weekStart])
+
+  const handleGenerateWeekReview = async () => {
+    if (weekReviewLoading) return
+    setWeekReviewLoading(true)
+    setWeekReviewError(null)
+    try {
+      const review = await ipc.ai.getWeekReview(weekStart, true)
+      setWeekReview(review)
+    } catch (error) {
+      setWeekReviewError(sanitizeIpcError(error, "Couldn't generate the week review. Try again.").message)
+    } finally {
+      setWeekReviewLoading(false)
+    }
+  }
+
+  const weekResource = useProjectionResource<{
+    days: WeekDaySummary[]
+    weekTotalSeconds: number
+  }>({
     scope: 'timeline',
     dependencies: [weekStart],
     intervalMs: includesToday ? 30_000 : 0,
     load: async () => {
       const dates = Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index))
-      const days = await Promise.all(dates.map((date) => ipc.db.getTimelineDay(date)))
-      return days.map((payload) => {
+      const [weekAggregates, dayPayloads] = await Promise.all([
+        ipc.db.getWeekWrapAggregates(weekStart),
+        Promise.all(dates.map((date) => ipc.db.getTimelineDay(date))),
+      ])
+      const aggregateByDate = new Map(weekAggregates.days.map((day) => [day.date, day]))
+      const days = dayPayloads.map((payload) => {
+        const aggregate = aggregateByDate.get(payload.date)
         const categories = new Map<AppCategory, number>()
         const workCategories = new Map<AppCategory, number>()
         const dayBlocks = visibleBlocks(payload.blocks)
@@ -1065,7 +1100,7 @@ function WeekView({
             workCategories.set(block.dominantCategory, (workCategories.get(block.dominantCategory) ?? 0) + seconds)
           }
         }
-        const dayTotalSeconds = visibleBlockTotal(dayBlocks)
+        const dayTotalSeconds = aggregate?.totalSeconds ?? visibleBlockTotal(dayBlocks)
         return {
           date: payload.date,
           totalSeconds: dayTotalSeconds,
@@ -1084,13 +1119,14 @@ function WeekView({
           )].slice(0, 3),
         }
       })
+      return { days, weekTotalSeconds: weekAggregates.totalSeconds }
     },
   })
 
-  const data = weekResource.data ?? []
+  const data = weekResource.data?.days ?? []
+  const totalWeekSeconds = weekResource.data?.weekTotalSeconds ?? data.reduce((sum, day) => sum + day.totalSeconds, 0)
   const maxSeconds = data.length > 0 ? Math.max(...data.map((day) => day.totalSeconds), 1) : 1
   const activeDays = data.filter((day) => day.totalSeconds > 0)
-  const totalWeekSeconds = activeDays.reduce((sum, day) => sum + day.totalSeconds, 0)
   const averageTrackedSeconds = activeDays.length > 0 ? Math.round(totalWeekSeconds / activeDays.length) : 0
   const mostActiveDay = activeDays.length > 0
     ? activeDays.reduce((best, day) => day.totalSeconds > best.totalSeconds ? day : best)
@@ -1261,6 +1297,60 @@ function WeekView({
               {topWeekCategory ? formatDuration(topWeekCategory[1]) : 'Leisure stays in the breakdown'}
             </div>
           </div>
+        </div>
+
+        <div style={{
+          borderTop: '1px solid var(--color-border-ghost)',
+          paddingTop: 14,
+          display: 'grid',
+          gap: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 730, color: 'var(--color-text-primary)' }}>
+                Week review
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--color-text-secondary)' }}>
+                {weekReview
+                  ? `Saved for ${formatFullDate(weekStart)} – ${formatFullDate(shiftDate(weekStart, 6))}`
+                  : 'No saved review yet'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void handleGenerateWeekReview() }}
+              disabled={weekReviewLoading || activeDays.length === 0}
+              style={{
+                padding: '7px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--color-border-ghost)',
+                background: 'var(--color-surface-low)',
+                color: 'var(--color-text-primary)',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: weekReviewLoading || activeDays.length === 0 ? 'default' : 'pointer',
+                opacity: weekReviewLoading || activeDays.length === 0 ? 0.6 : 1,
+              }}
+            >
+              {weekReviewLoading ? 'Generating…' : weekReview ? 'Generate Again' : 'Generate'}
+            </button>
+          </div>
+          {weekReviewError && (
+            <div style={{ fontSize: 12.5, color: 'var(--color-danger, #f87171)' }}>
+              {weekReviewError}
+            </div>
+          )}
+          {weekReview?.summary && (
+            <p style={{
+              margin: 0,
+              fontSize: 14,
+              lineHeight: 1.55,
+              color: 'var(--color-text-secondary)',
+              whiteSpace: 'pre-wrap',
+            }}>
+              {weekReview.summary}
+            </p>
+          )}
         </div>
 
         {activeDay && (

@@ -211,7 +211,7 @@ async function checkCarryoverNudge(): Promise<void> {
   try {
     const teaser = await tryGetWrappedTeaser(today, 'carryover')
     if (!teaser) return
-    const route = buildEveningWrapRoute(today)
+    const route = `/timeline?date=${today}&source=carryover-nudge`
     notifyWithNavigation('Good morning', teaser, route, { actionText: 'Open' })
     writeState({ ...state, lastCarryoverNudgeDate: today })
   } finally {

@@ -40,6 +40,16 @@ export function registerWrappedNarrativeProvider(runner: ProviderRunner): void {
 
 const NARRATIVE_TIMEOUT_MS = 12_000
 
+function attachFactsMeta(
+  narrative: AIWrappedNarrative,
+  facts: ReturnType<typeof buildWrappedFactsFromPayload>,
+): AIWrappedNarrative {
+  return {
+    ...narrative,
+    isLeisureDay: facts.kindBreakdown?.isLeisureDay ?? false,
+  }
+}
+
 export type WrappedNarrativeResult =
   | { status: 'ready'; narrative: AIWrappedNarrative }
   | { status: 'non_ai'; narrative: AIWrappedNarrative }
@@ -65,7 +75,7 @@ export async function getWrappedNarrative(
 
   // Empty/too-early days are not AI wraps — honest non-AI states only.
   if (facts.quality === 'empty' || facts.quality === 'tooEarly') {
-    const narrative: AIWrappedNarrative = {
+    const narrative = attachFactsMeta({
       lead: facts.quality === 'empty'
         ? 'Daylens did not see enough activity yet to tell a story about this day.'
         : 'The day is still warming up — a few more minutes of activity and a real recap will surface.',
@@ -74,7 +84,7 @@ export async function getWrappedNarrative(
       slides: { scale: null, focus: null, topApp: null, switching: null, identity: null, closing: null },
       source: 'fallback',
       factsHash,
-    }
+    }, facts)
     narrativeCache.set(cacheKey, narrative)
     return { status: 'non_ai', narrative }
   }
@@ -105,14 +115,15 @@ export async function getWrappedNarrative(
     if (!parsed) {
       return { status: 'unavailable', reason: 'validation_failed' }
     }
-    narrativeCache.set(cacheKey, parsed)
+    const narrative = attachFactsMeta(parsed, facts)
+    narrativeCache.set(cacheKey, narrative)
     recordDayRecapGenerated(facts.date)
     try {
       freezeWrapSnapshotForDate(getDb(), facts.date, null)
     } catch (error) {
       console.warn(`[wrap] failed to freeze snapshot for ${facts.date}:`, error)
     }
-    return { status: 'ready', narrative: parsed }
+    return { status: 'ready', narrative }
   } catch (error) {
     console.warn(`[ai] wrapped_narrative failed for ${facts.date}:`, error)
     return { status: 'unavailable', reason: 'provider_error' }
