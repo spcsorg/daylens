@@ -2,7 +2,6 @@
 // re-aggregating live blocks so stat cards and narrative always agree.
 
 import type { Database } from 'better-sqlite3'
-import type { WrappedFacts } from '../lib/wrappedNarrative'
 import {
   freezeDailyWrapSnapshot as freezeDailyWrapSnapshotQuery,
   getFrozenWrapSnapshotsForDates,

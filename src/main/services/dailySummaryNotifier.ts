@@ -11,7 +11,6 @@ import { getCurrentSession } from './tracking'
 import { getTimelineDayPayload } from './workBlocks'
 import {
   buildEveningWrapRoute,
-  buildDailyReportRoute,
   openDailySummaryRoute,
   setDailySummaryNavigationWindow,
 } from './dailySummaryNavigation'

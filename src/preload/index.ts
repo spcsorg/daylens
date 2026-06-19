@@ -9,7 +9,7 @@ import type {
   AIMessageFeedbackUpdate,
   AIChatTurnResult,
   AIDailyReportPreparationResult,
-  AIWrappedNarrative,
+  WrappedNarrativeResult,
   AISurfaceSummary,
   AIThreadMessage,
   AIThreadSettings,
@@ -179,7 +179,7 @@ const api = {
       ipcRenderer.invoke(IPC.AI.GET_APP_NARRATIVE, { canonicalAppId, days, force }),
     prepareDailyReport: (date?: string): Promise<AIDailyReportPreparationResult> =>
       ipcRenderer.invoke(IPC.AI.PREPARE_DAILY_REPORT, { date }),
-    getWrappedNarrative: (date: string): Promise<AIWrappedNarrative | null> =>
+    getWrappedNarrative: (date: string): Promise<WrappedNarrativeResult> =>
       ipcRenderer.invoke(IPC.AI.GET_WRAPPED_NARRATIVE, { date }),
     getWrappedPeriodNarrative: (facts: WrappedPeriodFacts): Promise<WrappedPeriodNarrative | null> =>
       ipcRenderer.invoke(IPC.AI.GET_WRAPPED_PERIOD_NARRATIVE, { facts }),
