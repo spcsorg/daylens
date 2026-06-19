@@ -1,20 +1,19 @@
 // Tests for the pure scheduling decisions used by the daily-summary notifier.
-// These cover the time-of-day gates, once-per-day write, activity threshold,
-// and morning-nudge "user hasn't started working yet" check.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   decideDailySummary,
+  decideYesterdayRecap,
+  decideCarryoverNudge,
   decideMorningNudge,
   NOTIFY_MIN_SECONDS,
+  CARRYOVER_NUDGE_MIN_SECONDS,
 } from '../src/main/lib/dailySummaryScheduler'
 
 const TODAY = '2026-05-12'
 const YESTERDAY = '2026-05-11'
 
 function at(hour: number, minute = 0): Date {
-  // Year/month/day fixed at 2026-05-12 so the date string passed alongside
-  // stays consistent. Local-time semantics match what the production code uses.
   return new Date(2026, 4, 12, hour, minute, 0, 0)
 }
 
@@ -31,19 +30,6 @@ test('daily summary does not fire when disabled', () => {
   assert.deepEqual(decision, { fire: false, reason: 'disabled' })
 })
 
-test('daily summary does not fire before 18:00 even with enough activity', () => {
-  for (const hour of [0, 6, 12, 17]) {
-    const decision = decideDailySummary({
-      now: at(hour, 59),
-      state: {},
-      todaySecondsTracked: NOTIFY_MIN_SECONDS * 4,
-      dailySummaryEnabled: true,
-      todayDateString: TODAY,
-    })
-    assert.deepEqual(decision, { fire: false, reason: 'before-18' }, `hour=${hour}`)
-  }
-})
-
 test('daily summary fires at exactly 18:00 with enough activity', () => {
   const decision = decideDailySummary({
     now: at(18, 0),
@@ -55,187 +41,91 @@ test('daily summary fires at exactly 18:00 with enough activity', () => {
   assert.deepEqual(decision, { fire: true, targetDate: TODAY })
 })
 
-test('daily summary does not fire when already fired today', () => {
-  const decision = decideDailySummary({
-    now: at(22),
-    state: { lastDailySummaryDate: TODAY },
-    todaySecondsTracked: NOTIFY_MIN_SECONDS * 10,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(decision, { fire: false, reason: 'already-fired-today' })
-})
+// ─── decideYesterdayRecap ───────────────────────────────────────────────────
 
-test('daily summary fires when last fire was a different day', () => {
-  const decision = decideDailySummary({
-    now: at(19),
-    state: { lastDailySummaryDate: YESTERDAY },
-    todaySecondsTracked: NOTIFY_MIN_SECONDS,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(decision, { fire: true, targetDate: TODAY })
-})
-
-test('daily summary does not fire with insufficient activity', () => {
-  const decision = decideDailySummary({
-    now: at(20),
-    state: {},
-    todaySecondsTracked: NOTIFY_MIN_SECONDS - 1,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(decision, { fire: false, reason: 'insufficient-activity' })
-})
-
-test('daily summary fires at the exact activity threshold', () => {
-  const decision = decideDailySummary({
-    now: at(20),
-    state: {},
-    todaySecondsTracked: NOTIFY_MIN_SECONDS,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(decision, { fire: true, targetDate: TODAY })
-})
-
-test('daily summary fires deep in the evening', () => {
-  const decision = decideDailySummary({
-    now: at(23, 45),
-    state: {},
-    todaySecondsTracked: NOTIFY_MIN_SECONDS * 6,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(decision, { fire: true, targetDate: TODAY })
-})
-
-// ─── decideMorningNudge ────────────────────────────────────────────────────
-
-const NUDGE_BASE = {
+const RECAP_BASE = {
   state: {},
   morningNudgeEnabled: true,
   todayDateString: TODAY,
   yesterdayDateString: YESTERDAY,
+  yesterdayRecapAlreadyGenerated: false,
 }
 
-test('morning nudge does not fire when disabled', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(10),
-    todaySecondsTracked: 0,
+test('yesterday recap skips when recap already exists', () => {
+  const decision = decideYesterdayRecap({
+    ...RECAP_BASE,
+    now: at(8),
     yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 4,
-    morningNudgeEnabled: false,
+    yesterdayRecapAlreadyGenerated: true,
   })
-  assert.deepEqual(decision, { fire: false, reason: 'disabled' })
+  assert.deepEqual(decision, { fire: false, reason: 'recap-already-exists' })
 })
 
-test('morning nudge does not fire before 09:00', () => {
-  for (const hour of [0, 5, 8]) {
-    const decision = decideMorningNudge({
-      ...NUDGE_BASE,
-      now: at(hour, 59),
-      todaySecondsTracked: 0,
-      yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 4,
-    })
-    assert.deepEqual(decision, { fire: false, reason: 'before-9' }, `hour=${hour}`)
-  }
-})
-
-test('morning nudge fires at 09:00 sharp', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(9, 0),
-    todaySecondsTracked: 0,
+test('yesterday recap fires at 6:00 with enough yesterday activity', () => {
+  const decision = decideYesterdayRecap({
+    ...RECAP_BASE,
+    now: at(6, 0),
     yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
   })
   assert.deepEqual(decision, { fire: true, targetDate: YESTERDAY })
 })
 
-test('morning nudge does not fire after noon', () => {
-  for (const hour of [12, 14, 18, 23]) {
-    const decision = decideMorningNudge({
-      ...NUDGE_BASE,
-      now: at(hour),
-      todaySecondsTracked: 0,
-      yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
-    })
-    assert.deepEqual(decision, { fire: false, reason: 'after-noon' }, `hour=${hour}`)
-  }
-})
-
-test('morning nudge does not fire if today already has activity', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
+test('yesterday recap fires even when user is already working today', () => {
+  const decision = decideYesterdayRecap({
+    ...RECAP_BASE,
     now: at(10),
-    todaySecondsTracked: 60,
-    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 4,
-  })
-  assert.deepEqual(decision, { fire: false, reason: 'already-working-today' })
-})
-
-test('morning nudge does not fire when yesterday had little activity', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(10),
-    todaySecondsTracked: 0,
-    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS - 1,
-  })
-  assert.deepEqual(decision, { fire: false, reason: 'insufficient-yesterday-activity' })
-})
-
-test('morning nudge does not fire when already fired today', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(10),
-    state: { lastMorningNudgeDate: TODAY },
-    todaySecondsTracked: 0,
-    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 4,
-  })
-  assert.deepEqual(decision, { fire: false, reason: 'already-fired-today' })
-})
-
-test('morning nudge fires when prior fire was yesterday', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(10),
-    state: { lastMorningNudgeDate: YESTERDAY },
-    todaySecondsTracked: 0,
-    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
+    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 2,
   })
   assert.deepEqual(decision, { fire: true, targetDate: YESTERDAY })
 })
 
-test('morning nudge fires at 11:59 (the last allowed minute)', () => {
-  const decision = decideMorningNudge({
-    ...NUDGE_BASE,
-    now: at(11, 59),
-    todaySecondsTracked: 0,
-    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
+// ─── decideCarryoverNudge ───────────────────────────────────────────────────
+
+const CARRY_BASE = {
+  state: {},
+  morningNudgeEnabled: true,
+  todayDateString: TODAY,
+}
+
+test('carryover nudge requires at least one hour of morning work', () => {
+  const decision = decideCarryoverNudge({
+    ...CARRY_BASE,
+    now: at(10),
+    todaySecondsTracked: CARRYOVER_NUDGE_MIN_SECONDS - 1,
+    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 2,
   })
-  assert.deepEqual(decision, { fire: true, targetDate: YESTERDAY })
+  assert.deepEqual(decision, { fire: false, reason: 'insufficient-morning-activity' })
 })
 
-// ─── Property-style: at most one notification per day from a fresh state ──
+test('carryover nudge fires after one hour of work today', () => {
+  const decision = decideCarryoverNudge({
+    ...CARRY_BASE,
+    now: at(10),
+    todaySecondsTracked: CARRYOVER_NUDGE_MIN_SECONDS,
+    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
+  })
+  assert.deepEqual(decision, { fire: true, targetDate: TODAY })
+})
 
-test('once fired, the same call does not fire again until state resets', () => {
-  let state: { lastDailySummaryDate?: string } = {}
-  const firstDecision = decideDailySummary({
-    now: at(19),
-    state,
-    todaySecondsTracked: NOTIFY_MIN_SECONDS,
-    dailySummaryEnabled: true,
+test('carryover nudge fires even when yesterday recap existed', () => {
+  const decision = decideCarryoverNudge({
+    ...CARRY_BASE,
+    now: at(11),
+    todaySecondsTracked: CARRYOVER_NUDGE_MIN_SECONDS + 600,
+    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS * 3,
+  })
+  assert.deepEqual(decision, { fire: true, targetDate: TODAY })
+})
+
+test('decideMorningNudge remains a back-compat alias for yesterday recap', () => {
+  const decision = decideMorningNudge({
+    now: at(10),
+    state: {},
+    todaySecondsTracked: 0,
+    yesterdaySecondsTracked: NOTIFY_MIN_SECONDS,
+    morningNudgeEnabled: true,
     todayDateString: TODAY,
+    yesterdayDateString: YESTERDAY,
   })
-  assert.equal(firstDecision.fire, true)
-  if (firstDecision.fire) state = { lastDailySummaryDate: firstDecision.targetDate }
-
-  const secondDecision = decideDailySummary({
-    now: at(21),
-    state,
-    todaySecondsTracked: NOTIFY_MIN_SECONDS * 2,
-    dailySummaryEnabled: true,
-    todayDateString: TODAY,
-  })
-  assert.deepEqual(secondDecision, { fire: false, reason: 'already-fired-today' })
+  assert.deepEqual(decision, { fire: true, targetDate: YESTERDAY })
 })

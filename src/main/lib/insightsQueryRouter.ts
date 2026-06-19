@@ -2761,6 +2761,23 @@ export function shouldUseRouter(message: string): boolean {
     if (lower.includes(phrase)) return true
   }
 
+  // Grounded work-activity prompts the router answers from timeline blocks.
+  // Must run before the synthesis block-list — "what did I work on" is not
+  // open-ended synthesis; it maps to buildDayBlocksAnswer / buildTimelineSummary.
+  if (
+    lower.includes('what did i work on')
+    || lower.includes('what was i working on')
+    || lower.includes('what should i resume')
+    || lower.includes('where did my time go')
+    || lower.includes('what happened this week')
+    || lower.includes('summarize this week')
+    || lower.includes('summarize the last 7 days')
+    || lower.includes('summarize my last 7 days')
+    || lower.includes('summarize the past 7 days')
+  ) {
+    return true
+  }
+
   // Time-at-moment prompts ("what did I do today at 4pm") must bypass the
   // synthesis block-list too — the prefix "what did i do" would otherwise
   // reject them, even though the router has `exactMomentAnswer` ready.

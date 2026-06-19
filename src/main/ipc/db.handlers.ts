@@ -48,6 +48,7 @@ import {
 } from '../services/workBlocks'
 import { computeAppActivityDigest } from '../services/appActivityDigest'
 import { generateWorkBlockInsight, scheduleTimelineAIJobs } from '../services/ai'
+import { recordDayRecapGenerated } from '../lib/dayRecap'
 import { resolveIcon } from '../services/iconResolver'
 import { getLinuxDesktopDiagnostics } from '../services/linuxDesktop'
 import { IPC } from '@shared/types'
@@ -436,6 +437,7 @@ export function registerDbHandlers(): void {
 
     const refreshed = materializeTimelineDayProjection(db, dateStr, getLiveSessionForDate(dateStr))
     scheduleTimelineAIJobs(refreshed)
+    recordDayRecapGenerated(dateStr)
     return refreshed
   })
 

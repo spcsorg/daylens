@@ -415,6 +415,101 @@ function SlideCenter({ children }: { children: ReactNode }) {
   )
 }
 
+interface WrapSlidePlan {
+  id: string
+  body: string
+  theme: SlideTheme
+}
+
+function isLikelyLeisureDay(d: WrappedData): boolean {
+  const leisureCats: AppCategory[] = ['entertainment', 'social', 'browsing']
+  const leisureSec = d.categoryBreakdown
+    .filter((entry) => leisureCats.includes(entry.category))
+    .reduce((sum, entry) => sum + entry.seconds, 0)
+  const workSec = Math.max(0, d.totalSeconds - leisureSec)
+  return d.quality === 'full' && leisureSec > workSec && workSec < 15 * 60
+}
+
+function buildWrapSlidePlan(narrative: AIWrappedNarrative, d: WrappedData): WrapSlidePlan[] {
+  const leisureDay = isLikelyLeisureDay(d)
+  const slides: WrapSlidePlan[] = [
+    { id: 'shape', body: narrative.lead, theme: DEFAULT_THEME },
+  ]
+  if (leisureDay) {
+    slides.push({
+      id: 'close',
+      body: narrative.slides.closing ?? "That's the day.",
+      theme: DEFAULT_THEME,
+    })
+    return slides
+  }
+  if (narrative.slides.topApp) {
+    slides.push({
+      id: 'work',
+      body: narrative.slides.topApp,
+      theme: catTheme(d.peakBlock?.category ?? d.dominantCategory),
+    })
+  }
+  if (narrative.slides.scale) {
+    slides.push({ id: 'time', body: narrative.slides.scale, theme: DEFAULT_THEME })
+  }
+  if (narrative.nudge) {
+    slides.push({ id: 'thread', body: narrative.nudge, theme: STEADY_THEME })
+  }
+  slides.push({
+    id: 'close',
+    body: narrative.slides.closing ?? "That's the day.",
+    theme: DEFAULT_THEME,
+  })
+  return slides.slice(0, 5)
+}
+
+function SlideNarrativeCard({ body, theme }: { body: string; theme: SlideTheme }) {
+  return (
+    <SlideLeft>
+      <p style={{
+        fontSize: 42,
+        fontWeight: 700,
+        lineHeight: 1.18,
+        letterSpacing: '-0.02em',
+        color: '#fff',
+        margin: 0,
+        maxWidth: '28ch',
+      }}>
+        {body}
+      </p>
+    </SlideLeft>
+  )
+}
+
+function SlideProviderRequired({ onClose }: { onClose: () => void }) {
+  return (
+    <SlideCenter>
+      <h1 style={{ fontSize: 34, fontWeight: 700, color: '#fff', margin: '0 0 12px' }}>
+        Connect a provider to open wraps
+      </h1>
+      <p style={{ fontSize: 17, color: 'rgba(255,255,255,0.55)', margin: '0 0 28px', maxWidth: '36ch', lineHeight: 1.5 }}>
+        Briefs and wraps are written fresh through your AI provider. Add an API key in Settings to continue.
+      </p>
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose() }}
+        style={{
+          pointerEvents: 'auto',
+          padding: '10px 18px',
+          borderRadius: 999,
+          border: '1px solid rgba(255,255,255,0.2)',
+          background: 'rgba(255,255,255,0.1)',
+          color: '#fff',
+          cursor: 'pointer',
+          fontSize: 14,
+        }}
+      >
+        Close
+      </button>
+    </SlideCenter>
+  )
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function GlowBar({ pct, accent, glow }: { pct: number; accent: string; glow: string }) {
@@ -1559,7 +1654,15 @@ export default function DayWrapped({
   const morningVideoUrl = useMemo(() => MORNING_VIDEO_URLS[dateVariant(data.date, MORNING_VIDEO_URLS.length)], [data.date])
   // Wrapped opens instantly with deterministic copy; the AI-enriched narrative
   // loads asynchronously and overlays the relevant slides once validated.
-  const [narrative, setNarrative] = useState<AIWrappedNarrative | null>(null)
+  const [narrativeState, setNarrativeState] = useState<
+    | { status: 'loading' }
+    | { status: 'unavailable' }
+    | { status: 'ready'; narrative: AIWrappedNarrative }
+    | { status: 'non_ai'; narrative: AIWrappedNarrative }
+  >({ status: 'loading' })
+  const narrative = narrativeState.status === 'ready' || narrativeState.status === 'non_ai'
+    ? narrativeState.narrative
+    : null
   const aiTeaser = narrative?.lead ?? null
   const aiNudge = narrative?.nudge ?? null
   const aiSlides = narrative?.slides ?? null
@@ -1567,15 +1670,22 @@ export default function DayWrapped({
 
   useEffect(() => {
     let cancelled = false
-    setNarrative(null)
+    setNarrativeState({ status: 'loading' })
 
     void ipc.ai.getWrappedNarrative(data.date)
       .then((result) => {
-        if (cancelled) return
-        setNarrative(result ?? null)
+        if (cancelled || !result) {
+          if (!cancelled) setNarrativeState({ status: 'unavailable' })
+          return
+        }
+        if (result.status === 'unavailable') {
+          setNarrativeState({ status: 'unavailable' })
+          return
+        }
+        setNarrativeState({ status: result.status, narrative: result.narrative })
       })
       .catch(() => {
-        if (!cancelled) setNarrative(null)
+        if (!cancelled) setNarrativeState({ status: 'unavailable' })
       })
 
     return () => { cancelled = true }
@@ -1664,17 +1774,22 @@ export default function DayWrapped({
   const hasDistractionData = false
   void distractionCost
 
-  const distractionSlides = hasDistractionData ? 3 : 0
-  const weekSlides = !isMorning && isExtended && weekSummary ? 3 : 0
+  const weekSlides = !isMorning && isExtended && weekSummary && narrative ? 1 : 0
 
-  // Quality gates: empty/tooEarly get a short slide set; partial gets 4 slides
-  // Full quality: 8 slides (Scale, Focus, Peak, TopApp, CategoryMix, Switching, Identity, CTA)
+  const wrapSlides = useMemo(() => {
+    if (!narrative || isMorning) return [] as WrapSlidePlan[]
+    return buildWrapSlidePlan(narrative, d)
+  }, [d, isMorning, narrative])
+
   const SLIDE_COUNT = isMorning
-    ? (showMorningNudge ? 4 : 3)
-    : d.quality === 'empty' ? 1
-    : d.quality === 'tooEarly' ? 1
-    : d.quality === 'partial' ? 4
-    : 8 + distractionSlides + weekSlides
+    ? (narrative ? (aiNudge ? 2 : 1) : 1)
+    : narrativeState.status === 'unavailable'
+      ? 1
+      : d.quality === 'empty' || d.quality === 'tooEarly'
+        ? 1
+        : narrativeState.status === 'loading'
+          ? 1
+          : wrapSlides.length + weekSlides
 
   const [slideIndex, setSlideIndex] = useState(0)
   const [direction, setDirection] = useState<'forward' | 'back'>('forward')
@@ -1708,46 +1823,17 @@ export default function DayWrapped({
 
   const baseThemes = useMemo<SlideTheme[]>(() => {
     if (isMorning) {
-      return showMorningNudge
-        ? [MORNING_THEMES[0], MORNING_THEMES[1], MORNING_THEMES[2], MORNING_THEMES[3]]
-        : [MORNING_THEMES[0], MORNING_THEMES[1], MORNING_THEMES[3]]
+      return narrative
+        ? [MORNING_THEMES[0], MORNING_THEMES[2]]
+        : [MORNING_THEMES[0]]
     }
-    if (d.quality === 'empty' || d.quality === 'tooEarly') {
-      return [DEFAULT_THEME]
-    }
-    if (d.quality === 'partial') {
-      return [
-        DEFAULT_THEME,
-        FOCUS_THEME,
-        d.topApp ? catTheme(d.topApp.category) : DEFAULT_THEME,
-        DEFAULT_THEME,
-      ]
-    }
-    const coreSlideThemes: SlideTheme[] = [
-      DEFAULT_THEME,                                                              // 0: Scale
-      FOCUS_THEME,                                                                // 1: Focus
-      d.peakBlock ? catTheme(d.peakBlock.category)    : DEFAULT_THEME,           // 2: Peak block
-      d.topApp    ? catTheme(d.topApp.category)        : DEFAULT_THEME,           // 3: Top app/domains
-      DEFAULT_THEME,                                                              // 4: Category mix
-      d.switchesPerHour > 12 || d.totalSwitches > 20 ? SCATTERED_THEME : STEADY_THEME, // 5: Context switching
-      identityCatTheme(d.dominantCategory),                                      // 6: Identity
-    ]
-    const distractionThemes: SlideTheme[] = hasDistractionData ? [
-      DISTRACTION_COST_THEME,
-      distractionCost?.trendDirection === 'improving' ? DISTRACTION_IMPROVING_THEME :
-      distractionCost?.trendDirection === 'worsening' ? DISTRACTION_WORSENING_THEME :
-      DISTRACTION_FLAT_THEME,
-      DISTRACTION_PEAK_THEME,
-    ] : []
-    const weekThemes: SlideTheme[] = isExtended && weekSummary ? [
-      CAT_THEME.productivity ?? DEFAULT_THEME,
-      CAT_THEME.meetings     ?? DEFAULT_THEME,
-      DEFAULT_THEME,
-    ] : []
-    // CTA is always the final slide so the close button is the last thing the
-    // user sees, not a distraction-cost slide that appears after dismiss.
-    return [...coreSlideThemes, ...distractionThemes, ...weekThemes, DEFAULT_THEME]
-  }, [d, distractionCost, hasDistractionData, isExtended, isMorning, showMorningNudge, weekSummary])
+    if (narrativeState.status === 'unavailable') return [DEFAULT_THEME]
+    if (d.quality === 'empty' || d.quality === 'tooEarly') return [DEFAULT_THEME]
+    if (narrativeState.status === 'loading') return [DEFAULT_THEME]
+    const eveningThemes = wrapSlides.map((slide) => slide.theme)
+    const weekTheme = weekSummary ? [CAT_THEME.productivity ?? DEFAULT_THEME] : []
+    return [...eveningThemes, ...weekTheme]
+  }, [d.quality, isMorning, narrative, narrativeState.status, weekSummary, wrapSlides])
 
   const slideThemes = useMemo(
     () => dedupeAdjacentThemes(baseThemes).map((entry) => rotateGradientForDate(entry, data.date)),
@@ -1823,57 +1909,32 @@ export default function DayWrapped({
 
         {isMorning ? (
           <>
-            {slideIndex === 0 && <SlideMorningGreeting d={d} userName={userName} aiTeaser={aiTeaser} />}
-            {slideIndex === 1 && <SlideCategoryIdentity d={d} theme={theme} morning aiLine={aiSlides?.identity ?? null} />}
-            {showMorningNudge && slideIndex === 2 && <SlideMorningNudge d={d} aiNudge={aiNudge} />}
-            {((showMorningNudge && slideIndex === 3) || (!showMorningNudge && slideIndex === 2)) && (
-              <SlideMorningClose hasReport={hasReport} aiTeaser={aiTeaser} onClose={onClose} onOpenReport={onOpenReport} />
+            {slideIndex === 0 && (
+              narrative
+                ? <SlideNarrativeCard body={narrative.lead} theme={theme} />
+                : <SlideMorningGreeting d={d} userName={userName} aiTeaser={aiTeaser} />
+            )}
+            {aiNudge && slideIndex === 1 && (
+              <SlideNarrativeCard body={aiNudge} theme={theme} />
             )}
           </>
+        ) : narrativeState.status === 'unavailable' ? (
+          <SlideProviderRequired onClose={onClose} />
         ) : d.quality === 'empty' ? (
-          // Empty state: nothing tracked
           <SlideEmpty onClose={onClose} />
         ) : d.quality === 'tooEarly' ? (
-          // Too early: under 5 minutes tracked
           <SlideTooEarly d={d} theme={theme} onClose={onClose} />
-        ) : d.quality === 'partial' ? (
-          // Partial state: 5–45 min tracked — show 4 slides with soft copy
-          <>
-            {slideIndex === 0 && <SlideScale d={d} theme={theme} aiLine={aiSlides?.scale ?? null} />}
-            {slideIndex === 1 && <SlideFocus d={d} theme={theme} aiLine={aiSlides?.focus ?? null} />}
-            {slideIndex === 2 && <SlideTopApp d={d} theme={theme} aiLine={aiSlides?.topApp ?? null} />}
-            {slideIndex === 3 && <SlideCTA d={d} onClose={onClose} onOpenReport={onOpenReport} hasReport={hasReport} aiTeaser={aiTeaser} aiClosing={aiSlides?.closing ?? null} />}
-          </>
+        ) : narrativeState.status === 'loading' ? (
+          <SlideCenter>
+            <p style={{ fontSize: 22, color: 'rgba(255,255,255,0.6)', margin: 0 }}>Writing your wrap…</p>
+          </SlideCenter>
         ) : (
-          // Full state: 45+ min tracked — 8-slide carousel + optional distraction + week
           <>
-            {slideIndex === 0 && <SlideScale d={d} theme={theme} aiLine={aiSlides?.scale ?? null} />}
-            {slideIndex === 1 && <SlideFocus d={d} theme={theme} aiLine={aiSlides?.focus ?? null} />}
-            {slideIndex === 2 && <SlidePeakBlock d={d} theme={theme} aiInsight={aiPeakInsight} />}
-            {slideIndex === 3 && <SlideTopApp d={d} theme={theme} aiLine={aiSlides?.topApp ?? null} />}
-            {slideIndex === 4 && <SlideCategoryMix d={d} />}
-            {slideIndex === 5 && <SlideContextSwitching d={d} theme={theme} aiLine={aiSlides?.switching ?? null} />}
-            {slideIndex === 6 && <SlideCategoryIdentity d={d} theme={theme} aiLine={aiSlides?.identity ?? null} />}
-            {hasDistractionData && distractionCost && slideIndex === 7 && (
-              <SlideDistractionCost cost={distractionCost} theme={theme} />
+            {wrapSlides[slideIndex] && (
+              <SlideNarrativeCard body={wrapSlides[slideIndex].body} theme={theme} />
             )}
-            {hasDistractionData && distractionCost && slideIndex === 8 && (
-              <SlideDistractionTrend cost={distractionCost} theme={theme} />
-            )}
-            {hasDistractionData && distractionCost && slideIndex === 9 && (
-              <SlideDistractionPeak cost={distractionCost} theme={theme} />
-            )}
-            {weekSummary && slideIndex === 7 + distractionSlides && (
+            {weekSummary && slideIndex === wrapSlides.length && (
               <SlideWeekChart week={weekSummary.thisWeek} theme={theme} aiLine={periodNarrative?.slides.chart ?? null} />
-            )}
-            {weekSummary && slideIndex === 8 + distractionSlides && (
-              <SlidePersonalRecord week={weekSummary.thisWeek} aiLine={periodNarrative?.slides.record ?? null} />
-            )}
-            {weekSummary && slideIndex === 9 + distractionSlides && (
-              <SlideWeekComparison thisWeek={weekSummary.thisWeek} lastWeek={weekSummary.lastWeek} theme={theme} aiLine={periodNarrative?.slides.comparison ?? null} />
-            )}
-            {slideIndex === 7 + distractionSlides + weekSlides && (
-              <SlideCTA d={d} onClose={onClose} onOpenReport={onOpenReport} hasReport={hasReport} aiTeaser={aiTeaser} aiClosing={aiSlides?.closing ?? null} />
             )}
           </>
         )}

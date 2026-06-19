@@ -67,6 +67,14 @@ test('does not route "summarize my Monday"', () => {
   assert.equal(shouldUseRouter('Summarize my Monday.'), false)
 })
 
+test('routes what did I work on today through the deterministic router', () => {
+  assert.equal(shouldUseRouter('What did I work on today?'), true)
+})
+
+test('routes summarize the last 7 days through the deterministic router', () => {
+  assert.equal(shouldUseRouter('Summarize the last 7 days.'), true)
+})
+
 test('does not route "compare my coding time this week vs last week"', () => {
   assert.equal(shouldUseRouter('Compare my coding time this week vs last week.'), false)
 })

@@ -9,12 +9,20 @@
 
 export interface DailyNotifierState {
   lastDailySummaryDate?: string
+  /** @deprecated use lastYesterdayRecapDate */
   lastMorningNudgeDate?: string
+  lastYesterdayRecapDate?: string
+  lastCarryoverNudgeDate?: string
 }
 
 // Minimum tracked seconds before Wrapped has enough signal to be worth notifying.
-// Matches the 'partial' threshold from the renderer quality model.
 export const NOTIFY_MIN_SECONDS = 45 * 60
+
+/** Carryover nudge fires after this many seconds of morning work. */
+export const CARRYOVER_NUDGE_MIN_SECONDS = 60 * 60
+
+/** Carryover nudge stops firing after this local hour. */
+export const CARRYOVER_NUDGE_MAX_HOUR = 14
 
 export type SchedulerDecision =
   | { fire: true; targetDate: string }
@@ -55,15 +63,70 @@ export interface MorningNudgeDecisionInput {
 }
 
 export function decideMorningNudge(input: MorningNudgeDecisionInput): SchedulerDecision {
+  // Back-compat alias — maps to yesterday recap decision.
+  return decideYesterdayRecap({
+    now: input.now,
+    state: input.state,
+    yesterdaySecondsTracked: input.yesterdaySecondsTracked,
+    morningNudgeEnabled: input.morningNudgeEnabled,
+    todayDateString: input.todayDateString,
+    yesterdayDateString: input.yesterdayDateString,
+    yesterdayRecapAlreadyGenerated: false,
+  })
+}
+
+export interface YesterdayRecapDecisionInput {
+  now: Date
+  state: DailyNotifierState
+  yesterdaySecondsTracked: number
+  morningNudgeEnabled: boolean
+  todayDateString: string
+  yesterdayDateString: string
+  /** When true, user already generated a recap yesterday — skip this notification. */
+  yesterdayRecapAlreadyGenerated: boolean
+}
+
+/** Yesterday's recap — fires early morning only if no recap was generated yesterday. */
+export function decideYesterdayRecap(input: YesterdayRecapDecisionInput): SchedulerDecision {
   if (!input.morningNudgeEnabled) return { fire: false, reason: 'disabled' }
-  if (input.state.lastMorningNudgeDate === input.todayDateString) {
+  const lastRecap = input.state.lastYesterdayRecapDate ?? input.state.lastMorningNudgeDate
+  if (lastRecap === input.todayDateString) {
     return { fire: false, reason: 'already-fired-today' }
   }
-  if (!hasReachedLocalTime(input.now, 9)) return { fire: false, reason: 'before-9' }
+  if (!hasReachedLocalTime(input.now, 6)) return { fire: false, reason: 'before-6' }
   if (input.now.getHours() >= 12) return { fire: false, reason: 'after-noon' }
-  if (input.todaySecondsTracked > 0) return { fire: false, reason: 'already-working-today' }
+  if (input.yesterdayRecapAlreadyGenerated) {
+    return { fire: false, reason: 'recap-already-exists' }
+  }
   if (input.yesterdaySecondsTracked < NOTIFY_MIN_SECONDS) {
     return { fire: false, reason: 'insufficient-yesterday-activity' }
   }
   return { fire: true, targetDate: input.yesterdayDateString }
+}
+
+export interface CarryoverNudgeDecisionInput {
+  now: Date
+  state: DailyNotifierState
+  todaySecondsTracked: number
+  yesterdaySecondsTracked: number
+  morningNudgeEnabled: boolean
+  todayDateString: string
+}
+
+/** Carryover nudge — fires after 1+ hours of morning work, always (independent of recap). */
+export function decideCarryoverNudge(input: CarryoverNudgeDecisionInput): SchedulerDecision {
+  if (!input.morningNudgeEnabled) return { fire: false, reason: 'disabled' }
+  if (input.state.lastCarryoverNudgeDate === input.todayDateString) {
+    return { fire: false, reason: 'already-fired-today' }
+  }
+  if (input.now.getHours() >= CARRYOVER_NUDGE_MAX_HOUR) {
+    return { fire: false, reason: 'after-carryover-window' }
+  }
+  if (input.todaySecondsTracked < CARRYOVER_NUDGE_MIN_SECONDS) {
+    return { fire: false, reason: 'insufficient-morning-activity' }
+  }
+  if (input.yesterdaySecondsTracked < NOTIFY_MIN_SECONDS) {
+    return { fire: false, reason: 'insufficient-yesterday-activity' }
+  }
+  return { fire: true, targetDate: input.todayDateString }
 }

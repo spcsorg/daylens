@@ -939,6 +939,11 @@ export interface AIWrappedNarrative {
   factsHash: string
 }
 
+export type WrappedNarrativeResult =
+  | { status: 'ready'; narrative: AIWrappedNarrative }
+  | { status: 'non_ai'; narrative: AIWrappedNarrative }
+  | { status: 'unavailable'; reason: 'no_provider' | 'provider_error' | 'validation_failed' }
+
 export type WrappedPeriod = 'week' | 'month'
 
 export interface WrappedPeriodFacts {

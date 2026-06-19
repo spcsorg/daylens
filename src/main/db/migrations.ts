@@ -1812,6 +1812,25 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 34,
+    description: 'Add frozen daily wrap snapshots for weekly wrap totals',
+    up: () => {
+      getDb().exec(`
+        CREATE TABLE IF NOT EXISTS daily_wrap_snapshots (
+          date TEXT PRIMARY KEY,
+          total_seconds INTEGER NOT NULL,
+          work_seconds INTEGER NOT NULL,
+          leisure_seconds INTEGER NOT NULL,
+          dominant_work_subject TEXT,
+          facts_json TEXT NOT NULL,
+          frozen_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_wrap_snapshots_frozen_at
+          ON daily_wrap_snapshots (frozen_at DESC);
+      `)
+    },
+  },
 ]
 
 function attentionClassForCategory(category: string): 'focus' | 'supporting' | 'ambient' {
