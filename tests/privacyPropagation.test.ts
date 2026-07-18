@@ -199,10 +199,21 @@ test('private and excluded observations cannot reach storage or downstream produ
     )
     assert.doesNotMatch(JSON.stringify(storedSessions), /Zen|Private|Dia/i)
 
-    for (const table of ['website_visits_pending', 'focus_events']) {
-      const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }
-      assert.equal(row.count, 0, `${table} must contain no blocked evidence`)
-    }
+    const focusCount = (
+      db.prepare('SELECT COUNT(*) AS count FROM focus_events').get() as { count: number }
+    ).count
+    assert.equal(focusCount, 0, 'focus_events must contain no blocked evidence')
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'website_visits_pending'",
+          )
+          .get() as { count: number }
+      ).count,
+      0,
+      'website_visits_pending must not exist after privacy-verified browser evidence',
+    )
     const visits = db.prepare('SELECT domain, page_title, url FROM website_visits').all()
     assert.deepEqual(visits, [
       { domain: 'github.com', page_title: 'Daylens', url: 'https://github.com/daylens/daylens' },
@@ -242,7 +253,7 @@ test('private and excluded observations cannot reach storage or downstream produ
   }
 })
 
-test('an excluded site with unknown browser mode never enters pending evidence', () => {
+test('an excluded site with unknown browser mode never enters page evidence', () => {
   const db = createProductionTestDatabase()
   __setSettings({
     trackingControlsEnabled: true,
@@ -265,14 +276,6 @@ test('an excluded site with unknown browser mode never enters pending evidence',
     })
     assert.equal(result.captureBlockReason, 'excluded_site')
     tracker.flush(db, BASE + 60_000)
-    assert.equal(
-      (
-        db.prepare('SELECT COUNT(*) AS count FROM website_visits_pending').get() as {
-          count: number
-        }
-      ).count,
-      0,
-    )
     assert.equal(
       (db.prepare('SELECT COUNT(*) AS count FROM website_visits').get() as { count: number }).count,
       0,
