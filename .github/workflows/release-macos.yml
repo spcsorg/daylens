@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 90
     # GitHub-hosted Apple Silicon runner. Switch back to a Blacksmith label
     # (e.g. blacksmith-6vcpu-macos-latest) once the Blacksmith app/credits are restored.
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-15
 
     steps:
       - name: Derive version from tag

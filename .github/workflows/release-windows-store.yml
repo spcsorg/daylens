@@ -31,7 +31,7 @@ permissions:
 jobs:
   build-windows-store:
     timeout-minutes: 90
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     env:
       DAYLENS_APPX_IDENTITY_NAME: ${{ inputs.identity_name }}
       DAYLENS_APPX_PUBLISHER: ${{ inputs.publisher }}

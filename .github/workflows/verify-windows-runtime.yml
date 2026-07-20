@@ -25,7 +25,7 @@ concurrency:
 jobs:
   verify-windows-runtime:
     timeout-minutes: 90
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
 
     steps:
       - name: Check out repository

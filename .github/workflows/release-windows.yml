@@ -19,7 +19,7 @@ permissions:
 jobs:
   build-windows:
     timeout-minutes: 90
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     env:
       WIN_CERTIFICATE_FILE: ${{ secrets.WIN_CERTIFICATE_FILE }}
       WIN_CERTIFICATE_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
