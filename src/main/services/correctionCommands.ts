@@ -490,6 +490,7 @@ export function applyCorrection(
 }
 
 interface UndoRow {
+  rowid: number
   id: string
   date: string
   kind: string
@@ -500,14 +501,18 @@ interface UndoRow {
 }
 
 export function undoCorrection(db: Database.Database, correctionId: string): CorrectionUndoResult {
-  const row = db.prepare(`SELECT * FROM correction_undo_log WHERE id = ?`).get(correctionId) as UndoRow | undefined
+  const row = db.prepare(`SELECT rowid, * FROM correction_undo_log WHERE id = ?`).get(correctionId) as UndoRow | undefined
   if (!row) throw new Error('Nothing to undo.')
   if (row.undone_at != null) return { undone: false, description: row.description }
+  // Order by (created_at, rowid): rowid breaks ties when two corrections land in
+  // the same millisecond, so the newest-only guard can't be defeated by clock
+  // resolution.
   const newer = db.prepare(`
     SELECT id FROM correction_undo_log
-    WHERE date = ? AND undone_at IS NULL AND created_at > ? AND id != ?
+    WHERE date = ? AND undone_at IS NULL
+      AND (created_at > ? OR (created_at = ? AND rowid > ?))
     LIMIT 1
-  `).get(row.date, row.created_at, row.id) as { id: string } | undefined
+  `).get(row.date, row.created_at, row.created_at, row.rowid) as { id: string } | undefined
   if (newer) throw new Error('A newer correction exists for this day — undo that one first.')
 
   const snapshot = JSON.parse(row.snapshot_json) as unknown
