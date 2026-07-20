@@ -9,7 +9,7 @@ import type {
   AIMessageFeedbackUpdate,
   AIChatTurnResult,
   AIDailyReportPreparationResult,
-  AIWrappedNarrative,
+  WrappedNarrativeResult,
   AISurfaceSummary,
   AIThreadMessage,
   AIThreadSettings,
@@ -27,6 +27,8 @@ import type {
   BreakRecommendation,
   DayTimelinePayload,
   DistractionCostPayload,
+  WeekWrapAggregateBundle,
+  WeekDayWrapAggregate,
   FocusReflectionSavePayload,
   FocusSession,
   FocusStartPayload,
@@ -130,6 +132,10 @@ const api = {
     getTimelineDay: (date: string): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.GET_TIMELINE_DAY, date),
     rebuildTimelineDay: (date: string): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.REBUILD_TIMELINE_DAY, date),
     getRecapRange: (dates: string[]): Promise<DayTimelinePayload[]> => ipcRenderer.invoke(IPC.DB.GET_RECAP_RANGE, dates),
+    getWeekWrapAggregates: (weekStart: string): Promise<WeekWrapAggregateBundle> =>
+      ipcRenderer.invoke(IPC.DB.GET_WEEK_WRAP_AGGREGATES, weekStart),
+    getWrapAggregatesForDates: (dates: string[]): Promise<WeekDayWrapAggregate[]> =>
+      ipcRenderer.invoke(IPC.DB.GET_WRAP_AGGREGATES_FOR_DATES, dates),
     getDistractionCost: (): Promise<DistractionCostPayload> => ipcRenderer.invoke(IPC.DB.GET_DISTRACTION_COST),
     getAppSummaries: (days?: number): Promise<AppUsageSummary[]> => ipcRenderer.invoke(IPC.DB.GET_APP_SUMMARIES, days),
     getAppSummariesForDate: (date: string): Promise<AppUsageSummary[]> => ipcRenderer.invoke(IPC.DB.GET_APP_SUMMARIES_FOR_DATE, date),
@@ -179,7 +185,7 @@ const api = {
       ipcRenderer.invoke(IPC.AI.GET_APP_NARRATIVE, { canonicalAppId, days, force }),
     prepareDailyReport: (date?: string): Promise<AIDailyReportPreparationResult> =>
       ipcRenderer.invoke(IPC.AI.PREPARE_DAILY_REPORT, { date }),
-    getWrappedNarrative: (date: string): Promise<AIWrappedNarrative | null> =>
+    getWrappedNarrative: (date: string): Promise<WrappedNarrativeResult> =>
       ipcRenderer.invoke(IPC.AI.GET_WRAPPED_NARRATIVE, { date }),
     getWrappedPeriodNarrative: (facts: WrappedPeriodFacts): Promise<WrappedPeriodNarrative | null> =>
       ipcRenderer.invoke(IPC.AI.GET_WRAPPED_PERIOD_NARRATIVE, { facts }),

@@ -48,6 +48,8 @@ import {
 } from '../services/workBlocks'
 import { computeAppActivityDigest } from '../services/appActivityDigest'
 import { generateWorkBlockInsight, scheduleTimelineAIJobs } from '../services/ai'
+import { recordDayRecapGenerated } from '../lib/dayRecap'
+import { getWeekWrapAggregatesFromMain, getWrapAggregatesForDatesFromMain } from '../services/wrapSnapshots'
 import { resolveIcon } from '../services/iconResolver'
 import { getLinuxDesktopDiagnostics } from '../services/linuxDesktop'
 import { IPC } from '@shared/types'
@@ -436,11 +438,20 @@ export function registerDbHandlers(): void {
 
     const refreshed = materializeTimelineDayProjection(db, dateStr, getLiveSessionForDate(dateStr))
     scheduleTimelineAIJobs(refreshed)
+    recordDayRecapGenerated(dateStr)
     return refreshed
   })
 
   ipcMain.handle(IPC.DB.GET_RECAP_RANGE, (_e, dates: string[]) => {
     return getRecapRange(getDb(), dates)
+  })
+
+  ipcMain.handle(IPC.DB.GET_WEEK_WRAP_AGGREGATES, (_e, weekStart: string) => {
+    return getWeekWrapAggregatesFromMain(weekStart)
+  })
+
+  ipcMain.handle(IPC.DB.GET_WRAP_AGGREGATES_FOR_DATES, (_e, dates: string[]) => {
+    return getWrapAggregatesForDatesFromMain(dates)
   })
 
   // App usage summaries for a range — used by Apps view

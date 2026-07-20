@@ -2453,3 +2453,113 @@ export function getDaysTracked(
   `).get(fromMs) as { day_count: number }
   return row?.day_count ?? 0
 }
+
+export interface DailyWrapSnapshotRow {
+  date: string
+  totalSeconds: number
+  workSeconds: number
+  leisureSeconds: number
+  dominantWorkSubject: string | null
+  factsJson: string
+  frozenAt: number
+}
+
+export function freezeDailyWrapSnapshot(
+  db: Database.Database,
+  payload: {
+    date: string
+    totalSeconds: number
+    workSeconds: number
+    leisureSeconds: number
+    dominantWorkSubject: string | null
+    factsJson: string
+  },
+): DailyWrapSnapshotRow {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO daily_wrap_snapshots (
+      date, total_seconds, work_seconds, leisure_seconds,
+      dominant_work_subject, facts_json, frozen_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      total_seconds = excluded.total_seconds,
+      work_seconds = excluded.work_seconds,
+      leisure_seconds = excluded.leisure_seconds,
+      dominant_work_subject = excluded.dominant_work_subject,
+      facts_json = excluded.facts_json,
+      frozen_at = excluded.frozen_at
+  `).run(
+    payload.date,
+    payload.totalSeconds,
+    payload.workSeconds,
+    payload.leisureSeconds,
+    payload.dominantWorkSubject,
+    payload.factsJson,
+    now,
+  )
+  return {
+    date: payload.date,
+    totalSeconds: payload.totalSeconds,
+    workSeconds: payload.workSeconds,
+    leisureSeconds: payload.leisureSeconds,
+    dominantWorkSubject: payload.dominantWorkSubject,
+    factsJson: payload.factsJson,
+    frozenAt: now,
+  }
+}
+
+export function getFrozenWrapSnapshotsForDates(
+  db: Database.Database,
+  dates: string[],
+): DailyWrapSnapshotRow[] {
+  if (dates.length === 0) return []
+  const placeholders = dates.map(() => '?').join(', ')
+  const rows = db.prepare(`
+    SELECT date, total_seconds, work_seconds, leisure_seconds,
+           dominant_work_subject, facts_json, frozen_at
+    FROM daily_wrap_snapshots
+    WHERE date IN (${placeholders})
+    ORDER BY date ASC
+  `).all(...dates) as Array<{
+    date: string
+    total_seconds: number
+    work_seconds: number
+    leisure_seconds: number
+    dominant_work_subject: string | null
+    facts_json: string
+    frozen_at: number
+  }>
+  return rows.map((row) => ({
+    date: row.date,
+    totalSeconds: row.total_seconds,
+    workSeconds: row.work_seconds,
+    leisureSeconds: row.leisure_seconds,
+    dominantWorkSubject: row.dominant_work_subject,
+    factsJson: row.facts_json,
+    frozenAt: row.frozen_at,
+  }))
+}
+
+export function sumFrozenWrapSnapshots(
+  db: Database.Database,
+  dates: string[],
+): {
+  totalSeconds: number
+  workSeconds: number
+  leisureSeconds: number
+  daysWithActivity: number
+} {
+  const snapshots = getFrozenWrapSnapshotsForDates(db, dates)
+  let totalSeconds = 0
+  let workSeconds = 0
+  let leisureSeconds = 0
+  let daysWithActivity = 0
+  for (const snap of snapshots) {
+    totalSeconds += snap.totalSeconds
+    workSeconds += snap.workSeconds
+    leisureSeconds += snap.leisureSeconds
+    if (snap.totalSeconds > 0) daysWithActivity += 1
+  }
+  return { totalSeconds, workSeconds, leisureSeconds, daysWithActivity }
+}

@@ -1,6 +1,5 @@
 // Period (week/month) narrative service. Mirrors `wrappedNarrative.ts` but
-// for aggregated periods. The renderer aggregates facts from per-day payloads
-// and ships them here; we keep the AI orchestration + cache in main.
+// for aggregated periods. Fail-closed per briefs-wraps spec — no provider, no fallback.
 
 import type { WrappedPeriodFacts, WrappedPeriodNarrative } from '@shared/types'
 import {
@@ -10,12 +9,12 @@ import {
   type ProviderTextResponse,
 } from './aiOrchestration'
 import {
-  buildPeriodFallbackNarrative,
   buildPeriodPrompts,
   computePeriodFactsHash,
   periodNarrativeCacheKey,
   validatePeriodNarrativeResponse,
 } from '../lib/wrappedPeriodNarrative'
+import { canRunWrappedNarrative } from './wrappedNarrative'
 
 const narrativeCache = new Map<string, WrappedPeriodNarrative>()
 
@@ -39,19 +38,15 @@ const NARRATIVE_TIMEOUT_MS = 14_000
 
 export async function getWrappedPeriodNarrative(
   facts: WrappedPeriodFacts,
-): Promise<WrappedPeriodNarrative> {
+): Promise<WrappedPeriodNarrative | null> {
   const factsHash = computePeriodFactsHash(facts)
   const cacheKey = periodNarrativeCacheKey(facts, factsHash)
 
   const cached = narrativeCache.get(cacheKey)
   if (cached) return cached
 
-  const fallback = buildPeriodFallbackNarrative(facts, factsHash)
-
-  if (facts.totalSeconds <= 0 || !providerRunner) {
-    narrativeCache.set(cacheKey, fallback)
-    return fallback
-  }
+  if (facts.totalSeconds <= 0) return null
+  if (!providerRunner || !(await canRunWrappedNarrative())) return null
 
   const { systemPrompt, userMessage } = buildPeriodPrompts(facts)
 
@@ -72,12 +67,12 @@ export async function getWrappedPeriodNarrative(
     )
 
     const parsed = validatePeriodNarrativeResponse(text, facts, factsHash)
-    const result = parsed ?? fallback
-    narrativeCache.set(cacheKey, result)
-    return result
+    if (!parsed) return null
+    narrativeCache.set(cacheKey, parsed)
+    return parsed
   } catch (error) {
     console.warn(`[ai] wrapped_period_narrative failed for ${facts.period} ${facts.anchorDate}:`, error)
-    return fallback
+    return null
   }
 }
 

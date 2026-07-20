@@ -86,10 +86,7 @@ export function registerAIHandlers(): void {
   })
 
   ipcMain.handle(IPC.AI.GET_WRAPPED_NARRATIVE, async (_e, payload: { date: string }) => {
-    const today = (() => {
-      const d = new Date()
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    })()
+    const today = localDateString(new Date())
     const liveSession = payload.date === today ? getCurrentSession() : null
     const dayPayload = getTimelineDayPayload(getDb(), payload.date, liveSession)
     return getWrappedNarrative(dayPayload)
