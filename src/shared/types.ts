@@ -78,6 +78,11 @@ export type CorrectionCommand =
   | { kind: 'exclude-block'; date: string; blockId: string }
   | { kind: 'exclude-evidence'; date: string; blockId: string; evidence: ExcludedEvidenceRef }
   | { kind: 'assign-client'; date: string; blockId: string; clientId: string | null; projectId?: string | null }
+  // DEV-189 (timeline.md §Meetings): mark a scheduled meeting as attended,
+  // skipped, moved, or unrelated. status null clears the mark. The meeting is
+  // addressed by its scheduled identity, not a block id — a calendar-only
+  // event has no block.
+  | { kind: 'mark-meeting'; date: string; meeting: { title: string; startMs: number }; status: 'attended' | 'skipped' | 'moved' | 'unrelated' | null }
 
 export interface CorrectionBlockDelta {
   blockId: string
@@ -381,6 +386,32 @@ export interface DayTimelinePayload {
   // Additive: what secondary displays showed while focus was elsewhere.
   // Absent on payloads that predate multi-display capture.
   secondaryDisplay?: SecondaryDisplayVisibleSpan[]
+  // Additive (DEV-189): the day's scheduled calendar events resolved against
+  // the day's own meeting blocks. Matched events annotate their block as an
+  // attended meeting (with the scheduled range as context); calendar-only
+  // events render as scheduled context — an outline, never a block, never
+  // counted in totalSeconds. Captured-only meetings need no entry here: they
+  // ARE blocks. Absent when no calendar signal is stored for the day.
+  scheduledMeetings?: TimelineScheduledMeeting[]
+}
+
+/** One scheduled calendar event as the Timeline day view shows it (DEV-189).
+ *  `attendance` is honest: 'matched' means captured meeting-app evidence OR
+ *  the person's explicit confirmation supports it (a block id is present only
+ *  for the evidence case); 'calendar_only' means it is scheduled context with
+ *  NO support that the meeting happened. `marked` carries the person's own
+ *  attended/skipped/moved/unrelated correction when one exists. */
+export interface TimelineScheduledMeeting {
+  title: string
+  startMs: number
+  endMs: number
+  attendeeCount: number | null
+  /** Attendee display names when the calendar source carries them. Evidence
+   *  surface only — never wrap copy. */
+  participants: string[]
+  attendance: 'matched' | 'calendar_only'
+  marked: 'attended' | 'skipped' | 'moved' | 'unrelated' | null
+  matchedBlockId: string | null
 }
 
 export type HistoryDayPayload = DayTimelinePayload
@@ -1630,6 +1661,8 @@ export interface ConnectorListing {
   whatItBrings: string
   /** Exact read-only scopes, each with plain-language meaning. */
   scopes: Array<{ scope: string; grants: string }>
+  /** Bounded initial-sync lookback, for honest progress copy. */
+  lookbackDays: number
   /** True when a working adapter ships today; false = listed for the wave. */
   available: boolean
   authState: ConnectorAuthState
@@ -1641,6 +1674,16 @@ export interface ConnectorListing {
   lastSyncError: string | null
   nextRetryAt: number | null
   itemsIngested: number
+}
+
+/** What a connect/sync action reports back to Settings. `error` is always a
+ *  sanitized summary — never a provider body that could carry secrets. */
+export interface ConnectorSyncSummary {
+  status: 'ok' | 'blocked_consent' | 'blocked_disabled' | 'failed' | 'not_connected'
+  ingested: number
+  quarantined: number
+  tombstoned: number
+  error?: string
 }
 
 // ─── Full-history export (privacy-retention-and-sync.md §Export, DEV-196) ────
@@ -1740,15 +1783,32 @@ export interface DayEnrichment {
     /** PRs grouped by project + state (open | merged | closed | draft). */
     pullRequests: Array<{ project: string; state: string; count: number }>
   } | null
-  /** What MEETINGS shaped the day, from the calendar connector. */
+  /** What MEETINGS shaped the day — the DEV-189 day-level resolution (issue
+   *  #3): calendar signal and captured meeting-app evidence combined, with
+   *  calendar-only / captured-only / matched reported as separate buckets so
+   *  no calendar event becomes claimed work without supporting evidence and
+   *  no observed meeting is denied for lacking a calendar entry. */
   meetings: {
+    /** Total recognized meetings across all three buckets. */
     count: number
-    /** Titles + pre-formatted scheduled length, longest first. title null when
-     *  the source gave none. Never an attendee name or count.
+    /** Longest first (by scheduled length, observed length for captured-only).
+     *  title null when the source gave none. Never an attendee name or count.
+     *  `scheduled` / `observed` are pre-formatted lengths — scheduled is null
+     *  for captured-only meetings, observed is null for calendar-only ones.
      *  // event-type inference: `type` + `confidence` from eventTypeInference.ts,
      *  so the writer may say "your ML class" instead of "the meeting" at high
      *  confidence, and must stay literal when it is not. */
-    items: Array<{ title: string | null; scheduled: string; type: EventType; confidence: number }>
+    items: Array<{
+      title: string | null
+      scheduled: string | null
+      observed: string | null
+      attendance: 'matched' | 'calendar_only' | 'captured_only'
+      type: EventType
+      confidence: number
+    }>
+    matched: number
+    calendarOnly: number
+    capturedOnly: number
   } | null
   /** Focus-timer runs, when the user enabled a focus app. Barest by design. */
   focusSessions: {
@@ -2704,9 +2764,15 @@ export const IPC = {
     PICK_PATH: 'file-access:pick-path',
   },
   CONNECTORS: {
-    // Listing only in this slice — lifecycle IPC (connect/disconnect/sync)
-    // arrives with the first connectable provider.
     LIST: 'connectors:list',
+    // Lifecycle IPC (DEV-188, with the first connectable provider). CONNECT
+    // runs the provider's authorization flow and first sync; DISCONNECT
+    // carries the person's explicit keep-or-delete choice for imported data.
+    CONNECT: 'connectors:connect',
+    SYNC: 'connectors:sync',
+    DISCONNECT: 'connectors:disconnect',
+    /** Main → renderer: connect-phase progress ({ connectorId, phase }). */
+    PROGRESS: 'connectors:progress',
   },
   EXPORT: {
     // Full-history export (DEV-196). PLAN previews what an export would
