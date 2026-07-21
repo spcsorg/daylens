@@ -37,6 +37,7 @@ import {
   addEntityEvidenceRef,
   addEntityRelationship,
   resolveMeetingEntity,
+  resolveMergeChain,
   resolvePersonEntity,
   resolveRepositoryEntity,
   upsertEntity,
@@ -268,7 +269,24 @@ function adoptExternalSignals(db: Database.Database): void {
 export type ConnectedEnvelope =
   | { kind: 'calendar_event'; sourceEventId: string; title: string; startMs?: number; endMs?: number; attendees?: Array<{ connectorId: string; displayName: string }> }
   | { kind: 'meeting_record'; sourceEventId: string; title: string; startMs?: number; endMs?: number; participants?: Array<{ connectorId: string; displayName: string }> }
-  | { kind: 'repository_activity'; provider: string; owner: string; repo: string; observedAt?: number }
+  | {
+    kind: 'repository_activity'
+    provider: string
+    owner: string
+    repo: string
+    observedAt?: number
+    /** What happened, minimally: activity kind, title (a commit subject or
+     *  PR/issue title — never a body, diff, or URL), and provider state. */
+    activity?: {
+      kind: 'commit' | 'pull_request' | 'review' | 'issue'
+      title: string
+      state?: string | null
+      /** Source-native login of who did it, when it was not the account owner. */
+      actorLogin?: string | null
+    }
+    /** People involved OTHER than the account owner, by source-native login. */
+    people?: Array<{ connectorId: string; displayName: string }>
+  }
   | { kind: 'document_reference'; sourceDocumentId: string; title: string; observedAt?: number }
   | { kind: 'message_reference'; sourceMessageId: string; author?: { connectorId: string; displayName: string }; observedAt?: number }
 
@@ -296,14 +314,26 @@ export function adoptConnectedEnvelope(db: Database.Database, envelope: Connecte
       }
       return meeting
     }
-    case 'repository_activity':
-      return resolveRepositoryEntity(db, {
+    case 'repository_activity': {
+      const repository = resolveRepositoryEntity(db, {
         provider: envelope.provider,
         owner: envelope.owner,
         repo: envelope.repo,
         origin: 'connected',
         observedAt: envelope.observedAt,
       })
+      for (const person of envelope.people ?? []) {
+        const entity = resolvePersonEntity(db, {
+          connectorId: person.connectorId,
+          displayName: person.displayName,
+          observedAt: envelope.observedAt,
+        })
+        if (entity && repository) {
+          addEntityRelationship(db, entity.id, repository.id, 'contributed', { source: 'connected', confidence: 0.9 })
+        }
+      }
+      return repository
+    }
     case 'document_reference': {
       const entity = upsertEntity(db, {
         type: 'file',
@@ -325,6 +355,75 @@ export function adoptConnectedEnvelope(db: Database.Database, envelope: Connecte
       })
     }
   }
+}
+
+// ─── Local ↔ provider repository identity unification ───────────────────────
+// memory-and-entities/connectors §Entity resolution: source-native identity
+// outranks display-name similarity, and cross-source matches need
+// CORROBORATION. A provisional local-git repository entity merges into the
+// provider-keyed one (the survivor keeps provider identity) ONLY when
+//   1. the identity keys agree exactly (local:<normalized short name>),
+//   2. the local git probe observed that repository on the commit's local day
+//      (an external_signal <date>:git evidence ref on the local entity), and
+//   3. that day's stored git signal lists the commit's exact subject line
+//      under the same repository name.
+// A same-name pair WITHOUT that corroboration stays two entities — visible in
+// the merge suggestions, decided by a person, never auto-merged. The merge is
+// the same reversible pointer flip Settings uses (aliases and evidence refs
+// stay on their rows), and a user rename on the local entity blocks the
+// automatic merge entirely (corrections outrank inference).
+
+export interface RepositoryUnificationInput {
+  providerEntityId: string
+  repoShortName: string
+  commitSubject: string
+  /** Local date of the commit — the day whose git signal must corroborate. */
+  date: string
+}
+
+export function unifyRepositoryEntityIdentity(
+  db: Database.Database,
+  input: RepositoryUnificationInput,
+): boolean {
+  const localKey = `local:${normalizeEntityLabel(input.repoShortName)}`
+  const localRow = db.prepare(
+    `SELECT * FROM entities WHERE entity_type = 'repository' AND identity_key = ?`,
+  ).get(localKey) as EntityRow | undefined
+  if (!localRow) return false
+  const local = resolveMergeChain(db, localRow)
+  if (local.status !== 'active' || local.id === input.providerEntityId) return false
+  if (local.name_source === 'user') return false
+
+  const observedLocally = db.prepare(`
+    SELECT 1 FROM entity_evidence_refs
+    WHERE entity_id = ? AND source_type = 'external_signal' AND source_id = ?
+  `).get(local.id, `${input.date}:git`) != null
+  if (!observedLocally) return false
+
+  // Read the day row directly (the externalSignals service imports THIS
+  // module for adoption, so it cannot be imported back).
+  const signalRow = db.prepare(
+    `SELECT payload_json FROM external_signals WHERE date = ? AND source = 'git'`,
+  ).get(input.date) as { payload_json: string } | undefined
+  if (!signalRow) return false
+  let payload: GitActivitySignal | null = null
+  try {
+    payload = JSON.parse(signalRow.payload_json) as GitActivitySignal
+  } catch {
+    return false
+  }
+  const repoEntry = payload?.repos?.find((repo) => repo.repo === input.repoShortName)
+  if (!repoEntry?.messages?.includes(input.commitSubject)) return false
+
+  const now = Date.now()
+  db.prepare(`UPDATE entities SET status = 'merged', merged_into_id = ?, updated_at = ? WHERE id = ?`)
+    .run(input.providerEntityId, now, local.id)
+  db.prepare(`UPDATE entities SET updated_at = ? WHERE id = ?`).run(now, input.providerEntityId)
+  addEntityAlias(db, input.providerEntityId, local.canonical_name, {
+    rawLabel: local.canonical_name,
+    source: 'connected',
+  })
+  return true
 }
 
 // ─── The backfill entrypoint (called by migration v50 and re-runnable) ───────

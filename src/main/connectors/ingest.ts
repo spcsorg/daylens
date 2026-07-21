@@ -18,15 +18,16 @@
 // refused outright — nothing is written, not even bookkeeping.
 
 import type Database from 'better-sqlite3'
-import type { CalendarEventSignal, CalendarSignal, ConnectorId } from '@shared/types'
+import type { CalendarEventSignal, CalendarSignal, ConnectorId, GitActivitySignal } from '@shared/types'
 import { isCaptureConsentCurrent } from '@shared/captureConsent'
 import { getSettings } from '../services/settings'
 import { getExternalSignal } from '../services/externalSignals'
-import { adoptConnectedEnvelope } from '../services/entities/entityAdoption'
+import { adoptConnectedEnvelope, unifyRepositoryEntityIdentity } from '../services/entities/entityAdoption'
 import { addEntityEvidenceRef, resolvePersonEntity } from '../services/entities/entityRepository'
 import {
   validateRecordEnvelope,
   type ConnectorDaySignalEvent,
+  type ConnectorGitDaySignal,
   type ConnectorRecordEnvelope,
   type ConnectorSyncPage,
 } from './contract'
@@ -37,7 +38,11 @@ import {
   tombstoneConnectorRecord,
   upsertConnectorRecord,
 } from './store'
-import { removeConnectorDaySignalEvent, removeConnectorRecordDerivedData } from './purge'
+import {
+  removeConnectorDaySignalEvent,
+  removeConnectorGitDaySignalEvent,
+  removeConnectorRecordDerivedData,
+} from './purge'
 import { connectorEvidenceSourceId } from './evidenceId'
 
 export { connectorEvidenceSourceId } from './evidenceId'
@@ -104,6 +109,62 @@ export function mergeConnectorCalendarDaySignal(
   `).run(date, JSON.stringify(merged), nowMs)
 }
 
+/** Cap per repo per day so one rebase spree cannot flood the day layer. */
+const MAX_DAY_COMMIT_MESSAGES = 12
+
+/**
+ * Merge connector git contributions into the external_signals 'git' day row —
+ * the same row shape the local git probe writes and enrichment/wraps read.
+ * Commits merge by exact subject line within their repo entry (so a commit the
+ * local probe already found is not double-counted); PRs merge by (title, repo).
+ */
+export function mergeConnectorGitDaySignal(
+  db: Database.Database,
+  date: string,
+  signals: ConnectorGitDaySignal[],
+  nowMs = Date.now(),
+): void {
+  if (signals.length === 0) return
+  const stored = getExternalSignal<GitActivitySignal>(db, date, 'git')?.payload
+  const payload: GitActivitySignal = stored ?? { repos: [], totalCommits: 0, prs: [] }
+
+  for (const signal of signals) {
+    if (signal.commit) {
+      let entry = payload.repos.find((repo) => repo.repo === signal.repo)
+      if (!entry) {
+        entry = { repo: signal.repo, commitCount: 0, messages: [], firstCommitClock: null, lastCommitClock: null }
+        payload.repos.push(entry)
+      }
+      // Count only what is also listed, so tombstone removal (which finds the
+      // commit by its subject line) stays symmetric with this merge.
+      if (!entry.messages.includes(signal.commit.message) && entry.messages.length < MAX_DAY_COMMIT_MESSAGES) {
+        entry.messages.push(signal.commit.message)
+        entry.commitCount += 1
+        if (entry.firstCommitClock == null || signal.commit.clock < entry.firstCommitClock) {
+          entry.firstCommitClock = signal.commit.clock
+        }
+        if (entry.lastCommitClock == null || signal.commit.clock > entry.lastCommitClock) {
+          entry.lastCommitClock = signal.commit.clock
+        }
+      }
+    }
+    if (signal.pr) {
+      const existing = payload.prs.find((pr) => pr.repo === signal.repo && pr.title === signal.pr!.title)
+      if (existing) existing.state = signal.pr.state
+      else payload.prs.push({ title: signal.pr.title, state: signal.pr.state, repo: signal.repo })
+    }
+  }
+  payload.totalCommits = payload.repos.reduce((sum, repo) => sum + repo.commitCount, 0)
+
+  db.prepare(`
+    INSERT INTO external_signals (date, source, payload_json, captured_at)
+    VALUES (?, 'git', ?, ?)
+    ON CONFLICT(date, source) DO UPDATE SET
+      payload_json = excluded.payload_json,
+      captured_at = excluded.captured_at
+  `).run(date, JSON.stringify(payload), nowMs)
+}
+
 // ─── Page ingestion ──────────────────────────────────────────────────────────
 
 export interface IngestPageResult {
@@ -119,6 +180,7 @@ export interface IngestPageResult {
 
 function envelopeDate(record: ConnectorRecordEnvelope): string | null {
   if (record.daySignal) return record.daySignal.date
+  if (record.gitSignal) return record.gitSignal.date
   if (record.provenance.effectiveAtMs != null) {
     const at = new Date(record.provenance.effectiveAtMs)
     const month = String(at.getMonth() + 1).padStart(2, '0')
@@ -152,6 +214,7 @@ export function ingestConnectorPage(
 
   const run = db.transaction(() => {
     const dayEvents = new Map<string, ConnectorDaySignalEvent[]>()
+    const gitEvents = new Map<string, ConnectorGitDaySignal[]>()
 
     for (const record of page.records) {
       const problems = validateRecordEnvelope(record)
@@ -169,6 +232,19 @@ export function ingestConnectorPage(
           sourceId: connectorEvidenceSourceId(connectorId, record.provenance.sourceRecordId),
           spanStartMs: record.provenance.effectiveAtMs,
         })
+        // A commit the local git probe ALSO observed corroborates that the
+        // provisional local-folder repository and this provider repository
+        // are one thing — unify them under the provider identity. Runs
+        // BEFORE this page's day-signal merge, so this page's own writes can
+        // never be their own corroboration.
+        if (record.entity.kind === 'repository_activity' && record.gitSignal?.commit) {
+          unifyRepositoryEntityIdentity(db, {
+            providerEntityId: entity.id,
+            repoShortName: record.entity.repo,
+            commitSubject: record.gitSignal.commit.message,
+            date: record.gitSignal.date,
+          })
+        }
       }
       // Attendees/participants minted inside adoptConnectedEnvelope get the
       // same per-record support ref (resolvePersonEntity is idempotent), so
@@ -177,7 +253,9 @@ export function ingestConnectorPage(
         ? record.entity.attendees ?? []
         : record.entity.kind === 'meeting_record'
           ? record.entity.participants ?? []
-          : []
+          : record.entity.kind === 'repository_activity'
+            ? record.entity.people ?? []
+            : []
       for (const person of people) {
         const personEntity = resolvePersonEntity(db, {
           connectorId: person.connectorId,
@@ -202,6 +280,11 @@ export function ingestConnectorPage(
           if (old && (!next || old.date !== next.date || old.startClock !== next.startClock || old.title !== next.title)) {
             removeConnectorDaySignalEvent(db, old, nowMs)
           }
+          const oldGit = previousEnvelope.gitSignal
+          const nextGit = record.gitSignal
+          if (oldGit && JSON.stringify(oldGit) !== JSON.stringify(nextGit ?? null)) {
+            removeConnectorGitDaySignalEvent(db, oldGit, nowMs)
+          }
         } catch { /* unreadable prior envelope — nothing to clean */ }
       }
 
@@ -211,11 +294,19 @@ export function ingestConnectorPage(
         events.push(record.daySignal)
         dayEvents.set(record.daySignal.date, events)
       }
+      if (record.gitSignal) {
+        const events = gitEvents.get(record.gitSignal.date) ?? []
+        events.push(record.gitSignal)
+        gitEvents.set(record.gitSignal.date, events)
+      }
       ingested += 1
     }
 
     for (const [date, events] of dayEvents) {
       mergeConnectorCalendarDaySignal(db, date, events, nowMs)
+    }
+    for (const [date, events] of gitEvents) {
+      mergeConnectorGitDaySignal(db, date, events, nowMs)
     }
 
     // Explicit provider deletions on an incremental page (cancellations under
