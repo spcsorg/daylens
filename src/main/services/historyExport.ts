@@ -63,6 +63,13 @@ const INTERNAL_TABLES: Record<string, string> = {
   browser_history_cursors: 'internal browser-history import cursors',
   app_profile_cache: 'derived app-profile cache, rebuilt automatically',
   memory_record_vectors: 'semantic-search embedding bookkeeping — derived, rebuilt automatically',
+  // Screen-context experiment: raw frames never leave the device and the
+  // derived evidence is local-only by the experiment's accepted boundary —
+  // it is excluded from sync, MCP, managed AI, AND every export, until a
+  // later accepted change explicitly moves that boundary.
+  screen_context_frames: 'screen-context experiment frame-lifecycle ledger — local-only by the experiment boundary',
+  screen_context_evidence: 'screen-context experiment derived evidence — local-only by the experiment boundary, never exported',
+  screen_eval_pairs: 'screen-context paired-evaluation questions and answers — local-only experiment material; the report is aggregate-only',
 }
 
 // Columns withheld from otherwise-exported tables.
@@ -137,6 +144,7 @@ const SECTION_RULES: SectionRule[] = [
         'context_patterns',
         'memory_index_days',
         'wrapped_narratives',
+        'day_analysis_versions',
       ].includes(t),
   },
   {
