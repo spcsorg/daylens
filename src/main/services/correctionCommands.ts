@@ -52,6 +52,7 @@ import {
   deleteMeetingAttendanceMark,
   isMeetingAttendanceStatus,
   meetingEntityIdForScheduledEvent,
+  resolveDayMeetingReport,
   scheduledEventKey,
   upsertMeetingAttendanceMark,
 } from './meetingResolution'
@@ -484,6 +485,7 @@ function surfaceNotes(
   command: CorrectionCommand,
   blocks: readonly WorkContextBlock[],
   category: AppCategory | undefined,
+  payloadBefore: DayTimelinePayload,
 ): string[] {
   const notes: string[] = []
   switch (command.kind) {
@@ -532,6 +534,28 @@ function surfaceNotes(
       } else {
         notes.push(`"${command.meeting.title}" stays scheduled context only — never attended work. Any meeting-app time near it stands on its own. Timeline, wrap, search, and AI answers follow.`)
       }
+      // The cross-surface deltas, computed honestly: `payloadBefore` is the
+      // day before the mark, and this function runs inside the preview
+      // savepoint AFTER the dry-run write — so the report read here is what
+      // every surface will actually resolve once the mark applies.
+      const beforeMeeting = payloadBefore.scheduledMeetings?.find((meeting) =>
+        meeting.title === command.meeting.title && meeting.startMs === command.meeting.startMs) ?? null
+      try {
+        const afterMeeting = resolveDayMeetingReport(db, command.date)?.meetings.find((meeting) =>
+          meeting.title === command.meeting.title && meeting.scheduledStartMs === command.meeting.startMs) ?? null
+        const bucket = (value: string): string => value === 'matched' ? 'attended (matched)' : 'scheduled only'
+        if (beforeMeeting && afterMeeting && afterMeeting.attendance !== 'captured_only'
+          && beforeMeeting.attendance !== afterMeeting.attendance) {
+          notes.push(`Meeting buckets: ${bucket(beforeMeeting.attendance)} → ${bucket(afterMeeting.attendance)} — the day's meeting report and wrap counts follow.`)
+        }
+      } catch { /* pre-migration database: the notes above still tell the story */ }
+      if (meetingEntityIdForScheduledEvent(db, command.date, meetingEventKeyOf(command))) {
+        if (command.status === 'attended') {
+          notes.push(`Search will label it "Meeting: ${command.meeting.title}" instead of "Scheduled: ${command.meeting.title}".`)
+        } else if (beforeMeeting?.marked === 'attended') {
+          notes.push(`Search goes back to "Scheduled: ${command.meeting.title}" — the explicit confirmation is withdrawn.`)
+        }
+      }
       break
     }
   }
@@ -562,7 +586,7 @@ export function previewCorrection(
       blockCountAfter: after.blocks.length,
       blocks: blockDeltas(resolved.blocks, after),
       apps: appDeltas(appsBefore, appsAfter),
-      surfaces: surfaceNotes(db, command, resolved.blocks, category),
+      surfaces: surfaceNotes(db, command, resolved.blocks, category, resolved.payload),
     }
   } finally {
     db.exec('ROLLBACK TO correction_preview')
