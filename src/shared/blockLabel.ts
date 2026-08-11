@@ -155,7 +155,22 @@ function cleanSiteName(domain: string): string {
   return stripped.charAt(0).toUpperCase() + stripped.slice(1)
 }
 
-export function userVisibleBlockLabel(block: WorkContextBlock): string {
+/** Everything the label chain actually reads. Named so a projection that holds
+ *  only these fields — the calendar-range fast read — can resolve a label
+ *  through this function instead of re-deriving one. Range views must preserve
+ *  label parity with `DayTimelinePayload`, and two implementations of a fallback
+ *  chain cannot stay in parity. */
+export type LabelResolvableBlock =
+  Pick<WorkContextBlock, 'dominantCategory' | 'topApps' | 'topArtifacts'>
+  & Partial<Pick<WorkContextBlock, 'aiLabel' | 'ruleBasedLabel'>>
+  & {
+    label: { current?: string | null; override?: string | null }
+    // Only the leading domain is read, so the range projection's per-domain
+    // fold satisfies this without building full WebsiteSummary rows.
+    websites: ReadonlyArray<{ domain: string }>
+  }
+
+export function userVisibleBlockLabel(block: LabelResolvableBlock): string {
   const override = block.label.override?.trim()
   // User override is intentional — preserve it verbatim even if it contains
   // pipes or other characters that naturalize would strip.

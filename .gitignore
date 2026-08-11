@@ -15,6 +15,11 @@ build/capture-helper
 PLAN.md
 CONTEXT.md
 PROMPTS.md
+# ...but a work order's execution trail is the source record, not an ephemeral
+# planning doc. core.ignorecase=true on macOS makes CONTEXT.md above match
+# .sw-factory/<WO>/context.md, which silently dropped the one file that records
+# which requirements and blueprints govern a work order.
+!.sw-factory/**/context.md
 .agents/
 skills-lock.json
 

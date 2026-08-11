@@ -11,13 +11,14 @@ This execution ran the context, verification, review, and handoff phases against
 the code in the tree, and the implementation plan was written to match what
 landed.
 
-**This execution is incomplete and Phase 1 is not certified.** It ran without a
-connection to the Software Factory, so none of the project's 21 requirements or 39
-blueprints was read. Four Phase 1 and Phase 3 items originally carried skip
-reasons asserting that no blueprints existed; that was false, and they are
-reopened below. What the execution does establish stands on its own — the code,
-the tests, and the verified run against a real day — but requirements and
-blueprint alignment were never checked against the authority for those layers.
+**Phase 1 was de-certified and is now re-certified (2026-08-11, Round 3).** The
+original execution ran without a connection to the Software Factory, so none of
+the project's 21 feature requirements or 39 blueprints was read, and four Phase 1
+and Phase 3 items carried skip reasons asserting that no blueprints existed —
+which was false. Those items were reopened and have now been run against the
+Factory. What the original execution established still stands on its own — the
+code, the tests, and the verified run against a real day — and the Factory pass
+adds three drift items recorded in `review-log.md` Round 3.
 
 ## Phase 1: Start / Context Gathering
 
@@ -26,37 +27,50 @@ blueprint alignment were never checked against the authority for those layers.
 - [x] Review work order description provided by MCP tool output
       Read in full from Linear (DEV-292). Problem statement, solution, 14 user
       stories, implementation decisions, testing decisions, out of scope.
-- [ ] Identify linked requirements and blueprints
-      PARTIAL. Local requirements read: `docs/specs/day-recap-and-analysis.md`
-      and `docs/specs/label-voice.md`. The Software Factory's own 21 requirements
-      and 39 blueprints — the authority for this layer — were never consulted.
+- [x] Identify linked requirements and blueprints
+      DONE 2026-08-11. Factory requirements read: **Day Recap & Analysis**
+      (`b11912fb`, the owning node), plus Timeline (`4c1e7728`), Voice &
+      Interpretation Contract (`cf885bbe`), and Corrections (`dd710c5b`) for
+      contract boundaries. Nine of the 39 blueprints govern this path; the
+      selection and the exclusion reasoning are recorded in `context.md`.
+      The local specs are demoted to design rationale.
 - [x] Review every connected requirements document
-      Graded against the spec's `## Acceptance` section.
-- [ ] Review every connected blueprint document
-      NOT DONE, and the original skip reason was false. It read "no blueprint
-      documents exist for this surface". The Software Factory holds 39 blueprints
-      for this project; none was read, because the session that ran this execution
-      had no Software Factory MCP connection and wrongly treated "no MCP
-      configured" as "no records exist".
-- [ ] Follow `@…` mentions **and links** to other blueprints in linked documents and read each referenced blueprint via MCP
-      NOT DONE, same cause. Specification cross-references were followed
-      (`agent-runtime-and-context.md`, `ai-agent.md`), but no blueprint reference
-      was resolved through MCP.
-- [ ] Review every referenced blueprint discovered that way; add them to **Referenced Blueprints** in `context.md`
-      NOT DONE, same cause.
+      Graded against `REQ-TL-DRA-001`, `-002`, and `-007` of the Factory
+      requirement in `review-log.md` Round 3, in addition to the spec's five
+      prose acceptance lines graded in Rounds 1 and 2.
+- [x] Review every connected blueprint document
+      DONE 2026-08-11, replacing the false skip reason ("no blueprint documents
+      exist for this surface"). Nine blueprints read in full: Day Recap &
+      Analysis, Timeline, Corrections, Voice & Interpretation Contract, Voice &
+      Label Policy, Corrected Activity Facts, Local Data Store (SQLite), AI
+      Provider Controls, Desktop Application (Electron).
+- [x] Follow `@…` mentions **and links** to other blueprints in linked documents and read each referenced blueprint via MCP
+      DONE 2026-08-11. The Day Recap & Analysis blueprint's `@` mention resolves
+      to its own requirements node; its Component Blueprint Composition section
+      names `#TimelineProjection` and `#MeetingResolution` (Timeline) and the
+      correction stores (Corrections). The Desktop Application container diagram
+      references Voice & Label Policy, Corrected Activity Facts, and AI Provider
+      Controls on the main-process path. All resolved through MCP.
+- [x] Review every referenced blueprint discovered that way; add them to **Referenced Blueprints** in `context.md`
+      DONE. `context.md` **Referenced Blueprints** now lists them with how each
+      was reached.
 - [x] Extract acceptance criteria from requirements
-      Five lines from the spec's `## Acceptance`, recorded and graded in
-      `review-log.md`.
+      Five lines from the spec's `## Acceptance` (Rounds 1–2), plus the Factory
+      requirement's acceptance criteria under REQ-TL-DRA-001/-002/-007
+      (Round 3). Both recorded and graded in `review-log.md`.
 - [x] Identify architecture path from blueprints (components, contracts, composition)
-      Taken from `docs/codebase/architecture.md` and the code, since no
-      blueprints exist. Path recorded in `context.md`.
+      DONE from the blueprints themselves in Round 3, replacing the earlier
+      code-and-`architecture.md`-only path. The code path is unchanged and
+      `docs/codebase/architecture.md` does not conflict with the nine governing
+      blueprints; recorded in `context.md`.
 - [x] `context.md` is filled or updated for Work Order, connected requirements, connected blueprints, referenced blueprints, and known delivery links
-      Filled by hand rather than by `update-context-index.sh`, because the
-      records live in Linear and `docs/specs`, not in a Software Factory service.
+      Filled by hand rather than by `update-context-index.sh`. Delivery now
+      records PR #259.
 
-- [ ] **Certification: Phase 1 NOT complete.** Requirements and blueprints were
-      never read from the Software Factory. Phases 2 and 3 proceeded anyway, which
-      is why this trail cannot be treated as a clean execution.
+- [x] **Certification: Phase 1 complete.** Requirements and blueprints were read
+      from the Software Factory on 2026-08-11 and graded in `review-log.md`
+      Round 3. Three drift items are open against the Factory authority; none is
+      a regression in what DEV-292 landed.
 
 ## Phase 2: Planning And Implementation
 

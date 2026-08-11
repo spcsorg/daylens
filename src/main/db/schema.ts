@@ -275,7 +275,12 @@ CREATE TABLE IF NOT EXISTS timeline_blocks (
   is_live INTEGER NOT NULL DEFAULT 0,
   heuristic_version TEXT NOT NULL,
   computed_at INTEGER NOT NULL,
-  invalidated_at INTEGER
+  invalidated_at INTEGER,
+  -- Why this block started and stopped (BoundaryReason[], JSON). NULLABLE, and
+  -- the NULL is load-bearing: NULL means the row predates persistence (reason
+  -- unknown), '[]' means computed with no reason applied. Migration v69.
+  start_reasons_json TEXT,
+  end_reasons_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_timeline_blocks_date ON timeline_blocks (date, start_time);

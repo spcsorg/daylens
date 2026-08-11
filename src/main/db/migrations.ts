@@ -3448,6 +3448,22 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 81,
+    description:
+      'Persist boundary reasons on timeline_blocks. The segmenter has always computed WHY a block started and stopped (BoundaryReason: idle-gap, subject-change, kind-shift, meeting-start/end, detour-end, category-shift, user-cut) and attached it to the in-memory block, but there was no column, so the reason was discarded the moment the process forgot it and a rehydrated block could not explain its own edges. Segmentation was therefore the least diagnosable part of the pipeline, which is exactly what the blueprint claimed it was not. Both columns are NULLABLE and the NULL is load-bearing: NULL means "this row predates persistence, we do not know", while the JSON array \'[]\' means "computed, and no reason applied". Collapsing those two into one value would let a pre-migration block masquerade as a block with no boundary. LOCAL-ONLY: no sync-allowlist key.',
+    up: () => {
+      const db = getDb()
+      const columns = db.prepare(`PRAGMA table_info(timeline_blocks)`).all() as Array<{ name: string }>
+      const existing = new Set(columns.map((column) => column.name))
+      if (!existing.has('start_reasons_json')) {
+        db.exec(`ALTER TABLE timeline_blocks ADD COLUMN start_reasons_json TEXT`)
+      }
+      if (!existing.has('end_reasons_json')) {
+        db.exec(`ALTER TABLE timeline_blocks ADD COLUMN end_reasons_json TEXT`)
+      }
+    },
+  },
 ]
 
 export const LATEST_SCHEMA_VERSION = migrations.at(-1)?.version ?? 0

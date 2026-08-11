@@ -55,7 +55,7 @@ Invariants that must hold:
 
 1. **Attention is the budget.** Only foreground `app_sessions` measure time. Browser history *explains* attention; per-domain credit goes through `reconcileWebsiteVisits`/`getCorrectedWebsiteSummariesForRange` (interval union + foreground clamp). No raw `SUM(duration_sec)` anywhere.
 2. **One clamp everywhere.** Day totals and per-block `websites` use the same corrected variant (fixed 2026-07-26; blocks previously used the raw one, which let a background Netflix tab outvote real work).
-3. **Kind follows intent.** A block whose dominant category is focused work is `work`, on the build path and the rehydrated read path alike (`effectiveBlockKind`). Leisure naming draws only from leisure domains.
+3. **Kind follows intent.** A block whose dominant category is focused work is `work`, on the build path and the rehydrated read path alike (`effectiveBlockKind`). Leisure naming draws only from leisure domains. `timeline_blocks.block_kind` is **not** a `WorkKind` — it is a `BlockCategoryBucket` (`work | communication | meeting | mixed`) that the label-voice contract consumes and that cannot express leisure. The two are distinct types so the column can no longer be cast into a kind (fixed 2026-08-11; the month grid did exactly that and read every block in history as work).
 4. **Subjects name the work, never the tool.** `workNameGuards` rejects tool brands, tool surfaces ("Cursor Agents", "New chat - Claude"), command lines, joined tab titles; `workIntent.subjectFromArtifact` skips them so a real document/channel/repo can name the block. Slack channel artifacts resolve to their project name. No email address ever enters a subject.
 5. **AI is groundable prose only.** `wrapFactTable` enumerates every number a line may contain; `wrapNarrativeShared` validates and repairs once; failed lines fall back per slide. Chart plumbing (the "Other" bucket) never reaches the model.
 6. **Wraps regenerate when a completed day's facts moved** (same-day opens reconcile; the frozen-at-10:38am failure mode is gone).
@@ -68,7 +68,7 @@ What makes it "activity, not tabs":
 1. `workBlocks.ts` — heuristic segmentation with boundary reasons.
 2. `workIntent.ts` — role (execution/research/communication/review/…) + subject, ranked artifact > page > workflow > domain, guarded per invariant 4.
 3. `workKind.ts` — work/leisure/personal, distribution-first.
-4. `analyzeDay.ts` — AI regroup + relabel, versioned (`day_analysis_versions`), heuristic fallback with no provider. Carries an `interpretationAgentEnabled` flag whose packet-based runtime is NOT wired yet — that runtime is where the agentic interpretation defined in [agent runtime and context](../specs/agent-runtime-and-context.md) lands.
+4. `analyzeDay.ts` — AI regroup + relabel, versioned (`day_analysis_versions`), heuristic fallback with no provider. For a low-confidence block it runs the interpretation agent's small Tier-1 tool loop (`services/interpretationAgent.ts`, max 4 steps) instead of the direct relabel call; any throw falls back to the direct relabel. Gated on `interpretationAgentEnabled`, which defaults to **true** (`services/settings.ts`) and has a Settings toggle. Wired at `analyzeDay.ts:231`.
 5. `dayWrapScenes.buildDayWrapFacts` — the one reconciled facts object per day (activities, ribbon, story beats, standout, hooks, quality gate).
 6. `wrappedNarrative.ts` (lib + service) — prompt build, validation, repair, fallback, cache keyed by date + facts hash.
 
@@ -120,14 +120,49 @@ The desktop can call a configured provider directly with a person’s own key. M
 - **Dead report generators removed** (`reportArtifacts.ts`, `reportFormats.ts`) — live export is `interactionTools` xlsx/csv + `weeklyExport`.
 - **Screen-context capture** (`services/screenContext/`) stays: consent-gated sampler + encrypted store + lifecycle, no shipped extractor yet. It now also serves the agent's Tier-3 live capture. Reconcile marketing copy ("no screenshots, ever") with this before any release that enables it.
 
+## Decisions recorded 2026-08-11
+
+- **`block_kind` is a display bucket, not a kind.** `BlockCategoryBucket`
+  (`work | communication | meeting | mixed`) is now a distinct type from
+  `WorkKind` (`work | leisure | personal | idle`), so the stored column cannot be
+  cast into a product kind. Context: `blockKindForCategory` returns the bucket
+  and cannot emit `leisure`, `personal`, or `idle` — the live database holds
+  1,172 `work`, 26 `communication`, 19 `mixed`, 18 `meeting`, and zero of the
+  other three. `timelineCalendarRange` cast that column through a
+  `WORK_KINDS.has(...) ? … : 'work'` fallback, so 63 blocks coerced to `work` and
+  a leisure block was unrepresentable: **every block in the month grid read as
+  work.** The reader now calls `effectiveBlockKind` with the `dominantCategory`
+  it already recomputes, leaving `kind` undefined so the resolver does not
+  short-circuit on `if (block.kind) return block.kind`. Consequence: ADR-002
+  ("kind is resolved on read") is now true of every reader, not all but one, and
+  a future cast fails to compile. Covered by `tests/blockKindReadPath.test.ts`.
+
+- **Boundary reasons are persisted** (`timeline_blocks.start_reasons_json` /
+  `end_reasons_json`, migration v69). The segmenter always computed
+  `BoundaryReason` and attached it to the in-memory block, but there was no
+  column, so the reason died with the process and a rehydrated block could not
+  explain its own edges — segmentation was the least diagnosable stage in the
+  pipeline. Both columns are nullable and the NULL is load-bearing: `NULL` means
+  *not recorded* (pre-v69 row), `'[]'` means *computed, no reason applied*.
+  Collapsing those would let a pre-migration block masquerade as a block with no
+  boundary. Covered by `tests/boundaryReasonPersistence.test.ts`.
+
+- **`aiBlockNamingProvider`, `aiSummaryProvider`, `aiArtifactProvider` are dead
+  settings.** They exist in `AppSettings` and the Settings UI, and nothing reads
+  them; `selectJobProvider` routes every non-chat job on `aiProvider` alone. A
+  live config can therefore show `anthropic` for all three while every job runs
+  on the CLI provider. Left in place, recorded so the next reader does not treat
+  them as the reason a job hit the wrong provider.
+
 ## Known contradictions and open work
 
 - **Focus score / distraction alerter** are marked "Removed" in `docs/product/v2.md` but fully live (`focusScore.ts`, `distractionAlerter` started at boot, Settings UI, MCP tool). Decide: revive the spec or remove the feature. Left in place because it is live product surface, not dead code.
-- **Interpretation agent runtime** — flag exists, runtime unwired (see above). Highest-leverage next build.
 - **Block segmentation can bridge untracked gaps** (a lunch inside one "block") and gaps are not yet first-class facts for the narrative — the rules are in [Timeline §Segmentation](../specs/timeline.md) and [Day recap §Gaps](../specs/day-recap-and-analysis.md).
+- **A block cannot hold more than one activity.** `timeline_blocks` carries exactly one label, one kind, one dominant category. [Timeline §60](../specs/timeline.md) specifies block-level threads at a 15% attention threshold; that threshold appears nowhere in `workBlocks.ts`. Threads exist only as a day-level construct (`buildDayThreads` in `renderer/lib/dayWrapScenes.ts`). There is no primary/secondary/ambient role anywhere, so "Cursor primary, Slack secondary, Netflix ambient" has no place to be stored, and no correction can target a role.
+- **No per-app interaction evidence.** There is no keyboard, mouse, or scroll signal; the only interaction input is system-wide `powerMonitor.getSystemIdleTime()`. Media playback is inferred from a title/category regex (`lib/passivePresence.ts`), not read from CoreAudio or MediaRemote — so "paused Netflix" and "playing Netflix" are indistinguishable.
 - **`apps/web` + Convex sync is frozen** pending the encrypted companion replacement (docs/product/v2.md).
 - **Stored AI block labels predating the name guards** still carry tool-y names ("Working on Cursor Agents"); they heal on re-analysis, not retroactively.
-- **Plaintext API key** found in the LEGACY app-data dir (`~/Library/Application Support/Daylens/config.json`, old GRDB-era app): rotate that key and delete the file; the current app keeps keys in the OS secure store.
+- ~~**Plaintext API key** in the LEGACY app-data dir~~ — remediated 2026-08-11, see [API key exposure](../operations/incident-2026-08-11-plaintext-api-key.md). The file is deleted and `tests/noSecretsInSettingsStore.test.ts` guards the shape. **Revoking the key in the Anthropic Console is still outstanding and is the user's action.**
 
 ## Current architectural risks
 
