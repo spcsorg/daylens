@@ -143,6 +143,7 @@ import { VOICE_SYSTEM_PROMPT, containsEmDash, findBannedVocab, findPlumbingVocab
 import { parseDayRegroupGroups } from '../ai/dayRegroup'
 import { maybeStartTrace, setCurrentTrace } from '../ai/trace'
 import { runChatAgentTurn } from '../agent/chatAgent'
+import { toAnswerEvidenceRecord } from '../agent/answerEvidence'
 import { linkContextPacketToMessage } from '../services/contextPacket'
 import { providerSupportsAgentTools } from '../agent/providerModel'
 import type { AgentQuestion } from '../agent/interactionTools'
@@ -171,6 +172,7 @@ interface AnswerEnvelope {
     fileDisclosures?: import('@shared/types').AIMessageFileDisclosure[]
     contextPacketId?: string | null
     citations?: import('@shared/types').AIMessageCitation[]
+    evidence?: import('@shared/types').ContextPacketAnswerEvidence
   }
   suggestedFollowUps: FollowUpSuggestion[]
   actions?: AIMessageAction[]
@@ -3820,6 +3822,9 @@ async function sendMessageInner(payload: AIChatSendRequest, options: SendMessage
       fileDisclosures: agentResult.fileDisclosures,
       contextPacketId: agentResult.contextPacketId,
       citations: agentResult.citations,
+      // WO-76: narrowed to the inspectable shape HERE, so the durable row
+      // never holds the turn's in-process evidence state.
+      evidence: toAnswerEvidenceRecord(agentResult.evidence),
     },
   })
   // Bind the recorded packet to the persisted assistant message (DEV-182), so
