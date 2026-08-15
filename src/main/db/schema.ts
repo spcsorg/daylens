@@ -983,9 +983,17 @@ CREATE INDEX IF NOT EXISTS idx_file_disclosures_thread ON file_disclosures (thre
 -- exact_text (memory_records_fts) is created by migration v52 alongside the
 -- other FTS tables. LOCAL-ONLY: none of these tables have sync-allowlist keys;
 -- they can never serialize into a remote payload (tests/syncAllowlist.test.ts).
+--
+-- This declaration is the post-v70 shape: the 'page' record kind plus
+-- domain/url for browser activity. Every migration that widens the
+-- record_kind CHECK rebuilds the table and skips itself when the CHECK
+-- already admits its kind, so keeping this in step is what makes those
+-- rebuilds no-ops on a fresh install — and what stops schema.ts from
+-- describing a table the app never actually runs on. The convergence of the
+-- two paths is asserted in tests/migrationRoundtrip.test.ts.
 CREATE TABLE IF NOT EXISTS memory_records (
   id                TEXT PRIMARY KEY,
-  record_kind       TEXT NOT NULL CHECK(record_kind IN ('session', 'meeting', 'artifact', 'supplied_fact', 'connected_activity')),
+  record_kind       TEXT NOT NULL CHECK(record_kind IN ('session', 'meeting', 'artifact', 'page', 'supplied_fact', 'connected_activity')),
   memory_type       TEXT NOT NULL CHECK(memory_type IN ('observed', 'connected', 'supplied', 'inferred')),
   statement         TEXT NOT NULL,
   exact_text        TEXT NOT NULL DEFAULT '',
@@ -996,6 +1004,8 @@ CREATE TABLE IF NOT EXISTS memory_records (
   app_bundle_id     TEXT,
   app_name          TEXT,
   title             TEXT,
+  domain            TEXT,
+  url               TEXT,
   primary_entity_id TEXT,
   source_refs_json  TEXT NOT NULL DEFAULT '[]',
   confidence        TEXT NOT NULL DEFAULT 'observed',
@@ -1008,6 +1018,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_records_date ON memory_records (date);
 CREATE INDEX IF NOT EXISTS idx_memory_records_kind_start ON memory_records (record_kind, start_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_records_domain ON memory_records (domain);
 
 -- Entity tags: which durable entities a record is about. Search resolves a
 -- query to entities through aliases, then finds tagged records by id — that is
