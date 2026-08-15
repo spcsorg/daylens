@@ -1018,7 +1018,10 @@ CREATE TABLE IF NOT EXISTS memory_records (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_records_date ON memory_records (date);
 CREATE INDEX IF NOT EXISTS idx_memory_records_kind_start ON memory_records (record_kind, start_ms DESC);
-CREATE INDEX IF NOT EXISTS idx_memory_records_domain ON memory_records (domain);
+-- The domain index is created by ensureMemoryRecordsDomainIndex() after the
+-- ladder runs: on a pre-v70 database the CREATE TABLE above keeps the legacy
+-- table, which has no domain column, so declaring the index here would abort
+-- startup before v70 could add the column.
 
 -- Entity tags: which durable entities a record is about. Search resolves a
 -- query to entities through aliases, then finds tagged records by id — that is

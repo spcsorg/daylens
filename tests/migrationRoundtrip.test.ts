@@ -382,6 +382,34 @@ test('SCHEMA_SQL never declares a memory object the ladder then changes', () => 
   }
 })
 
+test('a v69 database boots through SCHEMA_SQL before v70 adds the domain column', () => {
+  // Production order is SCHEMA_SQL then the ladder, and on an existing database
+  // CREATE TABLE IF NOT EXISTS keeps the legacy memory_records. Anything
+  // SCHEMA_SQL declares over a column only v70 adds therefore fails on the
+  // upgrade path — before the migration that would have added it can run.
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
+  db.exec(PRE_V70_MEMORY_SCHEMA)
+  db.exec(`
+    CREATE TABLE schema_version (
+      version    INTEGER PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
+    INSERT INTO schema_version (version, applied_at) VALUES (69, 0);
+  `)
+
+  try {
+    assert.doesNotThrow(() => db.exec(SCHEMA_SQL))
+    migrate(db)
+
+    const columns = db.prepare(`PRAGMA table_info(memory_records)`).all() as { name: string }[]
+    assert.ok(columns.some((column) => column.name === 'domain'), 'v70 did not add the domain column')
+    assert.ok(indexNames(db).has('idx_memory_records_domain'), 'the domain index is missing after the upgrade')
+  } finally {
+    db.close()
+  }
+})
+
 test('fresh install and a pre-v70 upgrade converge on the same memory schema', () => {
   // (a) Fresh install: SCHEMA_SQL + the ladder.
   const fresh = new Database(':memory:')
