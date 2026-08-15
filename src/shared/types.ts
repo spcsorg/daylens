@@ -146,6 +146,24 @@ export type BlockConfidence = 'high' | 'medium' | 'low'
 // distinction that makes leisure first-class: a video is never a "work session".
 export type WorkKind = 'work' | 'leisure' | 'personal' | 'idle'
 
+// A DIFFERENT vocabulary from WorkKind, and deliberately not assignable to it.
+//
+// `timeline_blocks.block_kind` has never held a WorkKind. It holds a display
+// bucket derived from the block's dominant category by
+// `blockKindForCategory` — 'meeting', 'communication', 'mixed', or 'work' —
+// which the label-voice contract consumes to pick its phrasing. It cannot
+// express 'leisure', 'personal', or 'idle' at all.
+//
+// The two were interchangeable as bare strings, and one reader
+// (timelineCalendarRange) cast the stored column straight into WorkKind,
+// coercing every unrecognized bucket to 'work'. Because the bucket vocabulary
+// has no 'leisure', that made every block in the month grid read as work.
+// Keeping them as distinct types means that cast no longer compiles.
+//
+// The product kind axis is resolved ONLY by `effectiveBlockKind` (ADR-002:
+// kind is resolved on read, never trusted from storage).
+export type BlockCategoryBucket = 'work' | 'communication' | 'meeting' | 'mixed'
+
 export const WORK_INTENT_ROLES = [
   'execution',
   'research',
@@ -516,6 +534,11 @@ export interface CalendarRangeDay {
   date: string
   blocks: CalendarRangeBlock[]
   activeSeconds: number
+  /** True when this day has no current block generation and is being shown from
+   *  its newest superseded one. The day is real and its activity is real; the
+   *  block shapes are one generation stale until the day is rebuilt. Absent
+   *  means the day came from the current generation. */
+  provisional?: boolean
 }
 
 export interface WorkContextInsight {

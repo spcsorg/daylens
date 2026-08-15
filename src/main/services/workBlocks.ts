@@ -25,6 +25,7 @@ import type {
   AppSession,
   ArtifactRef,
   BlockBoundary,
+  BlockCategoryBucket,
   BlockConfidence,
   BoundaryReason,
   DayTimelinePayload,
@@ -384,6 +385,41 @@ export interface AppDetailBlockSlice {
   topArtifacts: ArtifactRef[]
   pageRefs: PageRef[]
   workflowRefs: WorkflowRef[]
+  /** Why the block started and stopped, as persisted. `undefined` means the
+   *  row predates migration v69 and the reason was never recorded — which is
+   *  NOT the same as a block with no boundary reason (an empty array). */
+  boundary?: BlockBoundary
+}
+
+const BOUNDARY_REASONS: ReadonlySet<string> = new Set<BoundaryReason>([
+  'day-start', 'day-end', 'idle-gap', 'meeting-start', 'meeting-end',
+  'artifact-change', 'repo-change', 'category-shift', 'kind-shift',
+  'research-to-execution', 'detour-start', 'detour-end', 'subject-change',
+  'user-merge', 'user-cut',
+])
+
+function parseBoundaryReasons(raw: string | null): BoundaryReason[] | null {
+  if (raw == null) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return null
+    return parsed.filter((value): value is BoundaryReason =>
+      typeof value === 'string' && BOUNDARY_REASONS.has(value))
+  } catch {
+    return null
+  }
+}
+
+/** Rebuild a persisted boundary. Returns undefined when either side was never
+ *  recorded, so "not recorded" stays distinguishable from "no reason". */
+export function parsePersistedBoundary(
+  startRaw: string | null,
+  endRaw: string | null,
+): BlockBoundary | undefined {
+  const startReasons = parseBoundaryReasons(startRaw)
+  const endReasons = parseBoundaryReasons(endRaw)
+  if (startReasons == null || endReasons == null) return undefined
+  return { startReasons, endReasons }
 }
 
 const GENERIC_LABELS = new Set([
@@ -1510,7 +1546,9 @@ export function loadPersistedAppDetailBlocksForDates(
       end_time,
       dominant_category,
       label_current,
-      evidence_summary_json
+      evidence_summary_json,
+      start_reasons_json,
+      end_reasons_json
     FROM timeline_blocks b
     WHERE invalidated_at IS NULL
       AND date IN (${placeholders})
@@ -1527,6 +1565,8 @@ export function loadPersistedAppDetailBlocksForDates(
     dominant_category: AppCategory
     label_current: string
     evidence_summary_json: string
+    start_reasons_json: string | null
+    end_reasons_json: string | null
   }>
 
   const workflowsByBlock = workflowRefsByBlockId(db, rows.map((row) => row.id))
@@ -1579,6 +1619,9 @@ export function loadPersistedAppDetailBlocksForDates(
       topArtifacts,
       pageRefs,
       workflowRefs: workflowsByBlock.get(row.id) ?? [],
+      // Undefined when the row predates migration v69 — the caller cannot tell
+      // "no boundary" from "not recorded" unless the absence survives the read.
+      boundary: parsePersistedBoundary(row.start_reasons_json, row.end_reasons_json),
     })
     grouped.set(row.date, current)
   }
@@ -4520,13 +4563,17 @@ export function buildTimelineBlocksFromSessions(
   return buildBlocksForSessions(db, sessions).map((block) => finalizedLabelForBlock(db, block))
 }
 
-function blockKindFor(block: WorkContextBlock): string {
+function blockKindFor(block: WorkContextBlock): BlockCategoryBucket {
   return blockKindForCategory(block.dominantCategory)
 }
 
 /** The persisted block_kind implied by a dominant category — exported so the
- *  startup category heal writes the same value the builder would. */
-export function blockKindForCategory(dominantCategory: AppCategory): string {
+ *  startup category heal writes the same value the builder would.
+ *
+ *  This is a BlockCategoryBucket, NOT a WorkKind: it cannot express leisure,
+ *  personal, or idle. Readers that need the product kind axis must call
+ *  `effectiveBlockKind` instead of reading this column. */
+export function blockKindForCategory(dominantCategory: AppCategory): BlockCategoryBucket {
   if (dominantCategory === 'meetings') return 'meeting'
   if (dominantCategory === 'communication' || dominantCategory === 'email') return 'communication'
   if (dominantCategory === 'uncategorized') return 'mixed'
@@ -5259,9 +5306,11 @@ function persistTimelineDay(
           is_live,
           heuristic_version,
           computed_at,
+          start_reasons_json,
+          end_reasons_json,
           invalidated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         ON CONFLICT(id) DO UPDATE SET
           date = excluded.date,
           start_time = excluded.start_time,
@@ -5278,6 +5327,8 @@ function persistTimelineDay(
           is_live = excluded.is_live,
           heuristic_version = excluded.heuristic_version,
           computed_at = excluded.computed_at,
+          start_reasons_json = excluded.start_reasons_json,
+          end_reasons_json = excluded.end_reasons_json,
           invalidated_at = NULL
       `).run(
         block.id,
@@ -5296,6 +5347,11 @@ function persistTimelineDay(
         0,
         block.heuristicVersion,
         block.computedAt,
+        // NULL only when the builder produced no boundary at all; an empty
+        // array is a real answer ("computed, nothing applied") and must not
+        // collapse into "not recorded". Migration v69.
+        block.boundary ? JSON.stringify(block.boundary.startReasons) : null,
+        block.boundary ? JSON.stringify(block.boundary.endReasons) : null,
       )
 
       db.prepare(`DELETE FROM timeline_block_members WHERE block_id = ?`).run(block.id)

@@ -266,3 +266,150 @@ untouched here.
 
 All five spec acceptance lines now met. One advisory carries forward: no gate
 checks that the recap's total matches the timeline.
+
+---
+
+## Round 3
+
+Scope: the blueprint- and requirements-alignment steps reopened when Phase 1 was
+de-certified. No code changed in this round. The Software Factory MCP was
+connected (`software-factory-daylen-45f2f431`) and the authority for both layers
+was read: the Day Recap & Analysis requirement and nine of the 39 blueprints.
+Selection and exclusion reasoning is in `context.md`.
+
+### Requirements Alignment
+
+Graded against the Factory requirement **Day Recap & Analysis**
+(`b11912fb-c852-4d0e-9466-89c4663c750d`), which supersedes
+`docs/specs/day-recap-and-analysis.md` as the acceptance authority. Rounds 1 and 2
+graded five prose lines; the Factory node carries seven REQs and ~30 acceptance
+criteria.
+
+**Blocking:**
+
+- None. Nothing DEV-292 landed violates an acceptance criterion.
+
+**Advisory:**
+
+- **AC-TL-DRA-001.3 is unmet, and it is the carried-forward advisory.** "When the
+  Day recap presents an activity total, the feature shall present the same total
+  as the Timeline account." Rounds 1 and 2 recorded this as an advisory on the
+  strength of the local spec's prose line "its total matches the timeline". The
+  Factory requirement makes it a named acceptance criterion. Its status is
+  therefore promoted from advisory to **unmet AC** — no code regression, but the
+  gate the earlier rounds described as nice-to-have is required by the authority.
+  The Round 2 reasoning still holds: asserting a total inside prose needs the
+  number enumerated before generation, the way `wrapFactTable` does it.
+- **AC-TL-DRA-007.3 is unmet.** "When Day analysis or a Day recap creates a new
+  persisted result, the feature shall retain an inspectable version with its
+  grounded facts and replacement reason." The recap persists nothing — it holds an
+  in-memory `daySummaryCache` keyed by facts hash, memory hash, and variant id,
+  and appends no `day_analysis_versions` row. DEV-292 scoped persistence out
+  explicitly, so this is pre-existing drift the work order did not create and did
+  not close. Worth its own work order.
+- The five spec acceptance lines graded in Rounds 1 and 2 remain met. The Factory
+  requirement's REQ-TL-DRA-002 (degrade honestly, AC-002.1/.2/.3) is fully met and
+  is the criterion `degradedRecapReason` directly serves.
+
+### Blueprint Alignment
+
+**Skipped:** no. This replaces the false Round 1 skip reason ("no blueprint
+documents exist for this surface").
+
+**Blocking:**
+
+- None.
+
+**Advisory:**
+
+- **The Day Recap & Analysis blueprint is stale against the tree.** Its System
+  Contracts record `generateDaySummary` as reachable but unestablished: "its
+  implementation is absent from the tracked expected service path. Its source
+  coverage, grounding, output shape, and version behavior are not established by
+  this blueprint." DEV-292 landed in exactly that function and settles three of
+  the four: source coverage (`tests/recapContract.test.ts`, 14 tests), grounding
+  (`VOICE_SYSTEM_PROMPT` + memory block + profile directive + the variant's
+  grounding directives, over `buildDaySummaryScaffold`), and output shape
+  (`parseDaySummaryResultText` yields `{ summary }` and nothing else). Version
+  behavior remains unestablished, consistent with AC-TL-DRA-007.3 above. The
+  blueprint should be updated to match; that is a Factory document edit, not a
+  code change, and is left for the owner to accept.
+- **The blueprint asserts a contract the code does not implement.** Day Recap &
+  Analysis, Integration Contracts: "Recap generation marks a day as generated and
+  triggers snapshot freezing." Verified false — `freezeDaySnapshot` is called from
+  exactly one place, `src/main/services/dailySummaryNotifier.ts:438`, and never
+  from `generateDaySummary`. Pre-existing; DEV-292 neither caused nor changed it.
+- **`SummaryVoice` is not applied to the recap.** The Voice & Interpretation
+  Contract blueprint requires one normalized `SummaryVoice` across every generated
+  activity description, and names #NarrativePromptComposer as adding the directive
+  to narrative prompts. `voiceDirective(settings.summaryVoice)` is applied in
+  `wrappedNarrative.ts:203`, `wrappedPeriodNarrative.ts:287`, and
+  `wrappedQuestion.ts:120` — but not in `generateDaySummary`, whose system prompt
+  is `[VOICE_SYSTEM_PROMPT, memoryPrompt, userProfileDirective(...),
+  ...variant.directives]`. A person who selects `straight` or `witty` moves
+  Wrapped and not the recap. This is a small, contained fix and was not visible to
+  Rounds 1 or 2, which had no blueprint to check tone parity against.
+- **`recapVoiceFindings` sits on the wrong side of an ADR boundary.** Voice &
+  Label Policy ADR-002 decides: "Keep label evaluation in `labelVoice.ts` and
+  generated-answer directives in `voiceContract.ts`", on the grounds that short
+  labels and longer prose have different failure modes. `recapVoiceFindings` is a
+  generated-prose check living in `labelVoice.ts`, and it re-implements the
+  plumbing- and hype-term scans that `voiceContract.ts` already exports as
+  `findPlumbingVocab` and `findBannedVocab` — both of which `aiService.ts` already
+  imports. Two implementations of one policy on opposite sides of the boundary.
+  This corroborates the Round 2 advisory that `scoreToolSurfaces` treats the recap
+  as prose while `isDisqualifiedWorkSubject` is built for labels: the same
+  label/prose confusion, one layer down.
+
+**Aligned, confirmed against the blueprints rather than assumed:**
+
+- Timeline ADR-001 makes `DayTimelinePayload` the only activity source and forbids
+  deriving durations from raw evidence. `generateDaySummary` reads
+  `getTimelineDayPayload(db, dateStr, liveSession, { analysis: false })` and
+  derives nothing. Compliant, and the `analysis: false` choice (DEV-247) is what
+  makes AC-TL-DRA-001.2 grounding hold.
+- Corrected Activity Facts ADR-002 applies corrections at the shared query
+  boundary, which is what makes that read trustworthy rather than merely cheap.
+- The accepted drift on the call-site timeout belt, documented in
+  `implementation-plan.md`, is corroborated rather than contradicted by the AI
+  Provider Controls blueprint, which itself records that the orchestration choke
+  point is intended rather than verified: "the reviewed module describes an
+  intended orchestration choke point, but this component specification does not
+  claim guardrail enforcement without a verified call site." Retaining the belt is
+  the blueprint-consistent choice.
+
+### Architecture And Conventions
+
+No new findings. The Round 1 advisories (stale measurement comment, unused
+`modelStrategy: 'balanced'`, the `shipped`/`colleague` naming collision) stand
+unchanged.
+
+### Tests And Build
+
+No code changed in this round, so no commands were re-run. The Round 2 results
+stand: `typecheck` pass, `lint` 0 errors, `npm test` 2197 pass / 0 fail / 9 skip.
+
+### User-Facing Verification
+
+**Skipped:** yes — no behaviour changed in this round. The Round 1 verification of
+the recap path against a real day is untouched, and the open item from Round 1
+stands: the recap has not been observed in the application's own Timeline panel,
+so the `docs/acceptance/` line for this surface stays `landed`, not `passing`.
+
+### Security, Privacy, And Data Safety
+
+**Skipped:** yes — no code, data path, or output changed.
+
+### Round 3 Verdict
+
+- Total blocking: 0
+- Total advisory: 6 (2 requirements, 4 blueprint)
+- Documents read: 1 requirement, 9 blueprints
+- **Verdict:** APPROVED
+
+Phase 1 is certified. What DEV-292 landed stands: no blueprint or acceptance
+criterion is violated by the change. Three items are open against the Factory
+authority and none is a regression — AC-TL-DRA-001.3 (recap total, promoted from
+advisory), AC-TL-DRA-007.3 (no versioned recap result), and the missing
+`SummaryVoice` directive. The first two predate this work order; the third is a
+contained fix. Each is the owner's call to schedule, and none blocks handoff.
