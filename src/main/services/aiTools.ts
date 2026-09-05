@@ -23,14 +23,20 @@ import { blockActiveSeconds } from '@shared/blockDuration'
 // the user deleted is subtracted from every total the AI quotes, so the AI
 // never contradicts the Timeline or the Apps view.
 import {
+  aggregateAppSummaries,
   getCorrectedAppSummariesForRange as getAppSummariesForRange,
-  getCorrectedSessionsForRange as getSessionsForRange,
   getIgnoredBlockSpansForRange,
   getCorrectedDomainIntervals,
   getCorrectedPageFactsForRange,
   getCorrectedWebsiteSummariesForRange,
   browserPageCoverageNotes,
 } from './activityFacts'
+// The day summary reads the day the corrected boundary defines, not a bare
+// calendar day — the same boundary agent/deterministicFacts.ts computes the
+// answer enforcer's figures from.
+import { queryCorrectedActivityFactsForDay } from '../core/query/activityFactsQuery'
+import { getStoredCanonicalAppLinks } from '../core/inference/appIdentityRegistry'
+import { ownedDayBounds } from '../lib/dayOwnership'
 import { localDateString } from '../lib/localDate'
 import { computeFocusScoreV2 } from '../lib/focusScore'
 import {
@@ -797,9 +803,23 @@ function fmtHHMM(ms: number): string {
 }
 
 function execGetDaySummary(params: GetDaySummaryParams, db: Database.Database): DaySummaryResult {
-  const [fromMs, toMs] = localDayBounds(params.date)
-  const summaries = getAppSummariesForRange(db, fromMs, toMs)
-  const sessions = getSessionsForRange(db, fromMs, toMs)
+  // DEV-246: one definition of activity, time and attribution for the day.
+  // This tool used to read its own window — plain local midnight-to-midnight —
+  // while Timeline, Apps and the answer enforcer all read the day the CORRECTED
+  // boundary defines. Those are not the same window: day ownership hands a
+  // cross-midnight sitting to the day it started in, and a live day is clipped
+  // at now rather than at a midnight that has not happened. So the agent could
+  // state an app total, a day length or a site count that the screen next to it
+  // disagreed with, and that the enforcer then computed differently again.
+  // Reading queryCorrectedActivityFactsForDay makes those the same numbers by
+  // construction rather than by coincidence.
+  const facts = queryCorrectedActivityFactsForDay(db, params.date)
+  const [fromMs, toMs] = ownedDayBounds(db, params.date)
+  const sessions = facts.sessions
+  // Same rollup, same canonical-identity links as the Apps view and the
+  // enforcer: one installed app can never appear as two rows here and one
+  // there.
+  const summaries = aggregateAppSummaries(sessions, getStoredCanonicalAppLinks(db))
   const websites = getCorrectedWebsiteSummariesForRange(db, fromMs, toMs)
   const focusScore = computeFocusScoreV2({
     sessions: sessions.map((s) => ({
@@ -809,7 +829,7 @@ function execGetDaySummary(params: GetDaySummaryParams, db: Database.Database): 
       category: s.category,
       isFocused: s.isFocused,
     })),
-    totalActiveSeconds: summaries.reduce((s, a) => s + a.totalSeconds, 0),
+    totalActiveSeconds: facts.totalSeconds,
   })
   // Block labels and timings come from the renderer's live path so the
   // AI cites what the user saw.

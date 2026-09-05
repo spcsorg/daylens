@@ -17,21 +17,34 @@
 //     it TODAY and labeled when that evidence has since been deleted, the
 //     block recomputed, or the file grant revoked (spec §Privacy and
 //     disclosure: deletion removes material from FUTURE packets; the recorded
-//     disclosure stays truthful about the past).
+//     disclosure stays truthful about the past);
+//   claim-backed — WO-76 adds the answer's own evidence: which claims were
+//     traced to which recorded item, which figures Daylens computed instead of
+//     letting the model choose them, and what the answer had to admit it could
+//     not back.
 //
 // The inspector never exposes provider system prompts, hidden model
 // reasoning, credentials, or security instructions — everything here comes
 // from the packet the person's own data produced (spec §Context inspection).
+// The tool trace and the answer evidence are both re-projected from the
+// persisted row on the way out rather than parsed and trusted, so that
+// guarantee holds at the boundary and not only upstream of it.
 import type Database from 'better-sqlite3'
 import { aggregateToolsConsulted } from '@shared/agentTrail'
 import type {
   AIThreadMessageMetadata,
+  ContextPacketAnswerEvidence,
+  ContextPacketClaimKind,
+  ContextPacketComputedFigure,
+  ContextPacketEvidenceSource,
   ContextPacketEvidenceState,
   ContextPacketInspection,
   ContextPacketInspectionGroup,
   ContextPacketInspectionItem,
   ContextPacketInspectionOmission,
   ContextPacketListEntry,
+  ContextPacketSupportedClaim,
+  ContextPacketUnsupportedClaim,
   ContextPacketToolConsulted,
 } from '@shared/types'
 import {
@@ -194,12 +207,12 @@ export function resolveEvidencePresence(
 // governs separately. An mcp_-prefixed name is one of the person's own MCP
 // servers (the namespace connectMcpTools applies), identified as such.
 
-/** Tools called during the exchange, in first-use order; null when no turn
- *  record is bound to the message. */
-export function toolsConsultedForMessage(
+/** The persisted turn record bound to this message, or null when there is
+ *  none (no id, no row, no metadata, unreadable JSON). */
+function readTurnMetadata(
   db: Database.Database,
   messageId: number | null,
-): ContextPacketToolConsulted[] | null {
+): AIThreadMessageMetadata | null {
   if (messageId == null) return null
   let metadataJson: string | undefined
   try {
@@ -211,13 +224,135 @@ export function toolsConsultedForMessage(
     return null
   }
   if (!metadataJson) return null
-  let metadata: AIThreadMessageMetadata
   try {
-    metadata = JSON.parse(metadataJson) as AIThreadMessageMetadata
+    return JSON.parse(metadataJson) as AIThreadMessageMetadata
   } catch {
     return null
   }
+}
+
+/** Tools called during the exchange, in first-use order; null when no turn
+ *  record is bound to the message. */
+export function toolsConsultedForMessage(
+  db: Database.Database,
+  messageId: number | null,
+): ContextPacketToolConsulted[] | null {
+  const metadata = readTurnMetadata(db, messageId)
+  if (!metadata) return null
   return aggregateToolsConsulted(metadata.agent?.toolTrace)
+}
+
+// ─── Answer evidence (WO-76 / AC-AIA-002.3) ──────────────────────────────────
+// The read half of the answer-evidence boundary. The write half
+// (agent/answerEvidence) already narrowed the turn's evidence before it was
+// persisted, but by the time it is read back it is JSON on a row that any
+// past or future writer could have shaped differently, so it is projected
+// again here rather than parsed and trusted.
+//
+// The projection is a strict allowlist: each output field is built from one
+// named input field of an expected primitive type, unions are checked against
+// their members, free text is bounded, and anything else on the object is
+// dropped on the floor. A writer that stuffed a system prompt, an API key, or
+// another turn's text into an extra key would therefore not get it past this
+// function and onto the IPC surface.
+
+/** Long enough for a real claim, an evidence statement, or a computed
+ *  figure's sentence; short enough that no pasted document or serialized
+ *  payload can ride out through a text field. */
+const EVIDENCE_TEXT_MAX = 400
+
+const CLAIM_KINDS: readonly ContextPacketClaimKind[] = ['duration', 'clock_time', 'date', 'entity']
+const EVIDENCE_SOURCES: readonly ContextPacketEvidenceSource[] = ['packet', 'tool', 'computed']
+
+/** A non-empty bounded string, or null for anything else (missing, wrong
+ *  type, blank). Callers decide whether null drops the whole row. */
+function evidenceText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  if (!text) return null
+  return text.length > EVIDENCE_TEXT_MAX ? `${text.slice(0, EVIDENCE_TEXT_MAX - 1)}…` : text
+}
+
+function memberOf<T extends string>(value: unknown, members: readonly T[]): T | null {
+  return typeof value === 'string' && (members as readonly string[]).includes(value) ? (value as T) : null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+/** Project a list, dropping every element the shape rejects. A malformed row
+ *  is left out rather than rendered half-built or guessed at. */
+function projectList<T>(value: unknown, project: (row: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(value)) return []
+  const out: T[] = []
+  for (const entry of value) {
+    const row = asRecord(entry)
+    if (!row) continue
+    const projected = project(row)
+    if (projected) out.push(projected)
+  }
+  return out
+}
+
+function projectComputedFigure(row: Record<string, unknown>): ContextPacketComputedFigure | null {
+  const subject = evidenceText(row.subject)
+  const rendered = evidenceText(row.rendered)
+  const identity = evidenceText(row.identity)
+  const statement = evidenceText(row.statement)
+  if (!subject || !rendered || !identity || !statement) return null
+  return { subject, rendered, identity, statement, replaced: evidenceText(row.replaced) }
+}
+
+function projectSupportedClaim(row: Record<string, unknown>): ContextPacketSupportedClaim | null {
+  const kind = memberOf(row.kind, CLAIM_KINDS)
+  const source = memberOf(row.source, EVIDENCE_SOURCES)
+  const text = evidenceText(row.text)
+  const identity = evidenceText(row.identity)
+  const statement = evidenceText(row.statement)
+  if (!kind || !source || !text || !identity || !statement) return null
+  return { kind, text, identity, source, statement }
+}
+
+function projectUnsupportedClaim(row: Record<string, unknown>): ContextPacketUnsupportedClaim | null {
+  const kind = memberOf(row.kind, CLAIM_KINDS)
+  const text = evidenceText(row.text)
+  if (!kind || !text) return null
+  return { kind, text }
+}
+
+/**
+ * The inspectable answer-evidence record, rebuilt field by field from a
+ * persisted turn record. Null when the value is not an evidence record at all
+ * — a turn from before evidence coverage existed carries no such key, and a
+ * corrupt one carries something that is not an object. The inspector states
+ * that honestly; it never reconstructs coverage after the fact.
+ */
+export function projectAnswerEvidence(value: unknown): ContextPacketAnswerEvidence | null {
+  const row = asRecord(value)
+  if (!row) return null
+  const disclosedUncertainties = Array.isArray(row.disclosedUncertainties)
+    ? row.disclosedUncertainties.map(evidenceText).filter((text): text is string => text !== null)
+    : []
+  return {
+    computedFigures: projectList(row.computedFigures, projectComputedFigure),
+    supportedClaims: projectList(row.supportedClaims, projectSupportedClaim),
+    unsupportedClaims: projectList(row.unsupportedClaims, projectUnsupportedClaim),
+    disclosedUncertainties,
+  }
+}
+
+/** How the bound answer's claims were backed; null when no turn record is
+ *  bound to the message or the bound one recorded no evidence. */
+export function answerEvidenceForMessage(
+  db: Database.Database,
+  messageId: number | null,
+): ContextPacketAnswerEvidence | null {
+  const metadata = readTurnMetadata(db, messageId)
+  if (!metadata) return null
+  return projectAnswerEvidence(metadata.agent?.evidence)
 }
 
 // ─── Assembly ────────────────────────────────────────────────────────────────
@@ -276,6 +411,7 @@ export function assembleContextPacketInspection(
     leftDevice: packet.disclosure.leftDevice,
     itemCount: packet.disclosure.itemCount,
     toolsConsulted: toolsConsultedForMessage(db, stored.messageId),
+    answerEvidence: answerEvidenceForMessage(db, stored.messageId),
     groups,
     conflicts: packet.conflicts.map((conflict) => ({
       identity: conflict.identity,

@@ -1057,6 +1057,68 @@ export interface AIMessageCitation {
   statement: string
 }
 
+// ─── Answer evidence (WO-76 / AC-AIA-002.3) ──────────────────────────────────
+// The renderer-facing shape of "what backed this answer": WO-53 computes the
+// claim-to-evidence bindings inside the agent turn, and these types are the
+// ONLY form of them that is persisted, crosses IPC, and reaches the renderer.
+//
+// The shape is the enforcement. It carries claim text, evidence identities,
+// and the disclosed statements those identities resolve to — all of which came
+// from the person's own recorded data for this one exchange. It has no field
+// that could hold a provider system prompt, an API key, a raw tool payload, or
+// a message from another turn, so no writer upstream and no reader downstream
+// has a place to put one.
+
+/** What kind of assertion a scanned answer claim is. Mirrors the coverage
+ *  scanner's claim kinds. */
+export type ContextPacketClaimKind = 'duration' | 'clock_time' | 'date' | 'entity'
+
+/** Where within this one exchange a piece of backing evidence came from. */
+export type ContextPacketEvidenceSource = 'packet' | 'tool' | 'computed'
+
+/** One factual claim in the answer, bound to the evidence item backing it. */
+export interface ContextPacketSupportedClaim {
+  kind: ContextPacketClaimKind
+  /** The claim exactly as the answer stated it. */
+  text: string
+  /** Identity of the backing item, in the packet's identity style. */
+  identity: string
+  source: ContextPacketEvidenceSource
+  /** The disclosed statement the claim traces to. */
+  statement: string
+}
+
+/** One factual claim nothing in the exchange could back. */
+export interface ContextPacketUnsupportedClaim {
+  kind: ContextPacketClaimKind
+  text: string
+}
+
+/** One figure computed from the corrected activity boundary rather than
+ *  chosen by the model (AC-AIA-002.4). */
+export interface ContextPacketComputedFigure {
+  /** Plain-language name of what was measured. */
+  subject: string
+  /** The computed value, as the answer states it. */
+  rendered: string
+  /** Evidence identity, so the figure points at a recorded thing. */
+  identity: string
+  /** The disclosed statement a citation to this figure resolves to. */
+  statement: string
+  /** What the model had written before the computed value replaced it; null
+   *  when the answer already agreed with the computed figure. */
+  replaced: string | null
+}
+
+/** Everything the inspector can say about how one answer was backed. */
+export interface ContextPacketAnswerEvidence {
+  computedFigures: ContextPacketComputedFigure[]
+  supportedClaims: ContextPacketSupportedClaim[]
+  unsupportedClaims: ContextPacketUnsupportedClaim[]
+  /** Unbacked figures the answer was made to admit in words. */
+  disclosedUncertainties: string[]
+}
+
 // ─── Context packet inspection (DEV-183) ─────────────────────────────────────
 // The renderer-facing shape of "what the AI saw" for one exchange: the
 // recorded packet re-read from the local ledger, grouped per kind, with each
@@ -1136,6 +1198,11 @@ export interface ContextPacketInspection {
    *  persisted turn trace. Empty array: a bound turn ran and used no tools.
    *  Null: no turn record is bound (e.g. the turn failed after recording). */
   toolsConsulted: ContextPacketToolConsulted[] | null
+  /** How the bound answer's factual claims were backed (AC-AIA-002.3), read
+   *  from the persisted turn record. Null when no turn record is bound, or
+   *  when the bound one predates evidence recording — the inspector states
+   *  that rather than reconstructing coverage after the fact. */
+  answerEvidence: ContextPacketAnswerEvidence | null
   groups: ContextPacketInspectionGroup[]
   conflicts: Array<{ identity: string; detail: string; resolvedBy: string }>
   gaps: Array<{ date: string; detail: string; kind: string }>
@@ -1170,6 +1237,10 @@ export interface AIThreadMessageMetadata {
     contextPacketId?: string | null
     /** Verified packet citations in the answer, in display order. */
     citations?: AIMessageCitation[]
+    /** How this answer's factual claims were backed (WO-53), already narrowed
+     *  to the inspectable shape before it was written. Absent on turns
+     *  recorded before evidence coverage existed. */
+    evidence?: ContextPacketAnswerEvidence
   }
   answerKind?: AIAnswerKind | null
   suggestedFollowUps?: FollowUpSuggestion[]

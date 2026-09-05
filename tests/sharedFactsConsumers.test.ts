@@ -8,6 +8,11 @@ import type Database from 'better-sqlite3'
 import { createProductionTestDatabase } from './support/testDatabase.ts'
 import { executeTool, type DaySummaryResult } from '../src/main/services/aiTools.ts'
 import { getTimelineDayPayload, writeTimelineBlockReview } from '../src/main/services/workBlocks.ts'
+import {
+  computeDeterministicFacts,
+  detectDeterministicFactRequests,
+} from '../src/main/agent/deterministicFacts.ts'
+import { ownedDayBounds } from '../src/main/lib/dayOwnership.ts'
 import { searchAll } from '../src/main/db/queries.ts'
 
 interface SearchSessionsToolResult {
@@ -81,6 +86,102 @@ test('the agent day-overview total equals the Timeline payload total exactly', (
   assert.equal(summary.focusSeconds, Math.round(payload.focusSeconds))
   assert.ok(summary.focusSeconds <= summary.totalTrackedSeconds)
   db.close()
+})
+
+// DEV-246: the enforcer rewrites an answer whose headline number disagrees
+// with the corrected boundary. If the day-summary tool hands the model app
+// totals computed from a DIFFERENT window than the enforcer's, the model is
+// fed one number and corrected to another — the agent contradicting itself
+// mid-answer. The tool used to read a bare local-midnight window while the
+// enforcer read the owned day, so the two only agreed by luck.
+test('the agent day-overview app totals are the ones the answer enforcer computes', () => {
+  const db = createProductionTestDatabase()
+  seedDay(db)
+  const summary = executeTool('getDaySummary', { date: TEST_DATE }, db) as DaySummaryResult
+  const appNames = summary._evidence.topApps.map((app) => app.appName)
+  assert.ok(appNames.length > 0, 'the fixture must produce apps for this comparison to mean anything')
+
+  for (const app of summary._evidence.topApps) {
+    const [fact] = computeDeterministicFacts(
+      db,
+      detectDeterministicFactRequests(`how long was I in ${app.appName}?`, { dates: [TEST_DATE] }, appNames),
+    )
+    assert.ok(fact, `the enforcer computes no total for ${app.appName}, which the tool reports`)
+    assert.equal(fact.kind, 'app_total_time')
+    assert.equal(
+      fact.value,
+      app.totalSeconds,
+      `${app.appName}: the day-overview says ${app.totalSeconds}s and the enforcer computes ${fact.value}s. `
+      + 'One of them is reading a window the other is not.',
+    )
+  }
+})
+
+// The two windows only differ when the day itself does — a sitting that runs
+// past midnight belongs to the day it started in, so the owned day is longer
+// than the calendar day. That is where a tool reading plain local midnight
+// silently drops the tail of someone's evening and the surfaces beside it do
+// not.
+const CARRY_DATE = '2026-05-11'
+
+function carryMs(day: number, hour: number, minute = 0): number {
+  return new Date(2026, 4, day, hour, minute, 0, 0).getTime()
+}
+
+function seedCrossMidnightSitting(db: Database.Database): void {
+  const stretches: Array<[number, number]> = [
+    [carryMs(11, 22, 0), carryMs(11, 23, 59)],
+    [carryMs(12, 0, 1), carryMs(12, 1, 15)],
+  ]
+  const insertSession = db.prepare(`
+    INSERT INTO app_sessions (
+      bundle_id, app_name, start_time, end_time, duration_sec,
+      category, is_focused, window_title, raw_app_name, canonical_app_id, capture_source, capture_version
+    ) VALUES (?, ?, ?, ?, ?, 'development', 1, ?, ?, ?, 'test', 1)
+  `)
+  for (const [startMs, endMs] of stretches) {
+    insertFocusEvent(db, startMs, 'app_activated', 'com.mitchellh.ghostty', 'Ghostty', 'daylens — release cut')
+    insertFocusEvent(db, endMs, 'app_deactivated', 'com.mitchellh.ghostty', 'Ghostty', 'daylens — release cut')
+    insertSession.run(
+      'com.mitchellh.ghostty', 'Ghostty', startMs, endMs, Math.round((endMs - startMs) / 1000),
+      'daylens — release cut', 'Ghostty', 'ghostty',
+    )
+  }
+}
+
+test('the agent day-overview keeps a past-midnight sitting on the day that owns it', () => {
+  const db = createProductionTestDatabase()
+  seedCrossMidnightSitting(db)
+
+  // The fixture really does produce a carry — otherwise the two windows
+  // coincide and this test would pass without exercising anything.
+  const [, ownedEndMs] = ownedDayBounds(db, CARRY_DATE)
+  assert.ok(
+    ownedEndMs > carryMs(12, 0, 0),
+    'the fixture must produce an owned day that reaches past midnight',
+  )
+
+  const summary = executeTool('getDaySummary', { date: CARRY_DATE }, db) as DaySummaryResult
+  const ghostty = summary._evidence.topApps.find((app) => /ghostty/i.test(app.appName))
+  assert.ok(ghostty, 'the evening stretch must appear in the day overview')
+
+  const beforeMidnightSeconds = Math.round((carryMs(11, 23, 59) - carryMs(11, 22, 0)) / 1000)
+  assert.ok(
+    ghostty.totalSeconds > beforeMidnightSeconds,
+    `the day overview reports ${ghostty.totalSeconds}s, which is only the pre-midnight stretch — `
+    + 'the rest of the sitting was dropped at a calendar boundary the rest of the app does not use.',
+  )
+
+  const [fact] = computeDeterministicFacts(
+    db,
+    detectDeterministicFactRequests('how long was I in Ghostty?', { dates: [CARRY_DATE] }, ['Ghostty']),
+  )
+  assert.ok(fact, 'the enforcer must have a Ghostty total to compare against')
+  assert.equal(
+    fact.value,
+    ghostty.totalSeconds,
+    'the tool and the enforcer must read the same day, not two days that share a name',
+  )
 })
 
 test('a deleted block changes the agent day-overview and Timeline identically', () => {
