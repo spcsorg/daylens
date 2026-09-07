@@ -210,13 +210,17 @@ export function useAIChat() {
         billingAccess,
       }
     },
+    clearDataOnError: true,
     dependencies: [],
   })
 
-  const providerData = providerResource.data ?? lastProviderSnapshot
+  const providerData = providerResource.error
+    ? null
+    : providerResource.data ?? lastProviderSnapshot
   useEffect(() => {
     if (providerResource.data) lastProviderSnapshot = providerResource.data
-  }, [providerResource.data])
+    else if (providerResource.error) lastProviderSnapshot = null
+  }, [providerResource.data, providerResource.error])
 
   const settings = providerData?.settings ?? null
   const cliTools = providerData?.cliTools ?? null
