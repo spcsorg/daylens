@@ -47,12 +47,12 @@ export function recordMcpActivity(
   },
 ): void {
   const recorded: McpActivityEntry = {
-    tool: entry.tool,
+    tool: sanitizeForRender(entry.tool).text,
     timestamp: entry.timestamp ?? new Date().toISOString(),
     arguments: stripSecrets(entry.arguments ?? {}),
     ok: entry.ok,
   }
-  if (!entry.ok) recorded.error = entry.error ?? 'Tool error'
+  if (!entry.ok) recorded.error = sanitizeForRender(entry.error ?? 'Tool error').text
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   fs.appendFileSync(logPath, `${JSON.stringify(recorded)}\n`)
 }
