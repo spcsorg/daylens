@@ -26,7 +26,7 @@ import { validateWrappedNarrativeObject } from '../src/main/lib/wrappedNarrative
 import { planDayWrapSlides } from '../src/renderer/lib/wrapDeck.ts'
 import type { DayWrapFacts } from '../src/renderer/lib/dayWrapScenes.ts'
 
-// ─── A tempting day ───────────────────────────────────────────────────────────
+// ─── A tempting day ─────────────────────────────────────────────────────────
 // Calendar-looking meeting time, a long YouTube block, a repo-shaped work
 // thread with a long unbroken stretch, and a thin afternoon: every ingredient
 // each overclaim needs, with no enrichment to verify any of it.
@@ -58,7 +58,7 @@ const ctx: LineGuardContext = {
   allowedTimes: new Set(['9:12am', '6:04pm']),
 }
 
-// ─── 1. Attendance ────────────────────────────────────────────────────────────
+// ─── 1. Attendance ──────────────────────────────────────────────────────────
 
 test('adversarial: 35 minutes of meeting-category time never becomes attendance', () => {
   for (const line of [
@@ -73,7 +73,7 @@ test('adversarial: 35 minutes of meeting-category time never becomes attendance'
   assert.equal(wrapLineViolation('Your calendar had the design review, and the engine got the rest of the morning.', ctx), null)
 })
 
-// ─── 2. Activity during unobserved time ───────────────────────────────────────
+// ─── 2. Activity during unobserved time ─────────────────────────────────────
 
 test('adversarial: a gap in tracking is never narrated as what filled it', () => {
   for (const line of [
@@ -89,7 +89,7 @@ test('adversarial: a gap in tracking is never narrated as what filled it', () =>
   assert.equal(wrapLineViolation('Most of the afternoon happened away from this screen, so the story picks back up in the evening.', ctx), null)
 })
 
-// ─── 3. Reading / watching (open ≠ consumed) ──────────────────────────────────
+// ─── 3. Reading / watching (open ≠ consumed) ────────────────────────────────
 
 test('adversarial: an hour of YouTube in front never becomes "you watched"', () => {
   for (const line of [
@@ -104,7 +104,7 @@ test('adversarial: an hour of YouTube in front never becomes "you watched"', () 
   assert.equal(wrapLineViolation('YouTube held the biggest leisure share, and it sat in the evening where it belonged.', ctx), null)
 })
 
-// ─── 4. Finishing without verified output ─────────────────────────────────────
+// ─── 4. Finishing without verified output ───────────────────────────────────
 
 test('adversarial: four hours on one thread never becomes "finished" without an artifact', () => {
   const unverified = { ...ctx, outputVerified: false }
@@ -124,7 +124,7 @@ test('adversarial: four hours on one thread never becomes "finished" without an 
   assert.ok(findUnverifiedCompletionClaim('The fix merged before lunch.', false))
 })
 
-// ─── 5. Attention / focus quality ─────────────────────────────────────────────
+// ─── 5. Attention / focus quality ───────────────────────────────────────────
 
 test('adversarial: a 2h 29m stretch never becomes a focus grade', () => {
   for (const line of [
@@ -141,9 +141,16 @@ test('adversarial: a 2h 29m stretch never becomes a focus grade', () => {
   assert.ok(wrapLineViolation('Two and a half hours on the engine, one unbroken run.', ctx))
   // A real focus-timer fact stays nameable (the enrichment noun, not a grade).
   assert.equal(findOverclaimViolation('Three focus sessions in Forest, all before lunch.'), null)
+  // The live distraction profile may be named; grading language still dies.
+  assert.equal(
+    wrapLineViolation('YouTube was the main distraction surface, and it sat in the evening where it belonged.', ctx),
+    null,
+  )
+  assert.ok(wrapLineViolation('The afternoon was just drift after the morning engine work.', ctx))
+  assert.ok(wrapLineViolation('Your focus score landed well above the rest of the week.', ctx))
 })
 
-// ─── 6. A plan that was never written ─────────────────────────────────────────
+// ─── 6. A plan that was never written ───────────────────────────────────────
 
 test('adversarial: no plan exists in the data, so no plan is ever claimed', () => {
   for (const line of [
@@ -158,7 +165,7 @@ test('adversarial: no plan exists in the data, so no plan is ever claimed', () =
   assert.equal(findOverclaimViolation('The engine took the whole morning. Was that the idea, or did it take over?'), null)
 })
 
-// ─── The runtime deck path enforces the same rules ────────────────────────────
+// ─── The runtime deck path enforces the same rules ──────────────────────────
 
 function deckResponse(facts: DayWrapFacts, over: Record<string, string> = {}): Record<string, unknown> {
   const lines: Record<string, string> = {}
