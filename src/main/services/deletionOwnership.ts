@@ -43,7 +43,7 @@ const CONNECTOR_LEGACY = `legacy connector tables (feature removed); ${DEVICE_ON
 const SCREEN_LIFECYCLE = 'screen-context lifecycle (atomic extract-then-delete, quarantine, purge controls)'
 
 export const DELETION_OWNERSHIP: Record<string, DeletionOwnership> = {
-  // ── evidence ──────────────────────────────────────────────────────────────
+  // ── evidence ─────────────────────────────────────────────────────────────
   activity_state_events: { kind: 'evidence', owner: TRACKED_ACTIVITY },
   app_sessions: { kind: 'evidence', owner: `${TRACKED_ACTIVITY} (legacy rows; writes retired)` },
   focus_events: { kind: 'evidence', owner: TRACKED_ACTIVITY },
@@ -58,7 +58,7 @@ export const DELETION_OWNERSHIP: Record<string, DeletionOwnership> = {
   screen_context_evidence: { kind: 'evidence', owner: SCREEN_LIFECYCLE },
   live_app_session_snapshot: { kind: 'evidence', owner: 'flush/clear on session end; device deletion' },
 
-  // ── derived ───────────────────────────────────────────────────────────────
+  // ── derived ──────────────────────────────────────────────────────────────
   activity_segments: { kind: 'derived', owner: TRACKED_ACTIVITY },
   ai_surface_summaries: { kind: 'derived', owner: 'cleared on any purge (clearGeneratedActivitySummaries)' },
   app_identities: { kind: 'derived', owner: `${TRACKED_ACTIVITY}; identity observations re-derive from remaining evidence` },
@@ -99,7 +99,7 @@ export const DELETION_OWNERSHIP: Record<string, DeletionOwnership> = {
   workflow_signatures: { kind: 'derived', owner: PROJECTION_REBUILD },
   wrapped_narratives: { kind: 'derived', owner: 'deleteWrappedNarrativesForDate on evidence change/deletion' },
 
-  // ── user ──────────────────────────────────────────────────────────────────
+  // ── user ─────────────────────────────────────────────────────────────────
   agent_turn_checkpoints: { kind: 'user', owner: AI_THREADS },
   ai_artifacts: { kind: 'user', owner: AI_THREADS },
   ai_conversation_state: { kind: 'user', owner: AI_THREADS },
@@ -130,7 +130,7 @@ export const DELETION_OWNERSHIP: Record<string, DeletionOwnership> = {
   user_memory_facts: { kind: 'user', owner: 'memory forget flow' },
   work_memory_facts: { kind: 'user', owner: 'memory forget flow' },
 
-  // ── system ────────────────────────────────────────────────────────────────
+  // ── system ───────────────────────────────────────────────────────────────
   ai_usage_daily_rollup: { kind: 'system', owner: DEVICE_ONLY },
   ai_usage_events: { kind: 'system', owner: `usage retention window; ${DEVICE_ONLY}` },
   browser_history_cursors: { kind: 'system', owner: DEVICE_ONLY },
