@@ -132,6 +132,7 @@ import { registerSearchHandlers } from './ipc/search.handlers'
 import { registerSyncHandlers } from './ipc/sync.handlers'
 import { startMcpServer, stopMcpServer } from './services/mcpServer'
 import { initDb, closeDb, getDb } from './services/database'
+import { holdStartupMaintenance } from './lib/startupMaintenanceGate'
 import { startAIUsageRetentionSchedule, stopAIUsageRetentionSchedule } from './services/aiUsageRetention'
 import { recoverInterruptedTurns } from './services/agentTurnState'
 import { runPendingDerivedStateReset } from './core/projections/metadata'
@@ -265,7 +266,12 @@ declare const MAIN_WINDOW_VITE_NAME: string
 let mainWindow: BrowserWindow | null = null
 // Set to true once the user explicitly quits via tray menu
 let isQuitting = false
+/** Longest startup maintenance waits for a window before running anyway. */
+const STARTUP_MAINTENANCE_MAX_WAIT_MS = 15_000
+
 let databaseReady = false
+/** Releases the startup-maintenance gate once the window is on screen. */
+let releaseStartupMaintenance: (() => void) | null = null
 let deferredIntegrationStartup: ReturnType<typeof setTimeout> | null = null
 let backgroundServicesStarted = false
 let captureAdapterStartupTimer: ReturnType<typeof setTimeout> | null = null
@@ -1333,6 +1339,10 @@ app.whenReady()
       app.quit()
       return
     }
+    // Held until the window is up: the repairs behind this gate scan every
+    // stored block, and on the launch they actually run that used to keep the
+    // window off screen for seconds.
+    releaseStartupMaintenance = holdStartupMaintenance()
     initDb()
     databaseReady = true
     logStartupTiming('database ready')
@@ -1394,6 +1404,20 @@ app.whenReady()
     mainWindow = createWindow()
     logStartupTiming('window created')
     const startupWindow = mainWindow
+    // Startup maintenance waits for the window to be paintable and then runs
+    // behind it. `ready-to-show` and not `did-finish-load`: the window is
+    // created hidden, the load can finish before it is paintable, and starting
+    // synchronous repairs in that gap delays the first visible frame — the
+    // thing this gate exists to protect. The timeout is the recovery path for
+    // a launch where `ready-to-show` never arrives, so maintenance is deferred
+    // and never lost.
+    const releaseAfterFirstPaint = (): void => {
+      const release = releaseStartupMaintenance
+      releaseStartupMaintenance = null
+      release?.()
+    }
+    startupWindow.once('ready-to-show', releaseAfterFirstPaint)
+    setTimeout(releaseAfterFirstPaint, STARTUP_MAINTENANCE_MAX_WAIT_MS).unref?.()
     setDailySummaryNotificationWindow(mainWindow)
     setDistractionAlertWindow(mainWindow)
     setSpendAlertWindow(mainWindow)
