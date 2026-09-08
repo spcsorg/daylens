@@ -17,6 +17,7 @@ interface UseProjectionResourceOptions<T> {
    * refreshes; mount and interval refreshes are unaffected.
    */
   invalidationDebounceMs?: number
+  clearDataOnError?: boolean
   dependencies?: ReadonlyArray<unknown>
 }
 
@@ -44,6 +45,7 @@ export function useProjectionResource<T>({
   pauseWhenHidden = true,
   shouldReload,
   invalidationDebounceMs = 250,
+  clearDataOnError = false,
   dependencies = [],
 }: UseProjectionResourceOptions<T>): UseProjectionResourceState<T> {
   const [data, setData] = useState<T | null>(null)
@@ -112,6 +114,11 @@ export function useProjectionResource<T>({
       })
       .catch((err) => {
         if (!mountedRef.current || requestId !== requestIdRef.current) return
+        if (clearDataOnError) {
+          dataRef.current = null
+          serializedRef.current = null
+          setData(null)
+        }
         setError(err instanceof Error ? err.message : String(err))
       })
       .finally(() => {
@@ -127,7 +134,7 @@ export function useProjectionResource<T>({
       })
     inFlightRef.current = request
     return request
-  }, [enabled, pauseWhenHidden])
+  }, [enabled, pauseWhenHidden, clearDataOnError])
 
   useEffect(() => {
     mountedRef.current = true
