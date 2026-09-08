@@ -3,10 +3,9 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
-import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocket from 'ws'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
@@ -20,6 +19,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'daylens-synthetic-'))
 const userData = path.join(temporary, 'profile')
 let child
 let socket
+let sessionId
 const pending = new Map()
 let nextId = 0
 
@@ -31,7 +31,7 @@ function call(method, params = {}) {
       reject(new Error(`CDP timed out: ${method}`))
     }, 30_000)
     pending.set(id, { resolve, reject, timer })
-    socket.send(JSON.stringify({ id, method, params }))
+    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
   })
 }
 
@@ -69,31 +69,23 @@ try {
   seedLog.end()
   assert.equal(seedCode, 0, 'Synthetic fixture creation failed; see seed.log')
   const fixture = JSON.parse(fs.readFileSync(path.join(userData, 'fixture.json'), 'utf8'))
-  const server = net.createServer()
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const port = server.address().port
-  await new Promise((resolve) => server.close(resolve))
   const environment = { ...process.env, DAYLENS_DEV_USERDATA: userData,
     DAYLENS_REAL_DAY_HARNESS: '1', DAYLENS_REAL_DAY_DATE: fixture.today,
     DAYLENS_REAL_DAY_ALLOW_MODEL_NETWORK: '0' }
   delete environment.ELECTRON_RUN_AS_NODE
   const launchedAt = performance.now()
-  child = spawn(electron, [`--remote-debugging-port=${port}`, 'dist/main/main.js'], {
+  child = spawn(electron, ['--remote-debugging-port=0', 'dist/main/main.js'], {
     cwd: root, env: environment, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let log = ''
   child.stdout.on('data', (chunk) => { log += chunk })
   child.stderr.on('data', (chunk) => { log += chunk })
   child.on('exit', () => fs.writeFileSync(path.join(output, 'desktop.log'), log))
-  const target = await until(async () => {
-    if (child.exitCode !== null) throw new Error(`Electron exited: ${child.exitCode}`)
-    try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
-      return targets.find((entry) => entry.type === 'page' && entry.webSocketDebuggerUrl)
-    } catch { return null }
-  }, 'renderer CDP endpoint')
-  socket = new WebSocket(target.webSocketDebuggerUrl)
+  const endpoint = await until(() => {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Electron exited: ${child.exitCode ?? child.signalCode}`)
+    return log.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[a-zA-Z0-9-]+)/)?.[1]
+  }, 'spawned Electron debugging endpoint')
+  socket = new WebSocket(endpoint)
   await once(socket, 'open')
   socket.on('message', (raw) => {
     const message = JSON.parse(raw.toString())
@@ -104,6 +96,13 @@ try {
     if (message.error) request.reject(new Error(JSON.stringify(message.error)))
     else request.resolve(message.result)
   })
+  const rendererUrl = pathToFileURL(path.join(root, 'dist/renderer/main_window/index.html')).href
+  const target = await until(async () => {
+    const { targetInfos } = await call('Target.getTargets')
+    return targetInfos.find((entry) => entry.type === 'page' && (entry.url === rendererUrl || entry.url.startsWith(`${rendererUrl}#`)))
+  }, 'built Daylens renderer target')
+  const attached = await call('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+  sessionId = attached.sessionId
   await until(() => evaluate('Boolean(window.daylens && document.querySelector("main"))'), 'application shell')
   const shellObservedMs = performance.now() - launchedAt
   const started = performance.now()
