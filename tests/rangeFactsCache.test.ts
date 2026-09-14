@@ -1,7 +1,7 @@
 // DEV-227: the range-facts memo cache. A cached read must be
 // indistinguishable from a recomputed one, and any change to the evidence —
-// a new focus event, a new correction, a changed focusApps setting — must
-// invalidate. Pinned here because a stale hit would silently desynchronize
+// a new focus event, a new website visit, a new correction, a changed
+// focusApps setting — must invalidate. Pinned here because a stale hit would silently desynchronize
 // the Apps view, the AI's numbers, and the Timeline.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -146,6 +146,65 @@ test('an in-place evidence UPDATE is invisible to the signature — the epoch bu
     false,
     'purged title must not be served from cache',
   )
+  db.close()
+  clearRangeFactsCache()
+})
+
+test('newly imported website visits invalidate the cached window', () => {
+  clearRangeFactsCache()
+  const db = createProductionTestDatabase()
+  seedMorning(db)
+
+  const before = queryCorrectedActivityFactsForRange(db, FROM, TO)
+  assert.equal(before.websiteVisitCount, 0)
+  assert.equal(before.gaps.filter((gap) => gap.kind === 'capture_unavailable').length, 0)
+
+  // A browser-history import writes website_visits and nothing else: no focus
+  // event, no correction, no epoch bump. Inferred capture gaps, the visit
+  // count and coverage all read that table, so the signature must see it.
+  const visitTime = ms(15, 0)
+  db.prepare(`
+    INSERT INTO website_visits (
+      domain, page_title, url, visit_time, visit_time_us, duration_sec,
+      browser_bundle_id, canonical_browser_id, source
+    ) VALUES ('github.com', 'daylens', 'https://github.com/example', ?, ?, 120,
+              'com.google.Chrome', 'chrome', 'history')
+  `).run(visitTime, visitTime * 1000)
+
+  const after = queryCorrectedActivityFactsForRange(db, FROM, TO)
+  assert.equal(after.websiteVisitCount, 1, 'the imported visit must not be served from a stale cache')
+  assert.equal(after.gaps.filter((gap) => gap.kind === 'capture_unavailable').length, 1)
+  assert.equal(after.captureCoverage, 'partial')
+  db.close()
+  clearRangeFactsCache()
+})
+
+test('an in-place website-visit duration update invalidates the cached window', () => {
+  clearRangeFactsCache()
+  const db = createProductionTestDatabase()
+  seedMorning(db)
+  const visitTime = ms(15, 0)
+  db.prepare(`
+    INSERT INTO website_visits (
+      domain, page_title, url, visit_time, visit_time_us, duration_sec,
+      browser_bundle_id, canonical_browser_id, source
+    ) VALUES ('github.com', 'daylens', 'https://github.com/example', ?, ?, 120,
+              'com.google.Chrome', 'chrome', 'history')
+  `).run(visitTime, visitTime * 1000)
+
+  const before = queryCorrectedActivityFactsForRange(db, FROM, TO)
+  const beforeGap = before.gaps.find((gap) => gap.kind === 'capture_unavailable')
+  assert.ok(beforeGap)
+  assert.equal(beforeGap.endMs, visitTime + 120_000)
+
+  // History fill extends a visit's duration in place — count and max(id) are
+  // unchanged, so the summed duration is what the signature has to notice.
+  db.prepare(`UPDATE website_visits SET duration_sec = 600 WHERE visit_time = ?`).run(visitTime)
+
+  const after = queryCorrectedActivityFactsForRange(db, FROM, TO)
+  const afterGap = after.gaps.find((gap) => gap.kind === 'capture_unavailable')
+  assert.ok(afterGap)
+  assert.equal(afterGap.endMs, visitTime + 600_000, 'the widened gap must not be served from cache')
   db.close()
   clearRangeFactsCache()
 })

@@ -14,6 +14,7 @@ import { getDb } from './database'
 import { getSettings } from './settings'
 import { trackingControlsStateFromSettings } from '@shared/trackingControls'
 import { ingestSpool, deleteSpool } from './captureSpool'
+import { recordSupervisorEvent } from './captureEvidence'
 
 // The privacy gate lives in captureEventGate (it must run inside the relay,
 // before disk); re-exported here because it is part of this module's
@@ -31,6 +32,7 @@ let ingestTimer: ReturnType<typeof setInterval> | null = null
 let controlsTimer: ReturnType<typeof setInterval> | null = null
 let restartDelay = 1000
 let spawnedAt = 0
+let helperFailed = false
 const MAX_RESTART_DELAY = 30_000
 const STABLE_UPTIME_MS = 10_000
 const SHUTDOWN_KILL_DELAY_MS = 1500
@@ -99,17 +101,40 @@ function scheduleRestart(): void {
   }, restartDelay)
 }
 
+function markHelperFailed(): void {
+  if (helperFailed) return
+  helperFailed = true
+  try {
+    recordSupervisorEvent('capture_failed', Date.now())
+  } catch (err) {
+    console.warn('[focusCapture] failed to record capture_failed:', err)
+  }
+}
+
+function markHelperRecovered(): void {
+  if (!helperFailed) return
+  helperFailed = false
+  try {
+    recordSupervisorEvent('capture_recovered', Date.now())
+  } catch (err) {
+    console.warn('[focusCapture] failed to record capture_recovered:', err)
+  }
+}
+
 function spawnRelay(): void {
   if (stopping || relay) return
 
   const bin = helperPath()
   if (!fs.existsSync(bin)) {
     console.warn(`[focusCapture] helper not found at ${bin} — run "npm run build:capture-helper"`)
+    markHelperFailed()
+    scheduleRestart()
     return
   }
   const paths = resolveRelayPaths()
   if (!paths) {
     console.warn('[focusCapture] capture relay not found — capture cannot start')
+    markHelperFailed()
     return
   }
 
@@ -132,6 +157,7 @@ function spawnRelay(): void {
     })
   } catch (err) {
     console.warn('[focusCapture] relay spawn failed:', err)
+    markHelperFailed()
     scheduleRestart()
     return
   }
@@ -153,10 +179,15 @@ function spawnRelay(): void {
   proc.on('message', (message: { op?: string; code?: number | null; signal?: string | null }) => {
     if (message?.op === 'helper-exited') {
       console.warn(`[focusCapture] helper exited inside relay (code=${message.code} signal=${message.signal})`)
+      markHelperFailed()
+    }
+    if (message?.op === 'ready') {
+      markHelperRecovered()
     }
   })
   proc.on('error', (err) => {
     console.warn('[focusCapture] relay process error:', err)
+    markHelperFailed()
   })
   proc.on('exit', (code, signal) => {
     if (relay === proc) relay = null
@@ -169,6 +200,11 @@ function spawnRelay(): void {
       purgeFocusCaptureSpool()
     }
     if (stopping) return
+    // An unexpected relay exit is an outage whether or not the relay managed
+    // to report `helper-exited` first: it dies on its own spawn failure, on an
+    // initialisation error, and on a process-level error, and nothing is
+    // captured until the restart lands. Boundary first, then restart.
+    markHelperFailed()
     if (Date.now() - spawnedAt >= STABLE_UPTIME_MS) restartDelay = 1000
     console.warn(`[focusCapture] relay exited (code=${code} signal=${signal}); restarting`)
     scheduleRestart()
@@ -178,6 +214,9 @@ function spawnRelay(): void {
 export function startFocusCapture(): void {
   if (process.platform !== 'darwin') return
   stopping = false
+  // `helperFailed` is deliberately not reset here: a restart that follows a
+  // recorded failure must close that boundary with `capture_recovered` when
+  // the relay reports ready, not silently drop it.
   // A fresh consent grant supersedes any pending revocation sweep.
   purgeSpoolOnRelayExit = false
   // Anything spooled while the app was down lands before live tailing begins.
