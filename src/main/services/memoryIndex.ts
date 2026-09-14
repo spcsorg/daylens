@@ -235,13 +235,23 @@ function isScheduleShapedRef(ref: { source_type: string; source_id: string }): b
   return false
 }
 
-function meetingHasOccurrenceSupport(db: Database.Database, survivorId: string): boolean {
+/** Whether the meeting's evidence already says it HAPPENED, which is what
+ *  decides between the "Meeting: …" and "Scheduled: …" statements below.
+ *  `ignoreSourceId` answers the same question as if one ref were absent — a
+ *  correction preview asks it about its own mark, to tell a real label change
+ *  from one the existing evidence had already made. Exported so the preview
+ *  reads the same rule the index writes, rather than a copy that can drift. */
+export function meetingHasOccurrenceSupport(
+  db: Database.Database,
+  survivorId: string,
+  ignoreSourceId?: string,
+): boolean {
   const groupIds = mergeGroupIds(db, survivorId)
   const marks = groupIds.map(() => '?').join(', ')
   const refs = db.prepare(
     `SELECT source_type, source_id FROM entity_evidence_refs WHERE entity_id IN (${marks})`,
   ).all(...groupIds) as Array<{ source_type: string; source_id: string }>
-  return refs.some((ref) => !isScheduleShapedRef(ref))
+  return refs.some((ref) => ref.source_id !== ignoreSourceId && !isScheduleShapedRef(ref))
 }
 
 function meetingRecords(
