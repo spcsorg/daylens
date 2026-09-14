@@ -13,7 +13,6 @@ const convexSiteUrl = JSON.stringify(
 // When the key is absent the analytics module is a no-op.
 const posthogKey = JSON.stringify(env('POSTHOG_PROJECT_TOKEN') || env('POSTHOG_KEY'))
 const posthogHost = JSON.stringify(env('POSTHOG_HOST'))
-const sentryDsn = JSON.stringify(env('SENTRY_DSN'))
 const billingApiUrl = JSON.stringify(env('DAYLENS_BILLING_API_URL'))
 // JSON map of kid → base64 raw Ed25519 public key for entitlement-snapshot
 // verification. Empty until a signing key is minted for the billing service;
@@ -28,12 +27,6 @@ export default defineConfig({
       '@daylens/remote-contract': path.resolve(__dirname, 'packages/remote-contract/index.ts'),
     },
   },
-  ssr: {
-    // The AI SDK (chat agent, ADR 0003) ships ESM-only; Electron 34's Node 20
-    // cannot require() ESM at runtime, so these must be bundled into main.js
-    // instead of externalized to node_modules.
-    noExternal: [/^ai$/, /^@ai-sdk\//],
-  },
   define: isStandalone
     ? {
         MAIN_WINDOW_VITE_DEV_SERVER_URL: 'undefined',
@@ -41,7 +34,6 @@ export default defineConfig({
         __DAYLENS_CONVEX_SITE_URL__: convexSiteUrl,
         __POSTHOG_KEY__: posthogKey,
         __POSTHOG_HOST__: posthogHost,
-        __SENTRY_DSN__: sentryDsn,
         __DAYLENS_BILLING_API_URL__: billingApiUrl,
         __DAYLENS_ENTITLEMENT_PUBLIC_KEYS__: entitlementPublicKeys,
       }
@@ -49,7 +41,6 @@ export default defineConfig({
         __DAYLENS_CONVEX_SITE_URL__: convexSiteUrl,
         __POSTHOG_KEY__: posthogKey,
         __POSTHOG_HOST__: posthogHost,
-        __SENTRY_DSN__: sentryDsn,
         __DAYLENS_BILLING_API_URL__: billingApiUrl,
         __DAYLENS_ENTITLEMENT_PUBLIC_KEYS__: entitlementPublicKeys,
       },
@@ -69,6 +60,9 @@ export default defineConfig({
         '@paymoapp/active-window',
         'keytar',
         'electron-updater',
+        'ai',
+        /^@ai-sdk\//,
+        'exceljs',
         '@anthropic-ai/sdk',
         '@google/genai',
         'openai',

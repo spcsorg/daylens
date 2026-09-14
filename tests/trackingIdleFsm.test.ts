@@ -15,11 +15,12 @@ import {
 
 // These tests drive the idle/session finite-state machine in tracking.ts through
 // a scripted clock + idle timer + canned active window (the __setTrackingFsmTestHarness
-// seam). They reproduce the "brief post-away sitting writes no app_sessions row"
+// seam). They reproduce the "brief post-away sitting persists no session"
 // defect: a session's start is stamped from poll wall-clock while its away/idle
 // end is derived from the true last-input time, so the end could predate the start
 // and the session was silently discarded. See tracking.ts flushCurrent + the
-// return-from-idle start restamp.
+// return-from-idle start restamp. Flush facts are observed through the
+// harness's recordFlush seam — legacy app_sessions writes are retired.
 
 interface FlushInfo {
   startTime: number
@@ -99,6 +100,36 @@ function makeRig(activeWindow = () => WIN): Rig {
   }
 }
 
+test('a cross-midnight app switch flushes both day slices without recursing forever', async () => {
+  let activeWindow = WIN
+  const rig = makeRig(() => activeWindow)
+  const sessionStart = new Date(2026, 6, 3, 23, 59, 50, 0).getTime()
+  const midnight = new Date(2026, 6, 4, 0, 0, 0, 0).getTime()
+  const sessionEnd = midnight + 10_000
+
+  try {
+    await rig.poll(sessionStart, { input: true })
+    activeWindow = {
+      title: 'Calculator',
+      application: 'Calculator',
+      path: '/System/Applications/Calculator.app',
+      pid: 4322,
+      icon: '',
+    }
+    await rig.poll(sessionEnd, { input: true })
+
+    assert.deepEqual(
+      rig.flushes.map(({ startTime, endTime, endedReason }) => ({ startTime, endTime, endedReason })),
+      [
+        { startTime: sessionStart, endTime: midnight, endedReason: 'midnight_split' },
+        { startTime: midnight, endTime: sessionEnd, endedReason: 'app_switch' },
+      ],
+    )
+  } finally {
+    rig.teardown()
+  }
+})
+
 test('titleless Dia on Netflix remains active beyond the five-minute idle threshold', async () => {
   let win: typeof DIA_WIN | typeof WIN = DIA_WIN
   __setActiveBrowserContextTrackerForTest(new ActiveBrowserContextTracker(
@@ -121,22 +152,12 @@ test('titleless Dia on Netflix remains active beyond the five-minute idle thresh
     win = WIN
     await rig.poll(BASE + 365_000, { input: true })
 
-    const row = rig.db.prepare(`
-      SELECT app_name, start_time, end_time, duration_sec, ended_reason
-      FROM app_sessions
-      WHERE app_name = 'Dia'
-    `).get() as {
-      app_name: string
-      start_time: number
-      end_time: number
-      duration_sec: number
-      ended_reason: string | null
-    } | undefined
-    assert.ok(row)
-    assert.equal(row?.start_time, BASE)
-    assert.equal(row?.end_time, BASE + 365_000)
-    assert.equal(row?.duration_sec, 365)
-    assert.equal(row?.ended_reason, 'app_switch')
+    const flush = rig.flushes.find((f) => f.startTime === BASE)
+    assert.ok(flush)
+    assert.equal(flush?.endTime, BASE + 365_000)
+    assert.equal(flush?.durationSeconds, 365)
+    assert.equal(flush?.endedReason, 'app_switch')
+    assert.equal(flush?.persisted, true)
   } finally {
     rig.teardown()
   }
@@ -191,15 +212,12 @@ test('titleless Dia on a non-media domain still flushes under normal idle handli
     await pollThrough(rig, BASE + 60_000, BASE + 365_000)
 
     assert.equal(getCurrentSession(), null)
-    const row = rig.db.prepare(`
-      SELECT end_time, duration_sec, ended_reason
-      FROM app_sessions
-      WHERE app_name = 'Dia'
-    `).get() as { end_time: number; duration_sec: number; ended_reason: string | null } | undefined
-    assert.ok(row)
-    assert.equal(row?.end_time, BASE + 60_000)
-    assert.equal(row?.duration_sec, 60)
-    assert.equal(row?.ended_reason, 'away')
+    const flush = rig.flushes.find((f) => f.startTime === BASE)
+    assert.ok(flush)
+    assert.equal(flush?.endTime, BASE + 60_000)
+    assert.equal(flush?.durationSeconds, 60)
+    assert.equal(flush?.endedReason, 'away')
+    assert.equal(flush?.persisted, true)
   } finally {
     rig.teardown()
   }
@@ -307,21 +325,13 @@ test('positive control: return + second input ~34s later writes a real short awa
     await pollThrough(rig, secondTouch + 125_000, secondTouch + 305_000) // idle 305s → away → S1 flushed
 
     // A real short session lands with input-derived bounds and the away reason.
-    const s1 = rig.db
-      .prepare(
-        `SELECT start_time, end_time, duration_sec, ended_reason
-         FROM app_sessions
-         WHERE start_time = ?`,
-      )
-      .get(returnTouch) as
-      | { start_time: number; end_time: number; duration_sec: number; ended_reason: string | null }
-      | undefined
+    const s1 = rig.flushes.find((f) => f.startTime === returnTouch && f.persisted)
 
     assert.ok(s1, 'expected a persisted session starting at the return-input time')
-    assert.equal(s1?.start_time, returnTouch, 'start is the true return-input time, not poll wall-clock')
-    assert.equal(s1?.end_time, secondTouch, 'end is the input-derived idle-start (second touch)')
-    assert.equal(s1?.duration_sec, 34, 'duration spans exactly the ~34s of activity')
-    assert.equal(s1?.ended_reason, 'away')
+    assert.equal(s1?.startTime, returnTouch, 'start is the true return-input time, not poll wall-clock')
+    assert.equal(s1?.endTime, secondTouch, 'end is the input-derived idle-start (second touch)')
+    assert.equal(s1?.durationSeconds, 34, 'duration spans exactly the ~34s of activity')
+    assert.equal(s1?.endedReason, 'away')
   } finally {
     rig.teardown()
   }
@@ -342,10 +352,8 @@ test('single-touch reproduction (17:51 sitting): one wake-touch then grace then 
     // is intentionally NOT credited. Making these visible would mean crediting the
     // idle-grace window on away-escalation for a session with zero real activity,
     // which is rejected for now. If that policy flips, this expectation changes.
-    const rows = rig.db
-      .prepare(`SELECT COUNT(*) AS n FROM app_sessions WHERE start_time >= ?`)
-      .get(touch) as { n: number }
-    assert.equal(rows.n, 0, 'the single-touch return sitting must not write an app_sessions row')
+    const persisted = rig.flushes.filter((f) => f.startTime >= touch && f.persisted)
+    assert.equal(persisted.length, 0, 'the single-touch return sitting must not persist a session')
   } finally {
     rig.teardown()
   }

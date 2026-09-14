@@ -43,7 +43,7 @@ import type { AgentQuestion } from './interactionTools'
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').describe('Local date the block belongs to, YYYY-MM-DD')
 const CLOCK = z.string().regex(/^\d{1,2}:\d{2}$/, 'HH:MM').describe('Local clock time, 24h HH:MM')
 
-export const CORRECTION_ACTIONS = [
+const CORRECTION_ACTIONS = [
   'rename',
   'change_category',
   'adjust_time',
@@ -55,7 +55,7 @@ export const CORRECTION_ACTIONS = [
   'mark_meeting',
 ] as const
 
-export type CorrectionAction = (typeof CORRECTION_ACTIONS)[number]
+type CorrectionAction = (typeof CORRECTION_ACTIONS)[number]
 
 /** The mark kinds a person can put on a scheduled meeting (timeline.md
  *  §Meetings), plus 'clear' to withdraw an earlier mark. */
@@ -400,7 +400,7 @@ export type ProposeCorrectionOutcome =
   | Miss
   | { applied: false; reason: string; userNote?: string }
 
-export async function runCorrectionProposal(
+async function runCorrectionProposal(
   deps: CorrectionToolDeps,
   input: ProposeCorrectionInput,
 ): Promise<ProposeCorrectionOutcome> {
@@ -533,7 +533,7 @@ export type UndoCorrectionOutcome =
   | { undone: true; description: string; note: string }
   | { undone: false; reason: string }
 
-export async function runCorrectionUndo(
+async function runCorrectionUndo(
   deps: CorrectionToolDeps,
   input: { correctionId: string },
 ): Promise<UndoCorrectionOutcome> {
@@ -573,7 +573,7 @@ export async function runCorrectionUndo(
 export function buildCorrectionTools(deps: CorrectionToolDeps) {
   return {
     propose_correction: tool({
-      description: 'Fix the user\'s day when they say a block or a meeting is wrong ("that was the ACME kickoff", "I was at lunch 12-1", "I didn\'t attend the 2pm ACME meeting"). Proposes ONE reversible Daylens correction; the user sees a preview card of exactly what will change (labels, times, day totals, Apps, meeting buckets, search, AI answers) and confirms or cancels — nothing changes without their confirmation, so never claim the day was fixed unless this tool returned applied: true. Get blockId from get_day_overview first. Actions: rename, change_category, adjust_time (HH:MM), merge (2+ blockIds), split (at HH:MM), exclude_block (removes the stretch from every surface, reversibly), exclude_evidence (drop one app or site from a block), assign_client (by client/project name; empty clientName clears), mark_meeting (a SCHEDULED meeting was attended, skipped, moved, or unrelated to nearby call time — or clear an earlier mark; no blockId: give meetingTitle and/or meetingTime and the meeting resolves from the day\'s calendar, asking the user which when several match). Permanent deletion is not available here — that stays in the app\'s own confirmed flow.',
+      description: 'Fix the user\'s day when they say a block or a meeting is wrong ("that was the ACME kickoff", "I was at lunch 12-1", "I didn\'t attend the 2pm ACME meeting"). Proposes ONE reversible Daylens correction; the user sees a preview card of exactly what will change (labels, times, day totals, Apps, meeting buckets, search, AI answers) and confirms or cancels, nothing changes without their confirmation, so never claim the day was fixed unless this tool returned applied: true. Get blockId from get_day_overview first. Actions: rename, change_category, adjust_time (HH:MM), merge (2+ blockIds), split (at HH:MM), exclude_block (removes the stretch from every surface, reversibly), exclude_evidence (drop one app or site from a block), assign_client (by client/project name; empty clientName clears), mark_meeting (a SCHEDULED meeting was attended, skipped, moved, or unrelated to nearby call time — or clear an earlier mark; no blockId: give meetingTitle and/or meetingTime and the meeting resolves from the day\'s calendar, asking the user which when several match). Permanent deletion is not available here, that stays in the app\'s own confirmed flow.',
       inputSchema: z.object({
         action: z.enum(CORRECTION_ACTIONS),
         date: DATE,

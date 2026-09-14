@@ -2,27 +2,26 @@
 // Spawned by Claude Desktop (or another MCP client) via the config snippet
 // shown in Daylens Settings.
 //
-// Required env: DAYLENS_DB_PATH (absolute path to daylens.sqlite)
+// Env: DAYLENS_DB_PATH (absolute path to daylens.sqlite) overrides discovery;
+// without it the server resolves the same userData directory the app uses.
 // Set env ELECTRON_RUN_AS_NODE=1 when launching via the Daylens binary.
 import Database from 'better-sqlite3'
 import { Server } from '@modelcontextprotocol/sdk/server'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import os from 'node:os'
-import path from 'node:path'
 import fs from 'node:fs'
-import { executeTool } from '../../../src/main/services/aiTools'
-import { executeWrappedTool, isWrappedToolName } from '../../../src/main/services/wrappedTools'
 import type { TrackingControlsState } from '../../../src/shared/trackingControls'
-import { anthropicTools, wrappedTools } from './tools'
+import { mcpToolManifest } from './tools'
+import { callDaylensReadTool } from './dispatch'
+import { resolveDefaultDbPath } from './dbPath'
+import { mcpActivityLogPath, recordMcpActivity } from '../../../src/shared/mcpActivityLog'
+import { installConsoleStdioGuards } from '../../../src/shared/consoleStdio'
 
-const dbPath =
-  process.env.DAYLENS_DB_PATH ??
-  (process.platform === 'win32'
-    ? path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Daylens', 'daylens.sqlite')
-    : process.platform === 'darwin'
-      ? path.join(os.homedir(), 'Library', 'Application Support', 'Daylens', 'daylens.sqlite')
-      : path.join(os.homedir(), '.config', 'Daylens', 'daylens.sqlite'))
+// stderr only: stdout is the JSON-RPC transport, and a transport that has
+// failed should surface rather than be swallowed.
+installConsoleStdioGuards(['stderr'])
+
+const dbPath = process.env.DAYLENS_DB_PATH ?? resolveDefaultDbPath()
 
 if (!fs.existsSync(dbPath)) {
   console.error(`[daylens-mcp] Database not found at ${dbPath}. Set DAYLENS_DB_PATH to the correct location.`)
@@ -32,6 +31,15 @@ if (!fs.existsSync(dbPath)) {
 const db = new Database(dbPath, { readonly: true })
 try { db.pragma('journal_mode = WAL') } catch { /* read-only connection can't change journal mode */ }
 db.pragma('busy_timeout = 5000')
+const activityLogPath = mcpActivityLogPath(dbPath)
+
+function recordCall(name: string, args: unknown, ok: boolean, error?: string): void {
+  try {
+    recordMcpActivity(activityLogPath, { tool: name, arguments: args, ok, error })
+  } catch (err) {
+    console.error('[daylens-mcp] Failed to record activity:', err)
+  }
+}
 
 // The subprocess can't reach the Electron settings store, so the current
 // exclusion set is handed in by env (see mcpServer.ts). Without this the MCP
@@ -81,7 +89,7 @@ const server = new Server(
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...anthropicTools, ...wrappedTools].map((t) => ({
+  tools: mcpToolManifest().map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: t.input_schema,
@@ -90,27 +98,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
+  const toolArgs = (args ?? {}) as Record<string, unknown>
   try {
-    // Wrapped data-layer tools are async and read-only here: the subprocess DB
-    // handle can't persist a collected signal, so allowCollect stays false and
-    // they serve whatever the app's background collection has stored.
-    const result = isWrappedToolName(name)
-      ? await executeWrappedTool(name, (args ?? {}) as Record<string, unknown>, db, trackingControls, { allowCollect: false })
-      : executeTool(
-        name as Parameters<typeof executeTool>[0],
-        (args ?? {}) as Record<string, unknown>,
-        db,
-        trackingControls,
-      )
+    const result = await callDaylensReadTool(
+      name,
+      toolArgs,
+      db,
+      trackingControls,
+    )
+    recordCall(name, toolArgs, true)
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
     }
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    recordCall(name, toolArgs, false, message)
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Tool error: ${message}`,
         },
       ],
       isError: true,

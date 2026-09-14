@@ -126,7 +126,7 @@ test('adversarial: four hours on one thread never becomes "finished" without an 
 
 // ─── 5. Attention / focus quality ─────────────────────────────────────────────
 
-test('adversarial: a 2h 29m unbroken stretch never becomes a focus grade', () => {
+test('adversarial: a 2h 29m stretch never becomes a focus grade', () => {
   for (const line of [
     'A deeply focused morning on the engine, your best in weeks.',
     'You stayed focused for the whole stretch.',
@@ -135,10 +135,19 @@ test('adversarial: a 2h 29m unbroken stretch never becomes a focus grade', () =>
   ]) {
     assert.ok(wrapLineViolation(line, ctx), `attention-quality claim survived: ${line}`)
   }
-  // The observable fact — the unbroken run — is the legal form.
-  assert.equal(wrapLineViolation('Two and a half hours on the engine without surfacing, the longest unbroken run of the day.', ctx), null)
+  // The observable fact — the measured run — is the legal form; continuity
+  // absolutes ("unbroken") die with the grades.
+  assert.equal(wrapLineViolation('Two and a half hours on the engine, the longest run of the day.', ctx), null)
+  assert.ok(wrapLineViolation('Two and a half hours on the engine, one unbroken run.', ctx))
   // A real focus-timer fact stays nameable (the enrichment noun, not a grade).
   assert.equal(findOverclaimViolation('Three focus sessions in Forest, all before lunch.'), null)
+  // The live distraction profile may be named; grading language still dies.
+  assert.equal(
+    wrapLineViolation('YouTube was the main distraction surface, and it sat in the evening where it belonged.', ctx),
+    null,
+  )
+  assert.ok(wrapLineViolation('The afternoon was just drift after the morning engine work.', ctx))
+  assert.ok(wrapLineViolation('Your focus score landed well above the rest of the week.', ctx))
 })
 
 // ─── 6. A plan that was never written ─────────────────────────────────────────

@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 import { IPC } from '../src/shared/types.ts'
 import { ipcRecord } from './support/electron-stub.mjs'
 import { setTestDb } from './support/database-stub.mjs'
+import { __setSettings, getSettings } from './support/settings-stub.mjs'
 import { setupRealWorldDb, REAL_WORLD_DATE, localMs } from './support/realWorldActivityFixture.ts'
 import { registerDbHandlers } from '../src/main/ipc/db.handlers.ts'
 import { registerEntityHandlers } from '../src/main/ipc/entities.handlers.ts'
@@ -40,7 +41,6 @@ import { registerIntercomHandlers } from '../src/main/ipc/intercom.handlers.ts'
 import { registerNotificationHandlers } from '../src/main/ipc/notifications.handlers.ts'
 import { registerSearchHandlers } from '../src/main/ipc/search.handlers.ts'
 import { registerSyncHandlers } from '../src/main/ipc/sync.handlers.ts'
-import { registerConnectorHandlers } from '../src/main/ipc/connectors.handlers.ts'
 import { registerExportHandlers } from '../src/main/ipc/export.handlers.ts'
 import { registerScreenContextHandlers } from '../src/main/ipc/screenContext.handlers.ts'
 import { registerDistractionAlerterHandlers } from '../src/main/services/distractionAlerter.ts'
@@ -62,7 +62,6 @@ const REGISTER_FNS: Array<[string, () => void]> = [
   ['notifications', registerNotificationHandlers],
   ['search', registerSearchHandlers],
   ['sync', registerSyncHandlers],
-  ['connectors', registerConnectorHandlers],
   ['export', registerExportHandlers],
   ['screenContext', registerScreenContextHandlers],
   ['distractionAlerter', registerDistractionAlerterHandlers],
@@ -109,6 +108,20 @@ test('boot smoke: every handler group registers without throwing', () => {
   assert.ok(ipcRecord.handlers.size > 40, `expected many registered channels, got ${ipcRecord.handlers.size}`)
 })
 
+test('distraction threshold handler clamps values to the documented range', async () => {
+  registerDistractionAlerterHandlers()
+  const handler = ipcRecord.handlers.get('distraction-alerter:set-threshold')
+  assert.ok(handler)
+
+  await handler({} as never, { minutes: 61 })
+  assert.equal(getSettings().distractionAlertThresholdMinutes, 60)
+
+  await handler({} as never, { minutes: 0 })
+  assert.equal(getSettings().distractionAlertThresholdMinutes, 1)
+
+  __setSettings({ distractionAlertThresholdMinutes: 10 })
+})
+
 test('contract: every channel the renderer invokes has a handler in the main process', () => {
   // Handled channels: the runtime registrations above (true channel strings,
   // alias-safe) plus the few registered inline in index.ts / updater.ts.
@@ -151,11 +164,6 @@ test('behaviour: core handlers answer over a seeded real-world DB', async () => 
   const apps = await call(IPC.DB.GET_APP_SUMMARIES_FOR_DATE, REAL_WORLD_DATE)
   assert.ok(Array.isArray(apps) && apps.length > 0, 'app summaries should be non-empty')
   assert.ok(apps.every((a: { appName?: unknown }) => typeof a.appName === 'string'), 'each app summary needs an appName')
-
-  // Recap range: drives the multi-day recap. Same payload shape as a single day.
-  const recap = await call(IPC.DB.GET_RECAP_RANGE, [REAL_WORLD_DATE])
-  assert.ok(Array.isArray(recap) && recap.length === 1, 'recap range should return one payload per date')
-  assert.equal(recap[0].date, REAL_WORLD_DATE)
 
   // Search over the day: window-title match returns the coding session. Search
   // channels live in their own SEARCH_CHANNELS constant, not the IPC registry,

@@ -22,17 +22,21 @@ A person does not need to list the relevant applications or paste background Day
 
 ## Voice
 
-The agent describes what happened before describing the telemetry used to infer it.
+Warm, human, Claude-class. What happened first, then the evidence. Like there is actually another person on the other end — not a tracker reciting telemetry.
 
 It should say:
 
-- “You actively developed the Daylens Wrapped feature for 2h 14m.”
+- “This morning you spent about 2h 40m studying. Most of that was on Coursera in Dia.”
 - “You read Sean Goedecke’s article for 12 minutes. It was about how prompts are technical debt, too.”
 - “You spent 30 minutes reviewing ACME’s FY2026–2027 financial report with Norman and the team.”
 
-It should not lead with “the editor was active,” “the calendar contained,” or “based on the available metadata.”
+It should not lead with “Based on your Daylens data,” “the editor was active,” or “you spent 608 seconds.”
 
-A short observation such as “Solid session there” is welcome when it is relevant and supported. The agent does not assign productivity scores, diagnose distraction, or turn incomplete observation into a personal judgment.
+The first numeric answer is the computed one. No undercount-then-walk-back. Durations come out as hours and minutes, never raw seconds.
+
+A short observation such as “Solid session there” is welcome when it is relevant and supported. The agent may report the live focus score and distraction-profile facts when those numbers are in the evidence. It does not turn incomplete observation into a personal judgment.
+
+When capture is incomplete, it says so honestly: what page time it has, what the browser was doing in front or on a second display, and one useful question. It does not invent the rest or wait to be argued with.
 
 When evidence conflicts, it names the conflict naturally: “I found the meeting on your calendar, but no matching device or Granola activity.”
 
@@ -46,7 +50,7 @@ Every factual answer contains:
 4. Inspectable sources and privacy indicators.
 5. A clarification or specific uncertainty only when it changes the answer.
 
-The agent never invents a duration, page, file, meeting, person, project, outcome, or completion state. An application being foreground is evidence of activity, not automatic proof that an article was fully absorbed or a task was finished. Stronger language requires supporting page dwell, repeated interaction, connected records, an explicit statement, or another accepted signal.
+The agent never invents a duration, page, file, meeting, person, project, outcome, or completion state. Site totals (“how long on Coursera?”) and app totals are computed facts from the same corrected ledger Timeline and Apps read — same owned-day window, including page time filled onto a second-monitor full-screen browser span. An application being in front is evidence of activity, not automatic proof that an article was fully absorbed or a task was finished. Stronger language requires supporting page dwell, repeated interaction, connected records, an explicit statement, or another accepted signal.
 
 ## Agent flow
 
@@ -76,7 +80,7 @@ The first tool set is deliberately small:
 4. Aggregate canonical time by application, website, project, client, meeting, person, or category.
 5. Search exact and semantic memory.
 6. Retrieve supporting evidence and source links.
-7. Query one connected source through the Daylens connector boundary.
+7. Query one external source through the Daylens boundary — the `externalSignals` local probes (calendar, git) or a user-configured MCP server. (The OAuth connector framework was removed 2026-07-26; see connectors.md.)
 8. Compare periods or entities using the same calculation.
 9. Explain missing evidence or request one clarification.
 10. Preview and apply a reversible Daylens correction.
@@ -86,7 +90,9 @@ Tools accept typed, validated input and return compact product facts. They do no
 
 ### Local machine tools
 
-The shipped agent also answers “what did I ship?” and “where is that document?” through read-only machine tools: file search, file read, directory listing, repository discovery, and an allowlisted read-only git surface. These remain in V2 under one shared boundary:
+The shipped agent also answers “what did I ship?” and “where is that document?” through read-only machine tools: file search, file read, directory listing, repository discovery, and an allowlisted read-only git surface. These are the Tier 2 of the tiered escalation model in the [agent runtime and context specification](agent-runtime-and-context.md): the database tier is free and always available, machine tools are cheap and permission-carded, and the consent-gated Tier 3 (`capture_screen`) may pass one live, downscaled, never-stored frame to the model with a mandatory reason the person sees in the activity trail. The user-facing contract in one sentence: Daylens reads your local activity database freely; it looks at a file or your live screen only when a question needs it, tells you why, and never stores what it saw.
+
+The machine tools remain in V2 under one shared boundary:
 
 - Every path resolves, symlinks included, to a visible, non-private location inside the user home directory. Hidden folders, system data, credential stores, dependencies, and build output are denied.
 - The git surface accepts read subcommands only and rejects arguments that redirect output, re-point the repository, read files outside it, or invoke external drivers.
@@ -100,6 +106,8 @@ The shipped agent also answers “what did I ship?” and “where is that docum
 - Prefer deterministic tools for totals, counts, comparisons, and membership.
 - Use exact search before semantic search when the question includes distinctive wording.
 - Request connector data only when local memory cannot answer reliably.
+- Exhaust the free database tier before touching machine tools, and machine tools before any screen capture; say why when escalating.
+- Escalate when naming confidence is low, when evidence conflicts (a leisure domain against work titles), when the question is about *now*, or when a block is long but unnamed. These heuristics live in the system prompt, not code.
 - Ask one concise clarification when two interpretations would materially change the answer.
 - Do not ask a clarification merely because some evidence is incomplete; answer the supported part and state the specific gap.
 - Keep tool results inside the minimum time and entity scope needed for the question.
@@ -154,6 +162,8 @@ The agent may propose saving a durable fact or preference only when it would cle
 The proposal shows the exact fact and how it will be used. Saving requires confirmation. Silence, continuing the conversation, or accepting an answer is not confirmation.
 
 ## Models
+
+The shipping default is Claude Haiku 4.5 (`claude-haiku-4-5` on desktop, `claude-haiku-4-5-20251001` on the web companion). Settings and the chat picker resolve the same account provider and model. A thread may override that choice for one conversation; otherwise the next answer uses the Settings selection.
 
 People choose their managed model. The model picker shows:
 

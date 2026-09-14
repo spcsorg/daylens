@@ -41,7 +41,7 @@ It does not specify:
 - screen-frame capture or OCR
 - AI answer generation
 
-Those systems consume the evidence defined here and have their own specifications. The screen-context experiment remains a separate opt-in prototype governed by [V2 direction](../product/v2.md#screen-context-experiment).
+Those systems consume the evidence defined here and have their own specifications. The screen-context experiment remains a separate opt-in prototype governed by V2 direction.
 
 ## Data flow
 
@@ -211,9 +211,11 @@ The existing `website_visits_pending` approach is not part of the V2 contract be
 - Browser history is read from a non-blocking snapshot of the source database.
 - Source cursors and source record identifiers make ingestion idempotent.
 - History duration does not overrule foreground ownership.
-- A history visit with no foreground overlap may support retrieval but contributes no active time.
-- An active page interval is clipped to its owning foreground browser interval.
-- A history visit's own recorded duration is a navigation-gap estimate. When reconciling, the last corroborated page in a browser may fill that browser's verified foreground time until the next recorded navigation, bounded by an explicit per-visit cap and never crossing into untracked gaps. A live active-tab observation always outranks this fill. This is what keeps a two-hour single-page stay in a browser without live tab access from collapsing to a thirty-second guess.
+- A history visit with no foreground overlap and no secondary-display presence for that browser may support retrieval but contributes no active time.
+- An active page interval is clipped to its owning browser's input-focused intervals, and to that same browser's full-screen / second-monitor visible spans. Visible seconds never add to application totals — they only let the page explain a span the display stream already proved.
+- A history visit's own recorded duration is a navigation-gap estimate. When reconciling, the last corroborated page in a browser may fill that browser's verified foreground time and its secondary-display visible time until the next recorded navigation, bounded by an explicit per-visit cap and never crossing into untracked gaps. A live active-tab observation always outranks this fill. This is what keeps a two-hour Coursera stay on a second monitor from collapsing to a 608-second history guess.
+- Entertainment hosts (Netflix, YouTube, and the other `domainPolicy` entertainment sinks) are the exception on a titleless browser: without a live `active_browser_context` sample for that host, history-fill is a two-minute grace, not the ordinary multi-hour cap. Work and course pages keep the long cap. The two-minute window is the same lookback already used to treat a history row as recent enough to be the active tab.
+- Chromium browsers that can read the front tab but cannot verify window mode (Dia) do not persist that live tab as `active_browser_context`. Ordinary browser history may later provide page evidence through the history-ingestion path. The dropped `browser_context_events` table is not part of this path.
 
 ## Idle, pause, and missing time
 
@@ -318,14 +320,14 @@ No renderer, AI tool, MCP tool, sync encoder, or product surface may query a raw
 
 ## Migration from the current implementation
 
-The current application has overlapping paths:
+The application before this migration had overlapping paths:
 
-- `tracking.ts` polls foreground state and writes `app_sessions`
+- `tracking.ts` polled foreground state and wrote `app_sessions`
 - `browserContext.ts` and `browser.ts` write `website_visits`
 - native macOS and Windows helpers write `focus_events` alongside the legacy path
-- historical Timeline reads can project `focus_events`, while the live day still uses legacy sessions
-- some downstream block evidence queries `focus_events` directly
-- deletion manually scrubs several raw and derived tables
+- historical Timeline reads could project `focus_events`, while the live day still used legacy sessions
+- some downstream block evidence queried `focus_events` directly
+- deletion manually scrubbed several raw and derived tables
 
 The migration proceeds in reversible slices:
 
@@ -339,6 +341,8 @@ The migration proceeds in reversible slices:
 8. Move Timeline first, then Apps, search, the AI agent, MCP, and sync to shared corrected facts.
 9. Centralize deletion around evidence identity and derivative ownership.
 10. Stop legacy writes only after parity, restart recovery, deletion, and platform acceptance tests pass.
+
+Slice 10 is implemented: the tracking state machine persists no `app_sessions` rows on any platform — canonical `focus_events` are the only record of live capture, and restart recovery closes the open canonical span without a legacy row. The Windows history backfill remains a historical import for stretches with no canonical coverage; it never writes a span that overlaps captured evidence.
 
 Existing `app_sessions` and `website_visits` are not rewritten into fake event-level observations. A legacy adapter exposes them as legacy evidence until they are deleted or naturally fall outside the needed migration window.
 

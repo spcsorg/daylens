@@ -39,7 +39,7 @@ test('git resolves to humanized project names, counts, and sanitized highlights'
   const enrichment = resolveDayEnrichment(db, DATE)
   assert.ok(enrichment?.shipped)
   const shipped = enrichment!.shipped!
-  assert.deepEqual(shipped.commitsByProject[0], { project: 'billing service', commits: 9 })
+  assert.deepEqual(shipped.commitsByProject[0], { project: 'billing service', commits: 9, spread: null, viaAgents: null })
   assert.equal(shipped.pullRequests[0].project, 'billing service')
   assert.equal(shipped.pullRequests[0].state, 'open')
   // Conventional prefixes stripped, paths/branches gone from highlights.
@@ -135,7 +135,7 @@ test('notes: a stored notes signal resolves into sanitized meetingNotes', () => 
     notes: [
       {
         title: 'Andersen Weekly AI Training',
-        participants: ['Norman', 'catherine@alueducation.com', 'Husna Doe'],
+        participants: ['Norman', 'priya@example-college.edu', 'Husna Doe'],
         actionItems: ['agreed to revise the onboarding timeline', 'follow up on the model comparison in src/eval/run.ts'],
       },
     ],

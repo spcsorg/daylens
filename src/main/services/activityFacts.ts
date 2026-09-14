@@ -26,7 +26,9 @@ import {
   getWebsiteSummariesForRange,
   getWebsiteVisitsForRange,
   type CorrectionSpan,
+  type VisiblePresenceInterval,
 } from '../db/queries'
+import { getSecondaryDisplayVisibleSpansForRange } from '../core/projections/displayVisibility'
 import { resolveCanonicalApp } from '../lib/appIdentity'
 // activityFactsQuery imports the correction overlay back from this module;
 // both sides bind hoisted functions at call time only, so the cycle is inert.
@@ -34,6 +36,7 @@ import {
   queryCorrectedActivityFactsForRange,
   type CorrectedActivityRangeFacts,
 } from '../core/query/activityFactsQuery'
+import { getStoredCanonicalAppLinks } from '../core/inference/appIdentityRegistry'
 
 export type { CorrectionSpan }
 
@@ -285,8 +288,17 @@ export function applyTimelineCorrectionsToSessions(
 
 /** Aggregate corrected sessions into per-app usage summaries. Also feeds the
  *  Timeline-day aggregation, which rolls block-partitioned sessions through
- *  the same rollup. */
-export function aggregateAppSummaries(sessions: readonly AppSession[]): AppUsageSummary[] {
+ *  the same rollup.
+ *
+ *  `canonicalLinks` is the identity registry's stored bundle/path → canonical
+ *  mapping (see getStoredCanonicalAppLinks): a session captured under a
+ *  path-style key whose bundle resolution failed at write time still groups
+ *  with its bundle-keyed twin, so one installed app can never appear as two
+ *  rows. */
+export function aggregateAppSummaries(
+  sessions: readonly AppSession[],
+  canonicalLinks?: ReadonlyMap<string, string>,
+): AppUsageSummary[] {
   const totals = new Map<string, {
     bundleId: string
     appName: string
@@ -301,11 +313,15 @@ export function aggregateAppSummaries(sessions: readonly AppSession[]): AppUsage
   const ordered = [...sessions].sort((a, b) => a.startTime - b.startTime)
   for (const session of ordered) {
     const identity = resolveCanonicalApp(session.bundleId, session.appName)
-    const key = session.canonicalAppId ?? identity.canonicalAppId ?? session.bundleId
+    // The stored registry link remaps a twin's derived key onto its canonical
+    // counterpart — applied AFTER the per-session derivation because the
+    // canonical projection stamps a catalog miss with the raw bundle/path id.
+    const derivedKey = session.canonicalAppId ?? identity.canonicalAppId ?? session.bundleId
+    const key = canonicalLinks?.get(derivedKey) ?? derivedKey
     const entry = totals.get(key) ?? {
       bundleId: session.bundleId,
       appName: identity.displayName || session.appName,
-      canonicalAppId: session.canonicalAppId ?? identity.canonicalAppId ?? null,
+      canonicalAppId: key,
       seconds: 0,
       categorySeconds: new Map<AppCategory, number>(),
       sessionCount: 0,
@@ -346,7 +362,7 @@ export function getCorrectedAppSummariesForRange(
   const sessions = facts.evidenceSource === 'legacy' && liveSession
     ? withClippedLiveSession(facts.sessions, liveSession, fromMs, toMs)
     : facts.sessions
-  return aggregateAppSummaries(sessions)
+  return aggregateAppSummaries(sessions, getStoredCanonicalAppLinks(db))
 }
 
 function withClippedLiveSession(
@@ -384,6 +400,20 @@ export interface CorrectedDomainInterval {
   visitId: number
 }
 
+function visiblePresenceForRange(
+  db: Database.Database,
+  fromMs: number,
+  toMs: number,
+  sessions = getCorrectedSessionsForRange(db, fromMs, toMs),
+): VisiblePresenceInterval[] {
+  return getSecondaryDisplayVisibleSpansForRange(db, fromMs, toMs, sessions).map((span) => ({
+    bundleId: span.bundleId,
+    appName: span.appName,
+    start: span.startTime,
+    end: span.endTime,
+  }))
+}
+
 function subtractSpansFromInterval(start: number, end: number, spans: readonly CorrectionSpan[]): Array<{ start: number; end: number }> {
   let pieces = end > start ? [{ start, end }] : []
   for (const span of spans) {
@@ -408,10 +438,13 @@ export function getCorrectedDomainIntervals(
   const siteExclusions = getEvidenceExclusionsForRange(db, fromMs, toMs)
     .filter((exclusion) => exclusion.kind === 'site' && exclusion.domain)
   // Page credit clips against the same corrected foreground ownership the app
-  // totals are built from, so a domain's time can never exceed its browser's.
+  // totals are built from, plus secondary-display visible spans of the same
+  // browser so a full-screen course on monitor 2 is not stuck at a 10-minute
+  // history guess. Visible seconds never add to app totals.
   const reconciled = getReconciledDomainIntervals(
     db, fromMs, toMs, domainFilter,
     (chunkFromMs, chunkToMs) => getCorrectedSessionsForRange(db, chunkFromMs, chunkToMs),
+    (chunkFromMs, chunkToMs) => visiblePresenceForRange(db, chunkFromMs, chunkToMs),
   )
   return reconciled.flatMap((interval) => {
     const excludedForDomain = siteExclusions
@@ -463,7 +496,7 @@ export function getCorrectedWebsiteSummariesForRange(
     domain: string
     browserBundleId: string | null
     canonicalBrowserId: string | null
-    milliseconds: number
+    intervals: Array<{ start: number; end: number }>
     visitIds: Set<number>
     titleMs: Map<string, number>
   }>()
@@ -474,23 +507,37 @@ export function getCorrectedWebsiteSummariesForRange(
       domain: interval.domain,
       browserBundleId: visit?.browserBundleId ?? null,
       canonicalBrowserId: visit?.canonicalBrowserId ?? null,
-      milliseconds: 0,
+      intervals: [],
       visitIds: new Set<number>(),
       titleMs: new Map<string, number>(),
     }
     const milliseconds = interval.end - interval.start
-    entry.milliseconds += milliseconds
+    entry.intervals.push({ start: interval.start, end: interval.end })
     entry.visitIds.add(interval.visitId)
     const title = visitsById.get(interval.visitId)?.pageTitle?.trim()
     if (title) entry.titleMs.set(title, (entry.titleMs.get(title) ?? 0) + milliseconds)
     grouped.set(key, entry)
+  }
+  // Id-less visits bypass the shared per-browser claim pool upstream, so two
+  // orphan history rows can hold overlapping credited intervals — union per
+  // group before summing so a duplicate row can never double a domain's time.
+  const unionMs = (intervals: Array<{ start: number; end: number }>): number => {
+    const sorted = intervals.slice().sort((a, b) => a.start - b.start)
+    let total = 0
+    let cursor = Number.NEGATIVE_INFINITY
+    for (const piece of sorted) {
+      const start = Math.max(piece.start, cursor)
+      if (piece.end > start) total += piece.end - start
+      cursor = Math.max(cursor, piece.end)
+    }
+    return total
   }
   return [...grouped.entries()].map(([key, entry]) => {
     const raw = rawByDomainAndBrowser.get(key)
     const topTitle = [...entry.titleMs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
     return {
       domain: entry.domain,
-      totalSeconds: Math.round(entry.milliseconds / 1000),
+      totalSeconds: Math.round(unionMs(entry.intervals) / 1000),
       visitCount: entry.visitIds.size,
       topTitle,
       browserBundleId: raw?.browserBundleId ?? entry.browserBundleId,
@@ -524,6 +571,8 @@ export interface BrowserPageCoverage {
   canonicalBrowserId: string
   appName: string
   foregroundSeconds: number
+  /** Full-screen / second-monitor presence, already disjoint from foreground. */
+  visibleSeconds: number
   pageCoveredSeconds: number
 }
 
@@ -552,7 +601,11 @@ export function getCorrectedPageFactsForRange(
   for (let chunkStart = fromMs; chunkStart < toMs; chunkStart += PAGE_FACTS_CHUNK_MS) {
     const chunkEnd = Math.min(chunkStart + PAGE_FACTS_CHUNK_MS, toMs)
     const sessions = getCorrectedSessionsForRange(db, chunkStart, chunkEnd)
-    for (const { visit, freeIntervals } of getReconciledWebsiteVisitsForRange(db, chunkStart, chunkEnd, sessions)) {
+    const visiblePresence = visiblePresenceForRange(db, chunkStart, chunkEnd, sessions)
+    for (const { visit, freeIntervals } of getReconciledWebsiteVisitsForRange(
+      db, chunkStart, chunkEnd, sessions,
+      visiblePresence.length > 0 ? { visiblePresence } : {},
+    )) {
       if (freeIntervals.length === 0) continue
       const excludedForDomain = siteExclusions
         .filter((exclusion) => exclusion.domain === visit.domain)
@@ -574,7 +627,7 @@ export function getCorrectedPageFactsForRange(
       }
 
       const pageIdentity = visit.normalizedUrl ?? visit.pageKey ?? visit.url ?? visit.pageTitle ?? ''
-      const key = `${visit.domain} ${pageIdentity}`
+      const key = `${visit.domain}\u0000${pageIdentity}`
       let entry = byPage.get(key)
       if (!entry) {
         entry = {
@@ -610,15 +663,55 @@ export function getCorrectedPageFactsForRange(
   // Every browser with corrected foreground time appears in the coverage
   // report, page rows or not — a browser without tab access (zero page rows)
   // is exactly the case the coverage note exists for.
+  const visibleSpansByBrowser = new Map<string, CorrectionSpan[]>()
+  const visibleNameByBrowser = new Map<string, string>()
+  for (const span of getSecondaryDisplayVisibleSpansForRange(
+    db, fromMs, toMs, getCorrectedSessionsForRange(db, fromMs, toMs),
+  )) {
+    const key = (span.bundleId
+      ? resolveCanonicalApp(span.bundleId, span.appName ?? '').canonicalAppId
+      : null) ?? span.bundleId
+    if (!key) continue
+    const spans = visibleSpansByBrowser.get(key) ?? []
+    spans.push({ startMs: span.startTime, endMs: span.endTime })
+    visibleSpansByBrowser.set(key, spans)
+    if (span.appName && !visibleNameByBrowser.has(key)) visibleNameByBrowser.set(key, span.appName)
+  }
+  const visibleMsByBrowser = new Map<string, number>(
+    [...visibleSpansByBrowser].map(([key, spans]): [string, number] => [
+      key,
+      mergeCorrectionSpans(spans).reduce((total, span) => total + span.endMs - span.startMs, 0),
+    ]),
+  )
+
   const coverage: BrowserPageCoverage[] = []
+  const seenCoverage = new Set<string>()
   for (const summary of getCorrectedAppSummariesForRange(db, fromMs, toMs)) {
     const key = summary.canonicalAppId ?? summary.bundleId
-    const isBrowser = summary.category === 'browsing' || coveredMsByBrowser.has(key)
-    if (!isBrowser || summary.totalSeconds <= 0) continue
+    const visibleSeconds = Math.round((visibleMsByBrowser.get(key) ?? 0) / 1000)
+    const isBrowser = summary.category === 'browsing' || coveredMsByBrowser.has(key) || visibleSeconds > 0
+    if (!isBrowser || (summary.totalSeconds <= 0 && visibleSeconds <= 0)) continue
+    seenCoverage.add(key)
     coverage.push({
       canonicalBrowserId: key,
       appName: summary.appName,
       foregroundSeconds: summary.totalSeconds,
+      visibleSeconds,
+      pageCoveredSeconds: Math.round((coveredMsByBrowser.get(key) ?? 0) / 1000),
+    })
+  }
+
+  // A browser that was only visible on a second display (never focused)
+  // still needs a coverage row so that presence is said out loud.
+  for (const [key, visibleMs] of visibleMsByBrowser) {
+    if (seenCoverage.has(key)) continue
+    const visibleSeconds = Math.round(visibleMs / 1000)
+    if (visibleSeconds <= 0) continue
+    coverage.push({
+      canonicalBrowserId: key,
+      appName: visibleNameByBrowser.get(key) ?? key,
+      foregroundSeconds: 0,
+      visibleSeconds,
       pageCoveredSeconds: Math.round((coveredMsByBrowser.get(key) ?? 0) / 1000),
     })
   }
@@ -640,18 +733,33 @@ function formatHoursMinutes(seconds: number): string {
 const COVERAGE_NOTE_MIN_FOREGROUND_SEC = 30 * 60
 const COVERAGE_NOTE_MIN_GAP_SEC = 15 * 60
 
-/** True when a browser's page detail explains materially less time than the
- *  browser itself verifiably had in the foreground (limited tab access). */
-export function hasMaterialPageCoverageShortfall(entry: BrowserPageCoverage): boolean {
-  if (entry.foregroundSeconds < COVERAGE_NOTE_MIN_FOREGROUND_SEC) return false
-  if (entry.foregroundSeconds - entry.pageCoveredSeconds < COVERAGE_NOTE_MIN_GAP_SEC) return false
-  return entry.pageCoveredSeconds * 2 < entry.foregroundSeconds
+function presenceSeconds(entry: BrowserPageCoverage): number {
+  return entry.foregroundSeconds + entry.visibleSeconds
 }
 
+/** True when a browser's page detail explains materially less time than the
+ *  browser itself verifiably had in front or visible on another display. */
+export function hasMaterialPageCoverageShortfall(entry: BrowserPageCoverage): boolean {
+  const presence = presenceSeconds(entry)
+  if (presence < COVERAGE_NOTE_MIN_FOREGROUND_SEC) return false
+  if (presence - entry.pageCoveredSeconds < COVERAGE_NOTE_MIN_GAP_SEC) return false
+  return entry.pageCoveredSeconds * 2 < presence
+}
+
+// Worded the way the answer should read, not the way the plumbing works: the
+// model copies this note's vocabulary and punctuation straight into prose, so
+// it carries no em dash and none of the terms the voice contract bans
+// ("foreground", "page-level detail").
 export function browserPageCoverageNoteText(entry: BrowserPageCoverage): string {
-  return `${entry.appName} was foreground ${formatHoursMinutes(entry.foregroundSeconds)}; `
-    + `page-level detail covers ${formatHoursMinutes(entry.pageCoveredSeconds)} — `
-    + `page tracking for this browser is limited, so app time is the trustworthy total.`
+  const presence = presenceSeconds(entry)
+  const visibleClause = entry.visibleSeconds > 0
+    ? `, and also visible on a second display for ${formatHoursMinutes(entry.visibleSeconds)}`
+    : ''
+  return `${entry.appName} was in front for ${formatHoursMinutes(entry.foregroundSeconds)}`
+    + `${visibleClause}, `
+    + `and specific pages are recorded for ${formatHoursMinutes(entry.pageCoveredSeconds)} of that, `
+    + `because Daylens can only read some of this browser's tabs. `
+    + `Treat ${formatHoursMinutes(presence)} as the real total and the page list as partial.`
 }
 
 /** Honest reconciliation notes for browsers with a material page-coverage

@@ -32,8 +32,10 @@ import {
 import { resolveBrowserApplication } from '../services/browserRegistry'
 import { learnFromBlockOverride } from '../services/workMemory'
 import { isSystemNoiseApp } from '@shared/systemNoise'
-import { activityCategoryLabel } from '@shared/activityCategories'
+import { activityCategoryLabel, canonicalAppCategory } from '@shared/activityCategories'
+import { policyForHost } from '@shared/domainPolicy'
 import { REAL_ABSENCE_MIN_MS } from '../lib/absenceGuard'
+import { adoptWebsiteVisitWrite } from '../services/entities/entityAdoption'
 
 function resolveDisplayName(bundleId: string, fallbackName: string): string {
   return resolveCanonicalApp(bundleId, fallbackName).displayName
@@ -100,6 +102,13 @@ const SESSION_OVERLAP_LOOKBACK_MS = 12 * 60 * 60 * 1000
 // (see reconcileWebsiteVisits). Long enough for a whole morning on one course
 // page; anything beyond stays an honest "no page recorded" remainder.
 const HISTORY_FILL_MAX_MS = 4 * 60 * 60 * 1000
+// Titleless browsers (Dia: no window titles, no live tab events) otherwise
+// hand this whole cap to the last history row — often Netflix/YouTube sitting
+// behind hours of work. Entertainment policy hosts get only the same 2-minute
+// window already used to treat a history row as recent enough to be the
+// active tab (browserContext RECENT_HISTORY_LOOKBACK_MS). A live
+// active_browser_context row for that host lifts the restriction.
+const HISTORY_FILL_UNCORROBORATED_MEDIA_MAX_MS = 2 * 60 * 1000
 
 // Columns hydrated into AppSessionRow / clipRowToRange. Selecting them
 // explicitly (instead of SELECT *) keeps these hot range reads from pulling
@@ -203,8 +212,13 @@ function resolvedSessionCategory(
 ): AppCategory {
   const override = categoryOverrideFor(row, overrides, identity)
   if (override) return override
-  if (row.category && row.category !== 'uncategorized') return row.category
-  return identity.defaultCategory ?? 'uncategorized'
+  // Canonicalize on read: rows written before the category vocabulary settled
+  // carry display forms ("AI Tools") that every kind rule would misread. The
+  // v67 migration normalizes stored rows; this guards restored old backups
+  // and any other un-migrated source of session rows.
+  const stored = canonicalAppCategory(row.category)
+  if (stored !== 'uncategorized') return stored
+  return identity.defaultCategory ? canonicalAppCategory(identity.defaultCategory) : 'uncategorized'
 }
 
 function appLevelCategoryForIdentity(
@@ -373,7 +387,31 @@ function parseJsonObject<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-export interface SearchOptions {
+export type SearchSourceType = 'observed' | 'connected' | 'supplied' | 'inferred'
+
+/**
+ * The scopes a person can narrow a search to. Every eligible retrieval path is
+ * restricted by whichever of these are set; an unset filter means the full
+ * eligible local history.
+ *
+ * Project, client, person, and meeting are all entity ids drawn from one table.
+ * They stay four named fields because a caller narrowing to a client should not
+ * have to know it shares a namespace with meetings; they funnel into a single id
+ * set at the SQL boundary.
+ */
+export interface SearchFilters {
+  /** Bundle ids or display names. */
+  applications?: string[]
+  /** Domains. */
+  websites?: string[]
+  projects?: string[]
+  clients?: string[]
+  people?: string[]
+  meetings?: string[]
+  sources?: SearchSourceType[]
+}
+
+export interface SearchOptions extends SearchFilters {
   startDate?: string
   endDate?: string
   limit?: number
@@ -386,7 +424,119 @@ export interface SearchOptions {
   maxStartMs?: number
 }
 
-export type SearchSourceType = 'observed' | 'connected' | 'supplied' | 'inferred'
+/** The entity-shaped filters, flattened to the id set the SQL actually uses. */
+function filterEntityIds(opts: SearchFilters): string[] {
+  const ids = [
+    ...(opts.projects ?? []),
+    ...(opts.clients ?? []),
+    ...(opts.people ?? []),
+    ...(opts.meetings ?? []),
+  ].filter(Boolean)
+  return [...new Set(ids)]
+}
+
+function hasValues(values: readonly string[] | undefined): values is readonly string[] {
+  return Array.isArray(values) && values.length > 0
+}
+
+/** Which filter kinds a reader's tables can actually express. */
+export interface ExpressibleFilters {
+  applications?: boolean
+  websites?: boolean
+  entities?: boolean
+  /** The reader can only ever return rows of these memory types. */
+  sourceTypes: readonly SearchSourceType[]
+}
+
+/**
+ * A reader that cannot express a filter the person set must return nothing
+ * rather than rows that ignore it.
+ *
+ * This is the only safe direction. If an unexpressive reader returned its rows
+ * unfiltered, narrowing a search to a website would still bring back sessions
+ * and artifacts, so the filter would silently fail to constrain anything. An
+ * omission is visible and recoverable; a leak is neither.
+ *
+ * Exported because readers outside this module answer the same search: the
+ * aggregate readers behind structured retrieval must decide eligibility by this
+ * rule too, not by a second copy of it.
+ */
+export function readerIneligible(opts: SearchOptions, can: ExpressibleFilters): boolean {
+  if (hasValues(opts.applications) && !can.applications) return true
+  if (hasValues(opts.websites) && !can.websites) return true
+  if (filterEntityIds(opts).length > 0 && !can.entities) return true
+  if (hasValues(opts.sources)) {
+    const overlap = can.sourceTypes.some((type) => opts.sources?.includes(type))
+    if (!overlap) return true
+  }
+  return false
+}
+
+interface FilterSql {
+  sql: string
+  params: unknown[]
+}
+
+const NO_FILTER: FilterSql = { sql: '', params: [] }
+
+const MEMORY_SOURCE_TYPES: readonly SearchSourceType[] = ['observed', 'connected', 'supplied', 'inferred']
+/** Readers over raw capture tables can only ever return directly observed rows. */
+export const OBSERVED_ONLY: readonly SearchSourceType[] = ['observed']
+
+function marks(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ')
+}
+
+/** Filter clauses over a `memory_records`-shaped reader. */
+function memoryRecordFilterSql(opts: SearchOptions): FilterSql {
+  const clauses: string[] = []
+  const params: unknown[] = []
+
+  if (hasValues(opts.applications)) {
+    clauses.push(`AND (memory_records.app_bundle_id IN (${marks(opts.applications.length)})
+      OR LOWER(memory_records.app_name) IN (${marks(opts.applications.length)}))`)
+    params.push(...opts.applications, ...opts.applications.map((name) => name.toLowerCase()))
+  }
+  if (hasValues(opts.sources)) {
+    clauses.push(`AND memory_records.memory_type IN (${marks(opts.sources.length)})`)
+    params.push(...opts.sources)
+  }
+  const entityIds = filterEntityIds(opts)
+  if (entityIds.length > 0) {
+    clauses.push(`AND EXISTS (
+      SELECT 1 FROM memory_record_entities scope_tags
+      WHERE scope_tags.record_id = memory_records.id
+        AND scope_tags.entity_id IN (${marks(entityIds.length)})
+    )`)
+    params.push(...entityIds)
+  }
+  return { sql: clauses.join('\n      '), params }
+}
+
+/** Filter clauses over the legacy `app_sessions` reader. */
+function appSessionFilterSql(opts: SearchOptions): FilterSql {
+  if (!hasValues(opts.applications)) return NO_FILTER
+  return {
+    sql: `AND (app_sessions.bundle_id IN (${marks(opts.applications.length)})
+      OR LOWER(app_sessions.app_name) IN (${marks(opts.applications.length)}))`,
+    params: [...opts.applications, ...opts.applications.map((name) => name.toLowerCase())],
+  }
+}
+
+/** Filter clauses over the `website_visits` reader. */
+function websiteVisitFilterSql(opts: SearchOptions): FilterSql {
+  const clauses: string[] = []
+  const params: unknown[] = []
+  if (hasValues(opts.websites)) {
+    clauses.push(`AND LOWER(website_visits.domain) IN (${marks(opts.websites.length)})`)
+    params.push(...opts.websites.map((domain) => domain.toLowerCase()))
+  }
+  if (hasValues(opts.applications)) {
+    clauses.push(`AND website_visits.browser_bundle_id IN (${marks(opts.applications.length)})`)
+    params.push(...opts.applications)
+  }
+  return { sql: clauses.join('\n      '), params }
+}
 
 export interface SessionSearchResult {
   type: 'session'
@@ -912,7 +1062,18 @@ export function searchSessions(
   const { fromMs, toMs, limit } = searchBounds(opts)
   const memoryAvailable = memorySearchAvailable(db)
 
-  const memoryResults: SessionSearchResult[] = !memoryAvailable ? [] : (db.prepare(`
+  // The canonical arm can express every filter kind except website; the legacy
+  // arm carries no entity tags and is direct capture only.
+  const memoryEligible = !readerIneligible(opts, {
+    applications: true, entities: true, sourceTypes: MEMORY_SOURCE_TYPES,
+  })
+  const legacyEligible = !readerIneligible(opts, {
+    applications: true, sourceTypes: OBSERVED_ONLY,
+  })
+  const memoryFilters = memoryRecordFilterSql(opts)
+  const legacyFilters = appSessionFilterSql(opts)
+
+  const memoryResults: SessionSearchResult[] = !memoryAvailable || !memoryEligible ? [] : (db.prepare(`
     SELECT
       memory_records.rowid AS id,
       memory_records.record_kind,
@@ -930,13 +1091,20 @@ export function searchSessions(
     JOIN memory_records ON memory_records.rowid = memory_records_fts.rowid
     LEFT JOIN entities ON entities.id = memory_records.primary_entity_id
     WHERE memory_records_fts MATCH ?
+      -- Page records are the browser reader's to return; surfacing them here
+      -- too would report one domain twice for the same query.
+      AND memory_records.record_kind != 'page'
       AND memory_records.deleted_at IS NULL
       AND memory_records.start_ms >= ?
       AND memory_records.start_ms < ?
       ${MEMORY_RECORD_CORRECTION_FILTERS}
+      ${memoryFilters.sql}
     ORDER BY memory_records.start_ms DESC
     LIMIT ?
-  `).all(SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs, limit) as MemoryMomentRow[])
+  `).all(
+    SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs,
+    ...memoryFilters.params, limit,
+  ) as MemoryMomentRow[])
     .map(mapMemoryMomentRow)
 
   // Legacy fallback, restricted to days without a memory-index projection.
@@ -946,7 +1114,7 @@ export function searchSessions(
         WHERE memory_index_days.date = strftime('%Y-%m-%d', app_sessions.start_time / 1000, 'unixepoch', 'localtime')
       )`
     : ''
-  const legacyRows = db.prepare(`
+  const legacyRows = !legacyEligible ? [] : db.prepare(`
     SELECT
       app_sessions.id,
       app_sessions.bundle_id,
@@ -976,9 +1144,13 @@ export function searchSessions(
           AND app_sessions.start_time >= exclusion.span_start_ms
           AND app_sessions.start_time < exclusion.span_end_ms
       )
+      ${legacyFilters.sql}
     ORDER BY app_sessions.start_time DESC
     LIMIT ?
-  `).all(SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs, limit) as {
+  `).all(
+    SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs,
+    ...legacyFilters.params, limit,
+  ) as {
     id: number
     bundle_id: string
     app_name: string
@@ -1018,8 +1190,10 @@ export function searchEntityMoments(
   opts: SearchOptions = {},
 ): SessionSearchResult[] {
   if (entityIds.length === 0 || !memorySearchAvailable(db)) return []
+  if (readerIneligible(opts, { applications: true, entities: true, sourceTypes: MEMORY_SOURCE_TYPES })) return []
   const { fromMs, toMs, limit } = searchBounds(opts)
-  const marks = entityIds.map(() => '?').join(', ')
+  const filters = memoryRecordFilterSql(opts)
+  const idMarks = entityIds.map(() => '?').join(', ')
   const rows = db.prepare(`
     SELECT
       memory_records.rowid AS id,
@@ -1037,15 +1211,16 @@ export function searchEntityMoments(
     FROM memory_record_entities tags
     JOIN memory_records ON memory_records.id = tags.record_id
     LEFT JOIN entities ON entities.id = memory_records.primary_entity_id
-    WHERE tags.entity_id IN (${marks})
+    WHERE tags.entity_id IN (${idMarks})
       AND memory_records.deleted_at IS NULL
       AND memory_records.start_ms >= ?
       AND memory_records.start_ms < ?
       ${MEMORY_RECORD_CORRECTION_FILTERS}
+      ${filters.sql}
     GROUP BY memory_records.rowid
     ORDER BY memory_records.start_ms DESC
     LIMIT ?
-  `).all(...entityIds, fromMs, toMs, limit) as MemoryMomentRow[]
+  `).all(...entityIds, fromMs, toMs, ...filters.params, limit) as MemoryMomentRow[]
   return rows.map(mapMemoryMomentRow)
 }
 
@@ -1074,11 +1249,13 @@ export function searchSemanticMoments(
   opts: SearchOptions = {},
 ): SessionSearchResult[] {
   if (!memorySearchAvailable(db)) return []
+  if (readerIneligible(opts, { applications: true, entities: true, sourceTypes: MEMORY_SOURCE_TYPES })) return []
   const vecReady = db.prepare(
     `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_semantic_vec'`,
   ).get() != null
   if (!vecReady) return []
   const { fromMs, toMs, limit } = searchBounds(opts)
+  const filters = memoryRecordFilterSql(opts)
   // Over-fetch neighbours: date bounds, correction filters, and the model
   // check trim the candidate set after the k-NN.
   const k = Math.min(Math.max(limit * 4, 16), 256)
@@ -1116,6 +1293,7 @@ export function searchSemanticMoments(
       AND memory_records.start_ms >= ?
       AND memory_records.start_ms < ?
       ${MEMORY_RECORD_CORRECTION_FILTERS}
+      ${filters.sql}
     ORDER BY hits.distance ASC
     LIMIT ?
   `).all(
@@ -1126,6 +1304,7 @@ export function searchSemanticMoments(
     SEMANTIC_MAX_DISTANCE,
     fromMs,
     toMs,
+    ...filters.params,
     limit,
   ) as Array<MemoryMomentRow & { distance: number }>
   return rows.map((row) => ({
@@ -1161,6 +1340,7 @@ export function searchBlocks(
 ): BlockSearchResult[] {
   const ftsQuery = toFtsQuery(query)
   if (!ftsQuery) return []
+  if (readerIneligible(opts, { sourceTypes: OBSERVED_ONLY })) return []
   const { fromMs, toMs, limit } = searchBounds(opts)
 
   const indexedRows = db.prepare(`
@@ -1251,7 +1431,76 @@ export function searchBrowser(
 ): BrowserSearchResult[] {
   const ftsQuery = toFtsQuery(query)
   if (!ftsQuery) return []
+  if (readerIneligible(opts, { applications: true, websites: true, sourceTypes: OBSERVED_ONLY })) return []
   const { fromMs, toMs, limit } = searchBounds(opts)
+  const filters = websiteVisitFilterSql(opts)
+  const memoryAvailable = memorySearchAvailable(db)
+
+  // Canonical arm: the day's corrected browsing, projected per domain. An
+  // ignored span or an excluded site never became a record, so a correction
+  // propagates here by re-projection rather than by a hand-copied filter.
+  const memoryFilters = memoryRecordFilterSql(opts)
+  const memoryDomainFilter = hasValues(opts.websites)
+    ? `AND LOWER(memory_records.domain) IN (${marks(opts.websites.length)})`
+    : ''
+  const memoryDomainParams = hasValues(opts.websites)
+    ? opts.websites.map((domain) => domain.toLowerCase())
+    : []
+
+  const memoryResults: BrowserSearchResult[] = !memoryAvailable ? [] : (db.prepare(`
+    SELECT
+      memory_records.rowid AS id,
+      memory_records.domain,
+      memory_records.title AS page_title,
+      memory_records.url,
+      memory_records.start_ms,
+      memory_records.end_ms,
+      memory_records.date,
+      snippet(memory_records_fts, -1, ?, ?, '...', 18) AS excerpt
+    FROM memory_records_fts
+    JOIN memory_records ON memory_records.rowid = memory_records_fts.rowid
+    WHERE memory_records_fts MATCH ?
+      AND memory_records.record_kind = 'page'
+      AND memory_records.deleted_at IS NULL
+      AND memory_records.start_ms >= ?
+      AND memory_records.start_ms < ?
+      ${MEMORY_RECORD_CORRECTION_FILTERS}
+      ${memoryFilters.sql}
+      ${memoryDomainFilter}
+    ORDER BY memory_records.start_ms DESC
+    LIMIT ?
+  `).all(
+    SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs,
+    ...memoryFilters.params, ...memoryDomainParams, limit,
+  ) as Array<{
+    id: number
+    domain: string | null
+    page_title: string | null
+    url: string | null
+    start_ms: number
+    end_ms: number
+    date: string
+    excerpt: string | null
+  }>).map((row) => ({
+    type: 'browser',
+    id: row.id,
+    domain: row.domain ?? '',
+    pageTitle: row.page_title,
+    url: row.url,
+    startTime: row.start_ms,
+    endTime: row.end_ms,
+    date: row.date,
+    excerpt: row.excerpt ?? row.page_title ?? row.domain ?? '',
+  }))
+
+  // Legacy arm, restricted to days with no projection, so an indexed day
+  // answers exactly once and a not-yet-backfilled day still answers.
+  const unindexedDayFilter = memoryAvailable
+    ? `AND NOT EXISTS (
+        SELECT 1 FROM memory_index_days
+        WHERE memory_index_days.date = strftime('%Y-%m-%d', website_visits.visit_time / 1000, 'unixepoch', 'localtime')
+      )`
+    : ''
 
   const rows = db.prepare(`
     SELECT
@@ -1282,9 +1531,14 @@ export function searchBrowser(
           AND website_visits.visit_time >= exclusion.span_start_ms
           AND website_visits.visit_time < exclusion.span_end_ms
       )
+      ${unindexedDayFilter}
+      ${filters.sql}
     ORDER BY website_visits.visit_time DESC
     LIMIT ?
-  `).all(SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs, limit) as {
+  `).all(
+    SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs,
+    ...filters.params, limit,
+  ) as {
     id: number
     domain: string
     page_title: string | null
@@ -1294,7 +1548,7 @@ export function searchBrowser(
     excerpt: string | null
   }[]
 
-  return rows.map((row) => ({
+  const legacyResults: BrowserSearchResult[] = rows.map((row) => ({
     type: 'browser',
     id: row.id,
     domain: row.domain,
@@ -1305,6 +1559,10 @@ export function searchBrowser(
     date: localDateString(new Date(row.visit_time)),
     excerpt: row.excerpt ?? row.page_title ?? row.url ?? row.domain,
   }))
+
+  return [...memoryResults, ...legacyResults]
+    .sort((left, right) => right.startTime - left.startTime)
+    .slice(0, limit)
 }
 
 export function searchArtifacts(
@@ -1314,8 +1572,17 @@ export function searchArtifacts(
 ): ArtifactSearchResult[] {
   const ftsQuery = toFtsQuery(query)
   if (!ftsQuery) return []
+  if (readerIneligible(opts, { sourceTypes: OBSERVED_ONLY })) return []
   const { fromMs, toMs, limit } = searchBounds(opts)
 
+  // NOT routed through memory_records, deliberately. The canonical `artifact`
+  // record kind projects `artifacts`/`artifact_mentions` — documents observed
+  // in window titles — while this reader searches `ai_artifacts`, the files the
+  // assistant produced in a thread. They are different things, and pointing
+  // this reader at the canonical arm would make every AI artifact unfindable on
+  // any indexed day. What was genuinely broken here is the correction filter:
+  // this reader had none at all, so an artifact created inside a span the
+  // person marked ignored was still returned.
   const rows = db.prepare(`
     SELECT
       ai_artifacts.id,
@@ -1328,6 +1595,13 @@ export function searchArtifacts(
     WHERE ai_artifacts_fts MATCH ?
       AND ai_artifacts.created_at >= ?
       AND ai_artifacts.created_at < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM timeline_block_reviews review
+        WHERE review.review_state = 'ignored'
+          AND ai_artifacts.created_at >= json_extract(review.original_block_json, '$.startTime')
+          AND ai_artifacts.created_at < json_extract(review.original_block_json, '$.endTime')
+      )
     ORDER BY ai_artifacts.created_at DESC
     LIMIT ?
   `).all(SEARCH_HIGHLIGHT_START, SEARCH_HIGHLIGHT_END, ftsQuery, fromMs, toMs, limit) as {
@@ -2471,7 +2745,7 @@ export function insertWebsiteVisit(
         source
       )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `  ).run(
     visit.domain,
     visit.pageTitle,
     url,
@@ -2485,6 +2759,24 @@ export function insertWebsiteVisit(
     pageKey,
     visit.source,
   )
+  if (result.changes > 0) {
+    try {
+      const hasEntities = db.prepare(`
+        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entities' LIMIT 1
+      `).get()
+      if (hasEntities) {
+        const visitId = Number(result.lastInsertRowid)
+        adoptWebsiteVisitWrite(db, {
+          domain: visit.domain,
+          title: visit.pageTitle,
+          visitId: Number.isFinite(visitId) ? visitId : null,
+          observedAt: visit.visitTime,
+        })
+      }
+    } catch (error) {
+      console.warn('[queries] entity write-through for website visit failed', error)
+    }
+  }
   return result.changes > 0
 }
 
@@ -2631,7 +2923,17 @@ export function getBrowserActivityBreakdown(
   // draws from is shared with every other visit inside the same browser, and
   // filtering before reconciling would let a page fill time another visit had
   // already claimed (same rule as getTopPagesForDomains).
-  const credits = reconcileWebsiteVisits(db, fromMs, toMs)
+  //
+  // The caller's sessions MUST reach the reconciler. Without them it falls back
+  // to getSessionsForRange, which reads app_sessions — the legacy table that
+  // installs on the canonical focus_events evidence source stopped writing. It
+  // returns zero rows for any recent day, so the reconciler sees no foreground
+  // at all: every browser's claim pool collapses to the stretches no absence
+  // signal covers, and page credit all but vanishes. Measured on a real day,
+  // Dia's 4h04m broke down into 55m of named pages and 3h09m of invented
+  // "No page recorded". Passing the caller's corrected sessions restores the
+  // real foreground and the breakdown reconciles with the app header.
+  const credits = reconcileWebsiteVisits(db, fromMs, toMs, undefined, options.sessions)
   if (credits.length === 0) return { domains: [], attributedSeconds: 0 }
 
   // This browser's own foreground windows, duration-bounded so the credited
@@ -2796,6 +3098,37 @@ interface ReconciledVisitCredit {
   freeIntervals: { start: number; end: number }[]
 }
 
+function sessionMatchesBrowserVisit(session: AppSession, visit: ReconciledVisitRow): boolean {
+  if (visit.browser_bundle_id && session.bundleId === visit.browser_bundle_id) return true
+  if (visit.canonical_browser_id && session.canonicalAppId === visit.canonical_browser_id) return true
+  return false
+}
+
+function browserGroupIsTitleless(
+  sessions: readonly AppSession[],
+  browserVisits: readonly ReconciledVisitRow[],
+): boolean {
+  const matching = sessions.filter((session) =>
+    browserVisits.some((visit) => sessionMatchesBrowserVisit(session, visit)))
+  if (matching.length === 0) return true
+  return matching.every((session) => !session.windowTitle?.trim())
+}
+
+function historyFillCapMs(
+  visit: ReconciledVisitRow,
+  browserIsTitleless: boolean,
+  corroboratedMediaDomains: ReadonlySet<string>,
+): number {
+  if (
+    browserIsTitleless
+    && policyForHost(visit.domain) === 'entertainment'
+    && !corroboratedMediaDomains.has(visit.domain)
+  ) {
+    return HISTORY_FILL_UNCORROBORATED_MEDIA_MAX_MS
+  }
+  return HISTORY_FILL_MAX_MS
+}
+
 // One key separator used to keep composite Map keys unambiguous even when
 // a domain or browser id happens to contain a space or other punctuation.
 const KEY_SEP = String.fromCharCode(0)
@@ -2821,6 +3154,23 @@ const KEY_SEP = String.fromCharCode(0)
 // so a domain's reconciled total and the sum of its pages' reconciled
 // totals can never disagree by construction - they're unions of the same
 // underlying credited intervals, just grouped at different granularity.
+export interface VisiblePresenceInterval {
+  bundleId: string | null
+  appName?: string | null
+  canonicalAppId?: string | null
+  start: number
+  end: number
+}
+
+export interface ReconcileWebsiteVisitOptions {
+  allowUntrackedGaps?: boolean
+  // Full-screen / second-monitor presence for the same browsers. History
+  // fill and stored-duration clip may attach page time here. These windows
+  // never enter the overall-foreground gap calculation — a focused app on
+  // another display still owns the attention budget.
+  visiblePresence?: readonly VisiblePresenceInterval[]
+}
+
 function reconcileWebsiteVisits(
   db: Database.Database,
   fromMs: number,
@@ -2830,7 +3180,17 @@ function reconcileWebsiteVisits(
   // passes shared-query sessions here so page totals can never exceed the
   // browser total it reports; raw callers keep the legacy session read.
   foregroundSessions?: readonly AppSession[],
+  // Whether a visit may also be credited inside an honest capture gap — a
+  // stretch with no session at all and no absence signal. Supplying sessions
+  // used to imply "no", because the only callers that supplied them were the
+  // corrected read model, where page totals must never exceed the browser
+  // total. Block evidence needs both: real foreground from the caller's
+  // sessions AND the gap allowance, so a browser Daylens never saw as a
+  // session still counts while it was demonstrably the only thing running.
+  // Defaults to the old coupling, so every existing caller is unchanged.
+  options: ReconcileWebsiteVisitOptions = {},
 ): ReconciledVisitCredit[] {
+  const allowUntrackedGaps = options.allowUntrackedGaps ?? !foregroundSessions
   const whereExtra = browserBundleId ? ' AND browser_bundle_id = ?' : ''
   const params: (number | string)[] = browserBundleId
     ? [fromMs - SESSION_OVERLAP_LOOKBACK_MS, toMs, fromMs, browserBundleId]
@@ -2862,7 +3222,8 @@ function reconcileWebsiteVisits(
   const foregroundByBundle = new Map<string, { start: number; end: number }[]>()
   const foregroundByCanonical = new Map<string, { start: number; end: number }[]>()
   const allForeground: { start: number; end: number }[] = []
-  for (const session of foregroundSessions ?? getSessionsForRange(db, fromMs, toMs)) {
+  const sessionsForRange = foregroundSessions ?? getSessionsForRange(db, fromMs, toMs)
+  for (const session of sessionsForRange) {
     const interval = {
       start: session.startTime,
       end: session.endTime ?? (session.startTime + session.durationSeconds * 1000),
@@ -2876,6 +3237,28 @@ function reconcileWebsiteVisits(
       const byCanonical = foregroundByCanonical.get(session.canonicalAppId)
       if (byCanonical) byCanonical.push(interval)
       else foregroundByCanonical.set(session.canonicalAppId, [interval])
+    }
+  }
+
+  // Second-monitor / full-screen presence joins the per-browser maps only.
+  // allForeground (gap calculation) stays input-focused, so Notion on
+  // monitor 1 still owns the attention budget while Dia is visible on 2.
+  for (const span of options.visiblePresence ?? []) {
+    const interval = { start: span.start, end: span.end }
+    if (interval.end <= interval.start) continue
+    if (span.bundleId) {
+      const byBundle = foregroundByBundle.get(span.bundleId)
+      if (byBundle) byBundle.push(interval)
+      else foregroundByBundle.set(span.bundleId, [interval])
+    }
+    const canonical = span.canonicalAppId
+      ?? ((span.bundleId || span.appName)
+        ? resolveCanonicalApp(span.bundleId ?? '', span.appName ?? '').canonicalAppId
+        : null)
+    if (canonical) {
+      const byCanonical = foregroundByCanonical.get(canonical)
+      if (byCanonical) byCanonical.push(interval)
+      else foregroundByCanonical.set(canonical, [interval])
     }
   }
 
@@ -3068,27 +3451,36 @@ function reconcileWebsiteVisits(
     // browser's own total). The raw path keeps the untracked-gap allowance
     // for legacy surfaces that reconcile spotty early capture.
     const foregroundOnly = mergeIntervals(foregroundPieces)
-    const allowed = foregroundSessions
-      ? foregroundOnly
-      : mergeIntervals([...foregroundPieces, ...untracked])
+    const allowed = allowUntrackedGaps
+      ? mergeIntervals([...foregroundPieces, ...untracked])
+      : foregroundOnly
     // History-corroborated fill (capture spec: page detail attaches to an
-    // unverifiable-mode browser only via its own non-private history, and an
-    // active page interval is clipped to its owning foreground interval). A
+    // unverifiable-mode browser only via its own non-private history). A
     // history row's stored duration is a navigation-gap guess — a browser
     // whose tabs can't be read live (Dia) records ONE row for a two-hour
     // single-page stay, so summing stored durations loses the morning. The
-    // last known page in a browser may instead fill that browser's own
-    // verified foreground time until the next recorded navigation, bounded by
-    // HISTORY_FILL_MAX_MS. Live active-tab samples still claim their seconds
-    // first, so this only fills time no better evidence owns.
+    // last known page may fill that browser's verified foreground time AND
+    // its secondary-display visible time until the next recorded navigation,
+    // bounded by HISTORY_FILL_MAX_MS — or HISTORY_FILL_UNCORROBORATED_MEDIA_MAX_MS
+    // when a titleless browser's last row is an entertainment host with no
+    // live tab sample. Live active-tab samples still claim their seconds first.
+    // Visible time never adds to app totals; it only lets the page explain a
+    // span the display stream already proved.
     const ascendingHistory = [...browserVisits].sort((a, b) => a.visit_time - b.visit_time || a.id - b.id)
+    const browserIsTitleless = browserGroupIsTitleless(sessionsForRange, browserVisits)
+    const corroboratedMediaDomains = new Set<string>()
+    for (const visit of browserVisits) {
+      if (visit.source === 'active_browser_context' && policyForHost(visit.domain) === 'entertainment') {
+        corroboratedMediaDomains.add(visit.domain)
+      }
+    }
     const historyFillEnd = new Map<number, number>()
     for (let index = 0; index < ascendingHistory.length; index++) {
       const visit = ascendingHistory[index]
       if (visit.source === 'active_browser_context') continue
       const storedEndMs = visit.visit_time + visit.duration_sec * 1000
       const nextStartMs = ascendingHistory[index + 1]?.visit_time ?? Number.POSITIVE_INFINITY
-      const fillEnd = Math.min(nextStartMs, storedEndMs + HISTORY_FILL_MAX_MS)
+      const fillEnd = Math.min(nextStartMs, storedEndMs + historyFillCapMs(visit, browserIsTitleless, corroboratedMediaDomains))
       if (fillEnd > storedEndMs) historyFillEnd.set(visit.id, fillEnd)
     }
     // The observed active tab beats a history record; among equals the later
@@ -3396,8 +3788,9 @@ export function getReconciledWebsiteVisitsForRange(
   // Corrected-read callers pass shared-query sessions so page credit clips to
   // the same foreground ownership their app totals are built from.
   foregroundSessions?: readonly AppSession[],
+  options: ReconcileWebsiteVisitOptions = {},
 ): ReconciledPageVisit[] {
-  return reconcileWebsiteVisits(db, fromMs, toMs, undefined, foregroundSessions).map(({ visit, freeIntervals }) => ({
+  return reconcileWebsiteVisits(db, fromMs, toMs, undefined, foregroundSessions, options).map(({ visit, freeIntervals }) => ({
     visit: {
       id: visit.id,
       domain: visit.domain,
@@ -3435,13 +3828,18 @@ export function getReconciledDomainIntervals(
   toMs: number,
   domainFilter?: (domain: string) => boolean,
   foregroundSessionsForRange?: (fromMs: number, toMs: number) => readonly AppSession[],
+  visiblePresenceForRange?: (fromMs: number, toMs: number) => readonly VisiblePresenceInterval[],
 ): DomainCreditInterval[] {
   const DAY_MS = 24 * 60 * 60 * 1000
   const out: DomainCreditInterval[] = []
   for (let chunkStart = fromMs; chunkStart < toMs; chunkStart += DAY_MS) {
     const chunkEnd = Math.min(chunkStart + DAY_MS, toMs)
     const foreground = foregroundSessionsForRange?.(chunkStart, chunkEnd)
-    for (const { visit, freeIntervals } of reconcileWebsiteVisits(db, chunkStart, chunkEnd, undefined, foreground)) {
+    const visiblePresence = visiblePresenceForRange?.(chunkStart, chunkEnd)
+    for (const { visit, freeIntervals } of reconcileWebsiteVisits(
+      db, chunkStart, chunkEnd, undefined, foreground,
+      visiblePresence && visiblePresence.length > 0 ? { visiblePresence } : {},
+    )) {
       if (!visit.domain) continue
       if (domainFilter && !domainFilter(visit.domain)) continue
       for (const interval of freeIntervals) {
@@ -3721,6 +4119,30 @@ export function getActivityStateEventsForRange(
     WHERE event_ts >= ? AND event_ts < ?
     ORDER BY event_ts ASC
   `).all(fromMs, toMs) as ActivityStateEventRecord[]
+}
+
+/** The most recent activity-state event strictly before a boundary, within a
+ *  bounded look-back. Lets a scan reconstruct the machine state already in
+ *  force when its window opens (an idle_start from before the first session
+ *  still covers the window when no end event ever arrived). */
+export function getLastActivityStateEventBefore(
+  db: Database.Database,
+  beforeMs: number,
+  lookBackMs: number,
+): ActivityStateEventRecord | null {
+  const row = db.prepare(`
+    SELECT
+      id,
+      event_ts AS eventTs,
+      event_type AS eventType,
+      source,
+      metadata_json AS metadataJson
+    FROM activity_state_events
+    WHERE event_ts < ? AND event_ts >= ?
+    ORDER BY event_ts DESC
+    LIMIT 1
+  `).get(beforeMs, beforeMs - lookBackMs) as ActivityStateEventRecord | undefined
+  return row ?? null
 }
 
 export function setBlockLabelOverride(

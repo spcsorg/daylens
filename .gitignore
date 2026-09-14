@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .vite/
 out/
 dist/
@@ -10,6 +10,8 @@ private/
 
 # Compiled native helpers — built by scripts/build-capture-helper.sh
 build/capture-helper
+build/calendar-helper
+build/calendar-helper.app
 
 # AI agent working files — ephemeral planning docs, not part of the source record
 PLAN.md
@@ -21,6 +23,7 @@ skills-lock.json
 # AI regression harness — last-run cache, regenerated each run
 tests/ai-bench/.last-results.json
 .ai-behaviour/
+.recap-lab/
 .timeline-eval/
 
 # Claude Code local permissions (per-user, not shared)
@@ -35,3 +38,6 @@ artifacts/
 
 # ShipStudio metadata
 .shipstudio/
+.journal-eval/
+.vercel
+.env*

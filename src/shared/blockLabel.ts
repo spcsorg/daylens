@@ -1,5 +1,6 @@
 import type { AppCategory, ArtifactRef, WorkContextBlock } from './types'
-import { activityCategoryLabel } from './activityCategories'
+import { ACTIVITY_CATEGORY_LABELS, activityCategoryLabel } from './activityCategories'
+import { workNameGuardLabelViolation } from './workNameGuards'
 
 // Categories where a browser page artifact is a plausible label source for the
 // whole block. For development/communication/writing/etc. a co-occurring browser
@@ -110,12 +111,13 @@ export function naturalizeLabel(value: string): string {
   return cleaned.trim()
 }
 
-function isUsefulLabel(value: string | null | undefined): value is string {
+export function isUsefulLabel(value: string | null | undefined): value is string {
   if (!value) return false
   const trimmed = value.trim()
   if (!trimmed) return false
   if (GENERIC_LABELS.has(trimmed)) return false
   if (looksLikeRawArtifactLabel(trimmed)) return false
+  if (workNameGuardLabelViolation(trimmed, { storedLabel: true })) return false
   const pipeSegments = trimmed.split(/\s*\|\s*/).filter(Boolean)
   // 3+ pipe segments is almost always raw browser-tab soup
   // ("W2_Reading | Intro to ML | Perusall"). Reject so we fall through to a
@@ -131,6 +133,22 @@ function isUsefulLabel(value: string | null | undefined): value is string {
 
 function categoryDisplayName(category: AppCategory): string {
   return activityCategoryLabel(category)
+}
+
+const CATEGORY_FLOOR_LABELS = new Set(
+  [...Object.values(ACTIVITY_CATEGORY_LABELS), 'Untracked time'].map((label) => label.toLowerCase()),
+)
+
+/** True for the wordings `userVisibleBlockLabel` falls back to when nothing
+ *  named the block: the category word, "Untracked time", or the app list
+ *  ("Cursor and Chrome — activity"). `GENERIC_LABELS` misses several of them
+ *  (Entertainment, Social), so a surface that must not present a floor as a
+ *  description asks here as well. */
+export function labelIsCategoryFloor(value: string | null | undefined): boolean {
+  const trimmed = value?.trim()
+  if (!trimmed) return false
+  if (CATEGORY_FLOOR_LABELS.has(trimmed.toLowerCase())) return true
+  return /\s—\sactivity$/.test(trimmed)
 }
 
 function cleanSiteName(domain: string): string {
@@ -167,7 +185,7 @@ export function userVisibleBlockLabel(block: WorkContextBlock): string {
   )
   if (topArtifact) {
     const naturalized = naturalizeLabel(topArtifact.displayTitle.trim())
-    if (naturalized && !GENERIC_LABELS.has(naturalized) && !looksLikeRawArtifactLabel(naturalized)) return naturalized
+    if (isUsefulLabel(naturalized)) return naturalized
   }
 
   // A bare site name is only an honest label when a page could own the block.

@@ -9,6 +9,7 @@
 // question and a closing reflection. Rejected lines fall back per slide.
 
 import { createHash } from 'node:crypto'
+import { INTERPRETATION_DIRECTIVES } from '@shared/activityDescription'
 import { VOICE_SYSTEM_PROMPT } from '../ai/voiceContract'
 import type {
   WrappedPeriod,
@@ -61,7 +62,7 @@ const PERIOD_ANGLES = [
 /** Bumped whenever the period wrap's prompt semantics change (directives,
  *  contract, slide asks), so a stored analysis version records WHICH prompt
  *  produced it (DEV-206: reproducible, inspectable versions). */
-export const PERIOD_WRAP_PROMPT_VERSION = 1
+export const PERIOD_WRAP_PROMPT_VERSION = 2
 
 export function computePeriodFactsHash(facts: WrappedPeriodFacts): string {
   const bucket = (s: number) => Math.round(s / 60)
@@ -126,6 +127,8 @@ export function buildPeriodPrompts(facts: WrappedPeriodFacts): { systemPrompt: s
     DECK_JSON_CONTRACT,
     PERIOD_TIME_LITERACY,
     ...EVIDENCE_HONESTY_DIRECTIVES,
+    // Interpretation half only, for the same reason as the day deck.
+    ...INTERPRETATION_DIRECTIVES,
     'Each slide line is one or two sentences, written to the person ("you"), specific, never generic. Stat/caption slides stay tight (under ~200 characters); the thread and story beats may run to two full sentences. The curious question stays under ~200 characters and contains NO clock time and NO percentage.',
     'ADD A READ, DO NOT RESTATE. On every stat slide the slide\'s OWN big number is already printed huge on the card. Do not make that one number the subject of your sentence and do not merely repeat it. Lead with what it MEANS. BUT your line must still be concrete: anchor it in at least one real detail that is NOT that headline number, for example the real thread or work, a real day, or a real supporting figure. Never go vague or generic to avoid the number.',
     'THE REGISTER, by example (never copy these, match their honesty): "Tuesday morning you went straight into the code and stayed there for two and a half hours before your first break." / "Wednesday carried the week and Thursday paid for it, which is a fair trade." / "Three of the five days ended after 11pm, and the work shows where those hours went."',
@@ -137,7 +140,7 @@ export function buildPeriodPrompts(facts: WrappedPeriodFacts): { systemPrompt: s
     'Tools and apps may be named ONLY on the slides whose facts contain them (timesink, apps, forgotten, leisure). Everywhere else, say what was being made. A tool (Claude Code, Cursor, Warp, Canva) is the instrument, never the thing being made.',
     `Main mode = facts.dominantWorkCategory, the actual WORK, never leisure. A working person's ${label} is never "mostly entertainment" because a few videos played on the side.`,
     'NEVER grade: no focus score, no drift, no productivity score. Write a percentage ONLY on the work-versus-leisure split slide, and only the exact percentages that slide hands you; never put a percentage on any other slide.',
-    'BANNED WORDS, never write any of them, not even to negate them: "productive", "productivity", "distraction", "distracted", "drift", "focused", "focus score", "dinnertime". Part-of-day words ("morning", "midday", "the evenings", "late into the night") are free prose; use them naturally and accurately. But "noon" and "midnight" are CLOCK TIMES, exactly like "12pm" and "12am": write them ONLY when that exact time is in the slide\'s own facts. A night that ended at 11:55pm ended at 11:55pm, never "midnight"; copy the listed clock or say "late into the night".',
+    'BANNED WORDS, never write any of them, not even to negate them: "productive", "productivity", "drift", "focused", "focus score", "dinnertime". "Distraction" may name the live distraction profile or a leisure surface; do not use it to scold. Part-of-day words ("morning", "midday", "the evenings", "late into the night") are free prose; use them naturally and accurately. But "noon" and "midnight" are CLOCK TIMES, exactly like "12pm" and "12am": write them ONLY when that exact time is in the slide\'s own facts. A night that ended at 11:55pm ended at 11:55pm, never "midnight"; copy the listed clock or say "late into the night".',
     'DO NOT DEFEND OR JUSTIFY REST OR LEISURE. Never argue that downtime was "not drift", "not a distraction", "deliberate", or "earned". Rest is allowed and needs no defense; say plainly what happened and move on.',
     'Never state how MANY meetings there were; the facts only know the total meeting time.',
     `NEVER predict the next ${label}, NEVER say anything carries forward or needs picking up, NEVER assign homework. The recap looks back, never ahead.`,

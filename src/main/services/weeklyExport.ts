@@ -2,12 +2,27 @@
 // same corrected day payloads the Timeline renders — the model never types the
 // numbers. Sheet 1 is the per-day week summary with a totals row; sheet 2 is
 // the by-app rollup whose total equals sheet 1's week total by construction.
-import ExcelJS from 'exceljs'
+import { createRequire } from 'node:module'
+import type ExcelJS from 'exceljs'
 import type Database from 'better-sqlite3'
 import { blockActiveSeconds } from '@shared/blockDuration'
-import type { TimelineGapSegment } from '@shared/types'
+import type { DayTimelinePayload, TimelineGapSegment } from '@shared/types'
 import { localDateString } from '../lib/localDate'
-import { getTimelineDayPayload } from './workBlocks'
+import { getTimelineDayPayload, userVisibleLabelForBlock } from './workBlocks'
+
+
+
+const nodeRequire = createRequire(__filename)
+
+// exceljs is the heaviest module in the main process (~170ms of require) and
+// it is only ever needed when someone exports a workbook. Load it then.
+let excelJsModule: typeof import('exceljs') | null = null
+function excelJs(): typeof import('exceljs') {
+  if (!excelJsModule) {
+    excelJsModule = nodeRequire('exceljs') as typeof import('exceljs')
+  }
+  return excelJsModule
+}
 
 export interface WeeklyExportDay {
   date: string
@@ -15,6 +30,8 @@ export interface WeeklyExportDay {
   activeSeconds: number
   topApps: { appName: string; seconds: number }[]
   topSites: { domain: string; seconds: number }[]
+  projects: string[]
+  notes: string
   gaps: { kind: string; seconds: number }[]
 }
 
@@ -41,8 +58,31 @@ export function mondayOf(date: string): string {
   return localDateString(new Date(parsed.getTime() - offset * DAY_MS))
 }
 
-export function weeklyExportFilename(weekStart: string): string {
-  return `daylens-week-${weekStart}.xlsx`
+export function weeklyExportFilename(weekStart: string, weekEnd = weekEndFromMonday(weekStart)): string {
+  const endDay = weekEnd.slice(8)
+  return `Daylens-week-${weekStart}-to-${endDay}.xlsx`
+}
+
+function weekEndFromMonday(weekStart: string): string {
+  return localDateString(new Date(dayStart(weekStart).getTime() + 6 * DAY_MS))
+}
+
+function dayProjects(payload: DayTimelinePayload): string[] {
+  return (payload.dayEntities ?? [])
+    .filter((entity) => entity.type === 'project' || entity.type === 'client')
+    .sort((left, right) => right.seconds - left.seconds)
+    .map((entity) => entity.name)
+    .filter((name) => name.trim().length > 0)
+    .slice(0, 3)
+}
+
+function dayNotes(payload: DayTimelinePayload): string {
+  const labels = payload.blocks
+    .map((block) => userVisibleLabelForBlock(block))
+    .filter((label) => label.trim().length > 0)
+    .filter((label, index, all) => all.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index)
+    .slice(0, 3)
+  return labels.join(' · ')
 }
 
 function formatHoursMinutes(seconds: number): string {
@@ -133,6 +173,8 @@ export function collectWeeklyExportData(db: Database.Database, weekStartDate: st
       topSites: payload.websites
         .slice(0, 3)
         .map((site) => ({ domain: site.domain, seconds: site.totalSeconds })),
+      projects: dayProjects(payload),
+      notes: dayNotes(payload),
       gaps: [...gapSeconds.entries()]
         .map(([kind, seconds]) => ({ kind, seconds }))
         .filter((gap) => gap.seconds >= MIN_GAP_REPORT_SEC)
@@ -174,7 +216,7 @@ function stripeRow(row: ExcelJS.Row, index: number): void {
 }
 
 export async function writeWeeklyWorkbook(data: WeeklyExportData, filePath: string): Promise<void> {
-  const workbook = new ExcelJS.Workbook()
+  const workbook = new (excelJs().Workbook)()
 
   const summary = workbook.addWorksheet('Week summary')
   summary.columns = [
@@ -183,6 +225,8 @@ export async function writeWeeklyWorkbook(data: WeeklyExportData, filePath: stri
     { header: 'Active time', key: 'active', width: 12 },
     { header: 'Top apps', key: 'apps', width: 44 },
     { header: 'Top sites', key: 'sites', width: 36 },
+    { header: 'Project/client', key: 'projects', width: 28 },
+    { header: 'Notes', key: 'notes', width: 48 },
     { header: 'Gaps & absences', key: 'gaps', width: 32 },
   ]
   styleHeaderRow(summary.getRow(1))
@@ -193,6 +237,8 @@ export async function writeWeeklyWorkbook(data: WeeklyExportData, filePath: stri
       active: formatHoursMinutes(day.activeSeconds),
       apps: day.topApps.map((app) => `${app.appName} ${formatHoursMinutes(app.seconds)}`).join(' · '),
       sites: day.topSites.map((site) => `${site.domain} ${formatHoursMinutes(site.seconds)}`).join(' · '),
+      projects: day.projects.join(' · '),
+      notes: day.notes,
       gaps: day.gaps.map((gap) => `${gap.kind} ${formatHoursMinutes(gap.seconds)}`).join(' · '),
     })
     stripeRow(row, index)
@@ -204,6 +250,8 @@ export async function writeWeeklyWorkbook(data: WeeklyExportData, filePath: stri
     active: formatHoursMinutes(data.totalSeconds),
     apps: weekTopApps,
     sites: '',
+    projects: '',
+    notes: '',
     gaps: '',
   }))
 

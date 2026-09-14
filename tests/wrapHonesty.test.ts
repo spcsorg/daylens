@@ -55,9 +55,21 @@ test('overclaim guard kills the product speaking as the narrator', () => {
 })
 
 test('Daylens as the thing worked on stays legal', () => {
-  assert.equal(findOverclaimViolation('The evening went entirely to Daylens, one long unbroken run.'), null)
+  assert.equal(findOverclaimViolation('The evening went entirely to Daylens, one long run.'), null)
   assert.equal(findOverclaimViolation('Nine commits to Daylens by the end of the night.'), null)
   assert.equal(findOverclaimViolation('The Daylens work carried the whole afternoon.'), null)
+})
+
+test('overclaim guard kills continuity absolutes; the run itself stays legal', () => {
+  // The longest-stretch fact is measured with tolerances; swearing nothing
+  // else happened inside it is the shape-judge failure that capped real days.
+  assert.ok(findOverclaimViolation('One long unbroken run on the timeline engine.'))
+  assert.ok(findOverclaimViolation('Nothing broke it, 4:01pm to 10:01pm.'))
+  assert.ok(findOverclaimViolation('Two hours straight through, uninterrupted.'))
+  assert.ok(findOverclaimViolation('You worked without a break from lunch to dinner.'))
+  assert.ok(findOverclaimViolation('Nothing interrupted the afternoon build.'))
+  assert.equal(findOverclaimViolation('The longest run of the day, 1h 42m on the timeline engine.'), null)
+  assert.equal(findOverclaimViolation('One stretch carried the afternoon.'), null)
 })
 
 // ─── Raw-artifact leak guard ──────────────────────────────────────────────────
@@ -119,6 +131,19 @@ test('noon and midnight are clock claims that must ground in the slide facts', (
 test('midday and other part-of-day words are free prose, never clock tokens', () => {
   assert.equal(wrapLineViolation('The 1:1 sat on the calendar at midday and the afternoon built around it.', ctx), null)
   assert.equal(wrapLineViolation('The morning carried the close and the evening stayed quiet.', ctx), null)
+})
+
+test('wrapLineViolation allows factual distraction language but rejects blame and personal judgment', () => {
+  assert.equal(
+    wrapLineViolation('YouTube was the main distraction surface, and it sat in the evening where it belonged.', ctx),
+    null,
+  )
+  assert.ok(wrapLineViolation('Distractions derailed the afternoon after the morning engine work.', ctx))
+  assert.ok(wrapLineViolation('You got distracted and lost the afternoon to YouTube.', ctx))
+  const drift = wrapLineViolation('The afternoon was just drift after the morning engine work.', ctx)
+  assert.ok(drift && /drift/.test(drift))
+  const score = wrapLineViolation('Your focus score landed well above the rest of the week.', ctx)
+  assert.ok(score && /focus score/.test(score))
 })
 
 // ─── Coverage slide ───────────────────────────────────────────────────────────

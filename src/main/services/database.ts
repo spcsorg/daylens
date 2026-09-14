@@ -8,6 +8,7 @@ import { runMigrations } from '../db/migrations'
 import { ensureAIThreadSchema } from '../db/aiThreadSchema'
 import { repairStoredAppIdentityObservations } from '../core/inference/appIdentityRegistry'
 import { repairStoredIdentityColumns, syncDerivedStateMetadata } from '../core/projections/metadata'
+import { scheduleStartupMaintenance } from '../lib/startupMaintenanceGate'
 
 let _db: Database.Database | null = null
 
@@ -107,8 +108,12 @@ export function initDb(): void {
     // Synchronize versioned derived-state metadata and repair older local DBs
     // whose schema drifted before the formal metadata layer existed.
     syncDerivedStateMetadata(_db)
-    // Deferred to a background macrotask to keep cold launch instantaneous (F1 & F2 optimization)
-    setImmediate(() => {
+    // These heal historical drift. Nothing the first paint reads depends on
+    // them, and on a large database they cost seconds — so a host that owns a
+    // window holds them until it has one (see holdStartupMaintenance). With no
+    // holder — tests, workers, the CLI — they run on the next macrotask as
+    // before.
+    scheduleStartupMaintenance(() => {
       try {
         if (_db) {
           repairStoredIdentityColumns(_db)
@@ -117,6 +122,28 @@ export function initDb(): void {
         }
       } catch (err) {
         console.warn('[db] deferred repairs failed:', err)
+      }
+      // Heal stored block labels that today's work-name guards disqualify
+      // ("Working on Cursor Agents", leisure headlines on work blocks) and
+      // stored category facts the attention-clamped rules now contradict
+      // (a stale 'entertainment' dominant on a Slack/CI block). Runs once per
+      // guard version (WORK_NAME_GUARD_VERSION stamp), in bounded batches,
+      // and is safe to interrupt. Dynamic import: labelGuardRepair pulls in
+      // the whole workBlocks module, which must not join the cold launch path.
+      if (_db) {
+        const db = _db
+        import('./labelGuardRepair')
+          .then(({ runLabelGuardRepairIfNeeded }) => runLabelGuardRepairIfNeeded(db))
+          .then((result) => {
+            if (result.status === 'ran' && (result.healedBlocks > 0 || result.healedCategoryBlocks > 0)) {
+              console.log(
+                `[db] label guard repair healed ${result.healedBlocks} label(s) and `
+                + `${result.healedCategoryBlocks} category fact(s) `
+                + `across ${result.affectedDates.length} day(s)`,
+              )
+            }
+          })
+          .catch((err) => console.warn('[db] label guard repair failed:', err))
       }
     })
 
