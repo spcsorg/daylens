@@ -110,6 +110,38 @@ test('stripSecrets redacts secret keys and credential-shaped values', () => {
   assert.ok(raw.includes('2026-07-15'))
 })
 
+test('recordMcpActivity redacts credential-shaped values in errors', () => {
+  const dir = tempDir('daylens-mcp-activity-error-secret-')
+  const logPath = path.join(dir, 'mcp-activity.jsonl')
+  recordMcpActivity(logPath, {
+    tool: 'unknown',
+    arguments: {},
+    ok: false,
+    error: 'Unknown tool sk-abcdefghijklmnopqrstuvwxyz012345',
+  })
+
+  const raw = fs.readFileSync(logPath, 'utf8')
+  assert.ok(!raw.includes('sk-abcdefghijklmnopqrstuvwxyz012345'))
+  assert.equal(readMcpActivity(logPath)[0]?.error, 'Unknown tool [redacted]')
+})
+
+test('recordMcpActivity redacts credential-shaped values in the tool name', () => {
+  const dir = tempDir('daylens-mcp-activity-tool-secret-')
+  const logPath = path.join(dir, 'mcp-activity.jsonl')
+  // The tool name is client-controlled and sanitized by its own assignment,
+  // so it needs its own guard: a regression there would restore credential
+  // persistence without touching the error path this file already covers.
+  recordMcpActivity(logPath, {
+    tool: 'call sk-abcdefghijklmnopqrstuvwxyz012345',
+    arguments: {},
+    ok: true,
+  })
+
+  const raw = fs.readFileSync(logPath, 'utf8')
+  assert.ok(!raw.includes('sk-abcdefghijklmnopqrstuvwxyz012345'), 'the raw JSONL must not persist the credential')
+  assert.equal(readMcpActivity(logPath)[0]?.tool, 'call [redacted]')
+})
+
 test('concurrent appends keep one complete JSON object per line', () => {
   const dir = tempDir('daylens-mcp-activity-concurrent-')
   const logPath = path.join(dir, 'mcp-activity.jsonl')
