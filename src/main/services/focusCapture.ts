@@ -134,6 +134,7 @@ function spawnRelay(): void {
   const paths = resolveRelayPaths()
   if (!paths) {
     console.warn('[focusCapture] capture relay not found — capture cannot start')
+    markHelperFailed()
     return
   }
 
@@ -186,6 +187,7 @@ function spawnRelay(): void {
   })
   proc.on('error', (err) => {
     console.warn('[focusCapture] relay process error:', err)
+    markHelperFailed()
   })
   proc.on('exit', (code, signal) => {
     if (relay === proc) relay = null
@@ -198,6 +200,11 @@ function spawnRelay(): void {
       purgeFocusCaptureSpool()
     }
     if (stopping) return
+    // An unexpected relay exit is an outage whether or not the relay managed
+    // to report `helper-exited` first: it dies on its own spawn failure, on an
+    // initialisation error, and on a process-level error, and nothing is
+    // captured until the restart lands. Boundary first, then restart.
+    markHelperFailed()
     if (Date.now() - spawnedAt >= STABLE_UPTIME_MS) restartDelay = 1000
     console.warn(`[focusCapture] relay exited (code=${code} signal=${signal}); restarting`)
     scheduleRestart()
@@ -207,7 +214,9 @@ function spawnRelay(): void {
 export function startFocusCapture(): void {
   if (process.platform !== 'darwin') return
   stopping = false
-  helperFailed = false
+  // `helperFailed` is deliberately not reset here: a restart that follows a
+  // recorded failure must close that boundary with `capture_recovered` when
+  // the relay reports ready, not silently drop it.
   // A fresh consent grant supersedes any pending revocation sweep.
   purgeSpoolOnRelayExit = false
   // Anything spooled while the app was down lands before live tailing begins.

@@ -24,6 +24,23 @@ export function isFocusEligibleCategory(category: AppCategory | string): boolean
 }
 
 /**
+ * Which apps a sustained stretch may be built from. Same rule as
+ * `isAppFocused` — a work category OR an app the user named in onboarding as
+ * their real work — minus AI tools, which are never focus however they are
+ * configured. Deciding this from the category alone discards a qualifying
+ * 25-minute stretch in a niche or "other" app the user explicitly chose.
+ */
+export function isFocusEligibleApp(
+  category: AppCategory | string,
+  bundleId: string | null | undefined,
+  appName: string | null | undefined,
+  focusApps: readonly string[] | undefined,
+): boolean {
+  if (category === 'aiTools') return false
+  return isAppFocused(category, bundleId, appName, focusApps as string[] | undefined)
+}
+
+/**
  * Whether an app counts as real, focused work. A category in FOCUSED_CATEGORIES
  * always counts; on top of that, an app the user explicitly marked as their real
  * work in onboarding (`focusApps`) counts even if its category normally would
@@ -67,6 +84,8 @@ export interface SustainedFocusSession {
   bundleId?: string | null
   appName?: string | null
   canonicalAppId?: string | null
+  /** Already resolved against the user's `focusApps` by the projection. */
+  isFocused?: boolean
 }
 
 export interface SustainedFocusResult {
@@ -90,6 +109,7 @@ function sessionAppKey(session: SustainedFocusSession): string {
  */
 export function computeSustainedFocus(
   sessions: readonly SustainedFocusSession[],
+  focusApps?: readonly string[],
 ): SustainedFocusResult {
   const ordered = [...sessions]
     .filter((session) => sessionDurationSeconds(session) > 0)
@@ -121,7 +141,9 @@ export function computeSustainedFocus(
       : startTime !== null
         ? startTime + durationSeconds * 1000
         : null
-    const eligible = isFocusEligibleCategory(session.category)
+    const eligible = session.isFocused !== undefined
+      ? session.category !== 'aiTools' && session.isFocused
+      : isFocusEligibleApp(session.category, session.bundleId, session.appName, focusApps)
     const appKey = sessionAppKey(session)
     const gapBreaksStreak = startTime !== null && streakEndTime !== null
       ? startTime - streakEndTime > FOCUS_GAP_TOLERANCE_MS

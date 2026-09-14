@@ -281,7 +281,10 @@ function legacySessionsBeforeCanonicalEra(
   })
 }
 
-function totalsFromSessions(sessions: readonly AppSession[]): {
+function totalsFromSessions(
+  sessions: readonly AppSession[],
+  focusApps: readonly string[] | undefined,
+): {
   totalSeconds: number
   focusSeconds: number
   workCategorySeconds: number
@@ -293,7 +296,7 @@ function totalsFromSessions(sessions: readonly AppSession[]): {
       .filter((session) => session.isFocused)
       .reduce((sum, session) => sum + session.durationSeconds, 0),
   )
-  const rawFocus = computeSustainedFocus(sessions).focusSeconds
+  const rawFocus = computeSustainedFocus(sessions, focusApps).focusSeconds
   return { totalSeconds, focusSeconds: Math.min(rawFocus, totalSeconds), workCategorySeconds }
 }
 
@@ -503,7 +506,7 @@ export function queryCorrectedActivityFactsForRange(
       sessions[sessions.length - 1] = { ...last, id: LIVE_SESSION_SENTINEL_ID }
     }
   }
-  const { totalSeconds, focusSeconds, workCategorySeconds } = totalsFromSessions(sessions)
+  const { totalSeconds, focusSeconds, workCategorySeconds } = totalsFromSessions(sessions, focusApps)
   const explicitGaps = projectGapsFromFocusEvents(events, projectionEndMs)
   const inferredGaps = inferMissingCaptureGaps(
     db,

@@ -12,6 +12,9 @@
 //     evidence_exclusions count + max created_at; global on purpose —
 //     corrections are rare and small, so any change flushes every window)
 //   - legacy app_sessions in the window, when that table still exists
+//   - website_visits in the window (count + max id + summed duration — the
+//     inferred capture gaps, websiteVisitCount and coverage all read them,
+//     and a history import both inserts rows and updates durations in place)
 //   - the focusApps setting (feeds isFocused) and both query versions
 //
 // Windows that extend past "now" (a live day) additionally expire after a
@@ -87,6 +90,14 @@ export function computeRangeEvidenceSignature(
       `).get(fromMs, toMs) as { n: number; i: number }
     : { n: 0, i: 0 }
 
+  const visits = tableExists(db, 'website_visits')
+    ? db.prepare(`
+        SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS i, COALESCE(SUM(duration_sec), 0) AS d
+        FROM website_visits
+        WHERE visit_time >= ? AND visit_time < ?
+      `).get(fromMs, toMs) as { n: number; i: number; d: number }
+    : { n: 0, i: 0, d: 0 }
+
   return JSON.stringify([
     versionTag,
     readEvidenceEpoch(db),
@@ -94,6 +105,7 @@ export function computeRangeEvidenceSignature(
     reviews.n, reviews.u,
     exclusions.n, exclusions.u,
     legacy.n, legacy.i,
+    visits.n, visits.i, visits.d,
     focusApps,
   ])
 }

@@ -120,6 +120,23 @@ test('computeSustainedFocus counts a 30 minute single-app development stretch', 
   assert.equal(breakdown.streakCount, 1)
 })
 
+test('computeSustainedFocus honours an app the user configured as their real work', () => {
+  const uncategorised = session(0, 30, 'other', 'Reaper')
+  assert.equal(computeSustainedFocus([uncategorised]).focusSeconds, 0)
+  assert.equal(computeSustainedFocus([uncategorised], ['Reaper']).focusSeconds, 30 * 60)
+  // The projection resolves focusApps into isFocused; that answer must win too.
+  assert.equal(
+    computeSustainedFocus([{ ...uncategorised, isFocused: true }]).focusSeconds,
+    30 * 60,
+  )
+})
+
+test('computeSustainedFocus keeps AI tools ineligible even when configured as focus apps', () => {
+  const codex = session(0, 30, 'aiTools', 'Codex')
+  assert.equal(computeSustainedFocus([codex], ['Codex']).focusSeconds, 0)
+  assert.equal(computeSustainedFocus([{ ...codex, isFocused: true }]).focusSeconds, 0)
+})
+
 test('week and day summaries report real focus, expose the definition, and mark uncaptured days', () => {
   const db = createProductionTestDatabase()
 
