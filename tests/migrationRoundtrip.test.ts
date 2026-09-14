@@ -347,6 +347,23 @@ const PRE_V70_MEMORY_SCHEMA = `
   CREATE INDEX idx_memory_record_vectors_date ON memory_record_vectors (date);
 `
 
+/** A faithful pre-v70 database. Stamping a bare fixture at 69 is not enough:
+ *  a real v69 install carries every table the ladder built before then —
+ *  focus_events lands at v27 — and migrations after v70 index them (v81 does).
+ *  So build the whole thing, put memory_records back to its v69 shape, and
+ *  rewind the stamp; the ladder then replays v70 onward over a database that
+ *  looks like the one users actually upgrade from. */
+function preV70Database(): Database.Database {
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
+  db.exec(SCHEMA_SQL)
+  migrate(db)
+  db.exec(PRE_V70_MEMORY_SCHEMA)
+  db.exec('DELETE FROM schema_version WHERE version >= 70')
+  return db
+}
+
+
 test('SCHEMA_SQL never declares a memory object the ladder then changes', () => {
   // The fresh-install path in production is SCHEMA_SQL then the ladder
   // (services/database.ts). If a rebuild migration fires on that path, the
@@ -387,16 +404,7 @@ test('a v69 database boots through SCHEMA_SQL before v70 adds the domain column'
   // CREATE TABLE IF NOT EXISTS keeps the legacy memory_records. Anything
   // SCHEMA_SQL declares over a column only v70 adds therefore fails on the
   // upgrade path — before the migration that would have added it can run.
-  const db = new Database(':memory:')
-  db.pragma('foreign_keys = ON')
-  db.exec(PRE_V70_MEMORY_SCHEMA)
-  db.exec(`
-    CREATE TABLE schema_version (
-      version    INTEGER PRIMARY KEY,
-      applied_at INTEGER NOT NULL
-    );
-    INSERT INTO schema_version (version, applied_at) VALUES (69, 0);
-  `)
+  const db = preV70Database()
 
   try {
     assert.doesNotThrow(() => db.exec(SCHEMA_SQL))
@@ -418,18 +426,8 @@ test('fresh install and a pre-v70 upgrade converge on the same memory schema', (
 
   // (b) Upgrade: the v69 memory shape, carrying the FTS index a real v69
   // install had, then the ladder from v70 to HEAD.
-  const upgraded = new Database(':memory:')
-  upgraded.pragma('foreign_keys = ON')
-  upgraded.exec(SCHEMA_SQL)
-  upgraded.exec(PRE_V70_MEMORY_SCHEMA)
+  const upgraded = preV70Database()
   ensureMemorySearchSchema(upgraded)
-  upgraded.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version    INTEGER PRIMARY KEY,
-      applied_at INTEGER NOT NULL
-    )
-  `)
-  upgraded.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(69, 0)
 
   try {
     migrate(fresh)

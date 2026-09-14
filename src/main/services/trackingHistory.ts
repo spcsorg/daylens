@@ -13,6 +13,7 @@ import { materializeTimelineDayProjection } from '../core/query/projections'
 import { invalidateProjectionScope } from '../core/projections/invalidation'
 import { projectDay } from '../core/projections/chunk2'
 import { bumpRangeFactsEvidenceEpoch } from '../core/query/rangeFactsCache'
+import { syncDayMemoryMirror } from './memoryMirrorService'
 import { normalizeUrlForStorage, pageKeyForUrl, resolveCanonicalBrowser } from '../lib/appIdentity'
 
 export interface PurgeResult {
@@ -54,6 +55,13 @@ function rematerializeAndNotify(affectedDates: string[]): void {
   invalidateProjectionScope('timeline', 'tracking_controls_purge')
   invalidateProjectionScope('apps', 'tracking_controls_purge')
   invalidateProjectionScope('insights', 'tracking_controls_purge')
+  // The readable memory mirror is prose on disk, so the rule above applies to
+  // it too: a file must never keep describing activity the person deleted.
+  // Re-projecting from the just-purged day rewrites it without the deleted
+  // content; a day left with nothing writable renders as an empty day.
+  for (const date of affectedDates) {
+    void syncDayMemoryMirror(db, date)
+  }
 }
 
 function distinctLocalDates(timestamps: number[]): string[] {
@@ -121,6 +129,19 @@ export function deleteHistoryForApp(input: { bundleId?: string | null; appName?:
     deletedRows += db.prepare(`
       DELETE FROM focus_events
       WHERE (? <> '' AND lower(app_bundle_id) = lower(?))
+         OR (? <> '' AND lower(app_name) = lower(?))
+    `).run(...params).changes
+
+    const distractionRows = db.prepare(`
+      SELECT triggered_at
+      FROM distraction_events
+      WHERE (? <> '' AND lower(bundle_id) = lower(?))
+         OR (? <> '' AND lower(app_name) = lower(?))
+    `).all(...params) as { triggered_at: number }[]
+    for (const date of distinctLocalDates(distractionRows.map((row) => row.triggered_at))) affected.add(date)
+    deletedRows += db.prepare(`
+      DELETE FROM distraction_events
+      WHERE (? <> '' AND lower(bundle_id) = lower(?))
          OR (? <> '' AND lower(app_name) = lower(?))
     `).run(...params).changes
 
@@ -787,6 +808,8 @@ export function purgeTrackedEvidenceRows(db: Database.Database, input: PurgeTrac
         .run(fromMs, toMs, bundleId, appName)
       db.prepare(`DELETE FROM focus_events WHERE ts_ms >= ? AND ts_ms < ? AND (app_bundle_id = ? OR app_name = ?)`)
         .run(fromMs, toMs, bundleId, appName)
+      db.prepare(`DELETE FROM distraction_events WHERE triggered_at >= ? AND triggered_at < ? AND (bundle_id = ? OR app_name = ?)`)
+        .run(fromMs, toMs, bundleId, appName)
       db.prepare(`DELETE FROM derived_sessions WHERE start_ts_ms >= ? AND start_ts_ms < ? AND (app_bundle_id = ? OR app_name = ?)`)
         .run(fromMs, toMs, bundleId, appName)
     }
@@ -808,6 +831,7 @@ export function purgeTimelineBlockSpanRows(db: Database.Database, input: PurgeTi
     db.prepare(`DELETE FROM app_sessions WHERE start_time >= ? AND start_time < ?`).run(fromMs, toMs)
     db.prepare(`DELETE FROM website_visits WHERE visit_time >= ? AND visit_time < ?`).run(fromMs, toMs)
     db.prepare(`DELETE FROM focus_events WHERE ts_ms >= ? AND ts_ms < ?`).run(fromMs, toMs)
+    db.prepare(`DELETE FROM distraction_events WHERE triggered_at >= ? AND triggered_at < ?`).run(fromMs, toMs)
     db.prepare(`DELETE FROM derived_sessions WHERE start_ts_ms >= ? AND start_ts_ms < ?`).run(fromMs, toMs)
     db.prepare(`DELETE FROM artifact_mentions WHERE start_time >= ? AND start_time < ?`).run(fromMs, toMs)
   })
@@ -865,6 +889,24 @@ function focusEventAppIdentityWhereClause(input: DeleteTrackedActivityInput): { 
   return clauses.length > 0 ? { clause: `(${clauses.join(' OR ')})`, params } : null
 }
 
+function distractionEventAppIdentityWhereClause(input: DeleteTrackedActivityInput): { clause: string; params: unknown[] } | null {
+  const bundleId = (input.bundleId ?? '').trim()
+  const appName = (input.appName ?? '').trim()
+  const clauses: string[] = []
+  const params: unknown[] = []
+
+  if (bundleId) {
+    clauses.push('lower(bundle_id) = lower(?)')
+    params.push(bundleId)
+  }
+  if (appName) {
+    clauses.push('lower(app_name) = lower(?)')
+    params.push(appName)
+  }
+
+  return clauses.length > 0 ? { clause: `(${clauses.join(' OR ')})`, params } : null
+}
+
 export function deleteTrackedActivity(input: DeleteTrackedActivityInput): PurgeResult {
   const db = getDb()
   const appSessionIds = normalizeIds(input.appSessionIds)
@@ -881,12 +923,24 @@ export function deleteTrackedActivity(input: DeleteTrackedActivityInput): PurgeR
   if (appSessionIds.length > 0) {
     const inClause = placeholders(appSessionIds)
     const rows = db.prepare(`
-      SELECT start_time
+      SELECT bundle_id, app_name, start_time, COALESCE(end_time, start_time + duration_sec * 1000) AS end_time
       FROM app_sessions
       WHERE id IN (${inClause})
-    `).all(...appSessionIds) as { start_time: number }[]
+    `).all(...appSessionIds) as Array<{
+      bundle_id: string
+      app_name: string
+      start_time: number
+      end_time: number
+    }>
 
-    for (const row of rows) affectedDates.add(localDateString(new Date(row.start_time)))
+    for (const row of rows) {
+      affectedDates.add(localDateString(new Date(row.start_time)))
+      deletedRows += db.prepare(`
+        DELETE FROM distraction_events
+        WHERE triggered_at >= ? AND triggered_at < ?
+          AND (lower(bundle_id) = lower(?) OR lower(app_name) = lower(?))
+      `).run(row.start_time, row.end_time, row.bundle_id, row.app_name).changes
+    }
     deletedRows += db.prepare(`DELETE FROM app_sessions WHERE id IN (${inClause})`).run(...appSessionIds).changes
   }
 
@@ -923,6 +977,10 @@ export function deleteTrackedActivity(input: DeleteTrackedActivityInput): PurgeR
       deletedRows += db.prepare(`
         DELETE FROM focus_events
         WHERE ts_ms >= ? AND ts_ms < ?
+      `).run(row.start_ts_ms, row.end_ts_ms).changes
+      deletedRows += db.prepare(`
+        DELETE FROM distraction_events
+        WHERE triggered_at >= ? AND triggered_at < ?
       `).run(row.start_ts_ms, row.end_ts_ms).changes
     }
 
@@ -964,6 +1022,39 @@ export function deleteTrackedActivity(input: DeleteTrackedActivityInput): PurgeR
         AND ts_ms >= ?
         AND ts_ms < ?
     `).run(...focusEventAppWhere.params, explicitStartTime, explicitEndTime).changes
+  }
+
+  const distractionEventAppWhere = distractionEventAppIdentityWhereClause(input)
+  if (distractionEventAppWhere && hasValidExplicitRange) {
+    const distractionRows = db.prepare(`
+      SELECT triggered_at
+      FROM distraction_events
+      WHERE ${distractionEventAppWhere.clause}
+        AND triggered_at >= ?
+        AND triggered_at < ?
+    `).all(...distractionEventAppWhere.params, explicitStartTime, explicitEndTime) as { triggered_at: number }[]
+    for (const row of distractionRows) affectedDates.add(localDateString(new Date(row.triggered_at)))
+    deletedRows += db.prepare(`
+      DELETE FROM distraction_events
+      WHERE ${distractionEventAppWhere.clause}
+        AND triggered_at >= ?
+        AND triggered_at < ?
+    `).run(...distractionEventAppWhere.params, explicitStartTime, explicitEndTime).changes
+  } else if (
+    appSessionIds.length === 0
+    && derivedSessionIds.length === 0
+    && !appWhere
+    && explicitDate
+    && hasValidExplicitRange
+  ) {
+    const info = db.prepare(`
+      DELETE FROM distraction_events
+      WHERE triggered_at >= ? AND triggered_at < ?
+    `).run(explicitStartTime, explicitEndTime)
+    if (info.changes > 0) {
+      deletedRows += info.changes
+      affectedDates.add(explicitDate)
+    }
   }
 
   const domain = (input.domain ?? '').trim().toLowerCase().replace(/^www\./, '')

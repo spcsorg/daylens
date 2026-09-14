@@ -408,6 +408,13 @@ export interface DayTimelinePayload {
   // Additive: the durable entities the day's evidence supports naming.
   // Absent on payloads built before the entity ledger existed.
   dayEntities?: DayWrapEntity[]
+  // Additive: the day's open clarifying questions, detected over THIS payload.
+  // Present only when the caller asked for them — the day view needs them on
+  // first paint, the week and month views never do. Detecting them costs
+  // nothing next to the projection they are detected over, so asking for them
+  // here is what stops the day view from paying for a second projection just
+  // to reach the same answer.
+  clarifications?: TimelineClarification[]
 }
 
 /** What a manual Analyze / Re-analyze run actually did, so the UI reports the
@@ -1120,7 +1127,7 @@ export interface ContextPacketAnswerEvidence {
 }
 
 // ─── Context packet inspection (DEV-183) ─────────────────────────────────────
-// The renderer-facing shape of "what the AI saw" for one exchange: the
+// The renderer-facing shape of the sources inspector for one exchange: the
 // recorded packet re-read from the local ledger, grouped per kind, with each
 // item checked against the evidence that backs it today. Read-only — the
 // inspector shows the record, it never edits it.
@@ -1241,6 +1248,8 @@ export interface AIThreadMessageMetadata {
      *  to the inspectable shape before it was written. Absent on turns
      *  recorded before evidence coverage existed. */
     evidence?: ContextPacketAnswerEvidence
+    /** Wall-clock length of the agent turn, for the collapsed "Worked for" line. */
+    durationMs?: number | null
   }
   answerKind?: AIAnswerKind | null
   suggestedFollowUps?: FollowUpSuggestion[]
@@ -1620,6 +1629,54 @@ export interface WorkflowPattern {
 // the reconciled total without cluttering the list. Default: 10 seconds.
 export const MIN_DOMAIN_ROW_SECONDS = 10
 
+export interface AppActivityItem {
+  id: string
+  displayTitle: string
+  detail: string | null
+  totalSeconds: number
+  visitCount?: number
+  artifactType?: ArtifactRef['artifactType']
+  canonicalAppId?: string | null
+  ownerBundleId?: string | null
+  ownerAppName?: string | null
+  url?: string | null
+  host?: string | null
+  path?: string | null
+  domain?: string | null
+  normalizedUrl?: string | null
+  pageKey?: string | null
+  openTarget: OpenTarget
+}
+
+export interface AppActivityGroup {
+  id: string
+  label: string
+  kind: 'domain' | 'folder' | 'collection'
+  totalSeconds: number
+  itemCount: number
+  visitCount?: number
+  items: AppActivityItem[]
+}
+
+/**
+ * Expandable where-time-went tree for every app. Browsers use domain → page;
+ * native apps use folder/host → file or page. Reconciles:
+ * Σ item.totalSeconds = group.totalSeconds, Σ group.totalSeconds
+ * + everythingElse.totalSeconds = attributedSeconds, and
+ * attributedSeconds + unattributedSeconds = totalSeconds.
+ */
+export interface AppActivityBreakdown {
+  totalSeconds: number
+  attributedSeconds: number
+  unattributedSeconds: number
+  groups: AppActivityGroup[]
+  everythingElse?: {
+    totalSeconds: number
+    groupCount: number
+    itemCount: number
+  }
+}
+
 export interface AppDetailPayload {
   canonicalAppId: string
   displayName: string
@@ -1662,6 +1719,13 @@ export interface AppDetailPayload {
       visitCount: number
     }
   }
+  /**
+   * Comet/Dia-style expandable breakdown for every app, including native
+   * apps that have files, folders, or window titles instead of domains.
+   * Always present when the app has tracked time so the detail view never
+   * goes blank after the header.
+   */
+  activityBreakdown?: AppActivityBreakdown
   blockAppearances: Array<{
     blockId: string
     startTime: number
@@ -2049,6 +2113,17 @@ export type WrapSlidesExportResult =
   | { canceled: true }
   | { canceled: false; dir: string; files: string[] }
 
+/** One day's readable memory file, after a write attempt. `unchanged` means the
+ *  rendered day was byte-identical to what was already on disk, so nothing was
+ *  rewritten. `codexPath` is null unless the Codex export is enabled. */
+export interface MemoryMirrorSyncResult {
+  date: string
+  mirrorPath: string
+  codexPath: string | null
+  outcome: 'written' | 'unchanged'
+  bytes: number
+}
+
 /** The day's external signals, RESOLVED for the wrap writer: sanitized,
  *  humanized, pre-formatted, and stripped of anything the model must never
  *  echo (raw paths, branches, clock times it can't ground). Each block is
@@ -2111,13 +2186,36 @@ export interface DayEnrichment {
   } | null
 }
 
+export type McpDiscoverySource = 'claude-desktop' | 'claude-code' | 'cursor'
+
 /** Discovered optional enrichment sources shown in Settings: MCP servers from
- *  the Claude Desktop config and focus tools on this machine. Discovery
- *  only — nothing is called until the user enables it AND the enrichment is
- *  actually wired up. */
+ *  Claude Desktop, Claude Code, and Cursor configs, plus focus tools on this
+ *  machine. Discovery only — nothing is called until the user enables it AND
+ *  the enrichment is actually wired up. */
 export interface EnrichmentSourcesState {
-  mcpServers: Array<{ name: string; transport: 'stdio' | 'http' | 'unknown'; enabled: boolean }>
+  mcpServers: Array<{
+    name: string
+    transport: 'stdio' | 'http' | 'unknown'
+    enabled: boolean
+    source: McpDiscoverySource
+    sourceLabel: string
+  }>
   focusApps: Array<{ app: string; installed: boolean; enabled: boolean }>
+  /** Config files this scan looked at, so an empty state can name them. */
+  mcpConfigFiles: Array<{ label: string; displayPath: string }>
+}
+
+/** One external MCP tool call recorded next to the database. */
+export interface McpActivityEntry {
+  tool: string
+  timestamp: string
+  arguments: unknown
+  ok: boolean
+  error?: string
+}
+
+export interface McpActivityLog {
+  entries: McpActivityEntry[]
 }
 
 // ─── Wrap pre-flight ────────────────────────────────────────────────────────
@@ -2389,6 +2487,14 @@ export interface AppSettings {
   userGoals: string[]
   userIntent: string            // why the user is here, captured in onboarding; fed to AI suggestions
   summaryVoice?: SummaryVoice   // how recaps/wraps/briefs should sound; default 'warm'
+  /** Write each finished day as a readable Markdown file under the app data
+   *  directory. On by default: the file IS the local-first claim, and a person
+   *  who can open it can verify what Daylens recorded. */
+  memoryMirrorEnabled?: boolean
+  /** Additionally write those files into `$CODEX_HOME/memories/extensions/daylens`
+   *  so Codex and Claude Code read Daylens as a memory source. Off by default —
+   *  it writes outside Daylens's own data directory. */
+  memoryMirrorCodexExport?: boolean
   focusApps?: string[]          // apps the user counts as "real work" (bundle ids and/or names)
   interestedCategories?: AppCategory[] // categories the user said they care about; fed to AI context
   userRole?: string             // what the user does (e.g. "Designer"); seeds suggestions + AI context
@@ -2406,7 +2512,7 @@ export interface AppSettings {
   // The only per-surface provider override left: an explicit, user-chosen
   // provider for the AI chat tab. Every other surface follows `aiProvider`
   // (invariant #12). When unset, chat follows `aiProvider` too.
-  aiChatProvider?: AIProviderMode
+  aiChatProvider?: AIProviderMode | null
   aiBackgroundEnrichment?: boolean
   aiActiveBlockPreview?: boolean
   aiPromptCachingEnabled?: boolean
@@ -2436,11 +2542,12 @@ export interface AppSettings {
    *  without losing the brief itself. */
   activityFreeNotificationText?: boolean
   /** The interpretation-agent live switch (agent-runtime-and-context.md,
-   *  DEV-206): OFF by default. Turning it on routes automatic day analysis
-   *  through the packet-based interpretation agent instead of the direct
-   *  regroup/relabel pipeline — allowed only once the offline fixture eval
-   *  (interpretationEval) passes for the packaged runtime. Until that runtime
-   *  lands, the flag is honored but the direct pipeline still runs (logged). */
+   *  DEV-206 / DEV-287). When true, low-confidence day-analysis relabels run
+   *  through the packet-based interpretation agent. Historical relabels use
+   *  the read-only title, calendar, git, meeting-note, and entity tools.
+   *  Disclosure recording is fail-closed: if the interpret packet cannot be
+   *  stored, Daylens keeps the local label instead of making an unrecorded
+   *  remote call. The direct regroup/relabel pipeline remains the floor. */
   interpretationAgentEnabled?: boolean
   distractionAlertThresholdMinutes?: number
   distractionAlertsEnabled?: boolean
@@ -3126,6 +3233,7 @@ export const IPC = {
     GET_THREAD_SETTINGS: 'ai:get-thread-settings',
     SET_THREAD_SETTINGS: 'ai:set-thread-settings',
     OPEN_ARTIFACT: 'ai:open-artifact',
+    GET_MCP_ACTIVITY: 'ai:get-mcp-activity',
   },
   SETTINGS: {
     GET: 'settings:get',
@@ -3259,11 +3367,21 @@ export const IPC = {
     // person picks once. One dialog, many files, never a glued mega-image.
     WRAP_SLIDES: 'export:wrap-slides',
   },
+  MEMORY_MIRROR: {
+    // The readable memory mirror: one Markdown file per finished day. REVEAL is
+    // the trust action — it opens the actual file, so the local-first claim is
+    // something a person can check rather than take on faith.
+    LIST: 'memory-mirror:list',
+    ROOT: 'memory-mirror:root',
+    REVEAL: 'memory-mirror:reveal',
+    SYNC: 'memory-mirror:sync',
+    DELETE: 'memory-mirror:delete',
+  },
   CONTEXT_PACKETS: {
     GET: 'context-packets:get',
     GET_FOR_MESSAGE: 'context-packets:get-for-message',
     LIST: 'context-packets:list',
-    // DEV-183: the assembled read-only inspection behind "What the AI saw" —
+    // DEV-183: the assembled read-only inspection behind Sources for this answer —
     // the recorded packet grouped per kind, with omissions in plain language
     // and each item checked against the evidence backing it today.
     INSPECT: 'context-packets:inspect',
@@ -3285,7 +3403,7 @@ export const IPC = {
 } as const
 
 // A render crash caught by the renderer's ErrorBoundary, forwarded to the main
-// process for Sentry reporting. Code-level context only (error identity plus
+// process for error telemetry. Code-level context only (error identity plus
 // React component names) — never captured activity, titles, or page content.
 export interface RendererCrashReport {
   name: string

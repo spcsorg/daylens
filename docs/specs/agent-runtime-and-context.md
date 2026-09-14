@@ -73,7 +73,7 @@ The interpretation agent receives a bounded group of evidence and proposes under
 
 Its output is stored as versioned inference with source evidence, confidence, interpretation-policy version, model and runtime version, and creation time. It never overwrites the evidence that produced it. Reprocessing the same evidence may replace an automated inference but cannot override a person’s correction.
 
-In the current codebase this is the not-yet-wired `interpretationAgentEnabled` path in `analyzeDay.ts`. When wired, day analysis becomes an agent turn over the same tools as the chat agent: for each low-confidence block it may pull title context, entities, calendar, or (consented) frames before labeling. Deterministic heuristics stay as the always-available fallback and the floor for hermetic tests. This is where "the AI understands activity" and "the agent pulls context" become the same feature.
+In the current codebase this is the `interpretationAgentEnabled` path in `analyzeDay.ts`. When the flag is on, day analysis becomes an agent turn over the same read-only tools as the chat agent: for each low-confidence historical block it may pull title context, entities, or calendar before labeling. Live screen capture stays off this path — `shouldReanalyzeBlockWithAI` never sends a current block, and the tool is not registered unless the block is still live. Context-packet recording is fail-closed: if the disclosure record cannot be stored, Daylens keeps the local label. Deterministic heuristics stay as the always-available fallback and the floor for hermetic tests. This is where "the AI understands activity" and "the agent pulls context" become the same feature.
 
 ### Question-answering agent
 
@@ -164,7 +164,7 @@ For a full-day question, the initial packet may include:
 - the sequence of corrected Timeline blocks
 - resolved meetings and whether evidence supports that they occurred
 - project, client, person, repository, file, page, and application relationships
-- deterministic durations and meaningful transitions
+- deterministic durations and meaningful transitions, including per-site totals from the same reconciled website ledger and owned-day bounds Apps and Timeline read (not a history-row guess, not a calendar-midnight split, and not raw seconds)
 - significant connected events such as a pull request, issue change, or meeting note
 - capture gaps, exclusions that affect completeness, and material source conflicts
 
@@ -189,7 +189,7 @@ An interpretable block can contain:
 
 The agent may say that someone developed a feature, read an article, reviewed a report, attended a meeting, or researched a purchase when the evidence supports that language. It does not convert foreground application time into proof of comprehension, completion, attendance, or outcome.
 
-The day context does not assign productivity, focus, distraction, or quality scores. Short observations such as “Solid session there” are presentation and must remain grounded in the visible shape of the activity rather than a hidden behavioral score.
+The day context may include the live focus-score and distraction-profile facts when those surfaces already computed them. Short observations such as “Solid session there” remain presentation and must stay grounded in the visible shape of the activity, not in a hidden extra grade.
 
 ## File and document access
 
@@ -224,7 +224,7 @@ Daylens may answer that a file was used without reading its contents. It reads o
 
 ## Connector context
 
-The OAuth connector framework was removed from the product on 2026-07-26 (see [connectors.md](connectors.md)); calendar and git enrichment now arrives through the zero-setup local probes in `externalSignals.ts`, which is also the intended home of any reborn integration — as agent-pluggable evidence behind the tier model, not a settings page. The rules below bind any such source, current or future.
+The OAuth connector framework was removed from the product on 2026-07-26 (see connectors.md); calendar and git enrichment now arrives through the zero-setup local probes in `externalSignals.ts`, which is also the intended home of any reborn integration — as agent-pluggable evidence behind the tier model, not a settings page. The rules below bind any such source, current or future.
 
 A connected source makes permitted records retrievable; it does not preload the source into every conversation.
 

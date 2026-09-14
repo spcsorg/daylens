@@ -41,6 +41,8 @@ import type {
   HistoryExportRunResult,
   HistoryExportVerification,
   WrapSlidesExportResult,
+  MemoryMirrorSyncResult,
+  McpActivityLog,
   BillingUsageReport,
   SpendGuardrailsReport,
   IntercomIdentity,
@@ -278,7 +280,10 @@ const api = {
     close: () => ipcRenderer.send('window:close'),
   },
   db: {
-    getTimelineDay: (date: string): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.GET_TIMELINE_DAY, date),
+    getTimelineDay: (
+      date: string,
+      options?: { withClarifications?: boolean },
+    ): Promise<DayTimelinePayload> => ipcRenderer.invoke(IPC.DB.GET_TIMELINE_DAY, date, options),
     rebuildTimelineDay: (date: string, hint?: string): Promise<RebuildTimelineDayResult> => ipcRenderer.invoke(IPC.DB.REBUILD_TIMELINE_DAY, date, hint),
     // Subscribe to analyze progress ticks (DEV-270) for the duration of one run.
     onAnalyzeProgress: (callback: (update: TimelineAnalyzeProgress) => void): (() => void) => {
@@ -442,6 +447,8 @@ const api = {
       ipcRenderer.invoke(IPC.AI.SET_THREAD_SETTINGS, { threadId, settings }),
     openArtifact: (artifactId: number): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.AI.OPEN_ARTIFACT, { artifactId }),
+    getMcpActivity: (): Promise<McpActivityLog> =>
+      ipcRenderer.invoke(IPC.AI.GET_MCP_ACTIVITY),
   },
   search: {
     // The unified boundary: the planner scopes, retrieves, reconciles, and
@@ -675,6 +682,18 @@ const api = {
     wrapSlides: (payload: { stem: string; files: Array<{ filename: string; bytes: Uint8Array }> }): Promise<WrapSlidesExportResult> =>
       ipcRenderer.invoke(IPC.EXPORT.WRAP_SLIDES, payload),
   },
+  memoryMirror: {
+    // The readable memory mirror: one Markdown file per finished day.
+    list: (): Promise<string[]> => ipcRenderer.invoke(IPC.MEMORY_MIRROR.LIST),
+    root: (): Promise<string | null> => ipcRenderer.invoke(IPC.MEMORY_MIRROR.ROOT),
+    // Opens the day's actual file in the OS file manager.
+    reveal: (date: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.MEMORY_MIRROR.REVEAL, { date }),
+    sync: (date: string): Promise<MemoryMirrorSyncResult | null> =>
+      ipcRenderer.invoke(IPC.MEMORY_MIRROR.SYNC, { date }),
+    delete: (date: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.MEMORY_MIRROR.DELETE, { date }),
+  },
   contextPackets: {
     // DEV-181: the recorded, deterministic bundle behind an AI exchange.
     get: (packetId: string) => ipcRenderer.invoke(IPC.CONTEXT_PACKETS.GET, packetId),
@@ -682,7 +701,7 @@ const api = {
       ipcRenderer.invoke(IPC.CONTEXT_PACKETS.GET_FOR_MESSAGE, messageId),
     list: (payload: { limit?: number; exchangeKind?: 'chat' | 'day_analysis'; scopeKey?: string } = {}) =>
       ipcRenderer.invoke(IPC.CONTEXT_PACKETS.LIST, payload),
-    // DEV-183: the read-only "What the AI saw" inspection for one exchange —
+    // DEV-183: the read-only sources inspection for one exchange —
     // by packet id, or by the assistant message the packet is bound to.
     inspect: (payload: { packetId?: string | null; messageId?: number | null }): Promise<ContextPacketInspection | null> =>
       ipcRenderer.invoke(IPC.CONTEXT_PACKETS.INSPECT, payload),
@@ -698,7 +717,7 @@ const api = {
   },
   errors: {
     // Forward a render crash caught by an ErrorBoundary to the main process,
-    // which reports it to Sentry the same way main-process errors are.
+    // which reports it to PostHog the same way main-process errors are.
     reportRenderCrash: (report: RendererCrashReport) =>
       ipcRenderer.send(IPC.ERRORS.RENDERER_CRASH, report),
   },

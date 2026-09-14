@@ -1,5 +1,20 @@
+import { installConsoleStdioGuards, isStreamWriteError } from '@shared/consoleStdio'
+
+// Before anything can log: a write to a terminal that has since been closed
+// fails, and Node turns that failure into an uncaught exception. See the
+// module for the mechanism and why it was fatal here.
+installConsoleStdioGuards()
+
+/** Set once the crash dialog has been shown; see the handler below. */
+let fatalDialogShown = false
+
 // ─── Global error handlers — must be first, before any imports' side effects ──
 process.on('uncaughtException', (err) => {
+  // A stdout/stderr write that failed because the terminal or the parent pipe
+  // is gone is not a crash. Nothing is wrong with the app, and it is the one
+  // error whose own report cannot be written — reporting it re-enters this
+  // handler.
+  if (isStreamWriteError(err)) return
   console.error('[fatal] uncaughtException:', err)
   if (process.env.DAYLENS_REAL_DAY_HARNESS !== '1') {
     try {
@@ -32,6 +47,12 @@ process.on('uncaughtException', (err) => {
       a.exit(1)
       return
     }
+    // One dialog per session. showErrorBox is modal and synchronous, so a
+    // fault that repeats re-shows it the instant the user dismisses it — a
+    // wall of dialogs escapable only by force-quitting. Say it once and leave
+    // the app reachable, so the tray's Force Quit is still an option.
+    if (fatalDialogShown) return
+    fatalDialogShown = true
     d.showErrorBox('Daylens crashed', `${err.name}: ${err.message}\n\nPlease restart Daylens.`)
   } catch { /* dialog / app may not be ready */ }
 })
@@ -67,6 +88,7 @@ function recentCrashLoop(): boolean {
 }
 
 process.on('unhandledRejection', (reason) => {
+  if (isStreamWriteError(reason)) return
   console.error('[fatal] unhandledRejection:', reason)
   if (process.env.DAYLENS_REAL_DAY_HARNESS !== '1') {
     try {
@@ -110,6 +132,7 @@ import { registerSearchHandlers } from './ipc/search.handlers'
 import { registerSyncHandlers } from './ipc/sync.handlers'
 import { startMcpServer, stopMcpServer } from './services/mcpServer'
 import { initDb, closeDb, getDb } from './services/database'
+import { holdStartupMaintenance } from './lib/startupMaintenanceGate'
 import { startAIUsageRetentionSchedule, stopAIUsageRetentionSchedule } from './services/aiUsageRetention'
 import { recoverInterruptedTurns } from './services/agentTurnState'
 import { runPendingDerivedStateReset } from './core/projections/metadata'
@@ -122,6 +145,7 @@ import { getBrowserStatus, startBrowserTracking, stopBrowserTracking } from './s
 import { prewarmBrowserRegistry } from './services/browserRegistry'
 import { startSync, stopSync, finalizePreviousDay, syncNowForQuit } from './services/syncUploader'
 import { startMemoryIndexBackfill, stopMemoryIndexBackfill } from './services/memoryIndex'
+import { startMemoryMirrorBackfill, stopMemoryMirrorBackfill } from './services/memoryMirrorService'
 import { startSemanticIndexBackfill, stopSemanticIndexBackfill } from './services/semanticIndex'
 import { backfillWindowsHistory } from './services/windowsHistory'
 import { createTray, destroyTray, getTrayDiagnostics, hasTray } from './tray'
@@ -242,7 +266,12 @@ declare const MAIN_WINDOW_VITE_NAME: string
 let mainWindow: BrowserWindow | null = null
 // Set to true once the user explicitly quits via tray menu
 let isQuitting = false
+/** Longest startup maintenance waits for a window before running anyway. */
+const STARTUP_MAINTENANCE_MAX_WAIT_MS = 15_000
+
 let databaseReady = false
+/** Releases the startup-maintenance gate once the window is on screen. */
+let releaseStartupMaintenance: (() => void) | null = null
 let deferredIntegrationStartup: ReturnType<typeof setTimeout> | null = null
 let backgroundServicesStarted = false
 let captureAdapterStartupTimer: ReturnType<typeof setTimeout> | null = null
@@ -553,6 +582,7 @@ function ensureTray(): void {
       showMainWindow: (route?: string) => showMainWindow(route),
       hideMainWindow: () => hideMainWindow(),
       quitApp: () => { app.quit() },
+      forceQuitApp: () => { isQuitting = true; app.exit(0) },
     })
   }
 }
@@ -634,6 +664,12 @@ function startBackgroundServices(): void {
       // days per tick, newest first, until every captured day is current.
       // Until a day is reached, its searches serve through the legacy path.
       setTimeout(() => startMemoryIndexBackfill(getDb), 15_000)
+
+      // Write history into the readable memory mirror a few days per tick, so
+      // the folder reflects the whole record rather than only the days analyzed
+      // since the feature shipped. Later than the index backfill: it re-reads
+      // the mirror directory on each step and is pure catch-up work.
+      setTimeout(() => startMemoryMirrorBackfill(getDb), 45_000)
 
       // DEV-180: embed memory records for by-meaning search in bounded
       // background batches (local model; honest no-op when it is absent).
@@ -864,6 +900,7 @@ async function shutdownApp(options?: { awaitFinalSync?: boolean; backupBeforeExi
   stopCaptureServices()
   stopSync()
   stopMemoryIndexBackfill()
+  stopMemoryMirrorBackfill()
   stopSemanticIndexBackfill()
   stopEmbedWorker()
   stopAIUsageRetentionSchedule()
@@ -1302,6 +1339,10 @@ app.whenReady()
       app.quit()
       return
     }
+    // Held until the window is up: the repairs behind this gate scan every
+    // stored block, and on the launch they actually run that used to keep the
+    // window off screen for seconds.
+    releaseStartupMaintenance = holdStartupMaintenance()
     initDb()
     databaseReady = true
     logStartupTiming('database ready')
@@ -1363,6 +1404,20 @@ app.whenReady()
     mainWindow = createWindow()
     logStartupTiming('window created')
     const startupWindow = mainWindow
+    // Startup maintenance waits for the window to be paintable and then runs
+    // behind it. `ready-to-show` and not `did-finish-load`: the window is
+    // created hidden, the load can finish before it is paintable, and starting
+    // synchronous repairs in that gap delays the first visible frame — the
+    // thing this gate exists to protect. The timeout is the recovery path for
+    // a launch where `ready-to-show` never arrives, so maintenance is deferred
+    // and never lost.
+    const releaseAfterFirstPaint = (): void => {
+      const release = releaseStartupMaintenance
+      releaseStartupMaintenance = null
+      release?.()
+    }
+    startupWindow.once('ready-to-show', releaseAfterFirstPaint)
+    setTimeout(releaseAfterFirstPaint, STARTUP_MAINTENANCE_MAX_WAIT_MS).unref?.()
     setDailySummaryNotificationWindow(mainWindow)
     setDistractionAlertWindow(mainWindow)
     setSpendAlertWindow(mainWindow)

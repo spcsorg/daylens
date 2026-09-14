@@ -93,6 +93,13 @@ import { applyCorrection, previewCorrection, undoCorrection } from '../services/
 import { getTimelineRangeBlocks } from '../services/timelineCalendarRange'
 import { computeAppActivityDigest } from '../services/appActivityDigest'
 import { analyzeTimelineDay } from '../services/analyzeDay'
+import {
+  listMemoryMirrorDays,
+  mirrorRootPath,
+  removeDayMemoryMirror,
+  revealDayMemoryMirror,
+  syncDayMemoryMirror,
+} from '../services/memoryMirrorService'
 import { detectDayClarifications, applyClarificationAnswer } from '../services/dayClarifications'
 import { resolveIcon } from '../services/iconResolver'
 import { getLinuxDesktopDiagnostics } from '../services/linuxDesktop'
@@ -421,9 +428,20 @@ export function registerDbHandlers(): void {
     return getHistoryDayProjection(getDb(), dateStr, getLiveSessionForDate(dateStr), { materialize: false, analysis: false })
   })
 
-  ipcMain.handle(IPC.DB.GET_TIMELINE_DAY, (_e, dateStr: string) => {
+  // `withClarifications` is what keeps the day view from building this
+  // projection twice. Detecting the day's questions needs the payload and
+  // nothing else, so the caller that already triggered the build asks for them
+  // in the same breath; the week and month views, which never show them, pay
+  // nothing. GET_DAY_CLARIFICATIONS below still stands on its own for the
+  // refresh after an answer.
+  ipcMain.handle(IPC.DB.GET_TIMELINE_DAY, (
+    _e,
+    dateStr: string,
+    options: { withClarifications?: boolean } = {},
+  ) => {
     const payload = getTimelineDayProjection(getDb(), dateStr, getLiveSessionForDate(dateStr), { materialize: false, analysis: false })
-    return payload
+    if (!options.withClarifications) return payload
+    return { ...payload, clarifications: detectDayClarifications(getDb(), payload) }
   })
 
   ipcMain.handle(IPC.DB.REBUILD_TIMELINE_DAY, async (_e, dateStr: string, hint?: string) => {
@@ -446,6 +464,9 @@ export function registerDbHandlers(): void {
       triggerSource: 'user',
       onProgress,
     })
+    // The day just changed shape, so its readable copy is stale. Best-effort
+    // and unawaited: the analysis result must not wait on a filesystem write.
+    void syncDayMemoryMirror(getDb(), dateStr)
     return {
       payload: result.payload,
       changed: result.changed,
@@ -1470,6 +1491,23 @@ export function registerDbHandlers(): void {
 
   ipcMain.handle(IPC.ICONS.RESOLVE, async (_e, payload: IconRequest) => {
     return resolveIcon(payload)
+  })
+
+  ipcMain.handle(IPC.MEMORY_MIRROR.LIST, async () => listMemoryMirrorDays())
+
+  ipcMain.handle(IPC.MEMORY_MIRROR.ROOT, () => mirrorRootPath())
+
+  ipcMain.handle(IPC.MEMORY_MIRROR.REVEAL, async (_e, payload: { date: string }) =>
+    revealDayMemoryMirror(payload.date),
+  )
+
+  ipcMain.handle(IPC.MEMORY_MIRROR.SYNC, async (_e, payload: { date: string }) =>
+    syncDayMemoryMirror(getDb(), payload.date),
+  )
+
+  ipcMain.handle(IPC.MEMORY_MIRROR.DELETE, async (_e, payload: { date: string }) => {
+    await removeDayMemoryMirror(payload.date)
+    return true
   })
 }
 
