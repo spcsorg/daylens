@@ -49,7 +49,7 @@ import {
   isEntityCorrectionSnapshot,
   restoreEntityCorrectionSnapshot,
 } from './entities/entityCorrections'
-import { refreshMemoryIndexForDay } from './memoryIndex'
+import { meetingHasOccurrenceSupport, refreshMemoryIndexForDay } from './memoryIndex'
 import {
   deleteMeetingAttendanceMark,
   isMeetingAttendanceStatus,
@@ -559,10 +559,22 @@ function surfaceNotes(
           notes.push(`Meeting buckets: ${bucket(beforeMeeting.attendance)} → ${bucket(afterMeeting.attendance)} — the day's meeting report and wrap counts follow.`)
         }
       } catch { /* pre-migration database: the notes above still tell the story */ }
-      if (meetingEntityIdForScheduledEvent(db, command.date, meetingEventKeyOf(command))) {
-        if (command.status === 'attended') {
+      const eventKey = meetingEventKeyOf(command)
+      const meetingEntityId = meetingEntityIdForScheduledEvent(db, command.date, eventKey)
+      if (meetingEntityId) {
+        // The mark only moves the search label when nothing ELSE already
+        // supports occurrence. Asking with this mark's own confirmation ref
+        // ignored is what separates a real relabel from one the existing
+        // evidence had already made — promising a change that will not happen
+        // is the same lie as promising minutes that were not observed.
+        const supportedWithoutThisMark = meetingHasOccurrenceSupport(
+          db,
+          meetingEntityId,
+          `meeting-mark:${command.date}:${eventKey}`,
+        )
+        if (command.status === 'attended' && !supportedWithoutThisMark) {
           notes.push(`Search will label it "Meeting: ${command.meeting.title}" instead of "Scheduled: ${command.meeting.title}".`)
-        } else if (beforeMeeting?.marked === 'attended') {
+        } else if (command.status !== 'attended' && beforeMeeting?.marked === 'attended' && !supportedWithoutThisMark) {
           notes.push(`Search goes back to "Scheduled: ${command.meeting.title}" — the explicit confirmation is withdrawn.`)
         }
       }

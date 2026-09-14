@@ -31,6 +31,7 @@ import { resolveDayEnrichment } from '../src/main/services/enrichmentResolve.ts'
 import { putExternalSignal } from '../src/main/services/externalSignals.ts'
 import { indexMemoryForDay } from '../src/main/services/memoryIndex.ts'
 import { applyCorrection } from '../src/main/services/correctionCommands.ts'
+import { addEntityEvidenceRef } from '../src/main/services/entities/entityRepository.ts'
 import {
   buildCorrectionTools,
   resolveMarkMeetingTarget,
@@ -395,6 +396,76 @@ test('a preview that outlives its meeting expires: the calendar re-synced while 
     const report = resolveDayMeetingReport(db, TEST_DATE)!
     assert.ok(report.meetings.every((m) => m.marked == null), 'no mark landed')
     assert.equal(undoLogCount(db), 0)
+  } finally {
+    db.close()
+  }
+})
+
+test('meeting evidence that moves under the card expires the preview, mark untouched', async () => {
+  const db = createProductionTestDatabase()
+  try {
+    // A mark carries no target blocks, so the block fingerprint is empty for
+    // it. The bucket the card promised comes from the meeting's occurrence
+    // evidence, which can move without the mark moving — that must expire the
+    // preview too, or the user confirms a transition that no longer applies.
+    storeCalendar(db, [{ title: 'Quarterly planning', startClock: '10:00', durationMinutes: 60, attendeeCount: 4 }])
+    assert.equal(resolveDayMeetingReport(db, TEST_DATE)!.calendarOnlyCount, 1)
+
+    const deps: CorrectionToolDeps = {
+      db,
+      askUser: async () => {
+        // Capture lands while the card is open: the meeting matches on its own
+        // evidence now, so "scheduled only → attended (matched)" is stale.
+        insertZoom(db, 10, 2, 55)
+        return 'Apply correction'
+      },
+      hooks: { resolveLiveSession: () => null },
+    }
+    const tools = buildCorrectionTools(deps)
+    const outcome = await (tools.propose_correction as unknown as {
+      execute: (input: unknown, options: unknown) => Promise<Record<string, unknown>>
+    }).execute({ action: 'mark_meeting', date: TEST_DATE, meetingTitle: 'Quarterly planning', meetingStatus: 'attended' }, {})
+
+    assert.equal(outcome.applied, false)
+    assert.match(String(outcome.reason), /expired/i)
+    assert.equal(resolveDayMeetingReport(db, TEST_DATE)!.meetings[0].marked, null, 'no mark landed')
+    assert.equal(undoLogCount(db), 0)
+  } finally {
+    db.close()
+  }
+})
+
+test('a meeting already supported by its own evidence is not promised a search relabel', async () => {
+  const db = createProductionTestDatabase()
+  try {
+    // Capture already supports this meeting, so search calls it "Meeting: …"
+    // before any mark. Confirming attendance changes the bucket, not the label.
+    storeCalendar(db, [{ title: 'Quarterly planning', startClock: '10:00', durationMinutes: 60, attendeeCount: 4 }])
+    insertZoom(db, 10, 2, 55)
+    // Granola notes are one of the spec's named occurrence sources: they say
+    // the meeting HAPPENED, so search already calls it "Meeting: …".
+    const entityId = (db.prepare(
+      `SELECT id FROM entities WHERE entity_type = 'meeting' LIMIT 1`,
+    ).get() as { id: string }).id
+    addEntityEvidenceRef(db, entityId, { sourceType: 'connector', sourceId: 'granola:notes-1' })
+    indexMemoryForDay(db, TEST_DATE)
+    assert.match(meetingStatement(db), /^Meeting: /, 'the fixture must already carry occurrence support')
+
+    const turn = await markMeetingTurn(db, {
+      message: 'I did attend the 10am quarterly planning meeting, mark it.',
+      input: { action: 'mark_meeting', date: TEST_DATE, meetingTitle: 'Quarterly planning', meetingTime: '10:00', meetingStatus: 'attended' },
+      answer: 'Apply correction',
+      requestId: 'meeting-already-supported-1',
+    })
+
+    const card = turn.cards[0]
+    assert.match(card.question, /Mark "Quarterly planning" as attended/)
+    assert.ok(
+      !/Search will label it/.test(card.question),
+      `the card promised a search relabel that will not happen:\n${card.question}`,
+    )
+    assert.equal(turn.toolOutcome.applied, true)
+    assert.match(meetingStatement(db), /^Meeting: /, 'the label is unchanged, exactly as the card implied')
   } finally {
     db.close()
   }

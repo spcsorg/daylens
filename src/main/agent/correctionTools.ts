@@ -245,20 +245,39 @@ export function resolveMarkMeetingTarget(
   return { kind: 'ambiguous', status, candidates }
 }
 
-/** The stale-preview fingerprint for a mark-meeting command: the target's
- *  ledger identity plus its current mark. A calendar re-sync that drops the
- *  event expires the preview through the dry-run re-check; a mark that
- *  changed underneath the card expires it here. */
+/** The stale-preview fingerprint for a mark-meeting command. A mark carries
+ *  no target blocks, so the generic block fingerprint is empty for it and
+ *  this is the ONLY thing standing between a stale card and a write.
+ *
+ *  Two things can change under the card. The ledger mark itself — another
+ *  correction landed on the same meeting. And the meeting's own evidence: the
+ *  bucket the preview promised ("scheduled only → attended (matched)") is
+ *  derived from occurrence evidence, so a calendar re-sync or newly matched
+ *  capture can move it without touching the mark, leaving the user confirming
+ *  a transition that is no longer the one that would happen. Both are folded
+ *  in here; a calendar re-sync that drops the event entirely expires the
+ *  preview through the dry-run re-check instead. */
 function markMeetingLedgerState(db: Database.Database, command: CorrectionCommand): string {
   if (command.kind !== 'mark-meeting') return ''
   const [dayStartMs] = localDayBounds(command.date)
   const minutes = Math.round((command.meeting.startMs - dayStartMs) / 60_000)
   const key = scheduledEventKey(minutes, command.meeting.title)
+  let mark: string
   try {
-    return `${key}=${getMeetingAttendanceMarks(db, command.date).get(key) ?? 'none'}`
+    mark = getMeetingAttendanceMarks(db, command.date).get(key) ?? 'none'
   } catch {
-    return `${key}=unavailable`
+    mark = 'unavailable'
   }
+  let evidence: string
+  try {
+    const meeting = resolveDayMeetingReport(db, command.date)?.meetings.find((candidate) =>
+      candidate.title === command.meeting.title
+      && candidate.scheduledStartMs === command.meeting.startMs) ?? null
+    evidence = meeting ? `${meeting.attendance}|${meeting.marked ?? 'none'}` : 'absent'
+  } catch {
+    evidence = 'unavailable'
+  }
+  return `${key}=${mark}&${evidence}`
 }
 
 /** Translate the model's typed intent into the shared CorrectionCommand.
