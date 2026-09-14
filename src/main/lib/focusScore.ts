@@ -19,10 +19,6 @@ export const FOCUS_GAP_TOLERANCE_MS = 60_000
 export const FOCUS_DEFINITION =
   'Focus is time in one app for 25 minutes or more without switching apps, allowing gaps of up to 60 seconds. App category is not focus. AI tools are not eligible.'
 
-export function isFocusEligibleCategory(category: AppCategory | string): boolean {
-  return category !== 'aiTools' && FOCUSED_CATEGORIES.includes(category as AppCategory)
-}
-
 /**
  * Which apps a sustained stretch may be built from. Same rule as
  * `isAppFocused` — a work category OR an app the user named in onboarding as
