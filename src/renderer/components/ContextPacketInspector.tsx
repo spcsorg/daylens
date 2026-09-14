@@ -5,8 +5,16 @@
 // honest about absence (empty groups say plainly that nothing of that kind
 // was sent) and about time (evidence deleted after the exchange stays in the
 // record, labeled as no longer present).
+//
+// WO-76 adds "What backed the answer": the claim-to-evidence bindings, the
+// figures Daylens computed rather than letting the model choose them, and the
+// claims nothing here supports. That section renders only what the main
+// process put on ContextPacketInspection.answerEvidence — the renderer has no
+// other route to the turn, so the exclusion clause it enforces (no provider
+// instructions, no credentials, no other conversation) holds here too.
 import { useEffect, useState } from 'react'
 import type {
+  ContextPacketAnswerEvidence,
   ContextPacketInspection,
   ContextPacketInspectionGroup,
   ContextPacketInspectionItem,
@@ -53,6 +61,14 @@ const quietTextStyle: React.CSSProperties = {
   lineHeight: 1.55,
 }
 
+/** Recorded statements and claim text carry whatever the person's own data
+ *  said — file paths, long identifiers, unspaced strings. They wrap inside
+ *  the dialog rather than widening it, exactly as the packet rows do. */
+const wrappingTextStyle: React.CSSProperties = {
+  wordBreak: 'break-word',
+  overflowWrap: 'anywhere',
+}
+
 const badgeStyle: React.CSSProperties = {
   fontSize: 10.5,
   padding: '1px 7px',
@@ -92,6 +108,136 @@ function PacketItemRow({ item }: { item: ContextPacketInspectionItem }) {
       {gone && item.evidenceNote && (
         <div style={{ fontSize: 11.5, lineHeight: 1.5, color: '#f59e0b' }}>
           {item.evidenceNote}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Answer evidence (WO-76 / AC-AIA-002.3) ──────────────────────────────────
+// "Which claim in the answer rests on what." Everything rendered here arrives
+// on ContextPacketInspection.answerEvidence, which the main process rebuilt
+// field by field from the persisted turn record — the renderer displays that
+// record and never reaches past it for the prompt, the key, or another turn.
+
+const CLAIM_KIND_LABELS: Record<string, string> = {
+  duration: 'how long',
+  clock_time: 'a time',
+  date: 'a date',
+  entity: 'a name',
+}
+
+const EVIDENCE_SOURCE_LABELS: Record<string, string> = {
+  packet: 'from the context above',
+  tool: 'from a tool result',
+  computed: 'computed by Daylens',
+}
+
+function EvidenceSubheading({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--color-text-primary)' }}>{children}</span>
+  )
+}
+
+function AnswerEvidenceBody({ evidence }: { evidence: ContextPacketAnswerEvidence }) {
+  const nothingTraced = evidence.computedFigures.length === 0
+    && evidence.supportedClaims.length === 0
+    && evidence.unsupportedClaims.length === 0
+    && evidence.disclosedUncertainties.length === 0
+  if (nothingTraced) {
+    return (
+      <div style={quietTextStyle}>
+        The answer stated no figures, times, dates, or names, so there was nothing to trace back to evidence.
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      {evidence.computedFigures.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <EvidenceSubheading>Figures Daylens computed</EvidenceSubheading>
+          <div style={quietTextStyle}>
+            These came from your corrected activity record, not from the model choosing a number.
+          </div>
+          {evidence.computedFigures.map((figure) => (
+            <div
+              key={figure.identity}
+              style={{ display: 'grid', gap: 4, padding: '8px 10px', borderRadius: 10, border: '1px solid var(--color-border-ghost)', background: 'var(--color-surface-low)' }}
+            >
+              <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--color-text-primary)', ...wrappingTextStyle }}>
+                <strong style={{ fontWeight: 650 }}>{figure.rendered}</strong> — {figure.subject}
+              </div>
+              <div style={{ ...quietTextStyle, fontSize: 11.5, ...wrappingTextStyle }}>{figure.statement}</div>
+              {figure.replaced && (
+                <div style={{ fontSize: 11.5, lineHeight: 1.5, color: '#f59e0b' }}>
+                  The model first wrote {figure.replaced}. The computed figure replaced it before you saw the answer.
+                </div>
+              )}
+              <span
+                style={{ ...badgeStyle, fontFamily: 'var(--font-mono, monospace)', justifySelf: 'start', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={figure.identity}
+              >
+                {figure.identity}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {evidence.supportedClaims.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <EvidenceSubheading>Claims traced to evidence</EvidenceSubheading>
+          {evidence.supportedClaims.map((claim) => (
+            <div
+              key={`${claim.kind}:${claim.text}:${claim.identity}`}
+              style={{ display: 'grid', gap: 4, padding: '8px 10px', borderRadius: 10, border: '1px solid var(--color-border-ghost)', background: 'var(--color-surface-low)' }}
+            >
+              <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--color-text-primary)', ...wrappingTextStyle }}>
+                “{claim.text}”
+              </div>
+              <div style={{ ...quietTextStyle, fontSize: 11.5, ...wrappingTextStyle }}>Backed by: {claim.statement}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                <span style={badgeStyle}>{CLAIM_KIND_LABELS[claim.kind] ?? claim.kind}</span>
+                <span style={badgeStyle}>{EVIDENCE_SOURCE_LABELS[claim.source] ?? claim.source}</span>
+                <span
+                  style={{ ...badgeStyle, fontFamily: 'var(--font-mono, monospace)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  title={claim.identity}
+                >
+                  {claim.identity}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {evidence.unsupportedClaims.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <EvidenceSubheading>Claims nothing here backs</EvidenceSubheading>
+          <div style={quietTextStyle}>
+            Nothing in this exchange supports these, so treat them as uncertain rather than measured.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {evidence.unsupportedClaims.map((claim) => (
+              <span
+                key={`${claim.kind}:${claim.text}`}
+                style={{ ...badgeStyle, borderColor: 'rgba(245, 158, 11, 0.4)', color: '#f59e0b', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={claim.text}
+              >
+                {claim.text}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {evidence.disclosedUncertainties.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <EvidenceSubheading>What the answer admitted</EvidenceSubheading>
+          <div style={quietTextStyle}>
+            The answer was made to say in words that {evidence.disclosedUncertainties.join(', ')}{' '}
+            {evidence.disclosedUncertainties.length === 1 ? 'is' : 'are'} not backed by anything Daylens captured.
+          </div>
         </div>
       )}
     </div>
@@ -237,6 +383,19 @@ export function ContextPacketInspector({ packetId, messageId, onClose }: Context
                       </span>
                     ))}
                   </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
+                <span style={sectionTitleStyle}>What backed the answer</span>
+                {inspection.answerEvidence === null ? (
+                  <div style={quietTextStyle}>
+                    No turn record with claim evidence is bound to this exchange, so the answer&apos;s
+                    claims cannot be traced here. Answers given before Daylens started recording
+                    evidence coverage will always read this way.
+                  </div>
+                ) : (
+                  <AnswerEvidenceBody evidence={inspection.answerEvidence} />
                 )}
               </div>
 

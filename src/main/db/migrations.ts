@@ -377,6 +377,16 @@ export function ensureMemorySearchSchema(db: Database.Database): void {
   `)
 }
 
+// SCHEMA_SQL cannot declare the domain index: it runs before the ladder, and on
+// a pre-v70 database its CREATE TABLE IF NOT EXISTS keeps the legacy
+// memory_records, so an index over a column v70 has not added yet would abort
+// startup. Idempotent, and a no-op while the column is absent.
+export function ensureMemoryRecordsDomainIndex(db: Database.Database): void {
+  const columns = db.prepare(`PRAGMA table_info(memory_records)`).all() as { name: string }[]
+  if (!columns.some((column) => column.name === 'domain')) return
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_records_domain ON memory_records (domain)`)
+}
+
 export function scrubStaleAppNarrativeMetricSummaries(db: Database.Database): number {
   // B4: older app-detail narratives cached prose like "2 hours 18 minutes
   // across 59 sessions" while the header rendered live canonical totals.
@@ -3320,7 +3330,14 @@ const migrations: Migration[] = [
     up: () => {
       const db = getDb()
       const existing = getTableSql('memory_records') ?? ''
-      if (!existing || /'page'/.test(existing)) return
+      if (!existing) return
+      // Fresh installs already carry the post-v70 shape from SCHEMA_SQL, so the
+      // rebuild no-ops; the domain index is not declared there, so this is
+      // where those installs pick it up.
+      if (/'page'/.test(existing)) {
+        ensureMemoryRecordsDomainIndex(db)
+        return
+      }
 
       db.exec(`
         -- The FTS vtable's content view selects FROM memory_records, and the

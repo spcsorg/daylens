@@ -4,10 +4,18 @@
 // SAME number the Timeline shows for that day, computed by an independent path.
 //
 //   AI side:       executeTool('getDaySummary', ...) → _evidence.topApps
-//                   (getAppSummariesForRange)
+//                   (the corrected activity-fact boundary)
 //   Timeline side: buildTimelineBlocksFromSessions → block.topApps
 //
 // Two different aggregations over the one store. If they ever drift, this fails.
+//
+// The fixture day is a COMPLETED one. It used to be today, with stretches
+// running to 16:15 — hours that had not happened yet whenever the suite ran
+// before mid-afternoon. That only worked while the AI side read a bare
+// calendar window; the corrected boundary clips a live day at now, because a
+// day summary must not claim time the person has not lived. Seeding a
+// finished day removes the wall-clock dependency and lets the parity
+// assertion be about parity.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
@@ -34,7 +42,8 @@ const CURSOR = 'com.todesktop.230313mzl4w4u92'
 // A clean day: two long Cursor stretches plus a Chrome stretch, so the app the
 // AI is asked about is one of several and the totals are unambiguous.
 function seedDay(db: Database.Database): { date: Date; cursorSeconds: number } {
-  const today = new Date()
+  // Yesterday: every stretch below is in the past whatever hour the suite runs.
+  const day = new Date(Date.now() - 86_400_000)
   const insert = db.prepare(`
     INSERT INTO app_sessions (bundle_id, app_name, start_time, end_time, duration_sec,
       category, is_focused, window_title, raw_app_name, canonical_app_id, app_instance_id,
@@ -42,15 +51,15 @@ function seedDay(db: Database.Database): { date: Date; cursorSeconds: number } {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', 1)
   `)
   const add = (bundle: string, name: string, sh: number, sm: number, eh: number, em: number, cat: string, title: string) => {
-    const s = localMs(today, sh, sm), e = localMs(today, eh, em)
+    const s = localMs(day, sh, sm), e = localMs(day, eh, em)
     insert.run(bundle, name, s, e, Math.round((e - s) / 1000), cat, cat === 'development' ? 1 : 0, title, name, name.toLowerCase(), bundle)
   }
   add(CURSOR, 'Cursor', 9, 0, 11, 30, 'development', 'daylens — ai.ts')
   add('com.google.Chrome', 'Google Chrome', 11, 30, 12, 0, 'browsing', 'GitHub — pull request')
   add(CURSOR, 'Cursor', 13, 30, 16, 15, 'development', 'daylens — workBlocks.ts')
-  const cursorSeconds = Math.round((localMs(today, 11, 30) - localMs(today, 9, 0)) / 1000)
-    + Math.round((localMs(today, 16, 15) - localMs(today, 13, 30)) / 1000)
-  return { date: today, cursorSeconds }
+  const cursorSeconds = Math.round((localMs(day, 11, 30) - localMs(day, 9, 0)) / 1000)
+    + Math.round((localMs(day, 16, 15) - localMs(day, 13, 30)) / 1000)
+  return { date: day, cursorSeconds }
 }
 
 // What the Timeline shows for one app on a day: sum that app's seconds across the
