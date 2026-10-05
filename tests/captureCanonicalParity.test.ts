@@ -307,10 +307,15 @@ test('Linux canonical events rebuild the expected sessions with no legacy writes
     const rebuilt = rebuildPollForegroundSessions(rig.db, BASE - 1, BASE + 86_400_000)
       .filter((s) => (s.endMs - s.startMs) / 1_000 >= MIN_SESSION_SEC)
     assert.deepEqual(
-      rebuilt.map((s) => ({ appName: s.appName, startMs: s.startMs, endMs: s.endMs })),
+      rebuilt.map((s) => ({
+        appName: s.appName,
+        windowTitle: s.windowTitle,
+        startMs: s.startMs,
+        endMs: s.endMs,
+      })),
       [
-        { appName: 'TextEdit', startMs: BASE, endMs: BASE + 120_000 },
-        { appName: 'Mail', startMs: BASE + 120_000, endMs: BASE + 180_000 },
+        { appName: 'TextEdit', windowTitle: 'Draft notes', startMs: BASE, endMs: BASE + 120_000 },
+        { appName: 'Mail', windowTitle: 'Inbox', startMs: BASE + 120_000, endMs: BASE + 180_000 },
       ],
     )
     for (let i = 1; i < rebuilt.length; i++) {

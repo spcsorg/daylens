@@ -47,7 +47,6 @@ import {
 } from '../core/query/attributionResolvers'
 import { searchFileMentions as execSearchFileMentions } from '../lib/windowTitleFilenames'
 import { getTimelineDayPayload, userVisibleLabelForBlock } from './workBlocks'
-import { queryCorrectedActivityFactsForDay } from '../core/query/activityFactsQuery'
 import { sanitizeToolResult } from '@shared/aiSanitize'
 import { filterTrackingExcludedEvidence } from '@shared/evidencePrivacy'
 import { trackingControlsStateFromSettings, type TrackingControlsState } from '@shared/trackingControls'

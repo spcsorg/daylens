@@ -114,6 +114,7 @@ export function recordSupervisorEvent(eventType: SupervisorEventType, tsMs: numb
 export interface RebuiltPollSession {
   bundleId: string | null
   appName: string | null
+  windowTitle: string | null
   startMs: number
   endMs: number
 }
@@ -123,6 +124,7 @@ interface PollEventRow {
   event_type: string
   app_bundle_id: string | null
   app_name: string | null
+  window_title: string | null
 }
 
 // Rebuild foreground sessions from canonical foreground_poll evidence alone —
@@ -136,7 +138,7 @@ export function rebuildPollForegroundSessions(
   toMs: number,
 ): RebuiltPollSession[] {
   const rows = db.prepare(`
-    SELECT ts_ms, event_type, app_bundle_id, app_name
+    SELECT ts_ms, event_type, app_bundle_id, app_name, window_title
     FROM focus_events
     WHERE source = ? AND ts_ms >= ? AND ts_ms < ?
     ORDER BY ts_ms ASC, mono_ns ASC, id ASC
@@ -160,6 +162,7 @@ export function rebuildPollForegroundSessions(
         open = {
           bundleId: row.app_bundle_id,
           appName: row.app_name,
+          windowTitle: row.window_title,
           startMs: row.ts_ms,
           endMs: row.ts_ms,
         }
@@ -169,9 +172,10 @@ export function rebuildPollForegroundSessions(
       case 'lock':
         close(row.ts_ms)
         break
+      case 'window_changed':
+        if (open) open.windowTitle = row.window_title
+        break
       default:
-        // window_changed updates visible context; it neither opens nor closes
-        // foreground ownership.
         break
     }
   }

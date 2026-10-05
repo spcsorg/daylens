@@ -82,5 +82,7 @@ test('packaged smoke runs tracking on a fresh isolated profile and waits for per
   assert.match(source, /if \(!SMOKE_TEST\) registerCommandPaletteShortcut/)
   assert.match(source, /if \(!SMOKE_TEST && \(process\.platform === 'win32' \|\| process\.platform === 'linux'\)\) ensureProcessMonitor\(\)/)
   assert.match(source, /const captureProbe = await waitForSmokeCapture\(\)/)
-  assert.match(source, /FROM app_sessions[\s\S]*?WHERE window_title IN \(\?, \?\)/)
+  assert.match(source, /rebuildPollForegroundSessions/)
+  assert.match(source, /SMOKE_MIN_SESSION_SEC = 10/)
+  assert.match(source, /endMs - session.startMs\) \/ 1_000 >= SMOKE_MIN_SESSION_SEC/)
 })
