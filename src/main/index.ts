@@ -138,6 +138,7 @@ import { recoverInterruptedTurns } from './services/agentTurnState'
 import { runPendingDerivedStateReset } from './core/projections/metadata'
 import { hasApiKey, initSettings, getSettings, setSettings } from './services/settings'
 import { getCurrentSession, getLinuxTrackingDiagnostics, startTracking, stopTracking, trackingStatus } from './services/tracking'
+import { rebuildPollForegroundSessions } from './services/captureEvidence'
 import { startFocusCapture, stopFocusCapture, purgeFocusCaptureSpool } from './services/focusCapture'
 import { startWindowsFocusCapture, stopWindowsFocusCapture } from './services/windowsFocusCapture'
 import { ensureProcessMonitor } from './services/processMonitor'
@@ -419,20 +420,28 @@ interface SmokeCaptureSession {
   endedReason: string | null
 }
 
+// Same persistence floor as tracking.ts MIN_SESSION_SEC. Legacy app_sessions
+// writes are retired, so packaged smoke rebuilds sessions from canonical
+// focus_events and still requires each probe title to last at least this long.
+const SMOKE_MIN_SESSION_SEC = 10
+
 function readSmokeCaptureSessions(): SmokeCaptureSession[] {
   if (!SMOKE_FOREGROUND_TITLE || !SMOKE_FULLSCREEN_TITLE) return []
-  return getDb().prepare(`
-    SELECT
-      id,
-      app_name AS appName,
-      window_title AS windowTitle,
-      duration_sec AS durationSec,
-      capture_source AS captureSource,
-      ended_reason AS endedReason
-    FROM app_sessions
-    WHERE window_title IN (?, ?)
-    ORDER BY start_time ASC
-  `).all(SMOKE_FOREGROUND_TITLE, SMOKE_FULLSCREEN_TITLE) as SmokeCaptureSession[]
+  const probeTitles = new Set([SMOKE_FOREGROUND_TITLE, SMOKE_FULLSCREEN_TITLE])
+  return rebuildPollForegroundSessions(getDb(), 0, Date.now() + 1)
+    .filter((session) => (
+      session.windowTitle != null
+      && probeTitles.has(session.windowTitle)
+      && (session.endMs - session.startMs) / 1_000 >= SMOKE_MIN_SESSION_SEC
+    ))
+    .map((session, index) => ({
+      id: index + 1,
+      appName: session.appName ?? '',
+      windowTitle: session.windowTitle,
+      durationSec: Math.max(0, Math.round((session.endMs - session.startMs) / 1_000)),
+      captureSource: 'foreground_poll',
+      endedReason: null,
+    }))
 }
 
 interface SmokeCanonicalEvent {
