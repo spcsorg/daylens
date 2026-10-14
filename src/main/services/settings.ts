@@ -237,6 +237,10 @@ export async function setSettings(partial: Partial<AppSettings>): Promise<void> 
     if (v === undefined) store.delete?.(k)
     else store.set(k, v)
   }
+  if (partial.backgroundAiEnabled === false) {
+    const { cancelBackgroundAIJobs } = await import('../lib/backgroundAICancellation')
+    cancelBackgroundAIJobs()
+  }
 }
 
 export async function initSettings(): Promise<void> {

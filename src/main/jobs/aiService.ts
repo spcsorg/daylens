@@ -223,6 +223,7 @@ interface CLIToolDetectionResult {
 }
 
 interface CodexExecCapabilities {
+  supportsEphemeral: boolean
   supportsOutputLastMessage: boolean
   supportsSandbox: boolean
   supportsConfig: boolean
@@ -801,6 +802,7 @@ async function inspectCodexExecCapabilities(executablePath: string): Promise<Cod
 
   const combinedHelp = `${codexHelp}\n${codexExecHelp}`
   return {
+    supportsEphemeral: combinedHelp.includes('--ephemeral'),
     supportsOutputLastMessage: combinedHelp.includes('--output-last-message'),
     supportsSandbox: combinedHelp.includes('--sandbox'),
     supportsConfig: combinedHelp.includes('--config'),
@@ -1126,13 +1128,17 @@ async function runCLIProvider(
 
   const tmpFilePath = path.join(os.tmpdir(), `daylens-${tool}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`)
   const args = tool === 'claude'
-    ? ['-p', '--output-format', 'text', ...(model ? ['--model', model] : [])]
+    ? ['-p', '--no-session-persistence', '--output-format', 'text', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--disable-slash-commands', ...(model ? ['--model', model] : [])]
     : tool === 'chatgpt'
       ? [...(model ? ['--model', model] : [])]
       : tool === 'gemini'
         ? [...(model ? ['--model', model] : [])]
         : (() => {
         const nextArgs = ['exec', '--skip-git-repo-check']
+        if (!codexExecCapabilities?.supportsEphemeral) {
+          throw new CLIProviderError('launch_failed', 'Update the Codex CLI: this version cannot run without saving a session.')
+        }
+        nextArgs.push('--ephemeral')
         if (codexExecCapabilities?.supportsSandbox) {
           nextArgs.push('--sandbox', 'read-only')
         }
@@ -1150,6 +1156,8 @@ async function runCLIProvider(
         return nextArgs
       })()
   const promptViaStdin = tool !== 'codex'
+
+  if (signal?.aborted) throw abortError()
 
   try {
     const output = await new Promise<string>((resolve, reject) => {
@@ -3642,8 +3650,8 @@ async function sendMessageInner(payload: AIChatSendRequest, options: SendMessage
     }
     try {
       const text = await runClaudeCodeChat({
-        threadId: String(threadId ?? 'new'),
         question,
+        prior,
         systemPrompt: buildAgentSystemPrompt({
           now: new Date(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

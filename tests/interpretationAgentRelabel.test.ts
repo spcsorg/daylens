@@ -17,6 +17,7 @@ import {
   runInterpretationAgentRelabel,
 } from '../src/main/services/interpretationAgent.ts'
 import type { InterpretationAgentInsight } from '../src/main/services/interpretationAgent.ts'
+import { setSettings as persistSettings } from '../src/main/services/settings.ts'
 
 const TEST_DATE = '2026-04-22'
 
@@ -66,6 +67,65 @@ const mockUsage = {
   inputTokens: { total: 40, noCache: 40, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 20, text: 20, reasoning: 0 },
 }
+
+test('Background AI off blocks interpretation even when its own toggle is on', async () => {
+  const db = createProductionTestDatabase()
+  seedLowConfidenceDay(db)
+  setTestDb(db)
+  __setSettings({ backgroundAiEnabled: false, interpretationAgentEnabled: true, aiProvider: 'anthropic' })
+  let modelCalls = 0
+  const model = new MockLanguageModelV3({ doGenerate: async () => { modelCalls += 1; throw new Error('must not call') } })
+  try {
+    await analyzeTimelineDay(db, TEST_DATE, {
+      triggerSource: 'background',
+      regroupPlan: async () => null,
+      blockInsight: async () => ({ label: 'Reviewing team updates', narrative: 'Direct path.' }),
+      agentBlockInsight: (block, opts) => runInterpretationAgentRelabel(db, block, { ...opts, model, allowCollect: false }),
+    })
+    assert.equal(modelCalls, 0)
+  } finally {
+    __resetSettings()
+    clearTestDb()
+    db.close()
+  }
+})
+
+test('turning Background AI off aborts an interpretation model already running', async () => {
+  const db = createProductionTestDatabase()
+  seedLowConfidenceDay(db)
+  setTestDb(db)
+  __setSettings({ backgroundAiEnabled: true, interpretationAgentEnabled: true, aiProvider: 'anthropic' })
+  await setApiKey('anthropic', 'test-key')
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => { started = resolve })
+  let aborted = false
+  const model = new MockLanguageModelV3({
+    doGenerate: async (options) => {
+      assert.ok(options.abortSignal)
+      started()
+      return new Promise((_resolve, reject) => {
+        options.abortSignal!.addEventListener('abort', () => { aborted = true; reject(new Error('stopped')) }, { once: true })
+      })
+    },
+  })
+  try {
+    const pending = analyzeTimelineDay(db, TEST_DATE, {
+      triggerSource: 'background',
+      regroupPlan: async () => null,
+      blockInsight: async () => ({ label: 'Reviewing team updates', narrative: 'Direct path.' }),
+      agentBlockInsight: (block, opts) => runInterpretationAgentRelabel(db, block, { ...opts, model, allowCollect: false }),
+    })
+    await ready
+    __setSettings({ backgroundAiEnabled: false })
+    await persistSettings({ backgroundAiEnabled: false })
+    await pending
+    assert.equal(aborted, true)
+  } finally {
+    __resetSettings()
+    clearTestDb()
+    db.close()
+  }
+})
 
 test('flag off: the agent is never consulted and the direct relabel runs unchanged', async () => {
   const db = createProductionTestDatabase()

@@ -10,6 +10,9 @@ import { setTestDb, clearTestDb } from './support/database-stub.mjs'
 import { __resetSettings, __setSettings, setApiKey } from './support/settings-stub.mjs'
 import { executeTextAIJob } from '../src/main/services/aiOrchestration.ts'
 import { startAIUsageEvent, finishAIUsageEvent } from '../src/main/db/queries.ts'
+import { cancelBackgroundAIJobs } from '../src/main/lib/backgroundAICancellation.ts'
+import { abortError } from '../src/main/lib/aiCancellation.ts'
+import { setSettings as persistSettings } from '../src/main/services/settings.ts'
 
 async function setup(): Promise<InstanceType<typeof Database>> {
   const db = createProductionTestDatabase()
@@ -37,6 +40,12 @@ function seedSpend(db: InstanceType<typeof Database>, id: string, jobType: strin
     startedAt: now,
   })
   finishAIUsageEvent(db, { id, success: true, completedAt: now + 1, costUsd })
+}
+
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 test('the kill switch refuses machine-initiated jobs without calling the provider', async () => {
@@ -93,6 +102,62 @@ test('the kill switch never blocks user-initiated work', async () => {
     assert.equal(runnerCalls, 1)
     assert.equal(result.text, 'labeled')
   } finally {
+    teardown(db)
+  }
+})
+
+test('switching off while a job resolves prevents a stale-settings provider launch', async () => {
+  const db = await setup()
+  try {
+    let calls = 0
+    const pending = executeTextAIJob(
+      { jobType: 'block_cleanup_relabel', triggerSource: 'background', systemPrompt: 's', userMessage: 'u' },
+      async () => { calls += 1; return { text: 'unexpected' } },
+    )
+    __setSettings({ backgroundAiEnabled: false })
+    await assert.rejects(pending, /switched off/)
+    assert.equal(calls, 0)
+  } finally {
+    cancelBackgroundAIJobs()
+    teardown(db)
+  }
+})
+
+test('the kill switch aborts active automatic requests without aborting a manual request', async () => {
+  const db = await setup()
+  const started = deferred()
+  const manualStarted = deferred()
+  const finishManual = deferred()
+  try {
+    const automatic = executeTextAIJob(
+      { jobType: 'wrapped_narrative', triggerSource: 'system', systemPrompt: 's', userMessage: 'u' },
+      async (_config, _system, _prior, _user, options) => {
+        assert.ok(options.signal)
+        started.resolve()
+        return new Promise((_resolve, reject) => {
+          options.signal!.addEventListener('abort', () => reject(abortError()), { once: true })
+        })
+      },
+    )
+    const manual = executeTextAIJob(
+      { jobType: 'block_cleanup_relabel', triggerSource: 'user', systemPrompt: 's', userMessage: 'u' },
+      async (_config, _system, _prior, _user, options) => {
+        manualStarted.resolve()
+        await finishManual.promise
+        assert.equal(options.signal?.aborted ?? false, false)
+        return { text: 'manual answer' }
+      },
+    )
+    await Promise.all([started.promise, manualStarted.promise])
+    const stopped = assert.rejects(automatic, /stopped/)
+    __setSettings({ backgroundAiEnabled: false })
+    await persistSettings({ backgroundAiEnabled: false })
+    await stopped
+    finishManual.resolve()
+    assert.equal((await manual).text, 'manual answer')
+  } finally {
+    finishManual.resolve()
+    cancelBackgroundAIJobs()
     teardown(db)
   }
 })

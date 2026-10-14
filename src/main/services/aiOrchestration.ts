@@ -9,7 +9,8 @@ import { classifyProviderError, friendlyProviderError as friendlyProviderErrorCl
 import { getBillingAccess, getManagedAIConfig } from './billing'
 import { selectJobProvider } from '../lib/providerRouting'
 import { getProviderBreakerState, recordProviderHardFailure, resetProviderBreaker } from './providerCircuitBreaker'
-import { abortError, getAmbientAbortSignal, isAbortError } from '../lib/aiCancellation'
+import { abortError, getAmbientAbortSignal, isAbortError, runWithAbortSignal } from '../lib/aiCancellation'
+import { registerBackgroundAIJob } from '../lib/backgroundAICancellation'
 import { evaluateFeatureBudget, fireRunawaySpendAlertOnce } from './aiSpendGuardrails'
 import type {
   AIInvocationSource,
@@ -554,7 +555,20 @@ export function backgroundAIBudgetExhausted(db: ReturnType<typeof getDb>, now = 
   return countBackgroundAIUsageEventsSince(db, midnight.getTime()) >= BACKGROUND_AI_DAILY_CALL_CAP
 }
 
-export async function executeTextAIJob(
+export async function executeTextAIJob(...args: Parameters<typeof executeTextAIJobInternal>): ReturnType<typeof executeTextAIJobInternal> {
+  if (args[0].triggerSource === 'user') return executeTextAIJobInternal(...args)
+  const controller = new AbortController()
+  const unregister = registerBackgroundAIJob(controller)
+  const ambient = getAmbientAbortSignal()
+  const signal = ambient ? AbortSignal.any([ambient, controller.signal]) : controller.signal
+  try {
+    return await runWithAbortSignal(signal, () => executeTextAIJobInternal(...args))
+  } finally {
+    unregister()
+  }
+}
+
+async function executeTextAIJobInternal(
   payload: {
     jobType: AIJobType
     screen?: AISurface
@@ -664,6 +678,11 @@ export async function executeTextAIJob(
   }))
 
   const configs = await resolveProviderConfigsForJob(payload.jobType, settings, payload.preferredProviderOverride)
+
+  if (ambientSignal?.aborted) throw abortError()
+  if (payload.triggerSource !== 'user' && getSettings().backgroundAiEnabled === false) {
+    throw new Error('Background AI is switched off.')
+  }
 
   startAIUsageEvent(getDb(), {
     id: eventId,

@@ -11,10 +11,6 @@ import { randomUUID } from 'node:crypto'
 import { getMcpServerConfig } from '../services/mcpServer'
 import { abortError } from '../lib/aiCancellation'
 
-/** Claude Code's own turn identity, so a follow-up keeps the thread's context.
- *  In memory only: losing it costs context, never correctness. */
-const sessionByThread = new Map<string, string>()
-
 // Claude Code's own tools, none of which a question about the person's day
 // needs. Listing them by name is unavoidable — there is no "MCP only" switch —
 // so a future Claude Code release can add a tool this list misses. That costs
@@ -38,8 +34,8 @@ export function claudeCodeChatAvailable(): boolean {
 }
 
 export interface ClaudeCodeChatInput {
-  threadId: string
   question: string
+  prior?: Array<{ role: 'user' | 'assistant'; content: string }>
   systemPrompt: string
   model: string | null
   executablePath: string
@@ -64,9 +60,12 @@ export async function runClaudeCodeChat(input: ClaudeCodeChatInput): Promise<str
     mcpServers: { daylens: { command: mcp.command, args: mcp.args, env: mcp.env } },
   }))
 
-  const resumeSession = sessionByThread.get(input.threadId)
+  const question = input.prior?.length
+    ? `Conversation so far:\n${input.prior.map((message) => `${message.role === 'assistant' ? 'Assistant' : 'User'}: ${message.content}`).join('\n\n')}\n\nUser: ${input.question}`
+    : input.question
   const args = [
-    '-p', input.question,
+    '-p', question,
+    '--no-session-persistence',
     // Deltas as they are written, so the answer appears instead of the person
     // watching "Thinking" for half a minute. --verbose is required for
     // stream-json under --print.
@@ -92,7 +91,6 @@ export async function runClaudeCodeChat(input: ClaudeCodeChatInput): Promise<str
     // is a large set of instructions about editing files this turn cannot do.
     '--system-prompt', input.systemPrompt,
     ...(input.model ? ['--model', input.model] : []),
-    ...(resumeSession ? ['--resume', resumeSession] : []),
   ]
 
   try {
@@ -176,8 +174,6 @@ function runStreamingCli(input: ClaudeCodeChatInput, args: string[]): Promise<st
       } catch {
         return
       }
-      if (parsed.session_id) sessionByThread.set(input.threadId, parsed.session_id)
-
       if (parsed.type === 'stream_event' && parsed.event?.type === 'content_block_delta') {
         const delta = parsed.event.delta
         if (delta?.type === 'text_delta' && delta.text) {

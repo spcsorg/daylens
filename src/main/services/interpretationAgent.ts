@@ -32,7 +32,9 @@ import {
   type AIProviderUsage,
   type ResolvedProviderConfig,
 } from './aiOrchestration'
-import { getSettingsAsync } from './settings'
+import { getSettings, getSettingsAsync } from './settings'
+import { abortError } from '../lib/aiCancellation'
+import { registerBackgroundAIJob } from '../lib/backgroundAICancellation'
 import { executeWrappedTool } from './wrappedTools'
 import { executeTool } from './aiTools'
 import { workBlockPrompt } from '../jobs/aiService'
@@ -188,8 +190,30 @@ export async function runInterpretationAgentRelabel(
   block: WorkContextBlock,
   options: InterpretationAgentOptions = {},
 ): Promise<InterpretationAgentInsight> {
+  const controller = new AbortController()
+  const unregister = options.triggerSource === 'user' ? () => {} : registerBackgroundAIJob(controller)
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
+  try {
+    return await runInterpretationAgentRelabelInner(db, block, { ...options, signal })
+  } finally {
+    unregister()
+  }
+}
+
+async function runInterpretationAgentRelabelInner(
+  db: Database.Database,
+  block: WorkContextBlock,
+  options: InterpretationAgentOptions = {},
+): Promise<InterpretationAgentInsight> {
   const settings = await getSettingsAsync()
+  if (options.triggerSource !== 'user' && settings.backgroundAiEnabled === false) {
+    throw new Error('Background AI is switched off.')
+  }
   const configs = await resolveProviderConfigsForJob('interpretation_agent', settings)
+  if (options.signal?.aborted) throw abortError()
+  if (options.triggerSource !== 'user' && getSettings().backgroundAiEnabled === false) {
+    throw new Error('Background AI is switched off.')
+  }
   // Defensive: resolveProviderConfigsForJob throws when nothing resolves, but
   // an empty array from a stub or future refactor must fail with the same
   // clean message, never an undefined-config crash mid-turn.
