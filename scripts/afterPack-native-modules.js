@@ -1,5 +1,6 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const { verifyPackage } = require('./verify-packaged-natives.js')
 
 function walk(dir, results = []) {
   if (!fs.existsSync(dir)) return results
@@ -103,5 +104,11 @@ exports.default = async function afterPackNativeModules(context) {
         }
       }
     }
+  }
+  if (asarPaths.length === 0) {
+    throw new Error(`No app.asar files found in packaged output ${context.appOutDir}`)
+  }
+  for (const asarPath of asarPaths) {
+    verifyPackage(asarPath)
   }
 }

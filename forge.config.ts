@@ -13,6 +13,13 @@ const config: ForgeConfig = {
     appCopyright: `Copyright © ${new Date().getFullYear()} Daylens`,
   },
   rebuildConfig: {},
+  hooks: {
+    prePackage: async () => {
+      throw new Error(
+        'Forge is only used for development. Use npm run package or npm run make to build and verify the complete app with electron-builder.',
+      )
+    },
+  },
   makers: [
     // macOS zip for dev testing
     new MakerZIP({}, ['darwin']),

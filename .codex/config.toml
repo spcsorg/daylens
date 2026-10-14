@@ -1,2 +1,14 @@
 [mcp_servers.mobbin]
 url = "https://api.mobbin.com/mcp"
+
+[mcp_servers.linear-server]
+url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.paper]
+url = "http://127.0.0.1:29979/mcp"
+
+[mcp_servers.software-factory-daylen-45f2f431]
+url = "https://api.factory.8090.dev/v2/mcp"
+
+[mcp_servers.software-factory-daylen-45f2f431.http_headers]
+X-Sofa-Mcp-Project-Id = "45f2f431-ae93-407c-913b-8bce76ba3085"

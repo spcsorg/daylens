@@ -132,6 +132,12 @@ Platform capture changes require real-machine checks on every affected platform.
 
 The packaged-runtime workflows create real foreground and fullscreen test windows and verify the capture file produced by the packaged application. They prove startup, packaging, native loading, and basic capture on their hosted operating system. They do not replace permission prompts, private-window detection in installed browsers, sleep/lock/restart behavior, multi-display behavior, update installation, or visual product acceptance on representative machines.
 
+### Local packaging
+
+`npm run package` builds every bundle and the capture helper, then creates an installer-free packaged app under `dist-release` with electron-builder. `npm run make` uses the same pipeline to create the configured installers. Neither command publishes. Forge remains the development server behind `npm start`; direct Forge packaging is rejected because its Vite-only archive omits runtime dependencies and supporting bundles.
+
+Every electron-builder package runs archive validation automatically before signing. It requires the main process, preload, renderer and its referenced assets, background bundles, native module JavaScript entries, and unpacked native bindings. `node scripts/verify-packaged-natives.js dist-release` reruns the same check on existing packages. Content validation does not prove native ABI compatibility or successful startup; the packaged-runtime smoke checks remain required.
+
 ## Database and migration changes
 
 - Add forward-only migrations.
