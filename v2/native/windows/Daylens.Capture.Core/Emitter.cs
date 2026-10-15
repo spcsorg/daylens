@@ -38,7 +38,8 @@ public sealed class Emitter
         {
             var seq = _seq++;
             var limit = priority == Priority.Critical ? _capacity + _reserve : _capacity;
-            if (_queue.Count >= limit)
+            // The line being written still holds its slot, as in the Swift emitter.
+            if (_queue.Count + (_writing ? 1 : 0) >= limit)
             {
                 _dropped++;
                 return;

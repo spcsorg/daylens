@@ -160,6 +160,9 @@ public static class Browsers
             return end > 1 ? c[1..end] : null;
         }
         var exe = c.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+        // ".exe" inside a directory name (C:\Apps\Foo.exelent\) is not the end of the path.
+        while (exe > 0 && exe + 4 < c.Length && !char.IsWhiteSpace(c[exe + 4]))
+            exe = c.IndexOf(".exe", exe + 4, StringComparison.OrdinalIgnoreCase);
         return exe > 0 ? c[..(exe + 4)] : c.Split(' ')[0];
     }
 }

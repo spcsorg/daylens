@@ -29,8 +29,9 @@ public sealed record WindowInfo
     public WindowInfo(string? window, string? title, TitleState state)
     {
         Window = window;
-        TitleState = state;
-        Title = state == TitleState.Ok ? Truncate(title) : null;
+        Title = state == TitleState.Ok && !string.IsNullOrEmpty(title) ? Truncate(title) : null;
+        // The protocol requires a title exactly when the state is ok.
+        TitleState = state == TitleState.Ok && Title is null ? (title is null ? TitleState.Unavailable : TitleState.Empty) : state;
     }
 
     public static WindowInfo Read(string? window, string? title) =>
