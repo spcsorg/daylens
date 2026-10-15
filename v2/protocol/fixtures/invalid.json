@@ -1,0 +1,67 @@
+[
+ {
+  "name": "not_json",
+  "reason": "not_json",
+  "raw": "{\"v\":1,"
+ },
+ {
+  "name": "version_2",
+  "reason": "unsupported_version",
+  "raw": "{\"v\": 2, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "unknown_kind",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"keystroke\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "negative_seq",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": -1, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "float_wall_ms",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1.5, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "mono_as_string",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": \"881234567890\", \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "title_without_ok",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"no_permission\"}}"
+ },
+ {
+  "name": "ok_without_title",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": null, \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "bad_platform",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"beos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "bad_source",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"Bad Source\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "tz_offset_out_of_range",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 2000}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"daylens — zsh — 80×24\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "title_too_long",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"window\", \"obs\": {\"pid\": 501, \"window\": \"w-1\", \"title\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"title_state\": \"ok\"}}"
+ },
+ {
+  "name": "array_line",
+  "reason": "malformed",
+  "raw": "[1,2,3]"
+ }
+]

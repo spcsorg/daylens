@@ -1,0 +1,22 @@
+{
+  "name": "daylens-v2-capture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 'tests/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p .",
+    "capture": "node capture/service.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,387 @@
+[
+ {
+  "name": "mac_hello",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "hello",
+   "obs": {
+    "helper": "daylens-capture-macos",
+    "version": "2.0.0-dev",
+    "pid": 4242,
+    "os": "macOS 27.0.1",
+    "permissions": {
+     "accessibility": "granted"
+    },
+    "config": {
+     "heartbeat_s": 15,
+     "idle_threshold_s": 120,
+     "reconcile_s": 60
+    }
+   }
+  }
+ },
+ {
+  "name": "mac_heartbeat",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "heartbeat",
+   "obs": {
+    "permissions": {
+     "accessibility": "granted"
+    },
+    "title_stall_ms": 0,
+    "dropped": 0
+   }
+  }
+ },
+ {
+  "name": "mac_app",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 2,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "nsworkspace",
+   "kind": "app",
+   "obs": {
+    "app_id": "com.apple.Terminal",
+    "name": "Terminal",
+    "path": "/System/Applications/Utilities/Terminal.app",
+    "pid": 501,
+    "registered_browser": false,
+    "identity_state": "ok",
+    "store": null
+   }
+  }
+ },
+ {
+  "name": "mac_window",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 3,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "ax_observer",
+   "kind": "window",
+   "obs": {
+    "pid": 501,
+    "window": "w-1",
+    "title": "daylens — zsh — 80×24",
+    "title_state": "ok"
+   }
+  }
+ },
+ {
+  "name": "mac_window_no_permission",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 4,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "ax_observer",
+   "kind": "window",
+   "obs": {
+    "pid": 501,
+    "window": null,
+    "title": null,
+    "title_state": "no_permission"
+   }
+  }
+ },
+ {
+  "name": "mac_input_idle",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 5,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "idle_timer",
+   "kind": "input",
+   "obs": {
+    "state": "idle",
+    "last_input_wall_ms": 1792130292345,
+    "threshold_s": 120
+   }
+  }
+ },
+ {
+  "name": "mac_session_locked",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 6,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "distributed_notification",
+   "kind": "session",
+   "obs": {
+    "state": "locked"
+   }
+  }
+ },
+ {
+  "name": "mac_power_sleep",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 7,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "nsworkspace",
+   "kind": "power",
+   "obs": {
+    "state": "sleep"
+   }
+  }
+ },
+ {
+  "name": "mac_clock",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 8,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "notification",
+   "kind": "clock",
+   "obs": {
+    "change": "timezone_changed"
+   }
+  }
+ },
+ {
+  "name": "mac_bye",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 9,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "bye",
+   "obs": {
+    "reason": "shutdown"
+   }
+  }
+ },
+ {
+  "name": "win_app_store",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 10,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "app",
+   "obs": {
+    "app_id": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+    "name": "Calculator",
+    "path": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe",
+    "pid": 9120,
+    "registered_browser": false,
+    "identity_state": "ok",
+    "store": {
+     "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+     "package": "Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_app_access_denied",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 11,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "app",
+   "obs": {
+    "app_id": null,
+    "name": null,
+    "path": null,
+    "pid": 4,
+    "registered_browser": false,
+    "identity_state": "access_denied",
+    "store": null
+   }
+  }
+ },
+ {
+  "name": "win_window_unicode",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 12,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "window",
+   "obs": {
+    "pid": 9120,
+    "window": "0x1A2B3C",
+    "title": "Ünïcödé \"quoted\" \\ path ⠋ 日本語",
+    "title_state": "ok"
+   }
+  }
+ },
+ {
+  "name": "win_power_wake_automatic",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 13,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "power",
+   "kind": "power",
+   "obs": {
+    "state": "wake_automatic"
+   }
+  }
+ },
+ {
+  "name": "win_session_unlocked",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 14,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "wts",
+   "kind": "session",
+   "obs": {
+    "state": "unlocked"
+   }
+  }
+ },
+ {
+  "name": "win_input_active",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 15,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "idle_timer",
+   "kind": "input",
+   "obs": {
+    "state": "active",
+    "last_input_wall_ms": 1792130412000,
+    "threshold_s": 120
+   }
+  }
+ }
+]
