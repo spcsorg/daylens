@@ -1,0 +1,97 @@
+import XCTest
+@testable import CaptureCore
+
+final class CaptureCoreTests: XCTestCase {
+  let time = EventTime(wallMs: 1_792_130_412_345, monoUs: 881_234_567_890, tz: "Africa/Kigali", tzOffsetMin: 120)
+  let term = AppInfo(appId: "com.apple.Terminal", name: "Terminal", path: "/System/Applications/Utilities/Terminal.app", pid: 501, registeredBrowser: false, identityState: .ok)
+
+  func fixtures() throws -> [String: Any] {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../protocol/fixtures/valid.json").standardized
+    let list = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [[String: Any]]
+    return Dictionary(uniqueKeysWithValues: list.map { ($0["name"] as! String, $0["line"]!) })
+  }
+
+  func assertMatches(_ name: String, seq: Int64, source: String, kind: String, _ obs: JSON, file: StaticString = #filePath, line: UInt = #line) throws {
+    let encoded = envelope(run: "run-0001", seq: seq, boot: "boot-0001", time: time, platform: "macos", source: source, kind: kind, obs: obs).serialized()
+    let ours = try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as! NSDictionary
+    let golden = try fixtures()[name] as! NSDictionary
+    XCTAssertEqual(ours, golden, name, file: file, line: line)
+  }
+
+  func testEncoderMatchesGoldenFixtures() throws {
+    let p = Permissions(accessibility: "granted")
+    try assertMatches("mac_hello", seq: 0, source: "helper", kind: "hello",
+                      Obs.hello(helper: "daylens-capture-macos", version: "2.0.0-dev", pid: 4242, os: "macOS 27.0.1", permissions: p, heartbeatS: 15, idleThresholdS: 120, reconcileS: 60))
+    try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(permissions: p, titles: .ok, stallMs: 0, dropped: 0))
+    try assertMatches("mac_focus_app", seq: 2, source: "nsworkspace", kind: "focus",
+                      Obs.focus(trigger: .app_changed, app: term, window: .read(window: "w-1", title: "daylens — zsh — 80×24")))
+    try assertMatches("mac_focus_title", seq: 3, source: "ax_observer", kind: "focus",
+                      Obs.focus(trigger: .title_changed, app: term, window: .read(window: "w-1", title: "✳ Fix capture")))
+    try assertMatches("mac_focus_no_permission", seq: 4, source: "nsworkspace", kind: "focus",
+                      Obs.focus(trigger: .app_changed, app: term, window: WindowInfo(window: nil, title: nil, titleState: .no_permission)))
+    try assertMatches("mac_input_idle", seq: 5, source: "idle_timer", kind: "input", Obs.input(idle: true, lastInputWallMs: 1_792_130_292_345, thresholdS: 120, snapshot: false))
+    try assertMatches("mac_session_locked", seq: 6, source: "distributed_notification", kind: "session", Obs.session("locked", snapshot: false))
+    try assertMatches("mac_power_sleep", seq: 7, source: "nsworkspace", kind: "power", Obs.power("sleep"))
+    try assertMatches("mac_clock", seq: 8, source: "notification", kind: "clock", Obs.clock("timezone_changed"))
+    try assertMatches("mac_bye", seq: 9, source: "helper", kind: "bye", Obs.bye("shutdown"))
+  }
+
+  func testEscapingSurvivesHostileTitles() throws {
+    let title = "quote \" backslash \\ newline \n tab \t nul \u{0} sep \u{2028} emoji 🌘 日本語"
+    let s = Obs.focus(trigger: .title_changed, app: term, window: .read(window: "w", title: title)).serialized()
+    let parsed = try JSONSerialization.jsonObject(with: Data(s.utf8)) as! [String: Any]
+    XCTAssertEqual((parsed["window"] as! [String: Any])["title"] as? String, title)
+    XCTAssertFalse(s.contains("\n"))
+  }
+
+  func testTitlesAreTruncatedOnCharacterBoundaries() {
+    let long = String(repeating: "a", count: 1023) + "🌘🌘"
+    let w = WindowInfo.read(window: nil, title: long)
+    XCTAssertEqual(w.title!.utf16.count, 1023)
+    XCTAssertEqual(WindowInfo.read(window: nil, title: "").titleState, .empty)
+    XCTAssertNil(WindowInfo.read(window: nil, title: "").title)
+  }
+
+  func testEmitterAssignsSeqBeforeQueueingAndCountsDrops() {
+    let gate = DispatchSemaphore(value: 0)
+    var out: [String] = []
+    let lock = NSLock()
+    let e = Emitter(run: "r", boot: "b", platform: "macos", capacity: 2, reserve: 1) { line in
+      gate.wait()
+      lock.lock(); out.append(line); lock.unlock()
+    }
+    for _ in 0..<5 { e.emit(kind: "focus", source: "t", time: time, obs: Obs.power("sleep"), priority: .normal) }
+    e.emit(kind: "power", source: "t", time: time, obs: Obs.power("sleep"), priority: .critical)
+    e.emit(kind: "power", source: "t", time: time, obs: Obs.power("sleep"), priority: .critical)
+    for _ in 0..<10 { gate.signal() }
+    e.flush()
+    XCTAssertEqual(e.dropped, 4)
+    let seqs = out.map { (try! JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any])["seq"] as! Int }
+    XCTAssertEqual(seqs, [0, 1, 5], "two normal lines fit, the reserve takes one critical line, the gap shows as a seq jump")
+    XCTAssertTrue(out.allSatisfy { $0.hasSuffix("\n") && $0.dropLast().firstIndex(of: "\n") == nil })
+  }
+
+  func testIdleSchedulerChecksOnlyWhenIdleCouldBeReached() {
+    var s = IdleScheduler(thresholdS: 120)
+    var d = s.evaluate(secondsSinceInput: 10)
+    XCTAssertEqual(d.emit, false, "first look reports the state")
+    XCTAssertEqual(d.nextCheckS, 110.25, accuracy: 0.01)
+    d = s.evaluate(secondsSinceInput: 5)
+    XCTAssertNil(d.emit, "still active: nothing to say")
+    XCTAssertEqual(d.nextCheckS, 115.25, accuracy: 0.01)
+    d = s.evaluate(secondsSinceInput: 121)
+    XCTAssertEqual(d.emit, true)
+    XCTAssertEqual(d.nextCheckS, 2)
+    d = s.evaluate(secondsSinceInput: 400)
+    XCTAssertNil(d.emit)
+    d = s.evaluate(secondsSinceInput: 0.3)
+    XCTAssertEqual(d.emit, false, "input after idle is reported")
+    s.reset()
+    XCTAssertEqual(s.evaluate(secondsSinceInput: 0).emit, false, "after a reset the state is reported again")
+  }
+
+  func testActiveChecksNeverSpinFasterThanHalfASecond() {
+    var s = IdleScheduler(thresholdS: 120)
+    XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)
+  }
+}
