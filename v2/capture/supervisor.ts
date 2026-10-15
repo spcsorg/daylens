@@ -53,6 +53,8 @@ export interface SupervisorStats {
   crashes: number
   linesLost: number
   lateTicks: number
+  heartbeats: number
+  heartbeatMaxGapMs: number
 }
 
 export class Supervisor {
@@ -89,6 +91,8 @@ export class Supervisor {
     crashes: 0,
     linesLost: 0,
     lateTicks: 0,
+    heartbeats: 0,
+    heartbeatMaxGapMs: 0,
   }
 
   constructor(store: Store, normalizer: Normalizer, opts: SupervisorOptions) {
@@ -133,6 +137,12 @@ export class Supervisor {
     if (this.run) this.store.endRun(this.run, end.wall_ms, 'service_stopped')
     this.store.markServiceStopped(end.wall_ms)
     this.store.flush()
+    const r = this.stats.rejected
+    this.o.log(
+      `stats lines=${this.stats.lines} heartbeats=${this.stats.heartbeats} heartbeat_max_gap_ms=${this.stats.heartbeatMaxGapMs} late_ticks=${this.stats.lateTicks} ` +
+        `hangs=${this.stats.hangs} crashes=${this.stats.crashes} restarts=${this.stats.restarts} lines_lost=${this.stats.linesLost} ` +
+        `rejected=${r.too_long + r.not_json + r.unsupported_version + r.malformed}`,
+    )
   }
 
   helperPid(): number | null {
@@ -375,6 +385,10 @@ export class Supervisor {
         const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { silence_ms: Math.round(gapUs / 1000) } })
         this.store.closeGap(id, point)
       }
+    }
+    this.stats.heartbeats++
+    if (prev && prev.boot === line.boot && !sleepExplains) {
+      this.stats.heartbeatMaxGapMs = Math.max(this.stats.heartbeatMaxGapMs, Math.round((line.t.mono_us - prev.mono_us) / 1000))
     }
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, boot: line.boot }
     this.store.recordHeartbeat(line)

@@ -1,0 +1,122 @@
+// Kill, hang and contract tests against the real macOS helper. Skipped when it is not built.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import Database from 'better-sqlite3'
+import { parseLine } from '../capture/protocol.ts'
+import { DB_FILE } from '../capture/store.ts'
+
+const HELPER = fileURLToPath(new URL('../native/macos/.build/release/daylens-capture-macos', import.meta.url))
+const SERVICE = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
+const skip = process.platform !== 'darwin' || !existsSync(HELPER) ? 'real macOS helper not built' : false
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function waitFor(cond: () => boolean, timeoutMs = 15_000): Promise<void> {
+  const start = Date.now()
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error('timed out waiting')
+    await sleep(50)
+  }
+}
+
+function helperPid(servicePid: number): number | null {
+  try {
+    return Number(execFileSync('pgrep', ['-P', String(servicePid), '-f', 'daylens-capture-macos']).toString().trim().split('\n')[0]) || null
+  } catch {
+    return null
+  }
+}
+
+function startService(dataDir: string): { proc: ChildProcess; log: () => string } {
+  let log = ''
+  const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200'], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  })
+  proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
+  return { proc, log: () => log }
+}
+
+async function stop(proc: ChildProcess): Promise<void> {
+  const exited = new Promise((r) => proc.once('exit', r))
+  proc.kill('SIGTERM')
+  await exited
+}
+
+function gaps(dir: string): { reason: string; start_wall_ms: number; end_wall_ms: number | null; detail: string | null }[] {
+  const db = new Database(path.join(dir, DB_FILE), { readonly: true })
+  try {
+    return db.prepare('SELECT reason, start_wall_ms, end_wall_ms, detail FROM capture_gaps ORDER BY id').all() as never
+  } finally {
+    db.close()
+  }
+}
+
+test('every line the real helper writes passes the protocol validator', { skip }, async () => {
+  const proc = spawn(HELPER, ['--heartbeat-s', '1'], { stdio: ['pipe', 'pipe', 'ignore'] })
+  let out = ''
+  proc.stdout!.setEncoding('utf8').on('data', (c: string) => (out += c))
+  await sleep(2500)
+  proc.stdin!.write('{"op":"snapshot"}\n')
+  await sleep(500)
+  proc.stdin!.write('{"op":"shutdown"}\n')
+  await new Promise((r) => proc.once('exit', r))
+  const lines = out.split('\n').filter(Boolean)
+  const kinds = new Set<string>()
+  lines.forEach((l, i) => {
+    const r = parseLine(l)
+    assert.ok(r.ok, `line ${i}: ${r.ok ? '' : r.reason + ' ' + r.detail}`)
+    if (r.ok) {
+      assert.equal(r.line.seq, i, 'seq is contiguous')
+      kinds.add(r.line.kind)
+    }
+  })
+  for (const k of ['hello', 'heartbeat', 'focus', 'input', 'session', 'bye']) assert.ok(kinds.has(k), `missing ${k}`)
+})
+
+test('closing stdin makes the real helper exit at once', { skip }, async () => {
+  const proc = spawn(HELPER, [], { stdio: ['pipe', 'ignore', 'ignore'] })
+  await sleep(500)
+  const t = Date.now()
+  proc.stdin!.end()
+  await new Promise((r) => proc.once('exit', r))
+  assert.ok(Date.now() - t < 1000)
+})
+
+test('kill -9 of the real helper: crash gap, restart, recovery', { skip }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const svc = startService(dir)
+  await waitFor(() => svc.log().includes('helper hello'))
+  await sleep(1500)
+  const pid = helperPid(svc.proc.pid!)!
+  process.kill(pid, 'SIGKILL')
+  await waitFor(() => (svc.log().match(/helper hello/g) ?? []).length >= 2)
+  await sleep(1500)
+  const next = helperPid(svc.proc.pid!)
+  assert.ok(next !== null && next !== pid)
+  await stop(svc.proc)
+  const crash = gaps(dir).find((g) => g.reason === 'helper_crashed')!
+  assert.ok(crash && crash.end_wall_ms !== null)
+  assert.equal(JSON.parse(crash.detail!).signal, 'SIGKILL')
+  assert.ok(crash.end_wall_ms - crash.start_wall_ms < 5000, `recovered in ${crash.end_wall_ms - crash.start_wall_ms} ms`)
+})
+
+test('a frozen real helper (SIGSTOP) is detected as hung, replaced, and the gap explained', { skip }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const svc = startService(dir)
+  await waitFor(() => svc.log().includes('helper hello'))
+  await sleep(1500)
+  const pid = helperPid(svc.proc.pid!)!
+  process.kill(pid, 'SIGSTOP')
+  await waitFor(() => svc.log().includes('helper hung') && (svc.log().match(/helper hello/g) ?? []).length >= 2)
+  await sleep(1500)
+  await stop(svc.proc)
+  const hung = gaps(dir).find((g) => g.reason === 'helper_hung')!
+  assert.ok(hung && hung.end_wall_ms !== null)
+  const span = hung.end_wall_ms - hung.start_wall_ms
+  assert.ok(span >= 3000 && span < 10_000, `gap ${span} ms`)
+  assert.ok(gaps(dir).every((g) => g.reason !== 'helper_crashed'), 'a hang kill is not also counted as a crash')
+})
