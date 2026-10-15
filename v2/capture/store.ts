@@ -283,6 +283,10 @@ export class Store implements Sink {
     this.enqueue('UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE id = ? AND end_wall_ms IS NULL', [end.wall_ms, end.mono_us, end.boot, id])
   }
 
+  reopenGap(id: number): void {
+    this.enqueue('UPDATE capture_gaps SET end_wall_ms = NULL, end_mono_us = NULL, end_boot = NULL WHERE id = ?', [id])
+  }
+
   // --- batching ---------------------------------------------------------
 
   private enqueue(sql: string, params: unknown[]): void {

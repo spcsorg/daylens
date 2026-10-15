@@ -1,0 +1,60 @@
+// Capture service process: supervisor + normalization + storage. Runs outside the interface process.
+// Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
+
+import { parseArgs } from 'node:util'
+import { Normalizer, Privacy } from './normalize.ts'
+import { defaultDataDir, Store } from './store.ts'
+import { Supervisor } from './supervisor.ts'
+
+const { values } = parseArgs({
+  options: {
+    helper: { type: 'string' },
+    'helper-arg': { type: 'string', multiple: true },
+    'data-dir': { type: 'string' },
+    'heartbeat-s': { type: 'string', default: '15' },
+    'idle-threshold-s': { type: 'string', default: '120' },
+    'reconcile-s': { type: 'string', default: '60' },
+    'hang-after-s': { type: 'string' },
+    'tick-ms': { type: 'string' },
+  },
+})
+
+if (!values.helper) {
+  process.stderr.write('usage: service.ts --helper <path> [--data-dir <dir>]\n')
+  process.exit(64)
+}
+
+const heartbeatS = Number(values['heartbeat-s'])
+const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
+const store = new Store(values['data-dir'] ?? defaultDataDir(), { onError: (code) => log(`storage error code=${code}`) })
+const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
+const supervisor = new Supervisor(store, normalizer, {
+  helperPath: values.helper,
+  helperArgs: [
+    ...(values['helper-arg'] ?? []),
+    '--heartbeat-s', String(heartbeatS),
+    '--idle-threshold-s', values['idle-threshold-s'],
+    '--reconcile-s', values['reconcile-s'],
+  ],
+  heartbeatMs: heartbeatS * 1000,
+  hangAfterMs: values['hang-after-s'] ? Number(values['hang-after-s']) * 1000 : heartbeatS * 3000,
+  tickMs: values['tick-ms'] ? Number(values['tick-ms']) : Math.max(250, Math.round((heartbeatS * 1000) / 3)),
+  log,
+})
+
+let stopping = false
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) return
+  stopping = true
+  log(`stopping signal=${signal}`)
+  await supervisor.stop()
+  store.close()
+  process.exit(0)
+}
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
+process.on('SIGINT', () => void shutdown('SIGINT'))
+// An interface parent that dies closes this pipe; capture stops with it.
+if (process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
+
+log(`started pid=${process.pid} db=${store.file}`)
+supervisor.start()

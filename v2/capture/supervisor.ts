@@ -1,0 +1,424 @@
+// Runs the native helper, watches its heartbeat, restarts it, and records every gap with its reason.
+// Logs carry codes and counts only, never observation content.
+
+import { spawn, type ChildProcess } from 'node:child_process'
+import type { GapPoint, GapReason, Normalizer } from './normalize.ts'
+import { MAX_LINE_BYTES, parseLine, type Line, type LineOf, type RejectReason } from './protocol.ts'
+import type { Store } from './store.ts'
+
+export interface SupervisorOptions {
+  helperPath: string
+  helperArgs?: string[]
+  env?: NodeJS.ProcessEnv
+  heartbeatMs?: number
+  hangAfterMs?: number
+  tickMs?: number
+  backoffInitialMs?: number
+  backoffMaxMs?: number
+  stableMs?: number
+  crashLoopCount?: number
+  unavailableRetryMs?: number
+  shutdownGraceMs?: number
+  now?: () => number
+  hrtimeMs?: () => number
+  log?: (msg: string) => void
+}
+
+type Required<T> = { [K in keyof T]-?: T[K] }
+
+const DEFAULTS = {
+  helperArgs: [] as string[],
+  env: process.env,
+  heartbeatMs: 15_000,
+  hangAfterMs: 45_000,
+  tickMs: 5_000,
+  backoffInitialMs: 500,
+  backoffMaxMs: 30_000,
+  stableMs: 60_000,
+  crashLoopCount: 5,
+  unavailableRetryMs: 300_000,
+  shutdownGraceMs: 1_500,
+  now: Date.now,
+  hrtimeMs: () => Number(process.hrtime.bigint() / 1_000_000n),
+  log: (msg: string) => process.stderr.write(`[capture] ${msg}\n`),
+}
+
+const SAFE_STDERR = /^[a-z_]+=[A-Za-z0-9_.:-]{0,64}( [a-z_]+=[A-Za-z0-9_.:-]{0,64})*$/
+
+export interface SupervisorStats {
+  lines: number
+  rejected: Record<RejectReason, number>
+  restarts: number
+  hangs: number
+  crashes: number
+  linesLost: number
+  lateTicks: number
+}
+
+export class Supervisor {
+  private readonly o: Required<SupervisorOptions>
+  private readonly store: Store
+  private readonly normalizer: Normalizer
+  private child: ChildProcess | null = null
+  private run: string | null = null
+  private lastSeq = -1
+  private lastLine: GapPoint | null = null
+  private lastHeartbeat: { point: GapPoint; mono_us: number; boot: string } | null = null
+  private lastSleep: { mono_us: number; boot: string } | null = null
+  private allGap: { id: number; reason: GapReason } | null = null
+  // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
+  private recovering: { id: number; reason: GapReason } | null = null
+  private titlesGap: number | null = null
+  private rejectGap: { id: number; count: number; startWall: number } | null = null
+  private awakeSilenceMs = 0
+  private lastTick: { wall: number; hr: number } | null = null
+  private ticker: ReturnType<typeof setInterval> | null = null
+  private restartTimer: ReturnType<typeof setTimeout> | null = null
+  private backoffMs: number
+  private fastFailures = 0
+  private spawnedAtHr = 0
+  private killedForHang = false
+  private stopping = false
+  private stdoutBuf = ''
+  private discardingLongLine = false
+  readonly stats: SupervisorStats = {
+    lines: 0,
+    rejected: { too_long: 0, not_json: 0, unsupported_version: 0, malformed: 0 },
+    restarts: 0,
+    hangs: 0,
+    crashes: 0,
+    linesLost: 0,
+    lateTicks: 0,
+  }
+
+  constructor(store: Store, normalizer: Normalizer, opts: SupervisorOptions) {
+    this.o = { ...DEFAULTS, ...opts } as Required<SupervisorOptions>
+    this.store = store
+    this.normalizer = normalizer
+    this.backoffMs = this.o.backoffInitialMs
+  }
+
+  start(): void {
+    const now = this.o.now()
+    const prev = this.store.previousCoverage()
+    if (prev) this.store.closeDanglingGaps({ wall_ms: prev.endWallMs, mono_us: null, boot: null })
+    this.openAllGap(
+      prev ? 'service_down' : 'service_starting',
+      prev ? { wall_ms: Math.min(prev.endWallMs, now), mono_us: null, boot: null } : this.servicePoint(),
+      prev ? { clean_stop: prev.clean } : null,
+    )
+    this.store.markServiceStarted()
+    this.store.flush()
+    this.lastTick = { wall: now, hr: this.o.hrtimeMs() }
+    this.ticker = setInterval(() => this.tick(), this.o.tickMs)
+    this.spawnHelper()
+  }
+
+  async stop(): Promise<void> {
+    this.stopping = true
+    if (this.ticker) clearInterval(this.ticker)
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    const child = this.child
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      this.send({ op: 'shutdown' })
+      const timer = setTimeout(() => child.kill('SIGKILL'), this.o.shutdownGraceMs)
+      await exited
+      clearTimeout(timer)
+    }
+    const end = this.servicePoint()
+    this.normalizer.interrupt(end)
+    if (this.titlesGap !== null) this.store.closeGap(this.titlesGap, end)
+    if (this.allGap) this.store.closeGap(this.allGap.id, end)
+    if (this.run) this.store.endRun(this.run, end.wall_ms, 'service_stopped')
+    this.store.markServiceStopped(end.wall_ms)
+    this.store.flush()
+  }
+
+  helperPid(): number | null {
+    return this.child?.pid ?? null
+  }
+
+  // --- process lifecycle --------------------------------------------------
+
+  private spawnHelper(): void {
+    if (this.stopping) return
+    this.run = null
+    this.lastSeq = -1
+    this.lastHeartbeat = null
+    this.awakeSilenceMs = 0
+    this.killedForHang = false
+    this.stdoutBuf = ''
+    this.discardingLongLine = false
+    this.spawnedAtHr = this.o.hrtimeMs()
+    let child: ChildProcess
+    try {
+      child = spawn(this.o.helperPath, this.o.helperArgs, { stdio: ['pipe', 'pipe', 'pipe'], env: this.o.env, windowsHide: true })
+    } catch (err) {
+      this.onSpawnError(err)
+      return
+    }
+    this.child = child
+    child.on('error', (err) => this.onSpawnError(err))
+    child.stdin?.on('error', () => {})
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => this.onStdout(chunk))
+    child.stderr?.setEncoding('utf8')
+    child.stderr?.on('data', (chunk: string) => {
+      for (const l of chunk.split('\n')) {
+        const t = l.trim()
+        if (t) this.o.log(SAFE_STDERR.test(t) ? `helper ${t}` : 'helper stderr line redacted')
+      }
+    })
+    child.on('exit', (code, signal) => this.onExit(child, code, signal))
+  }
+
+  private onSpawnError(err: unknown): void {
+    const code = (err as { code?: unknown })?.code
+    this.o.log(`helper spawn failed code=${typeof code === 'string' ? code : 'unknown'}`)
+    this.child = null
+    this.ensureAllGap('helper_unavailable', this.lastLine ?? this.servicePoint(), { spawn_error: typeof code === 'string' ? code : 'unknown' })
+    this.scheduleRestart(this.o.unavailableRetryMs)
+  }
+
+  private onExit(child: ChildProcess, code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.child !== child) return
+    this.child = null
+    if (this.stdoutBuf) this.onStdout('\n')
+    if (this.stopping) return
+    const upMs = this.o.hrtimeMs() - this.spawnedAtHr
+    const at = this.lastLine ?? this.servicePoint()
+    if (this.killedForHang) {
+      this.o.log('helper killed after hang')
+    } else {
+      this.stats.crashes++
+      this.o.log(`helper exited code=${code ?? 'none'} signal=${signal ?? 'none'}`)
+      this.normalizer.interrupt(at)
+      this.ensureAllGap('helper_crashed', at, { exit_code: code, signal })
+    }
+    this.fastFailures = upMs < this.o.stableMs ? this.fastFailures + 1 : 0
+    if (upMs >= this.o.stableMs) this.backoffMs = this.o.backoffInitialMs
+    if (this.fastFailures >= this.o.crashLoopCount) {
+      if (this.allGap) {
+        this.store.updateGap(this.allGap.id, { reason: 'helper_unavailable', detail: { fast_failures: this.fastFailures } })
+        this.allGap.reason = 'helper_unavailable'
+      }
+      this.scheduleRestart(this.o.unavailableRetryMs)
+      return
+    }
+    this.scheduleRestart(this.backoffMs)
+    this.backoffMs = Math.min(this.backoffMs * 2, this.o.backoffMaxMs)
+  }
+
+  private scheduleRestart(delayMs: number): void {
+    if (this.stopping || this.restartTimer) return
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      this.stats.restarts++
+      this.spawnHelper()
+    }, delayMs)
+  }
+
+  // --- watchdog -----------------------------------------------------------
+
+  // Silence counts only time this service itself was awake and on schedule, so a
+  // sleeping machine or a suspended service is never mistaken for a hung helper.
+  private tick(): void {
+    const wall = this.o.now()
+    const hr = this.o.hrtimeMs()
+    const last = this.lastTick ?? { wall, hr }
+    this.lastTick = { wall, hr }
+    const dWall = wall - last.wall
+    const dHr = hr - last.hr
+    const late = dWall > this.o.tickMs * 2 || dHr > this.o.tickMs * 2 || dWall < 0
+    if (late) {
+      this.stats.lateTicks++
+      return
+    }
+    if (!this.child) return
+    this.awakeSilenceMs += dHr
+    if (this.awakeSilenceMs >= this.o.hangAfterMs) this.onHang()
+  }
+
+  private onHang(): void {
+    const child = this.child
+    if (!child) return
+    this.stats.hangs++
+    this.o.log(`helper hung silence_ms=${Math.round(this.awakeSilenceMs)}`)
+    const at = this.lastHeartbeat?.point ?? this.lastLine ?? this.servicePoint()
+    this.normalizer.interrupt(at)
+    this.ensureAllGap('helper_hung', at, { awake_silence_ms: Math.round(this.awakeSilenceMs) })
+    this.killedForHang = true
+    this.awakeSilenceMs = 0
+    child.kill('SIGKILL')
+  }
+
+  // --- line handling ------------------------------------------------------
+
+  private onStdout(chunk: string): void {
+    let buf = this.stdoutBuf + chunk
+    let nl = buf.indexOf('\n')
+    while (nl !== -1) {
+      const raw = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (this.discardingLongLine) this.discardingLongLine = false
+      else if (raw.trim()) this.onRawLine(raw)
+      nl = buf.indexOf('\n')
+    }
+    if (buf.length > MAX_LINE_BYTES) {
+      if (!this.discardingLongLine) this.reject('too_long')
+      this.discardingLongLine = true
+      buf = ''
+    }
+    this.stdoutBuf = buf
+  }
+
+  private onRawLine(raw: string): void {
+    const r = parseLine(raw)
+    if (!r.ok) {
+      this.reject(r.reason)
+      return
+    }
+    this.onLine(r.line)
+  }
+
+  private reject(reason: RejectReason): void {
+    this.stats.rejected[reason]++
+    this.o.log(`line rejected reason=${reason}`)
+    const now = this.o.now()
+    if (this.rejectGap && now - this.rejectGap.startWall < 60_000) {
+      this.rejectGap.count++
+      this.store.updateGap(this.rejectGap.id, { detail: { count: this.rejectGap.count } })
+      this.store.closeGap(this.rejectGap.id, { wall_ms: now, mono_us: null, boot: null })
+      return
+    }
+    const id = this.store.openGap({ reason: 'protocol_rejected', scope: 'all', run: this.run, start: { wall_ms: now, mono_us: null, boot: null }, detail: { count: 1 } })
+    this.store.closeGap(id, { wall_ms: now, mono_us: null, boot: null })
+    this.rejectGap = { id, count: 1, startWall: now }
+  }
+
+  private onLine(line: Line): void {
+    this.stats.lines++
+    const point: GapPoint = { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
+
+    if (this.run === null) {
+      if (line.kind !== 'hello' || line.seq !== 0) {
+        this.reject('malformed')
+        return
+      }
+      this.onHello(line)
+    } else if (line.run !== this.run) {
+      this.reject('malformed')
+      return
+    } else if (line.seq !== this.lastSeq + 1) {
+      const missing = line.seq - this.lastSeq - 1
+      if (missing <= 0) {
+        this.reject('malformed')
+        return
+      }
+      this.stats.linesLost += missing
+      this.o.log(`lines lost count=${missing}`)
+      const from = this.lastLine ?? point
+      this.normalizer.interrupt(from)
+      const id = this.store.openGap({ reason: 'lines_lost', scope: 'all', run: this.run, start: from, detail: { missing } })
+      this.store.closeGap(id, point)
+      this.send({ op: 'snapshot' })
+    }
+    this.lastSeq = line.seq
+    this.lastLine = point
+
+    switch (line.kind) {
+      case 'hello':
+        return
+      case 'heartbeat':
+        return this.onHeartbeat(line, point)
+      case 'power':
+        if (line.obs.state === 'sleep') this.lastSleep = { mono_us: line.t.mono_us, boot: line.boot }
+        this.normalizer.handle(line)
+        if (line.obs.state === 'resume') this.send({ op: 'snapshot' })
+        return
+      case 'bye':
+        this.o.log(`helper bye reason=${/^[a-z_]{1,32}$/.test(line.obs.reason) ? line.obs.reason : 'other'}`)
+        return
+      default:
+        this.normalizer.handle(line)
+    }
+  }
+
+  private onHello(line: LineOf<'hello'>): void {
+    this.run = line.run
+    this.o.log(`helper hello pid=${line.obs.pid} accessibility=${line.obs.permissions.accessibility}`)
+    this.store.startRun(line)
+    this.awakeSilenceMs = 0
+    this.lastSleep = null
+    const point: GapPoint = { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
+    if (this.allGap) {
+      this.store.closeGap(this.allGap.id, point)
+      this.recovering = this.allGap
+      this.allGap = null
+    }
+    this.lastHeartbeat = { point, mono_us: line.t.mono_us, boot: line.boot }
+  }
+
+  private onHeartbeat(line: LineOf<'heartbeat'>, point: GapPoint): void {
+    this.awakeSilenceMs = 0
+    this.recovering = null
+    const prev = this.lastHeartbeat
+    // Event-time continuity: a long silence between heartbeats with no sleep reported means the helper itself stalled.
+    // A heartbeat can still slip out between the sleep notice and the actual suspend, hence the look-back.
+    const sleepExplains =
+      this.lastSleep !== null && this.lastSleep.boot === line.boot && this.lastSleep.mono_us >= (prev?.mono_us ?? 0) - this.o.heartbeatMs * 2000
+    if (prev && prev.boot === line.boot && !sleepExplains) {
+      const gapUs = line.t.mono_us - prev.mono_us
+      if (gapUs > this.o.heartbeatMs * 2.5 * 1000) {
+        this.o.log(`helper stalled between heartbeats ms=${Math.round(gapUs / 1000)}`)
+        const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { silence_ms: Math.round(gapUs / 1000) } })
+        this.store.closeGap(id, point)
+      }
+    }
+    this.lastHeartbeat = { point, mono_us: line.t.mono_us, boot: line.boot }
+    this.store.recordHeartbeat(line)
+    this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
+    const titlesDown = line.obs.titles !== 'ok'
+    if (titlesDown && this.titlesGap === null) {
+      this.titlesGap = this.store.openGap({ reason: 'titles_unavailable', scope: 'titles', run: this.run, start: point, detail: { state: line.obs.titles } })
+    } else if (!titlesDown && this.titlesGap !== null) {
+      this.store.closeGap(this.titlesGap, point)
+      this.titlesGap = null
+    }
+  }
+
+  // --- helpers ------------------------------------------------------------
+
+  private servicePoint(): GapPoint {
+    return { wall_ms: this.o.now(), mono_us: null, boot: null }
+  }
+
+  private openAllGap(reason: GapReason, start: GapPoint, detail: Record<string, number | boolean | string | null> | null): void {
+    const id = this.store.openGap({ reason, scope: 'all', run: this.run, start, detail })
+    this.allGap = { id, reason }
+  }
+
+  // One all-scope gap at a time; a second failure before recovery extends the first.
+  private ensureAllGap(reason: GapReason, start: GapPoint, detail: Record<string, number | boolean | string | null>): void {
+    if (this.titlesGap !== null) {
+      this.store.closeGap(this.titlesGap, start)
+      this.titlesGap = null
+    }
+    if (!this.allGap && this.recovering) {
+      this.store.reopenGap(this.recovering.id)
+      this.allGap = this.recovering
+      this.recovering = null
+    }
+    if (this.allGap) {
+      this.store.updateGap(this.allGap.id, { detail: { ...detail, also: reason } })
+      return
+    }
+    this.openAllGap(reason, start, detail)
+  }
+
+  private send(msg: { op: 'shutdown' | 'snapshot' }): void {
+    const stdin = this.child?.stdin
+    if (stdin && stdin.writable) stdin.write(JSON.stringify(msg) + '\n')
+  }
+}
