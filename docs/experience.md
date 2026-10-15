@@ -8,7 +8,7 @@ Windows, macOS and Linux share one design. These are the only differences, each 
 
 | Area | Windows | macOS | Linux |
 |---|---|---|---|
-| Window controls | Right side, Windows style | Left side, traffic lights | Follows the desktop |
+| Window controls | Right side; native Windows caption buttons drawn in Daylens colors, so Snap layouts work | Left side, traffic lights | Follows the desktop |
 | Background menu | System tray icon | Menu bar icon | Tray where the desktop supports it |
 | Shortcut modifier | Ctrl | Cmd | Ctrl |
 | Permissions in onboarding | None needed for window titles | One step: Accessibility, plus browser access | Depends on the desktop; see [System design](system-design.md#linux) |
@@ -33,6 +33,7 @@ Today is home.
 - **Fixing an hour.** "What were you doing?" takes a few words. The recorded facts for that hour are shown underneath. Saving replaces the title and summary everywhere: Today, Search, Ask, assistants and day files. A small "Edited" mark appears beside the title. Undo is available for a few seconds after saving and from the hour afterwards.
 - **Removing a source.** Removes every record of that page or file for that day and rewrites the hour from what is left. Optionally, never record that site again.
 - **Gaps.** Time with nothing recorded says why: asleep, idle, locked, paused, excluded, or permission lost.
+- **Browser time Daylens could not read.** When the page is unknown and nothing else explains it, the hour says so and asks "What were you doing in Chrome from 2:00 to 2:20?" The answer works like a correction. The same place offers the browser extension.
 - **Left off.** A card at the current hour shows the last thing you were doing. Each item in it opens that thing directly.
 - **Day one.** No empty states and no "come back tomorrow". Earlier today is filled in automatically from browser history and anything else already allowed. Filled-in hours are marked as having less detail.
 - **Other days.** Previous and next buttons and a calendar picker. Days with records are marked.
@@ -70,6 +71,10 @@ Ask answers questions about any day from the same record.
 - **AI:** the current choice (Daylens AI, your own key, a CLI on the machine, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.
 - **Data:** save each day as a note in a folder you choose, let coding agents read those notes, and export everything.
+
+## Browser extension
+
+Offered after onboarding, from Settings and from an hour Daylens could not read, never as an onboarding step. One click per browser, with a one-line explanation: it lets Daylens see which page you were on, never in private windows.
 
 ## Tray and menu bar
 

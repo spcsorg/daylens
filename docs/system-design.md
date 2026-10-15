@@ -4,14 +4,15 @@ Daylens V2 is one desktop app on Windows, macOS and Linux. A small native helper
 
 ## Budgets
 
-These are requirements. Each is measured on every platform before a release.
+Speed is the first requirement. These budgets are ceilings, measured on every platform for every change that could affect them; the goal is to be well under them.
 
 | Measure | Budget |
 |---|---|
 | Cold launch to Today on screen | Under 2 seconds |
 | Opening Today, any day | First paint under 200 ms, from local facts only |
 | Search results | Under 100 ms for typical queries |
-| Capture helper, all day | Measured CPU, memory and energy; no growth over a day |
+| Everything Daylens runs in the background | Event-driven, never busy polling. Averages under 0.5% CPU on a mid-range laptop, under 150 MB of memory combined, no growth over a day, and no measurable battery drop over a working day |
+| A user action (open an hour, save a fix, switch day) | Visible response under 100 ms |
 | An hour written after it ends | Within a few minutes, in the background |
 | AI cost of naming one day | Within the per-day budget set in [Billing](billing.md) |
 
@@ -45,7 +46,7 @@ The interface is one shared web codebase in a desktop shell. V1 already ships th
 
 Each platform has a small helper that reports what is happening and nothing else. All helpers speak the same protocol: one JSON line per observation, carrying the event time, the platform, the source, and the observation itself. Normalization and every decision live in shared code, so the platforms cannot drift.
 
-Whether the helpers stay as separate native programs (as in V1: Swift on macOS, C# on Windows) or become one Rust program with three back ends is decided at the start of the capture step, based on how much logic each helper needs. The protocol is the same either way.
+The macOS helper is Swift and the Windows helper is C#, published self-contained so users install nothing extra. Both are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang (such as UI Automation on Windows) runs on its own thread so it can never stop capture. Each observation carries a protocol version, a sequence number and defined clock units.
 
 ## Capture
 
@@ -53,11 +54,11 @@ Whether the helpers stay as separate native programs (as in V1: Swift on macOS, 
 
 | Signal | Windows | macOS | Linux |
 |---|---|---|---|
-| Front app | Foreground window and its process | Front application | X11 active window; on Wayland, see below |
-| Window title | Window text, no permission needed | Accessibility permission | X11 window name; on Wayland, see below |
-| Browser page | Address and title through UI Automation | Address and title through browser automation or Accessibility | Browser history files, plus the window title |
+| Front app | Foreground-change events and limited process queries; hosted Store apps resolved to the real app | Front application | X11 active window; on Wayland, see below |
+| Window title | Window text and title-change events, no permission needed | Accessibility permission | X11 window name; on Wayland, see below |
+| Browser page | See [Browsers](#browsers) | See [Browsers](#browsers) | See [Browsers](#browsers) |
 | Idle | Time since last input | Time since last input | Idle time from the desktop session |
-| Lock and sleep | Session and power notifications | Workspace and power notifications | Session manager signals |
+| Lock and sleep | Session and power notifications; waking automatically is not the user returning | Workspace and power notifications | Session manager signals |
 | Calendar (optional) | Account calendar through sign-in | Calendar permission (full access is the only level) | Account calendar through sign-in |
 | AI agent sessions | Claude Code and Codex session logs | Same | Same |
 | Microphone or speaker in use (later) | Audio session state | Audio process state | Audio server state |
@@ -68,6 +69,17 @@ No keystrokes, no screen images and no audio content are captured on any platfor
 
 On X11, capture works like the other platforms. On Wayland, apps cannot read the active window without the desktop's help. Daylens supports Wayland desktops through a small desktop extension where one exists (GNOME Shell extension, KWin script, wlroots foreign-toplevel). Where none exists, Daylens records only what it can and says so in Settings. It never pretends to have a full record.
 
+### Browsers
+
+Every browser window is in one of three states: **normal**, **private** or **unknown**. Unknown is never treated as normal.
+
+- **Pages come from browser history files.** Browsers do not write private browsing to history. Readers take only real visits from verified profiles, skip Guest profiles, and ignore bookmarks, downloads and other history sources. Visits synced from other devices or added by extensions are kept apart where the browser marks them. A page from history is searchable, but it gets no time on its own: a visit shows that a page was opened, not that it was read.
+- **Live window titles and addresses are stored only when the window is confirmed normal** by the browser itself: a browser automation property, or the Daylens browser extension. A title that lacks "Incognito", or that matches a history entry, is not confirmation.
+- **The Daylens browser extension** is optional and offered after onboarding, not during it. It is not allowed in private windows, reports the focused tab of normal windows, and gives exact pages and times. It ships at launch for Chrome, Edge and Firefox; Arc and Dia support is verified before it is claimed.
+- **Confirmed private windows** are not recorded at all.
+- **Unknown windows** are recorded as browser time without a page or title. The engine then looks for other evidence of what happened in that time: history visits, commits, agent sessions, files and calendar events. If it still cannot tell, the hour asks the user for context in a few words, the same way a correction works, and offers the extension.
+- Browser history files are read with short read transactions while the browser runs, never by copying the database files, and never by changing the browser's settings.
+
 ### AI agent sessions
 
 Claude Code and Codex write session logs to the user's home folder on every platform. Two small readers turn them into observations: which project folder, when a turn started and ended, and when the user submitted a message.
@@ -76,6 +88,7 @@ Claude Code and Codex write session logs to the user's home folder on every plat
 - Imported turns, aborted turns, missing endings and duplicate records are handled explicitly.
 - If a log format changes and parsing degrades, Settings says so. Daylens never silently reports no agent activity.
 - Only metadata and short, selected excerpts are read. Full transcripts and command output are not stored.
+- Log folders are watched for appended data, not rescanned. On Windows, sessions inside WSL are found without waking stopped Linux distributions.
 
 ### Normalization
 
@@ -149,7 +162,7 @@ A read-only MCP server lets any MCP app read days, hours, search results and sou
 | Choice | How it works |
 |---|---|
 | Daylens AI | The billing service checks the plan, meters usage and forwards to the model provider. Default. |
-| Your own key | The app calls the provider directly. The key is stored in the platform's secure storage. |
+| Your own key | The app calls the provider directly. The key is stored in the platform's secure storage: Keychain on macOS, Credential Manager on Windows (user-scoped DPAPI for larger records), the Secret Service on Linux. The interface never receives a stored secret. |
 | A CLI on the machine | The app runs Claude Code or Codex headlessly, billed to the user's own subscription. |
 | None | Hours stay as facts. Ask searches instead of answering. |
 

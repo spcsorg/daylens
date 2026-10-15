@@ -17,7 +17,8 @@ Every promise the product makes has an automated test that fails if the promise 
 
 | Promise | Test |
 |---|---|
-| Private windows are never stored | Open private windows in each supported browser on each platform; assert nothing is stored |
+| Private windows leave no page or title anywhere | In each supported browser and platform, use unique canary pages in private, Guest and permanent-private modes, alongside a normal window showing the same page; check observations, intervals, search, logs and diagnostics while open, after closing and after restart |
+| Unknown is never treated as normal | Break the browser bridge and automation mid-session; assert no page or title is stored for that window |
 | Exclusions apply before storage | Use an excluded app and site; assert only an "excluded" gap is stored |
 | Deletion reaches everything | Delete a source and a range; assert observations, hours, search, Ask answers and day notes no longer contain it, and a re-import does not bring it back |
 | A correction wins | Correct an hour, trigger a rewrite, reopen every screen and the MCP server; assert the correction is shown everywhere; undo restores the previous text |
@@ -30,7 +31,18 @@ Every promise the product makes has an automated test that fails if the promise 
 
 ## Platform matrix
 
-Every release is tested on Windows, macOS and Linux (X11 and at least one Wayland desktop), from a packaged, signed build, never only from source.
+Every release is tested on Windows 11, macOS and Linux (X11 and at least one Wayland desktop), from a packaged, signed build, never only from source.
+
+| Environment | Used for |
+|---|---|
+| Windows 11 on ARM in Parallels on a Mac | Everyday development: interface, Win32 and UI Automation behavior, browser privacy tests, install and update flows |
+| A Windows 11 x64 cloud desktop (a client image, not Windows Server) | Native x64 behavior, browser integrations, signed updates |
+| CI runners | Builds, unit and contract tests, signature checks, installer automation. GitHub's default Windows runner is Windows Server, so it never counts as client testing |
+| A physical Windows 11 x64 laptop | Battery, sleep, Modern Standby, lid close, docking, mixed scaling, antivirus, and the Windows gold day |
+
+A gold day used for capture accuracy also records timestamped markers for app and page switches, so missed short switches and private-window leaks can be found.
+
+Each release covers:
 
 - Permissions denied, granted, revoked, and after an update.
 - Sleep, wake, lock and clock changes.

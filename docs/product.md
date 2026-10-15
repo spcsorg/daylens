@@ -13,7 +13,9 @@ Working tagline: **Your day, remembered. For you and your AI.**
 
 ## Who it is for
 
-People whose work is spread across many apps, sites, documents, meetings and AI tools. Most users are on Windows; Daylens also ships on macOS and Linux.
+People whose work is spread across many apps, sites, documents, meetings and AI tools. Most users are on Windows.
+
+**Releases:** V2 ships as a stable release on Windows 11 and macOS. Linux ships as a nightly until it meets the same bar.
 
 ## One experience on every platform
 
@@ -23,11 +25,11 @@ Differences are allowed only where the operating system forces them, and each on
 
 ## Principles
 
-1. **Today never waits on AI.** Every screen shows recorded facts the moment it opens. AI writing replaces facts when it is ready.
-2. **Never claim more than the record shows.** Something is finished only when there is proof: a commit, a published page, a sent message. Opening something is not finishing it. When Daylens cannot tell what happened, it says so.
-3. **Corrections win.** A correction takes a few words, changes the hour everywhere, survives every rewrite, and can be undone.
-4. **You control what it sees.** Exclusions apply before anything is stored. Private windows are never recorded. Pause and delete are always one step away.
-5. **Fast from the first build.** Speed is a requirement with budgets, not a later optimization.
+1. **Fast above everything.** Every screen opens instantly and every action responds immediately. In the background, Daylens uses as little CPU, memory and battery as possible; a user should never notice it running. Speed is checked on every change, not optimized later.
+2. **Today never waits on AI.** Every screen shows recorded facts the moment it opens. AI writing replaces facts when it is ready.
+3. **Never claim more than the record shows.** Something is finished only when there is proof: a commit, a published page, a sent message. Opening something is not finishing it. When Daylens cannot tell what happened, it says so.
+4. **Corrections win.** A correction takes a few words, changes the hour everywhere, survives every rewrite, and can be undone.
+5. **You control what it sees.** Exclusions apply before anything is stored. Pages and titles from private windows are never recorded. Pause and delete are always one step away.
 6. **It pays for itself.** AI that costs money to run is covered by plans, and no plan promises more than the costs allow.
 
 ## Voice

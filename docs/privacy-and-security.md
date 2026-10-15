@@ -11,7 +11,7 @@
 - Keystrokes or anything typed.
 - Screen images, video or audio.
 - File contents.
-- Private and incognito windows.
+- Pages and titles from private and incognito windows.
 - Anything in an excluded app or site.
 
 ## Where data lives and goes
@@ -34,7 +34,8 @@
 - **Captured text is untrusted.** Page titles, document names and agent logs can contain instructions. The writer has no tools and no authority, its output is validated in code, and all text is rendered as plain text.
 - **No feedback loops.** Daylens's written text is never used as evidence for later writing.
 - **Secrets** (API keys, account tokens) are stored in the platform's secure storage and never written to logs or the database.
-- **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, Authenticode on Windows, signed packages on Linux.
+- **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, Authenticode on Windows (installer, app and helper, timestamped and verified after packaging), signed packages on Linux.
+- **Updates on Windows** refuse to install when the publisher cannot be verified; a missing publisher setting fails the release.
 - **Updates** are signed and verified before install.
 - **The MCP server** is read-only and local to the machine.
 - **Payments.** Card data is entered only in the payment provider's hosted checkout.
@@ -43,7 +44,8 @@
 
 Each of these has an automated test before release. See [Testing](testing.md#acceptance-tests).
 
-- Private windows are never stored on any platform.
+- Pages and titles from private windows are never stored on any platform, including while the window is open, after it closes and after a restart.
+- A browser window not confirmed normal never has its page or title stored.
 - Exclusions apply before storage.
 - Deletion reaches every copy and is not re-imported.
 - Pausing stops capture for exactly the chosen time.
