@@ -35,7 +35,7 @@ public struct AppInfo: Equatable {
   public static let none = AppInfo(appId: nil, name: nil, path: nil, pid: nil, registeredBrowser: false, identityState: .none)
   var json: JSON {
     .object([
-      ("app_id", .str(appId)), ("name", .str(name)), ("path", .str(path)), ("pid", .int(pid)),
+      ("app_id", .str(clip(appId, 1024))), ("name", .str(clip(name, 512))), ("path", .str(clip(path, 2048))), ("pid", .int(pid)),
       ("registered_browser", .bool(registeredBrowser)), ("identity_state", .string(identityState.rawValue)), ("store", .null),
     ])
   }
@@ -46,29 +46,35 @@ public struct WindowInfo: Equatable {
   public var title: String?
   public var titleState: TitleState
   public init(window: String?, title: String?, titleState: TitleState) {
-    self.window = window; self.titleState = titleState
-    self.title = titleState == .ok ? WindowInfo.truncate(title) : nil
+    self.window = window
+    let t = titleState == .ok && !(title ?? "").isEmpty ? WindowInfo.truncate(title) : nil
+    self.title = t
+    // The protocol requires a title exactly when the state is ok.
+    self.titleState = titleState == .ok && t == nil ? (title == nil ? .unavailable : .empty) : titleState
   }
   /// Builds from a raw title read: empty strings become `.empty`.
   public static func read(window: String?, title: String?) -> WindowInfo {
     guard let t = title else { return WindowInfo(window: window, title: nil, titleState: .unavailable) }
     return t.isEmpty ? WindowInfo(window: window, title: nil, titleState: .empty) : WindowInfo(window: window, title: t, titleState: .ok)
   }
-  static func truncate(_ s: String?) -> String? {
-    guard let s, s.utf16.count > maxTitleUTF16 else { return s }
-    var out = ""
-    var n = 0
-    for ch in s {
-      let w = ch.utf16.count
-      if n + w > maxTitleUTF16 { break }
-      out.append(ch)
-      n += w
-    }
-    return out
-  }
+  static func truncate(_ s: String?) -> String? { clip(s, maxTitleUTF16) }
   var json: JSON {
     .object([("window", .str(window)), ("title", .str(title)), ("title_state", .string(titleState.rawValue))])
   }
+}
+
+/// Clips to `max` UTF-16 code units on a character boundary, matching the validator's string limits.
+public func clip(_ s: String?, _ max: Int) -> String? {
+  guard let s, s.utf16.count > max else { return s }
+  var out = ""
+  var n = 0
+  for ch in s {
+    let w = ch.utf16.count
+    if n + w > max { break }
+    out.append(ch)
+    n += w
+  }
+  return out
 }
 
 public struct Permissions {

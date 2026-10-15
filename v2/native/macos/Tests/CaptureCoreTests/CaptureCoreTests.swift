@@ -90,6 +90,20 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertEqual(s.evaluate(secondsSinceInput: 0).emit, false, "after a reset the state is reported again")
   }
 
+  func testOkStateWithoutATitleIsNeverEncodedAsOk() {
+    XCTAssertEqual(WindowInfo(window: "w", title: nil, titleState: .ok).titleState, .unavailable)
+    XCTAssertEqual(WindowInfo(window: "w", title: "", titleState: .ok).titleState, .empty)
+    XCTAssertEqual(WindowInfo(window: "w", title: "x", titleState: .ok).title, "x")
+  }
+
+  func testIdentityFieldsAreClipped() throws {
+    let app = AppInfo(appId: String(repeating: "a", count: 5000), name: String(repeating: "n", count: 600), path: nil, pid: 1, registeredBrowser: false, identityState: .ok)
+    let s = Obs.focus(trigger: .app_changed, app: app, window: .read(window: nil, title: "t")).serialized()
+    let a = (try JSONSerialization.jsonObject(with: Data(s.utf8)) as! [String: Any])["app"] as! [String: Any]
+    XCTAssertEqual((a["app_id"] as! String).count, 1024)
+    XCTAssertEqual((a["name"] as! String).count, 512)
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

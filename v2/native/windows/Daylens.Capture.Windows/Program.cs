@@ -25,9 +25,9 @@ internal static unsafe class Program
 
     static int Main(string[] args)
     {
-        _heartbeatS = IntArg(args, "--heartbeat-s", 15);
-        _idleThresholdS = IntArg(args, "--idle-threshold-s", 120);
-        _reconcileS = IntArg(args, "--reconcile-s", 60);
+        _heartbeatS = IntArg(args, "--heartbeat-s", 15, 3600);
+        _idleThresholdS = IntArg(args, "--idle-threshold-s", 120, 86400);
+        _reconcileS = IntArg(args, "--reconcile-s", 60, 86400);
         _stdout = Console.OpenStandardOutput();
         _emitter = new Emitter(Guid.NewGuid().ToString(), Clock.BootId(), "windows", WriteStdout);
         _resolver = new Resolver(_emitter);
@@ -62,10 +62,10 @@ internal static unsafe class Program
         return 0;
     }
 
-    static int IntArg(string[] args, string name, int fallback)
+    static int IntArg(string[] args, string name, int fallback, int max)
     {
         var i = Array.IndexOf(args, name);
-        return i >= 0 && i + 1 < args.Length && int.TryParse(args[i + 1], out var v) && v > 0 ? v : fallback;
+        return i >= 0 && i + 1 < args.Length && int.TryParse(args[i + 1], out var v) && v > 0 && v <= max ? v : fallback;
     }
 
     static void WriteStdout(byte[] line)
@@ -87,8 +87,10 @@ internal static unsafe class Program
     {
         if (hwnd == 0) return new WindowInfo(null, null, TitleState.Unavailable);
         var id = $"0x{hwnd:X}";
+        Marshal.SetLastPInvokeError(0);
         var len = Native.GetWindowTextLength(hwnd);
-        if (len <= 0) return new WindowInfo(id, null, TitleState.Empty);
+        // Zero with an error set means the read failed (the window may be gone), not an empty title.
+        if (len <= 0) return new WindowInfo(id, null, Marshal.GetLastPInvokeError() == 0 ? TitleState.Empty : TitleState.Unavailable);
         len = Math.Min(len, 4096);
         var buf = stackalloc char[len + 1];
         var n = Native.GetWindowText(hwnd, buf, len + 1);
@@ -156,13 +158,18 @@ internal static unsafe class Program
         var d = _idle.Evaluate(since);
         var report = d.Emit ?? (snapshot ? _idle.Idle : null);
         if (report is bool idle)
-            Emit("input", "idle_timer", Obs.Input(idle, time.WallMs - (long)(since * 1000), _idleThresholdS, snapshot && d.Emit is null), time);
+            Emit("input", "idle_timer", Obs.Input(idle, time.WallMs - (long)(since * 1000), _idleThresholdS, snapshot), time);
         if (!_idleSuspended)
             Native.SetCoalescableTimer(_hwnd, TimerIdle, (uint)(d.NextCheckS * 1000), 0, d.NextCheckS > 5 ? 1000u : 500u);
     }
 
+    static bool _locked;
+
     static void SuspendIdle(bool suspend)
     {
+        // Nobody types on a locked or sleeping machine; checks resume when it is back and unlocked.
+        if (!suspend && _locked) return;
+        if (suspend == _idleSuspended) return;
         _idleSuspended = suspend;
         if (suspend) Native.KillTimer(_hwnd, TimerIdle); else CheckIdle();
     }
@@ -172,7 +179,9 @@ internal static unsafe class Program
     static string SessionState()
     {
         if (!Native.WTSQuerySessionInformation(0, -1, Native.WTSSessionInfoEx, out var buf, out var bytes) || buf == 0) return "unknown";
-        try { return bytes >= 16 ? Sessions.FromSessionFlags(Marshal.ReadInt32(buf, 12)) : "unknown"; }
+        // WTSINFOEXW: Level (4 bytes), then the union aligned to 8 (it holds LARGE_INTEGERs):
+        // SessionId at 8, SessionState at 12, SessionFlags at 16.
+        try { return bytes >= 20 ? Sessions.FromSessionFlags(Marshal.ReadInt32(buf, 16)) : "unknown"; }
         finally { Native.WTSFreeMemory(buf); }
     }
 
@@ -180,7 +189,9 @@ internal static unsafe class Program
     {
         Focus(FocusTrigger.Snapshot, Native.GetForegroundWindow(), Clock.Now(), force: true);
         CheckIdle(snapshot: true);
-        Emit("session", "wts", Obs.Session(SessionState(), true));
+        var state = SessionState();
+        _locked = state == "locked";
+        Emit("session", "wts", Obs.Session(state, true));
     }
 
     // --- window and messages --------------------------------------------------
@@ -262,13 +273,13 @@ internal static unsafe class Program
         {
             var s = (Native.POWERBROADCAST_SETTING*)lParam;
             setting = s->PowerSetting;
-            value = s->Data;
+            if (s->DataLength >= sizeof(uint)) value = s->Data;
         }
         var state = Power.Classify(pbt, setting, value);
         if (state is null) return;
         Emit("power", "power", Obs.Power(state));
         if (state == "sleep") SuspendIdle(true);
-        else if (state is "resume" or "resume_user")
+        else if (state == "resume")
         {
             _idle.Reset();
             SuspendIdle(false);
@@ -280,9 +291,14 @@ internal static unsafe class Program
         var state = Sessions.Classify(wts);
         if (state is null) return;
         Emit("session", "wts", Obs.Session(state, false));
-        if (state is "locked" or "console_disconnect" or "remote_disconnect") SuspendIdle(true);
+        if (state is "locked" or "console_disconnect" or "remote_disconnect")
+        {
+            _locked = state == "locked" || _locked;
+            SuspendIdle(true);
+        }
         else if (state is "unlocked" or "console_connect" or "remote_connect")
         {
+            if (state == "unlocked") _locked = false;
             SuspendIdle(false);
             Focus(FocusTrigger.Reconcile, Native.GetForegroundWindow(), Clock.Now());
         }
@@ -290,15 +306,24 @@ internal static unsafe class Program
 
     // --- control --------------------------------------------------------------
 
+    static volatile bool _shutdownRequested;
+
     static void ReadControl()
     {
         using var stdin = new StreamReader(Console.OpenStandardInput());
         string? line;
         while ((line = stdin.ReadLine()) is not null)
         {
-            if (line.Contains("\"shutdown\"")) Native.PostMessage(_hwnd, MsgShutdown, 0, 0);
-            else if (line.Contains("\"snapshot\"")) Native.PostMessage(_hwnd, MsgSnapshot, 0, 0);
+            var op = line.Replace(" ", "");
+            if (op.Contains("\"op\":\"shutdown\""))
+            {
+                _shutdownRequested = true;
+                Native.PostMessage(_hwnd, MsgShutdown, 0, 0);
+            }
+            else if (op.Contains("\"op\":\"snapshot\"")) Native.PostMessage(_hwnd, MsgSnapshot, 0, 0);
         }
-        Environment.Exit(0); // the capture service is gone
+        // The capture service is gone. A requested shutdown gets a moment to write bye first.
+        if (_shutdownRequested) Thread.Sleep(2000);
+        Environment.Exit(0);
     }
 }

@@ -51,9 +51,12 @@ internal sealed unsafe class Resolver
     /// Called by the hook thread when this thread is stuck: queued work is abandoned and reported without identity.
     public void Abandon()
     {
-        Interlocked.Increment(ref _generation);
-        lock (_gate) _queue.Clear();
-        _last = null;
+        lock (_gate)
+        {
+            Interlocked.Increment(ref _generation);
+            _queue.Clear();
+            _last = null;
+        }
     }
 
     void Loop()
@@ -72,72 +75,77 @@ internal sealed unsafe class Resolver
             try { app = Identify(w.Hwnd, w.Pid); }
             catch { app = AppInfo.Unknown(w.Pid, IdentityState.AccessDenied); Diag.Write("identify_failed"); }
             Interlocked.Exchange(ref _busySinceMs, 0);
-            if (w.Generation != Generation) continue;
-            var changed = _last is not { } l || l.App != app || l.Window != w.Window;
-            if (!changed && !w.Force && w.Trigger != FocusTrigger.AppChanged) continue;
-            _last = (app, w.Window);
+            lock (_gate)
+            {
+                if (w.Generation != Generation) continue;
+                var changed = _last is not { } l || l.App != app || l.Window != w.Window;
+                if (!changed && !w.Force && w.Trigger != FocusTrigger.AppChanged) continue;
+                _last = (app, w.Window);
+            }
             var source = w.Trigger == FocusTrigger.Reconcile ? "reconcile" : "win_event";
-            _emitter.Emit("focus", source, w.Time, Obs.Focus(w.Trigger, app, w.Window), Emitter.Priority.Normal);
+            try { _emitter.Emit("focus", source, w.Time, Obs.Focus(w.Trigger, app, w.Window), Emitter.Priority.Normal); }
+            catch { Diag.Write("emit_failed"); }
         }
     }
 
     AppInfo Identify(nint hwnd, int pid)
     {
         if (hwnd == 0 || pid == 0) return AppInfo.NoneInFront;
-        var (state, path, created) = QueryProcess(pid);
-        if (state != IdentityState.Ok) return AppInfo.Unknown(pid, state);
-        if (StoreApps.IsFrameHost(path))
+        var p = OpenProcess(pid);
+        if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
+        try
         {
-            var content = StoreApps.SelectContentWindow(pid, Children(hwnd));
-            if (content is { } c)
+            if (StoreApps.IsFrameHost(p.Path))
             {
-                pid = c.Pid;
-                (state, path, created) = QueryProcess(pid);
-                if (state != IdentityState.Ok) return AppInfo.Unknown(pid, state);
+                var content = StoreApps.SelectContentWindow(pid, Children(hwnd));
+                if (content is { } c)
+                {
+                    Native.CloseHandle(p.Handle);
+                    pid = c.Pid;
+                    p = OpenProcess(pid);
+                    if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
+                }
             }
+            // A creation time of 0 means it could not be read; then a reused pid could hit a stale entry.
+            if (p.Created != 0 && _identities.TryGetValue((pid, p.Created), out var cached)) return cached;
+            var app = Describe(p.Handle, pid, p.Path!);
+            if (_identities.Count > 512) _identities.Clear();
+            if (p.Created != 0) _identities[(pid, p.Created)] = app;
+            return app;
         }
-        if (_identities.TryGetValue((pid, created), out var cached)) return cached;
-        var app = Describe(pid, path!);
-        if (_identities.Count > 512) _identities.Clear();
-        _identities[(pid, created)] = app;
-        return app;
+        finally { if (p.Handle != 0) Native.CloseHandle(p.Handle); }
     }
 
-    static (IdentityState, string?, long) QueryProcess(int pid)
+    readonly record struct OpenedProcess(IdentityState State, nint Handle, string? Path, long Created);
+
+    // One handle per lookup, so every query describes the same process even if the pid is reused meanwhile.
+    static OpenedProcess OpenProcess(int pid)
     {
         var h = Native.OpenProcess(Native.PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
         if (h == 0)
         {
             var err = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
-            return (err == 87 ? IdentityState.Gone : IdentityState.AccessDenied, null, 0);
+            return new(err == 87 ? IdentityState.Gone : IdentityState.AccessDenied, 0, null, 0);
         }
-        try
+        var buf = stackalloc char[4096];
+        uint size = 4096;
+        if (!Native.QueryFullProcessImageName(h, 0, buf, ref size))
         {
-            var buf = stackalloc char[1024];
-            uint size = 1024;
-            if (!Native.QueryFullProcessImageName(h, 0, buf, ref size)) return (IdentityState.AccessDenied, null, 0);
-            Native.GetProcessTimes(h, out var created, out _, out _, out _);
-            return (IdentityState.Ok, new string(buf, 0, (int)size), created);
+            Native.CloseHandle(h);
+            return new(IdentityState.AccessDenied, 0, null, 0);
         }
-        finally { Native.CloseHandle(h); }
+        var created = Native.GetProcessTimes(h, out var c, out _, out _, out _) ? c : 0;
+        return new(IdentityState.Ok, h, new string(buf, 0, (int)size), created);
     }
 
-    AppInfo Describe(int pid, string path)
+    AppInfo Describe(nint h, int pid, string path)
     {
-        var h = Native.OpenProcess(Native.PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
         string? aumid = null, package = null;
-        if (h != 0)
-        {
-            try
-            {
-                var buf = stackalloc char[512];
-                uint len = 512;
-                if (Native.GetApplicationUserModelId(h, ref len, buf) == 0 && len > 1) aumid = new string(buf, 0, (int)len - 1);
-                len = 512;
-                if (Native.GetPackageFullName(h, ref len, buf) == 0 && len > 1) package = new string(buf, 0, (int)len - 1);
-            }
-            finally { Native.CloseHandle(h); }
-        }
+        var buf = stackalloc char[512];
+        uint len = 512;
+        if (Native.GetApplicationUserModelId(h, ref len, buf) == 0 && len > 1) aumid = new string(buf, 0, (int)len - 1);
+        len = 512;
+        if (Native.GetPackageFullName(h, ref len, buf) == 0 && len > 1) package = new string(buf, 0, (int)len - 1);
         var browser = IsRegisteredBrowser(path);
         if (aumid is not null)
         {
@@ -184,8 +192,10 @@ internal sealed unsafe class Resolver
                     else
                     {
                         var outBuf = stackalloc char[512];
+                        outBuf[0] = '\0';
                         if (Native.SHLoadIndirectString(indirect, outBuf, 512, 0) == 0)
                         {
+                            outBuf[511] = '\0';
                             var s = new string(outBuf);
                             if (StoreApps.IsResolved(s)) name = s;
                         }
@@ -211,29 +221,64 @@ internal sealed unsafe class Resolver
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
         {
-            try
-            {
-                using (var smi = root.OpenSubKey(@"SOFTWARE\Clients\StartMenuInternet"))
-                    if (smi is not null)
-                        foreach (var name in smi.GetSubKeyNames())
-                        {
-                            using var cmd = smi.OpenSubKey($@"{name}\shell\open\command");
-                            if (Browsers.CommandExe(cmd?.GetValue(null) as string) is { } exe) found.Add(exe);
-                        }
-                using var apps = root.OpenSubKey(@"SOFTWARE\RegisteredApplications");
-                if (apps is null) continue;
-                foreach (var app in apps.GetValueNames())
-                {
-                    if (apps.GetValue(app) is not string capPath) continue;
-                    using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
-                    if (urls?.GetValue("http") is not string progId || urls.GetValue("https") is null) continue;
-                    using var cmd = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
-                    if (Browsers.CommandExe(cmd?.GetValue(null) as string) is { } exe) found.Add(exe);
-                }
-            }
-            catch { Diag.Write("browser_registry_failed"); }
+            foreach (var exe in Each(() => StartMenuInternet(root))) found.Add(exe);
+            foreach (var exe in Each(() => UrlHandlers(root))) found.Add(exe);
         }
         _browserExes = found;
+    }
+
+    // One bad registry entry must not hide the others.
+    static IEnumerable<string> Each(Func<IEnumerable<string?>> source)
+    {
+        var list = new List<string>();
+        try
+        {
+            foreach (var s in source())
+                if (s is not null) list.Add(s);
+        }
+        catch { Diag.Write("browser_registry_failed"); }
+        return list;
+    }
+
+    static IEnumerable<string?> StartMenuInternet(RegistryKey root)
+    {
+        using var smi = root.OpenSubKey(@"SOFTWARE\Clients\StartMenuInternet");
+        if (smi is null) yield break;
+        foreach (var name in smi.GetSubKeyNames())
+        {
+            string? exe = null;
+            try
+            {
+                using var cmd = smi.OpenSubKey($@"{name}\shell\open\command");
+                exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
+            }
+            catch { Diag.Write("browser_registry_entry_failed"); }
+            yield return exe;
+        }
+    }
+
+    static IEnumerable<string?> UrlHandlers(RegistryKey root)
+    {
+        using var apps = root.OpenSubKey(@"SOFTWARE\RegisteredApplications");
+        if (apps is null) yield break;
+        foreach (var app in apps.GetValueNames())
+        {
+            string? exe = null;
+            try
+            {
+                if (apps.GetValue(app) is string capPath)
+                {
+                    using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
+                    if (urls?.GetValue("http") is string progId && urls.GetValue("https") is not null)
+                    {
+                        using var cmd = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
+                        exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
+                    }
+                }
+            }
+            catch { Diag.Write("browser_registry_entry_failed"); }
+            yield return exe;
+        }
     }
 
     static readonly List<ChildWindow> ChildBuffer = new();

@@ -26,7 +26,7 @@ Every native helper (macOS, Windows, later Linux) speaks this protocol to the ca
 | `v` | Protocol version. The service rejects any other value. |
 | `run` | Random ID for this helper process. |
 | `seq` | 0 for the first line of a run, then +1 for every line created, including lines later dropped. A jump means lines were lost. |
-| `boot` | ID of the current boot. `mono_us` values compare only within one boot. macOS: `kern.bootsessionuuid`. Windows: boot time from interrupt time, rounded to seconds. |
+| `boot` | ID of the current boot. `mono_us` values compare only within one boot. macOS: `kern.bootsessionuuid`. Windows: `boot-` and the boot time in minutes since the epoch, computed as wall clock minus interrupt time. A clock change can alter it within one boot; the service then only skips mono comparisons across that change. |
 | `t.wall_ms` | When the event happened. Unix epoch milliseconds, UTC. |
 | `t.mono_us` | When the event happened, monotonic microseconds since boot, **including time asleep**. macOS: `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1000`. Windows: `QueryInterruptTimePrecise() / 10` (100 ns units). Microseconds keep the value exact in a JSON number for centuries of uptime. |
 | `t.tz` | IANA time zone at the event. Windows falls back to the Windows zone ID when it cannot be mapped. |

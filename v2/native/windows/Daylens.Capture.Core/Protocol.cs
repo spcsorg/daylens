@@ -109,9 +109,10 @@ public static class Obs
     {
         w.WriteString("trigger", Names.Of(trigger));
         w.WriteStartObject("app");
-        WriteNullable(w, "app_id", app.AppId);
-        WriteNullable(w, "name", app.Name);
-        WriteNullable(w, "path", app.Path);
+        // Clipped to the validator's limits: exe metadata is controlled by the exe, and one long field must not void the line.
+        WriteNullable(w, "app_id", Clip(app.AppId, 1024));
+        WriteNullable(w, "name", Clip(app.Name, 512));
+        WriteNullable(w, "path", Clip(app.Path, 2048));
         if (app.Pid is int pid) w.WriteNumber("pid", pid); else w.WriteNull("pid");
         w.WriteBoolean("registered_browser", app.RegisteredBrowser);
         w.WriteString("identity_state", Names.Of(app.IdentityState));
@@ -148,6 +149,13 @@ public static class Obs
     public static Action<Utf8JsonWriter> Power(string state) => w => w.WriteString("state", state);
     public static Action<Utf8JsonWriter> Clock(string change) => w => w.WriteString("change", change);
     public static Action<Utf8JsonWriter> Bye(string reason) => w => w.WriteString("reason", reason);
+
+    static string? Clip(string? s, int max)
+    {
+        if (s is null || s.Length <= max) return s;
+        var cut = char.IsHighSurrogate(s[max - 1]) ? max - 1 : max;
+        return s[..cut];
+    }
 
     static void WriteNullable(Utf8JsonWriter w, string name, string? value)
     {

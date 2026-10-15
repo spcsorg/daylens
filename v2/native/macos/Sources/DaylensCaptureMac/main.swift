@@ -9,15 +9,15 @@ import Foundation
 
 let helperVersion = "2.0.0-dev"
 
-func intArg(_ name: String, _ fallback: Int) -> Int {
+func intArg(_ name: String, _ fallback: Int, max: Int) -> Int {
   let args = CommandLine.arguments
-  guard let i = args.firstIndex(of: name), i + 1 < args.count, let v = Int(args[i + 1]), v > 0 else { return fallback }
+  guard let i = args.firstIndex(of: name), i + 1 < args.count, let v = Int(args[i + 1]), v > 0, v <= max else { return fallback }
   return v
 }
 
-let heartbeatS = intArg("--heartbeat-s", 15)
-let idleThresholdS = intArg("--idle-threshold-s", 120)
-let reconcileS = intArg("--reconcile-s", 60)
+let heartbeatS = intArg("--heartbeat-s", 15, max: 3600)
+let idleThresholdS = intArg("--idle-threshold-s", 120, max: 86400)
+let reconcileS = intArg("--reconcile-s", 60, max: 86400)
 
 signal(SIGPIPE, SIG_IGN)
 
@@ -59,7 +59,7 @@ func checkIdle(snapshot: Bool = false) {
   let time = Clock.now()
   let d = idle.evaluate(secondsSinceInput: since)
   if let nowIdle = d.emit ?? (snapshot ? idle.idle : nil) {
-    emit("input", "idle_timer", Obs.input(idle: nowIdle, lastInputWallMs: time.wallMs - Int64(since * 1000), thresholdS: idleThresholdS, snapshot: snapshot && d.emit == nil), time: time)
+    emit("input", "idle_timer", Obs.input(idle: nowIdle, lastInputWallMs: time.wallMs - Int64(since * 1000), thresholdS: idleThresholdS, snapshot: snapshot), time: time)
   }
   if !idleSuspended {
     idleTimer.schedule(deadline: .now() + d.nextCheckS, leeway: .milliseconds(d.nextCheckS > 5 ? 1000 : 500))
