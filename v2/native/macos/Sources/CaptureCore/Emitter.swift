@@ -25,17 +25,17 @@ public final class Emitter {
   public var dropped: Int64 { lock.lock(); defer { lock.unlock() }; return _dropped }
 
   public func emit(kind: String, source: String, time: EventTime, obs: JSON, priority: Priority) {
+    // Built and queued under the lock so lines leave in seq order whichever thread emits.
     lock.lock()
+    defer { lock.unlock() }
     let s = seq
     seq += 1
     let limit = priority == .critical ? capacity + reserve : capacity
     if queued >= limit {
       _dropped += 1
-      lock.unlock()
       return
     }
     queued += 1
-    lock.unlock()
     let line = envelope(run: run, seq: s, boot: boot, time: time, platform: platform, source: source, kind: kind, obs: obs).serialized() + "\n"
     queue.async {
       self.write(line)
