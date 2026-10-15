@@ -1,0 +1,28 @@
+# Build plan
+
+V2 is built one step at a time. Each step is planned, reviewed by a different model or person before and after it is built, and measured. The next step starts only when the current one meets its measure on every platform.
+
+| Step | What | Done when |
+|---|---|---|
+| 1 | **Capture.** Helpers on all three platforms on one protocol, normalization, capture health, browser pages, stable signing | Gold-day capture has no unexplained gaps; budgets met; permission tests pass on packaged builds |
+| 2 | **Storage.** The single source of truth and its change announcements | Correction, deletion, pause and exclusion tests pass at the storage level |
+| 3 | **Today, facts first.** The shell and Today on real data, on all three platforms | Paint and launch budgets met; screens match the design on every platform |
+| 4 | **Agent sessions.** Claude Code and Codex readers | Agent work on gold days is attributed correctly, with no false durations |
+| 5 | **Writing hours.** Packets, the chosen model, validation, corrections | Gold-day scores meet the target; cost per day within budget |
+| 6 | **Search and Ask** | Search budget met; gold search queries answered |
+| 7 | **Assistants.** MCP server, client detection, read log | Each supported client connects and reads on each platform |
+| 8 | **Onboarding** | A first-time user reaches their own named morning without help, on each platform |
+| 9 | **AI choice, plans and payments** | Payment-state and usage tests pass against the payment providers' test modes |
+| 10 | **Release** | The release checklist below is complete |
+
+## Release checklist
+
+- [ ] Every acceptance test in [Testing](testing.md#acceptance-tests) passes on every platform.
+- [ ] Gold-day scores meet the target, including the held-out day and the Windows day.
+- [ ] Budgets met on every platform from signed, packaged builds.
+- [ ] Security review complete; findings fixed or accepted in writing.
+- [ ] Terms and Privacy page published and linked from onboarding and Settings.
+- [ ] Signed installers for Windows, macOS and Linux; updates verified.
+- [ ] Billing in production mode with confirmed webhooks, and prices set.
+- [ ] Operations runbooks checked against the code.
+- [ ] V1 users' existing data opens in V2.

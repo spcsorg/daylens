@@ -8,14 +8,13 @@ Contributions are welcome. Product behavior remains intentional: understand the 
 
 Read the documents relevant to the work:
 
-- [Product direction](docs/product/product.md)
-- [V2 direction](docs/V2-PLAN.md)
-- [Development workflow](docs/development.md)
-- [Current architecture](docs/codebase/architecture.md)
-- [Repository structure](docs/codebase/structure.md)
+- [V2 documentation](docs/README.md)
+- [Product](docs/product.md)
+- [System design](docs/system-design.md)
+- [Build plan](docs/build-plan.md)
 - [Agent instructions](AGENTS.md)
 
-If an accepted specification exists under `docs/specs`, follow it. If the change requires a new product decision, open a discussion or issue before writing the implementation.
+Follow the V2 documents under `docs/`. If the change requires a new product decision, open a discussion or issue before writing the implementation.
 
 ## Changes that can begin directly
 
@@ -67,7 +66,7 @@ npm run verify:remote-web
 npm run timeline:eval -- --strict
 ```
 
-Run contract, web, billing, or packaged-runtime checks when those boundaries change. Some AI evaluations use real data, credentials, and paid provider calls; do not run them casually. See [Testing and verification](docs/hygiene/testing.md) and Benchmarks and evaluations.
+Run contract, web, billing, or packaged-runtime checks when those boundaries change. Some AI evaluations use real data, credentials, and paid provider calls; do not run them casually. See [Testing](docs/testing.md) and Benchmarks and evaluations.
 
 Visible behavior should also be verified in the running application. Green tests are necessary, not sufficient.
 
