@@ -6,9 +6,12 @@ Every native helper (macOS, Windows, later Linux) speaks this protocol to the ca
 
 - The capture service starts the helper with stdin and stdout as pipes.
 - The helper writes one JSON object per line to stdout, UTF-8, `\n` terminated, at most 16 KiB per line.
-- stdout is written from a dedicated writer thread through a bounded queue. If the queue is full the line is dropped, the drop is counted in the next `heartbeat`, and the gap shows as a jump in `seq`. A stalled reader never blocks capture.
-- stderr is for diagnostics only. It never contains titles, paths or app names.
-- stdin carries control lines. `{"op":"shutdown"}` asks for a clean exit. End of file on stdin means the capture service is gone, and the helper exits at once.
+- `seq` is assigned when a line is created, before it is queued. stdout is written from a dedicated writer thread through a bounded queue (1024 lines). When the queue is full, `focus` and `input` lines are dropped first; `heartbeat`, `session`, `power`, `clock`, `hello` and `bye` use a small reserve. Drops are counted in the next `heartbeat` and show as a jump in `seq`. A stalled reader never blocks capture.
+- stderr carries only fixed diagnostic codes (`code=value` tokens). It never contains titles, paths, app names or exception messages. The service drops any stderr line that is not in that form.
+- stdin carries control lines:
+  - `{"op":"shutdown"}`: exit cleanly, ending with `bye`.
+  - `{"op":"snapshot"}`: re-emit current `focus`, `input` and `session` with `trigger: "snapshot"` / `snapshot: true`. The service asks for one after lost lines and after resume.
+  - End of file: the capture service is gone. Exit at once.
 
 ## Envelope
 
@@ -39,25 +42,30 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 | Kind | `obs` |
 |---|---|
-| `hello` | `helper`, `version`, `pid`, `os`, `permissions`, `config: {heartbeat_s, idle_threshold_s, reconcile_s}`. First line of every run. |
-| `heartbeat` | `permissions`, `title_stall_ms` (how long the title thread has been stuck in one call, 0 if not), `dropped` (lines dropped at the queue since start). Sent every `heartbeat_s` from the helper's main event thread, so a stuck event loop stops heartbeats. |
-| `app` | `app_id`, `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`. The front app changed, or reconciliation found a different one. |
-| `window` | `pid`, `window`, `title`, `title_state`. The focused window or its title changed. |
-| `input` | `state` (`idle` or `active`), `last_input_wall_ms`, `threshold_s`. Input crossed the idle threshold. |
-| `session` | `state`: `locked`, `unlocked`, `console_disconnect`, `console_connect`, `remote_connect`, `remote_disconnect`, `logoff`, `logon`. |
-| `power` | `state`: `sleep`, `wake`, `wake_automatic`, `display_off`, `display_on`, `display_dim`. `wake_automatic` is a wake without a user (Windows `PBT_APMRESUMEAUTOMATIC` with no following user resume). |
+| `hello` | `helper`, `version`, `pid`, `os`, `permissions`, `config: {heartbeat_s, idle_threshold_s, reconcile_s}`. First line of every run, followed by a snapshot. |
+| `heartbeat` | `permissions`, `titles` (title channel: `ok`, `degraded`, `stalled`, `no_permission`), `stall_ms` (how long a worker has been stuck in one call, 0 if none), `dropped` (lines dropped at the queue since start). Sent every `heartbeat_s` from the helper's main event thread, so a stuck event loop stops heartbeats even if other threads still emit. |
+| `focus` | `trigger`, `app`, `window`. The front app, the focused window or its title changed; or reconciliation found a difference; or a snapshot was requested. Every `focus` line carries the identity of the app that owns the window, so privacy rules are decided per line and never depend on line order. |
+| `input` | `state` (`idle` or `active`), `last_input_wall_ms`, `threshold_s`, `snapshot`. Input crossed the idle threshold, or a snapshot. |
+| `session` | `state`: `locked`, `unlocked`, `console_disconnect`, `console_connect`, `remote_connect`, `remote_disconnect`, `logoff`, `logon`, `unknown`; `snapshot`. |
+| `power` | `state`: `sleep`, `resume`, `resume_user`, `display_off`, `display_on`, `display_dim`. `resume` means the system is running again, cause unknown. `resume_user` is evidence that a person caused or followed the resume (Windows `PBT_APMRESUMESUSPEND`). Waking alone is never the user returning. |
 | `clock` | `change`: `time_changed` or `timezone_changed`. |
 | `bye` | `reason`. Last line of a clean exit. |
 
+`trigger`: `app_changed`, `window_changed`, `title_changed`, `reconcile`, `snapshot`.
+
+`app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
+
+`window`: `window` (an opaque window ID), `title`, `title_state`.
+
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 
-`identity_state`: `ok`; `access_denied` (the process could not be queried, identity fields are null); `timeout` (the query hung and was abandoned); `gone` (the process exited first); `none` (nothing is in front).
+`identity_state`: `ok`; `access_denied` (the process could not be queried, identity fields are null); `timeout` (the query hung and was abandoned); `gone` (the process exited first); `none` (nothing is in front). Shared code treats any state other than `ok` as unknown and withholds the title.
 
 `registered_browser` is a platform fact, not a decision: the app is registered to open `http` and `https` links. Shared code decides what that means for privacy.
 
 `store` is set for packaged Windows apps: `aumid` (the application user model ID) and `package` (the package full name).
 
-`title_state`: `ok` (`title` is present); `empty` (the window has no title); `no_permission` (Accessibility is not granted); `timeout` (the read hung); `unavailable` (no focused window or the read failed). `title` is present exactly when `title_state` is `ok`, truncated to 1024 UTF-16 code units.
+`title_state`: `ok` (`title` is present); `empty` (the window has no title); `no_permission` (Accessibility is not granted); `timeout` (the read hung); `unavailable` (no focused window or the read failed). `title` is present exactly when `title_state` is `ok`, truncated to 1024 UTF-16 code units. Helpers send titles unmodified; cleaning happens in shared code.
 
 ## Contract tests
 
