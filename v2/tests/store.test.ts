@@ -124,6 +124,12 @@ test('a long storage outage that overflows the queue is recorded as a gap', () =
   let now = T0
   const store = new Store(dir, { busyTimeoutMs: 10, maxPendingOps: 5, now: () => now })
   const n = new Normalizer(store)
+  const events: string[] = []
+  store.onOverflow = () => {
+    events.push('overflow')
+    n.interrupt({ wall_ms: now, mono_us: null, boot: null })
+  }
+  store.onRecovered = () => events.push('recovered')
   const blocker = new Database(path.join(dir, DB_FILE))
   blocker.exec('BEGIN EXCLUSIVE')
   for (let i = 0; i < 12; i++) n.handle(focus(app('com.apple.Terminal', { pid: i }), `t${i}`, T0 + i))
@@ -137,6 +143,10 @@ test('a long storage outage that overflows the queue is recorded as a gap', () =
   assert.equal(gaps[0]!.reason, 'storage_failed')
   assert.equal(gaps[0]!.end_wall_ms, T0 + 60_000)
   assert.deepEqual(JSON.parse(gaps[0]!.detail), { dropped_ops: 7 })
+  assert.deepEqual(events, ['overflow', 'recovered'], 'one overflow episode, one recovery')
+  n.handle(focus(app('com.apple.Terminal', { pid: 11 }), 't11', T0 + 70_000, 'reconcile'))
+  store.flush()
+  assert.equal(store.query<{ c: number }>(`SELECT count(*) AS c FROM observations WHERE title = 't11'`)[0]!.c, 1, 'the open row is re-inserted, not extended into a dropped id')
   store.close()
 })
 

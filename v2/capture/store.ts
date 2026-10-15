@@ -151,6 +151,9 @@ export class Store implements Sink {
   private droppedSinceFailure = 0
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
+  private overflowing = false
+  onOverflow: () => void = () => {}
+  onRecovered: () => void = () => {}
   private readonly maxPendingOps: number
 
   constructor(dir: string, opts: StoreOptions = {}) {
@@ -294,6 +297,10 @@ export class Store implements Sink {
       this.pending.shift()
       this.health.droppedOps++
       this.droppedSinceFailure++
+      if (!this.overflowing) {
+        this.overflowing = true
+        this.onOverflow()
+      }
     }
     this.pending.push({ sql, params })
     if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null) this.flush()
@@ -358,6 +365,10 @@ export class Store implements Sink {
         const id = this.openGap({ reason: 'storage_failed', scope: 'all', run: null, start, detail: { dropped_ops: dropped } })
         this.closeGap(id, { wall_ms: committed, mono_us: null, boot: null })
         this.flush()
+      }
+      if (this.overflowing) {
+        this.overflowing = false
+        this.onRecovered()
       }
     }
     this.health.committedWallMs = committed

@@ -38,6 +38,7 @@ func requestFocus(_ trigger: FocusTrigger, _ app: NSRunningApplication?, time: E
   let info = appInfo(app)
   // A stuck title worker must not hold back the app change itself.
   if titles.stallMs > 1000 && (trigger == .app_changed || trigger == .snapshot) {
+    titles.abandon()
     emit("focus", "nsworkspace", Obs.focus(trigger: trigger, app: info, window: WindowInfo(window: nil, title: nil, titleState: .timeout)), time: time)
   }
   titles.submit(FocusRequest(trigger: trigger, app: info, time: time, force: force))

@@ -100,6 +100,9 @@ export class Supervisor {
     this.store = store
     this.normalizer = normalizer
     this.backoffMs = this.o.backoffInitialMs
+    // Dropped writes may include the row the normalizer is extending: start fresh and re-read the present state.
+    store.onOverflow = () => normalizer.interrupt(this.lastLine ?? this.servicePoint())
+    store.onRecovered = () => this.send({ op: 'snapshot' })
   }
 
   start(): void {

@@ -8,6 +8,7 @@ struct FocusRequest {
   var app: AppInfo
   var time: EventTime
   var force: Bool
+  var generation: Int = 0
 }
 
 /// Owns every Accessibility call on its own thread and run loop, so a hung app can delay
@@ -15,7 +16,8 @@ struct FocusRequest {
 final class TitleWorker: Thread {
   private let emitter: Emitter
   private let lock = NSLock()
-  private var pending: FocusRequest?
+  private var queue: [FocusRequest] = []
+  private var generation = 0
   private var busySinceUs: Int64 = 0
   private var runLoop: CFRunLoop?
   private let ready = DispatchSemaphore(value: 0)
@@ -61,13 +63,16 @@ final class TitleWorker: Thread {
 
   var degraded: Bool { lock.lock(); defer { lock.unlock() }; return _degraded }
 
-  /// Only the newest request matters; an older one still waiting is replaced.
+  /// Every request is kept in order, so sub-second switches survive a busy worker.
   func submit(_ r: FocusRequest) {
     lock.lock()
-    let replacingForced = pending?.force ?? false
     var next = r
-    if replacingForced { next.force = true }
-    pending = next
+    next.generation = generation
+    if queue.count >= 64 {
+      queue.removeFirst()
+      diag("title_queue_full")
+    }
+    queue.append(next)
     lock.unlock()
     guard let rl = runLoop else { return }
     CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in self?.drain() }
@@ -84,12 +89,25 @@ final class TitleWorker: Thread {
     CFRunLoopWakeUp(rl)
   }
 
-  private func drain() {
+  /// Called from the main thread when this worker is stuck and the main thread reported focus itself:
+  /// anything older must not land after that report.
+  func abandon() {
     lock.lock()
-    guard let r = pending else { lock.unlock(); return }
-    pending = nil
+    generation += 1
+    queue.removeAll()
     lock.unlock()
-    drainWith(r)
+  }
+
+  private var currentGeneration: Int { lock.lock(); defer { lock.unlock() }; return generation }
+
+  private func drain() {
+    while true {
+      lock.lock()
+      guard !queue.isEmpty else { lock.unlock(); return }
+      let r = queue.removeFirst()
+      lock.unlock()
+      drainWith(r)
+    }
   }
 
   private func drainWith(_ r: FocusRequest) {
@@ -98,12 +116,12 @@ final class TitleWorker: Thread {
     let pid = pid_t(r.app.pid ?? 0)
     if pid != observedPid || observer == nil { observe(pid: pid, app: r.app) } else { observedApp = r.app }
     guard AXIsProcessTrusted() else {
-      emitIfChanged(r.trigger, WindowInfo(window: nil, title: nil, titleState: .no_permission), time: r.time, force: true)
+      emitIfChanged(r.trigger, WindowInfo(window: nil, title: nil, titleState: .no_permission), time: r.time, force: true, generation: r.generation)
       return
     }
     let win = focused()
     if !CFEqualOptional(win, focusedWindow) { watchWindow(win) }
-    emitIfChanged(r.trigger, readTitle(win), time: r.time, force: r.force || r.trigger == .app_changed)
+    emitIfChanged(r.trigger, readTitle(win), time: r.time, force: r.force || r.trigger == .app_changed, generation: r.generation)
   }
 
   private func setBusy(_ busy: Bool) {
@@ -188,7 +206,8 @@ final class TitleWorker: Thread {
     }
   }
 
-  private func emitIfChanged(_ trigger: FocusTrigger, _ w: WindowInfo, time: EventTime, force: Bool) {
+  private func emitIfChanged(_ trigger: FocusTrigger, _ w: WindowInfo, time: EventTime, force: Bool, generation: Int? = nil) {
+    if let g = generation, g != currentGeneration { return }
     if !force, let last = lastEmitted, last.app == observedApp, last.window == w { return }
     lastEmitted = (observedApp, w)
     emitter.emit(kind: "focus", source: trigger == .reconcile ? "reconcile" : "ax_observer", time: time,
@@ -218,8 +237,6 @@ final class TitleWorker: Thread {
     }
   }
 
-  /// Fallback when this worker is stuck: the main thread reports the app change without a title.
-  func lastKnownApp() -> AppInfo { observedApp }
 }
 
 private func CFEqualOptional(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
