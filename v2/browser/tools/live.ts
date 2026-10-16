@@ -202,6 +202,8 @@ function commandOf(pid: number): string {
 
 class ChromiumDriver implements Driver {
   readonly profile: string
+  // Chromium's own user data folder. Dia treats --user-data-dir as its app folder and nests Chromium's under "User Data".
+  readonly dataDir: string
   readonly logFile: string
   readonly bundleId: string
   private proc: ChildProcess | null = null
@@ -216,6 +218,7 @@ class ChromiumDriver implements Driver {
     this.app = app
     this.extensionDir = extensionDir
     this.profile = path.join(dir, `${name}-profile`)
+    this.dataDir = name === 'dia' ? path.join(this.profile, 'User Data') : this.profile
     this.logFile = path.join(dir, `${name}-browser.log`)
     this.binary = binaryOf(app)
     this.bundleId = bundleIdOf(app)
@@ -239,18 +242,18 @@ class ChromiumDriver implements Driver {
   // hands off to the user's running Dia would never write the port file into the test profile.
   private async proveIsolated(): Promise<void> {
     mkdirSync(this.profile, { recursive: true })
-    rmSync(path.join(this.profile, 'DevToolsActivePort'), { force: true })
+    rmSync(path.join(this.dataDir, 'DevToolsActivePort'), { force: true })
     const args = this.args().filter((a) => !a.startsWith('--load-extension') && !a.startsWith('--disable-extensions-except'))
     const p = spawn(this.binary, [...args, 'about:blank'], { stdio: 'ignore' })
     const start = Date.now()
-    while (!existsSync(path.join(this.profile, 'DevToolsActivePort'))) {
+    while (!existsSync(path.join(this.dataDir, 'DevToolsActivePort'))) {
       if (p.exitCode !== null || Date.now() - start > 20_000) {
         p.kill('SIGKILL')
         throw new Error(`${this.name} did not start on the test profile; stopping before the extension is loaded anywhere`)
       }
       await sleep(100)
     }
-    const [port, wsPath] = readFileSync(path.join(this.profile, 'DevToolsActivePort'), 'utf8').trim().split('\n')
+    const [port, wsPath] = readFileSync(path.join(this.dataDir, 'DevToolsActivePort'), 'utf8').trim().split('\n')
     const cdp = await Rpc.connect(`ws://127.0.0.1:${port}${wsPath}`)
     await cdp.send('Browser.close').catch(() => {})
     cdp.close()
@@ -260,13 +263,13 @@ class ChromiumDriver implements Driver {
   async launch(url: string): Promise<void> {
     if (this.name === 'dia') await this.proveIsolated()
     mkdirSync(this.profile, { recursive: true })
-    rmSync(path.join(this.profile, 'DevToolsActivePort'), { force: true })
+    rmSync(path.join(this.dataDir, 'DevToolsActivePort'), { force: true })
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
     this.proc = spawn(this.binary, [...this.args(), url], { env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() }, stdio: ['ignore', 'pipe', 'pipe'] })
     this.proc.stdout!.pipe(logStream)
     this.proc.stderr!.pipe(logStream)
     activatePid = this.proc.pid ?? null
-    const portFile = path.join(this.profile, 'DevToolsActivePort')
+    const portFile = path.join(this.dataDir, 'DevToolsActivePort')
     const start = Date.now()
     while (!existsSync(portFile)) {
       if (Date.now() - start > 20_000) throw new Error(`${this.name} did not open its debugging port`)
@@ -486,7 +489,7 @@ function makeDriver(dir: string): Driver {
 
 function hostDir(d: Driver): string {
   if (kind === 'firefox') return path.join(os.homedir(), 'Library', 'Application Support', 'Mozilla', 'NativeMessagingHosts')
-  return path.join(d.profile, 'NativeMessagingHosts')
+  return path.join((d as ChromiumDriver).dataDir, 'NativeMessagingHosts')
 }
 
 function hostPids(): number[] {
