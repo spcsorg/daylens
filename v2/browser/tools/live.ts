@@ -455,7 +455,8 @@ class FirefoxDriver implements Driver {
       ].join('\n') + '\n',
     )
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
-    this.proc = spawn(this.binary, ['-profile', this.profile, '--remote-debugging-port', String(this.port), url], {
+    // System access lets the runner open the extension's own popup page, which BiDi navigation refuses.
+    this.proc = spawn(this.binary, ['-profile', this.profile, '--remote-debugging-port', String(this.port), '--remote-allow-system-access', url], {
       env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -488,6 +489,21 @@ class FirefoxDriver implements Driver {
     }
   }
   async openWindow(url: string): Promise<string> {
+    if (url.startsWith('moz-extension://')) {
+      const chrome = (await this.bidi.send('browsingContext.getTree', { maxDepth: 0, 'moz:scope': 'chrome' })).contexts[0].context
+      await this.bidi.send('script.evaluate', {
+        expression: `(() => { const t = gBrowser.addTab(${JSON.stringify(url)}, { triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal() }); gBrowser.selectedTab = t; return true })()`,
+        target: { context: chrome },
+        awaitPromise: false,
+      })
+      const start = Date.now()
+      for (;;) {
+        const c = (await this.tops()).find((x) => x.url === url)
+        if (c) return c.context
+        if (Date.now() - start > 10_000) throw new Error('firefox: extension page did not open')
+        await sleep(200)
+      }
+    }
     const { context } = await this.bidi.send('browsingContext.create', { type: 'window' })
     await this.navigate(context, url)
     return context
