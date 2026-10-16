@@ -9,7 +9,9 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit -p .",
-    "capture": "node capture/service.ts"
+    "capture": "node capture/service.ts",
+    "build:js": "tsc -p tsconfig.build.json",
+    "build:electron-sqlite": "cd build/js && npm_config_runtime=electron npm_config_target=34.5.8 npm_config_disturl=https://electronjs.org/headers npm install --no-audit --no-fund better-sqlite3@12.8.0"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3"
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.5",
+    "electron": "34.5.8",
     "typescript": "7.0.2"
   }
 }

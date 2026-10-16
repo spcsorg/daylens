@@ -1,6 +1,7 @@
 // Runs the capture service with a real helper, samples every process it owns, and reports CPU, memory,
 // wakeups and energy against the background budget (docs/system-design.md#budgets).
 // Usage: node tools/soak.ts --helper <path> --minutes 60 --out <dir> [--procstat <path>] [--warmup-s 60]
+//        [--runtime electron]   runs the compiled service (npm run build:js) under Electron's Node, as production does
 import { spawn } from 'node:child_process'
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -18,6 +19,7 @@ const { values } = parseArgs({
     'warmup-s': { type: 'string', default: '60' },
     'interval-s': { type: 'string', default: '10' },
     summarize: { type: 'boolean', default: false },
+    runtime: { type: 'string', default: 'node' },
     'from-ms': { type: 'string' },
     'to-ms': { type: 'string' },
   },
@@ -56,7 +58,8 @@ function linearSlope(xs: number[], ys: number[]): number {
 
 export function summarize(dir: string, warmupS: number, window: { from?: number; to?: number } = {}): Record<string, unknown> {
   const samples: Sample[] = readFileSync(path.join(dir, 'samples.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
-  const owned = samples.filter((s) => s.name === 'node' || s.name.startsWith('daylens-capture'))
+  // procstat samples only the service and its descendants, so every sample is ours.
+  const owned = samples
   const times = [...new Set(owned.map((s) => s.t_ms))].sort((a, b) => a - b)
   const t0 = times[0]!
   const measured = times.filter((t) => t - t0 >= warmupS * 1000 && t >= (window.from ?? 0) && t <= (window.to ?? Infinity))
@@ -126,7 +129,14 @@ export function summarize(dir: string, warmupS: number, window: { from?: number;
 
 async function run(): Promise<void> {
   mkdirSync(out, { recursive: true })
-  const svc = spawn(process.execPath, [service, '--helper', values.helper!, '--data-dir', path.join(out, 'data')], { stdio: ['ignore', 'ignore', 'pipe'] })
+  const electron = values.runtime === 'electron'
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const bin = electron ? path.join(root, 'node_modules', '.bin', 'electron') : process.execPath
+  const script = electron ? path.join(root, 'build', 'js', 'capture', 'service.js') : service
+  const svc = spawn(bin, [script, '--helper', values.helper!, '--data-dir', path.join(out, 'data')], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: electron ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
+  })
   const log = createWriteStream(path.join(out, 'service.log'))
   svc.stderr!.pipe(log)
   const ps = spawn(procstat, ['--root', String(svc.pid), '--interval-s', values['interval-s']!], { stdio: ['ignore', 'pipe', 'inherit'] })
