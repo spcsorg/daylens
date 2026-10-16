@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
@@ -31,6 +31,19 @@ export function assertNotV1(dir: string): void {
   }
   for (const f of V1_FILE_NAMES) {
     if (existsSync(path.join(resolved, f))) throw new Error('refusing a folder that holds a V1 database')
+  }
+}
+
+// The folder check alone is not enough: a linked database file could point V2 at V1's database.
+export function assertRealDatabaseFiles(dir: string): void {
+  for (const f of [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`]) {
+    let isLink = false
+    try {
+      isLink = lstatSync(path.join(dir, f)).isSymbolicLink()
+    } catch {
+      continue
+    }
+    if (isLink) throw new Error('refusing a linked database file')
   }
 }
 
@@ -193,6 +206,7 @@ export class Store implements Sink {
     assertNotV1(dir)
     mkdirSync(dir, { recursive: true })
     assertNotV1(dir)
+    assertRealDatabaseFiles(dir)
     this.releaseLock = acquireWriterLock(dir)
     this.file = path.join(dir, DB_FILE)
     this.now = opts.now ?? Date.now

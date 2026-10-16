@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -191,4 +192,19 @@ test('a gap closed before it started collapses to empty instead of going negativ
   s.flush()
   assert.deepEqual(s.query('SELECT start_wall_ms, end_wall_ms FROM capture_gaps'), [{ start_wall_ms: T0 + 5000, end_wall_ms: T0 + 5000 }])
   s.close()
+})
+
+test('a database file linked to another database is refused and the target is untouched', () => {
+  const v1 = path.join(tmp(), 'v1-lookalike.sqlite')
+  const db = new Database(v1)
+  db.exec("CREATE TABLE focus_events (id INTEGER PRIMARY KEY, title TEXT); INSERT INTO focus_events (title) VALUES ('v1 row')")
+  db.close()
+  const hash = () => createHash('sha256').update(readFileSync(v1)).digest('hex')
+  const before = hash()
+  for (const suffix of ['', '-wal']) {
+    const dir = tmp()
+    symlinkSync(suffix ? v1 + '-elsewhere' : v1, path.join(dir, DB_FILE + suffix))
+    assert.throws(() => new Store(dir), /linked database file/)
+  }
+  assert.equal(hash(), before)
 })
