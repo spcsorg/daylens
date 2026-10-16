@@ -186,30 +186,30 @@ NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, obje
   emit("clock", "notification", Obs.clock("timezone_changed"))
 }
 
-idleTimer.setEventHandler { checkIdle() }
+idleTimer.setEventHandler { autoreleasepool { checkIdle() } }
 idleTimer.schedule(deadline: .distantFuture)
 idleTimer.resume()
 
 // Heartbeats come from the main thread: if it wedges, they stop.
 let heartbeat = DispatchSource.makeTimerSource(queue: .main)
 heartbeat.schedule(deadline: .now() + .seconds(heartbeatS), repeating: .seconds(heartbeatS), leeway: .milliseconds(heartbeatS * 100))
-heartbeat.setEventHandler {
+heartbeat.setEventHandler { autoreleasepool {
   let p = permissions()
   let stall = titles.stallMs
   let state: ChannelState = p.accessibility != "granted" ? .no_permission : stall > 2000 ? .stalled : titles.degraded ? .degraded : .ok
   emit("heartbeat", "helper", Obs.heartbeat(awakeUs: Clock.awakeUs(), permissions: p, focusRegistered: true, sessionRegistered: true,
                                             powerRegistered: rootPowerPort != 0, titles: state, stallMs: stall, dropped: emitter.dropped))
-}
+} }
 heartbeat.resume()
 
 let reconcile = DispatchSource.makeTimerSource(queue: .main)
 reconcile.schedule(deadline: .now() + .seconds(reconcileS), repeating: .seconds(reconcileS), leeway: .seconds(max(1, reconcileS / 10)))
-reconcile.setEventHandler {
+reconcile.setEventHandler { autoreleasepool {
   let app = NSWorkspace.shared.frontmostApplication
   let changed = (app?.processIdentifier ?? 0) != frontPid
   frontPid = app?.processIdentifier ?? 0
   requestFocus(changed ? .app_changed : .reconcile, app)
-}
+} }
 reconcile.resume()
 
 // Control from the capture service. End of input means the service is gone.

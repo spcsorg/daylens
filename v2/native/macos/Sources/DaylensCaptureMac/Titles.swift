@@ -70,17 +70,18 @@ final class TitleWorker: Thread {
     next.generation = generation
     lock.unlock()
     guard queue.push(next, wallMs: r.time.wallMs), let rl = runLoop else { return }
-    CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in self?.drain() }
+    // This thread has no autorelease pool of its own; each unit of work drains one.
+    CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in autoreleasepool { self?.drain() } }
     CFRunLoopWakeUp(rl)
   }
 
   func permissionChanged() {
     guard let rl = runLoop else { return }
-    CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in
+    CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in autoreleasepool {
       guard let self else { return }
       self.teardown()
       self.drainWith(FocusRequest(trigger: .snapshot, app: self.observedApp, time: Clock.now(), force: true))
-    }
+    } }
     CFRunLoopWakeUp(rl)
   }
 
@@ -199,14 +200,14 @@ final class TitleWorker: Thread {
     guard refreshTimer == nil else { return }
     let delay = TitleWorker.refreshDelays[min(refreshAttempt, TitleWorker.refreshDelays.count - 1)]
     refreshAttempt += 1
-    let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + delay, 0, 0, 0) { [weak self] _ in
+    let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + delay, 0, 0, 0) { [weak self] _ in autoreleasepool {
       guard let self else { return }
       self.refreshTimer = nil
       self.setBusy(true)
       defer { self.setBusy(false) }
       if !self.pendingNotifications.isEmpty { self.registerPending() }
       self.emitIfChanged(.window_changed, self.currentWindowInfo(), time: Clock.now(), force: false)
-    }
+    } }
     refreshTimer = timer
     CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, .defaultMode)
   }
@@ -382,5 +383,5 @@ private func CFEqualOptional(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
 
 private func axCallback(_ observer: AXObserver, _ element: AXUIElement, _ name: CFString, _ refcon: UnsafeMutableRawPointer?) {
   guard let refcon else { return }
-  Unmanaged<TitleWorker>.fromOpaque(refcon).takeUnretainedValue().onNotification(name as String, element: element)
+  autoreleasepool { Unmanaged<TitleWorker>.fromOpaque(refcon).takeUnretainedValue().onNotification(name as String, element: element) }
 }
