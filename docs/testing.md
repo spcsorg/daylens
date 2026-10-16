@@ -54,9 +54,9 @@ Each release covers:
 ## Normal checks
 
 ```bash
-npm run typecheck
-npm test
-npm run contract:check
+cd v2 && npm test
+cd v2/native/macos && swift test
+cd v2/native/windows && dotnet test
 ```
 
 AI evaluations call paid providers. They run on purpose, not on every change.

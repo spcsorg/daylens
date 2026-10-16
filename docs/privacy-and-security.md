@@ -20,6 +20,7 @@
 - When AI is on, the packet for an hour (titles, addresses, app names, times) is sent to the chosen provider to write that hour, and the relevant hours are sent to answer a question in Ask. Nothing else is sent.
 - Assistants the user connects can read days through the MCP server. What an assistant reads can be sent to that assistant's own AI service, and Daylens cannot recall it afterwards. This is stated on the Terms and Privacy page and when connecting.
 - The billing service stores account, plan, usage and payment records. It never receives activity, prompts or answers.
+- Anonymous usage analytics are on by default and can be turned off in Settings › Recording and privacy. They count feature use and errors only: never titles, addresses, file names, prompts or answers.
 
 ## Controls
 

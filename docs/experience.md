@@ -68,7 +68,7 @@ Ask answers questions about any day from the same record.
 ## Settings
 
 - **General:** start and end of the day, notification times, launch at login, appearance.
-- **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), and delete history.
+- **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), usage analytics (on, with an off switch), and delete history.
 - **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read, and setup for any other MCP app.
 - **AI:** the current choice (Daylens AI, your own key, a CLI on the machine, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.

@@ -40,13 +40,13 @@ The interface never waits on AI, the network, or a long query. Background work r
 
 ### The shell
 
-The interface is one shared web codebase in a desktop shell. V1 already ships this way on all three platforms; V2 keeps the shell and rewrites what runs inside it. The interface process only renders and sends user actions. Capture, the engine, search indexing and the MCP server run in separate processes.
+The interface is one shared web codebase in a desktop shell. V1 already ships this way on all three platforms; V2 keeps the shell, moves to a supported Electron release (44 or later; V1's 34 is out of support), and rewrites what runs inside it. The interface process only renders and sends user actions. Capture, the engine, search indexing and the MCP server run in separate processes.
 
 ### Native helpers
 
 Each platform has a small helper that reports what is happening and nothing else. All helpers speak the same protocol: one JSON line per observation, carrying the event time, the platform, the source, and the observation itself. Normalization and every decision live in shared code, so the platforms cannot drift.
 
-The macOS helper is Swift and the Windows helper is C#, published self-contained so users install nothing extra. Both are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang (such as UI Automation on Windows) runs on its own thread so it can never stop capture. Each observation carries a protocol version, a sequence number and defined clock units.
+The macOS helper is Swift and the Windows helper is C#, published as one native executable (Native AOT, built on Windows) so users install nothing extra and it uses little memory. Both are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang (such as UI Automation on Windows) runs on its own thread so it can never stop capture. Each observation carries a protocol version, a sequence number and defined clock units.
 
 ### Packages
 
@@ -66,7 +66,7 @@ The macOS helper is Swift and the Windows helper is C#, published self-contained
 | Window title | Window text and title-change events, no permission needed | Accessibility permission | X11 window name; on Wayland, see below |
 | Browser page | See [Browsers](#browsers) | See [Browsers](#browsers) | See [Browsers](#browsers) |
 | Idle | Time since last input | Time since last input | Idle time from the desktop session |
-| Lock and sleep | Session and power notifications; waking automatically is not the user returning | Workspace and power notifications | Session manager signals |
+| Lock and sleep | Session and power notifications; waking automatically is not the user returning | Screen-lock notifications, display notices (the helper runs as a background application to receive them), and sleep and wake from the power system | Session manager signals |
 | Calendar (optional) | Account calendar through sign-in | Calendar permission (full access is the only level) | Account calendar through sign-in |
 | AI agent sessions | Claude Code and Codex session logs | Same | Same |
 | Microphone or speaker in use (later) | Audio session state | Audio process state | Audio server state |
