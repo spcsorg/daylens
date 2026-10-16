@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.Versioning;
 using Daylens.Capture.Core;
 using Microsoft.Win32;
@@ -14,7 +15,8 @@ internal sealed unsafe class Resolver
 {
     const int MaxQueue = 256;
     readonly object _gate = new();
-    readonly Queue<FocusWork> _queue = new();
+    readonly RequestQueue<FocusWork> _queue = new(MaxQueue);
+    readonly AutoResetEvent _wake = new(false);
     readonly Emitter _emitter;
     readonly Dictionary<(int Pid, long Created), AppInfo> _identities = new();
     readonly Dictionary<string, string?> _packageNames = new(StringComparer.OrdinalIgnoreCase);
@@ -45,54 +47,59 @@ internal sealed unsafe class Resolver
 
     public long Generation => Interlocked.Read(ref _generation);
 
+    /// Every request is kept in order; when the queue is full the oldest is dropped and reported as a loss.
     public void Submit(FocusWork w)
     {
-        lock (_gate)
-        {
-            if (_queue.Count >= MaxQueue) { _queue.Dequeue(); Diag.Write("resolver_queue_full"); }
-            _queue.Enqueue(w);
-            Monitor.Pulse(_gate);
-        }
+        if (_queue.Push(w, w.Time.WallMs)) _wake.Set();
     }
 
-    /// Called by the hook thread when this thread is stuck: queued work is abandoned and reported without identity.
+    /// Called by the hook thread when this thread is stuck: queued work is abandoned, counted as lost,
+    /// and the hook thread reports focus without identity meanwhile.
     public void Abandon()
     {
         lock (_gate)
         {
             Interlocked.Increment(ref _generation);
-            _queue.Clear();
             _last = null;
         }
+        _queue.Clear();
     }
 
     void Loop()
     {
         while (true)
         {
-            FocusWork w;
-            lock (_gate)
-            {
-                while (_queue.Count == 0) Monitor.Wait(_gate);
-                w = _queue.Dequeue();
-            }
-            if (w.Generation != Generation) continue;
-            Interlocked.Exchange(ref _busySinceMs, Environment.TickCount64);
-            AppInfo app;
-            try { app = Identify(w.Hwnd, w.Pid); }
-            catch { app = AppInfo.Unknown(w.Pid, IdentityState.AccessDenied); Diag.Write("identify_failed"); }
-            Interlocked.Exchange(ref _busySinceMs, 0);
-            lock (_gate)
-            {
-                if (w.Generation != Generation) continue;
-                var changed = _last is not { } l || l.App != app || l.Window != w.Window;
-                if (!changed && !w.Force && w.Trigger != FocusTrigger.AppChanged) continue;
-                _last = (app, w.Window);
-            }
-            var source = w.Trigger == FocusTrigger.Reconcile ? "reconcile" : "win_event";
-            try { _emitter.Emit("focus", source, w.Time, Obs.Focus(w.Trigger, app, w.Window), Emitter.Priority.Normal); }
-            catch { Diag.Write("emit_failed"); }
+            _wake.WaitOne();
+            _queue.Drain(Handle, ReportLoss);
         }
+    }
+
+    void Handle(FocusWork w)
+    {
+        // Work from before an abandon was not reported, so it counts as lost too, including the one that was stuck.
+        if (w.Generation != Generation) { _queue.CountLost(w.Time.WallMs); return; }
+        Interlocked.Exchange(ref _busySinceMs, Environment.TickCount64);
+        AppInfo app;
+        try { app = Identify(w.Hwnd, w.Pid); }
+        catch { app = AppInfo.Unknown(w.Pid, IdentityState.AccessDenied); Diag.Write("identify_failed"); }
+        Interlocked.Exchange(ref _busySinceMs, 0);
+        lock (_gate)
+        {
+            if (w.Generation != Generation) { _queue.CountLost(w.Time.WallMs); return; }
+            var changed = _last is not { } l || l.App != app || l.Window != w.Window;
+            if (!changed && !w.Force && w.Trigger != FocusTrigger.AppChanged) return;
+            _last = (app, w.Window);
+        }
+        var source = w.Trigger == FocusTrigger.Reconcile ? "reconcile" : "win_event";
+        try { _emitter.Emit("focus", source, w.Time, Obs.Focus(w.Trigger, app, w.Window), Emitter.Priority.Normal); }
+        catch { Diag.Write("emit_failed"); }
+    }
+
+    void ReportLoss(QueueLoss l)
+    {
+        Diag.Write("resolver_queue_loss", l.Count.ToString(CultureInfo.InvariantCulture));
+        try { _emitter.Emit("loss", "helper", Clock.Now(), Obs.Loss(l.Count, l.FromWallMs, l.ToWallMs), Emitter.Priority.Critical); }
+        catch { Diag.Write("emit_failed"); }
     }
 
     AppInfo Identify(nint hwnd, int pid)
