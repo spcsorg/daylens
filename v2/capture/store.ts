@@ -2,12 +2,12 @@ import Database from 'better-sqlite3'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
+import { DEFAULT_EXCLUSIONS, DEFAULT_SITE_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
 import type { GapDetail, GapPoint, GapReason, GapStart, ObservationRow, Sink } from './normalize.ts'
 import type { Line, LineOf } from './protocol.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const FLUSH_INTERVAL_MS = 1000
 const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS observations (
   title_state TEXT,
   state TEXT,
   detail TEXT,
-  possibly_stale_since_wall_ms INTEGER
+  possibly_stale_since_wall_ms INTEGER,
+  url TEXT
 );
 CREATE INDEX IF NOT EXISTS observations_event_wall ON observations(event_wall_ms);
 CREATE TABLE IF NOT EXISTS capture_gaps (
@@ -142,7 +143,7 @@ CREATE TABLE IF NOT EXISTS capture_gaps (
 CREATE INDEX IF NOT EXISTS capture_gaps_start ON capture_gaps(start_wall_ms);
 CREATE TABLE IF NOT EXISTS exclusions (
   id INTEGER PRIMARY KEY,
-  match TEXT NOT NULL CHECK (match IN ('app_id', 'exe')),
+  match TEXT NOT NULL CHECK (match IN ('app_id', 'exe', 'site')),
   value TEXT NOT NULL,
   label TEXT NOT NULL,
   is_default INTEGER NOT NULL,
@@ -221,15 +222,19 @@ export class Store implements Sink {
     this.db.exec(SCHEMA)
     const version = this.db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined
     if (!version) this.db.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION))
-    else if (Number(version.value) === 1) this.migrateV1()
-    else if (Number(version.value) !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
+    else {
+      let v = Number(version.value)
+      if (v === 1) v = this.migrateV1()
+      if (v === 2) v = this.migrateV2()
+      if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
+    }
     this.seedExclusions()
     this.nextObsId = ((this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0) + 1
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
   }
 
   // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
-  private migrateV1(): void {
+  private migrateV1(): number {
     this.db.transaction(() => {
       this.db.exec(`
         ALTER TABLE capture_gaps RENAME TO capture_gaps_v1;
@@ -238,8 +243,28 @@ export class Store implements Sink {
         DROP TABLE capture_gaps_v1;
         CREATE INDEX IF NOT EXISTS capture_gaps_start ON capture_gaps(start_wall_ms);
       `)
-      this.db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION))
+      this.db.prepare(`UPDATE meta SET value = '2' WHERE key = 'schema_version'`).run()
     })()
+    return 2
+  }
+
+  // v3 adds page addresses and site exclusions; the exclusions CHECK is rebuilt the same way as v2's gaps.
+  private migrateV2(): number {
+    this.db.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE observations ADD COLUMN url TEXT;
+        ALTER TABLE exclusions RENAME TO exclusions_v2;
+        ${SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS exclusions'))}
+        INSERT INTO exclusions SELECT * FROM exclusions_v2;
+        DROP TABLE exclusions_v2;
+      `)
+      if (this.db.prepare(`SELECT value FROM meta WHERE key = 'exclusions_seeded'`).get()) {
+        const ins = this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 1)')
+        for (const r of DEFAULT_SITE_EXCLUSIONS) ins.run(r.match, r.value, r.label)
+      }
+      this.db.prepare(`UPDATE meta SET value = '3' WHERE key = 'schema_version'`).run()
+    })()
+    return 3
   }
 
   private seedExclusions(): void {
@@ -276,6 +301,16 @@ export class Store implements Sink {
   closeDanglingGaps(end: GapPoint): void {
     this.db.prepare('UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE end_wall_ms IS NULL').run(end.wall_ms, end.mono_us, end.boot)
     this.db.prepare(`UPDATE capture_runs SET ended_wall_ms = coalesce(last_heartbeat_wall_ms, started_wall_ms), end_reason = 'service_died' WHERE ended_wall_ms IS NULL`).run()
+  }
+
+  meta(key: string): string | null {
+    const r = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined
+    return r?.value ?? null
+  }
+
+  setMeta(key: string, value: string | null): void {
+    if (value === null) this.enqueue('DELETE FROM meta WHERE key = ?', [key])
+    else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
   }
 
   markServiceStarted(): void {
@@ -318,12 +353,12 @@ export class Store implements Sink {
     const id = this.nextObsId++
     this.enqueue(
       `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
-         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, row.run, row.seq, row.boot, row.platform, row.source, row.kind, row.event_wall_ms, row.event_mono_us, row.tz, row.tz_offset_min,
         this.now(), row.event_wall_ms, row.app_id, row.app_name, row.app_path, row.pid, row.window, row.title, row.title_raw, row.title_state,
-        row.state, row.detail,
+        row.state, row.detail, row.url ?? null,
       ],
     )
     return id
