@@ -8,39 +8,47 @@ const ext = (g.browser ?? g.chrome)!
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const status = $('status')
+const connectBtn = $<HTMLButtonElement>('connect')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const choices = $('choices')
 const resumeBtn = $<HTMLButtonElement>('resume')
 const openBtn = $<HTMLButtonElement>('open')
 const error = $('error')
 
-function untilText(ms: number): string {
+function at(ms: number): string {
   const d = new Date(ms)
-  const sameDay = d.toDateString() === new Date().toDateString()
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return sameDay ? `Paused until ${time}` : `Paused until ${d.toLocaleDateString([], { weekday: 'long' })} ${time}`
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'long' })} ${time}`
 }
 
-function statusLine(s: PopupState, paused: boolean): [string, 'ok' | 'warn' | 'none'] {
+function statusLine(s: PopupState): [string, 'ok' | 'warn' | 'none'] {
   if (s.daylens === 'connecting') return ['Connecting…', 'none']
   if (s.daylens === 'not_installed') return ['Daylens isn’t installed on this computer', 'none']
+  if (s.connecting_pair && s.daylens !== 'connected') return ['Waiting for Daylens…', 'none']
+  if (s.daylens === 'unpaired') return ['Not connected to Daylens', 'none']
   if (s.daylens === 'not_running') return ['Daylens isn’t running', 'warn']
-  if (paused) return [s.until_wall_ms === null ? 'Paused' : untilText(s.until_wall_ms), 'warn']
+  if (s.paused) return [s.paused_until_wall_ms === null ? 'Paused in this browser' : `Paused in this browser until ${at(s.paused_until_wall_ms)}`, 'warn']
+  if (s.capture === 'paused') return [s.until_wall_ms === null ? 'Daylens is paused' : `Daylens is paused until ${at(s.until_wall_ms)}`, 'warn']
   return ['Connected', 'ok']
 }
 
 function render(s: PopupState): void {
   const connected = s.daylens === 'connected'
-  const paused = connected && s.capture === 'paused'
-  const [text, tone] = statusLine(s, paused)
+  const [text, tone] = statusLine(s)
   status.textContent = text
   status.dataset.tone = tone
-  pauseBtn.hidden = !connected || paused || !choices.hidden
-  resumeBtn.hidden = !paused
-  if (!connected || paused) choices.hidden = true
-  openBtn.hidden = s.daylens === 'not_installed' || s.daylens === 'connecting'
+  connectBtn.hidden = s.daylens !== 'unpaired' || s.connecting_pair
+  pauseBtn.hidden = !connected || s.paused || s.capture === 'paused' || !choices.hidden
+  resumeBtn.hidden = !s.paused
+  if (!connected || s.paused || s.capture === 'paused') choices.hidden = true
+  openBtn.hidden = s.daylens === 'not_installed' || s.daylens === 'connecting' || s.daylens === 'unpaired'
   openBtn.classList.toggle('link', connected)
   openBtn.classList.toggle('primary', !connected)
+}
+
+function fail(text: string): void {
+  error.textContent = text
+  error.hidden = false
 }
 
 async function ask(req: PopupRequest): Promise<PopupState | null> {
@@ -50,12 +58,15 @@ async function ask(req: PopupRequest): Promise<PopupState | null> {
     render(s)
     return s
   } catch {
-    error.textContent = 'Couldn’t reach the extension. Close this and try again.'
-    error.hidden = false
+    fail('Couldn’t reach the extension. Close this and try again.')
     return null
   }
 }
 
+connectBtn.addEventListener('click', async () => {
+  const s = await ask({ t: 'connect' })
+  if (s && !s.connecting_pair && s.daylens !== 'connected') fail('Couldn’t start connecting. Try again.')
+})
 pauseBtn.addEventListener('click', () => {
   choices.hidden = false
   pauseBtn.hidden = true
@@ -66,10 +77,7 @@ choices.addEventListener('click', async (e) => {
   if (!b) return
   choices.hidden = true
   const s = await ask({ t: 'pause', for: b.dataset.for as PauseFor })
-  if (s && s.capture !== 'paused') {
-    error.textContent = 'Daylens didn’t pause. Try again from Daylens.'
-    error.hidden = false
-  }
+  if (s && !s.paused) fail('This browser didn’t pause. Try again.')
 })
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !choices.hidden) {
@@ -81,18 +89,12 @@ document.addEventListener('keydown', (e) => {
 })
 resumeBtn.addEventListener('click', async () => {
   const s = await ask({ t: 'resume' })
-  if (s && s.capture === 'paused') {
-    error.textContent = 'Daylens is still paused. Try again from Daylens.'
-    error.hidden = false
-  }
+  if (s && s.paused) fail('This browser is still paused. Try again.')
 })
 openBtn.addEventListener('click', async () => {
   const s = await ask({ t: 'open' })
   if (s && s.opened) window.close()
-  else if (s) {
-    error.textContent = 'Couldn’t open Daylens. Open it from your apps.'
-    error.hidden = false
-  }
+  else if (s) fail('Couldn’t open Daylens. Open it from your apps.')
 })
 
 void ask({ t: 'status' })

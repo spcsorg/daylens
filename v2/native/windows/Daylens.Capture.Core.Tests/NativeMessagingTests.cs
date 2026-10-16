@@ -23,7 +23,7 @@ public class NativeMessagingTests
         var page = Encode("""{"t":"tab","state":"page","trigger":"updated","window":"2","tab":"7","url":"https://docs.example.com/d/1AbC/edit","title":"Plan"}""",
             Chrome, "abcdefghijklmnopabcdefghijklmnop", 0);
         Assert.True(JsonNode.DeepEquals(page, Fixtures()["host_win_tab_page"]), page.ToJsonString());
-        var unknown = Encode("""{"t":"tab","state":"unknown","trigger":"focus","reason":"not_normal"}""", Firefox, "browser@daylens", 1);
+        var unknown = Encode("""{"t":"tab","state":"unknown","trigger":"focus","reason":"not_normal"}""", Firefox, "browser@daylens.app", 1);
         Assert.True(JsonNode.DeepEquals(unknown, Fixtures()["host_win_tab_unknown_firefox"]), unknown.ToJsonString());
     }
 
@@ -31,7 +31,7 @@ public class NativeMessagingTests
     public void LaunchDetection()
     {
         Assert.Equal(new HostLaunch(false, "dgidcofcmgnlicmmepgomalcdcbgjjjg"), HostLaunch.Detect(["chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg/", "--parent-window=1234"]));
-        Assert.Equal(new HostLaunch(true, "browser@daylens"), HostLaunch.Detect([@"C:\Users\a\AppData\Local\Daylens\app.daylens.browser.json", "browser@daylens"]));
+        Assert.Equal(new HostLaunch(true, "browser@daylens.app"), HostLaunch.Detect([@"C:\Users\a\AppData\Local\Daylens\app.daylens.browser.json", "browser@daylens.app"]));
         Assert.Null(HostLaunch.Detect([]));
         Assert.Null(HostLaunch.Detect(["--heartbeat-s", "15"]));
         Assert.Null(HostLaunch.Detect(["chrome-extension://zzz/"]));

@@ -29,7 +29,7 @@ final class NativeMessagingTests: XCTestCase {
   func testLaunchDetection() {
     XCTAssertEqual(HostLaunch.detect(["/x/host", "chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg/"]), .chromium(extensionId: "dgidcofcmgnlicmmepgomalcdcbgjjjg"))
     XCTAssertEqual(HostLaunch.detect(["/x/host", "chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg/", "--parent-window=0"]), .chromium(extensionId: "dgidcofcmgnlicmmepgomalcdcbgjjjg"))
-    XCTAssertEqual(HostLaunch.detect(["/x/host", "/Users/a/Library/Application Support/Mozilla/NativeMessagingHosts/app.daylens.browser.json", "browser@daylens"]), .firefox(extensionId: "browser@daylens"))
+    XCTAssertEqual(HostLaunch.detect(["/x/host", "/Users/a/Library/Application Support/Mozilla/NativeMessagingHosts/app.daylens.browser.json", "browser@daylens.app"]), .firefox(extensionId: "browser@daylens.app"))
     XCTAssertNil(HostLaunch.detect(["/x/host"]))
     XCTAssertNil(HostLaunch.detect(["/x/host", "--heartbeat-s", "15"]), "the capture helper's own launch is never host mode")
     XCTAssertNil(HostLaunch.detect(["/x/host", "chrome-extension://NOTANID/"]))

@@ -35,7 +35,7 @@ public enum HostLaunch: Equatable {
 /// Store IDs join this list when each store assigns them.
 public let allowedExtensionIds: Set<String> = [
   "dgidcofcmgnlicmmepgomalcdcbgjjjg",  // unpacked dev build (manifest.chromium-dev.json key)
-  "browser@daylens",  // Firefox add-on ID, held until the domain is confirmed
+  "browser@daylens.app",
 ]
 
 /// Native messaging frames: a 32-bit length in native byte order, then UTF-8 JSON.

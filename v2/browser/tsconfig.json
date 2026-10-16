@@ -4,5 +4,5 @@
     "lib": ["es2024", "dom"],
     "types": []
   },
-  "include": ["extension/src/**/*.ts", "../capture/address.ts"]
+  "include": ["extension/src/**/*.ts", "../capture/address.ts", "../capture/pairing.ts"]
 }

@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
 
 export const HOST_NAME = 'app.daylens.browser'
 export const DEV_CHROMIUM_ID = 'dgidcofcmgnlicmmepgomalcdcbgjjjg'
-export const FIREFOX_ID = 'browser@daylens'
+export const FIREFOX_ID = 'browser@daylens.app'
 
 export function hostManifest(kind: 'chromium' | 'firefox', hostPath: string): object {
   const base = { name: HOST_NAME, description: 'Daylens', path: path.resolve(hostPath), type: 'stdio' }

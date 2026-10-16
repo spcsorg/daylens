@@ -2,7 +2,9 @@
 // Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
 
 import { parseArgs } from 'node:util'
+import { createInterface } from 'node:readline'
 import { BrowserPages } from './browser.ts'
+import { BrowserLocal, helperPeerCheck, localEnabled } from './browserLocal.ts'
 import { BrowserSocket, statusMsg } from './browserSocket.ts'
 import { Privacy } from './normalize.ts'
 import { Pause } from './pause.ts'
@@ -35,6 +37,7 @@ const privacy = new Privacy(store.exclusions())
 const pages = new BrowserPages(store, privacy, { log })
 let supervisor: Supervisor | null = null
 let browserSocket: BrowserSocket | null = null
+let browserLocal: BrowserLocal | null = null
 const pause = new Pause(store, {
   onChange: (state, at) => {
     log(`capture ${state.paused ? 'paused' : 'resumed'}`)
@@ -44,6 +47,7 @@ const pause = new Pause(store, {
       pages.requestSnapshots()
     }
     browserSocket?.broadcast(statusMsg(state))
+    browserLocal?.status(state)
   },
 })
 const normalizer = new ServiceNormalizer(store, privacy, pause, pages)
@@ -68,6 +72,7 @@ async function shutdown(signal: string): Promise<void> {
   log(`stopping signal=${signal}`)
   pause.stop()
   await browserSocket?.stop()
+  await browserLocal?.stop()
   await supervisor!.stop()
   store.close()
   process.exit(0)
@@ -84,3 +89,19 @@ pause.restore()
 supervisor.start()
 browserSocket = new BrowserSocket(pages, pause, { log })
 void browserSocket.start()
+if (localEnabled()) {
+  browserLocal = new BrowserLocal(pages, pause, store, { peerCheck: helperPeerCheck(values.helper), clock: () => normalizer.clock(), log })
+  void browserLocal.start()
+  // Only the parent (the Daylens app) writes here: daylens://pair links the operating system delivered to it.
+  createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (raw) => {
+    let msg: { op?: unknown; link?: unknown; id?: unknown }
+    try {
+      msg = JSON.parse(raw)
+    } catch {
+      return log('control rejected reason=not_json')
+    }
+    if (msg.op === 'pair' && typeof msg.link === 'string') browserLocal?.addPairLink(msg.link)
+    else if (msg.op === 'unpair' && typeof msg.id === 'string') browserLocal?.unpair(msg.id)
+    else log('control rejected reason=unknown_op')
+  })
+}

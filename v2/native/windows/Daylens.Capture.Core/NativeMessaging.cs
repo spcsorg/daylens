@@ -13,7 +13,7 @@ public sealed record HostLaunch(bool Firefox, string ExtensionId)
     public static readonly IReadOnlySet<string> Allowed = new HashSet<string>(StringComparer.Ordinal)
     {
         "dgidcofcmgnlicmmepgomalcdcbgjjjg", // unpacked dev build (manifest.chromium-dev.json key)
-        "browser@daylens", // Firefox add-on ID, held until the domain is confirmed
+        "browser@daylens.app",
     };
 
     public static HostLaunch? Detect(string[] args)
