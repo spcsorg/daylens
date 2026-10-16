@@ -161,6 +161,25 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertEqual(classifyBundle(nil), .unknown)
   }
 
+  func testAShortSleepStillReportsTheUserComingBack() {
+    var s = IdleScheduler(thresholdS: 120)
+    let resume: Int64 = 1_000_000
+    _ = s.evaluate(secondsSinceInput: 5, nowWallMs: resume - 1000)
+    s.reset()
+    s.markResume(wallMs: resume)
+    var d = s.evaluate(secondsSinceInput: 30, nowWallMs: resume + 500)
+    XCTAssertEqual(d.emit, false, "the state after resume is reported")
+    XCTAssertFalse(d.returned, "input from before the sleep is not a return")
+    XCTAssertEqual(d.nextCheckS, 2, "keep looking briefly until the user is back")
+    d = s.evaluate(secondsSinceInput: 1, nowWallMs: resume + 1_500)
+    XCTAssertFalse(d.returned, "waking the machine counts as input at the boundary, not a return")
+    d = s.evaluate(secondsSinceInput: 0.2, nowWallMs: resume + 9_000)
+    XCTAssertNil(d.emit, "never idle, so the state did not change")
+    XCTAssertTrue(d.returned, "but the first input after the resume is reported")
+    XCTAssertGreaterThan(d.nextCheckS, 100, "and checks go back to their normal pace")
+    XCTAssertFalse(s.evaluate(secondsSinceInput: 0.1, nowWallMs: resume + 20_000).returned, "reported once")
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

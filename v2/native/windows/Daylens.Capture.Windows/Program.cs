@@ -191,10 +191,10 @@ internal static unsafe class Program
     {
         var since = SecondsSinceInput();
         var time = Clock.Now();
-        var d = _idle.Evaluate(since);
-        var report = d.Emit ?? (snapshot ? _idle.Idle : null);
+        var d = _idle.Evaluate(since, time.WallMs);
+        var report = d.Emit ?? (snapshot || d.Returned ? _idle.Idle : null);
         if (report is bool idle)
-            Emit("input", "idle_timer", Obs.Input(idle, time.WallMs - (long)(since * 1000), _idleThresholdS, snapshot), time);
+            Emit("input", "idle_timer", Obs.Input(idle, time.WallMs - (long)(since * 1000), _idleThresholdS, snapshot && !d.Returned), time);
         if (!_idleSuspended)
             Native.SetCoalescableTimer(_hwnd, TimerIdle, (uint)(d.NextCheckS * 1000), 0, d.NextCheckS > 5 ? 1000u : 500u);
     }
@@ -347,6 +347,7 @@ internal static unsafe class Program
         else if (state == "resume")
         {
             _idle.Reset();
+            _idle.MarkResume(Clock.WallMs());
             SuspendIdle(false);
         }
     }

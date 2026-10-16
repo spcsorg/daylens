@@ -65,9 +65,9 @@ func secondsSinceInput() -> Double {
 func checkIdle(snapshot: Bool = false) {
   let since = secondsSinceInput()
   let time = Clock.now()
-  let d = idle.evaluate(secondsSinceInput: since)
-  if let nowIdle = d.emit ?? (snapshot ? idle.idle : nil) {
-    emit("input", "idle_timer", Obs.input(idle: nowIdle, lastInputWallMs: time.wallMs - Int64(since * 1000), thresholdS: idleThresholdS, snapshot: snapshot), time: time)
+  let d = idle.evaluate(secondsSinceInput: since, nowWallMs: time.wallMs)
+  if let nowIdle = d.emit ?? (snapshot || d.returned ? idle.idle : nil) {
+    emit("input", "idle_timer", Obs.input(idle: nowIdle, lastInputWallMs: time.wallMs - Int64(since * 1000), thresholdS: idleThresholdS, snapshot: snapshot && !d.returned), time: time)
   }
   if !idleSuspended {
     idleTimer.schedule(deadline: .now() + d.nextCheckS, leeway: .milliseconds(d.nextCheckS > 5 ? 1000 : 500))
@@ -153,6 +153,7 @@ rootPowerPort = IORegisterForSystemPower(nil, &powerPortRef, { _, _, type, arg i
   case kMessageSystemHasPoweredOn:
     emit("power", "iokit", Obs.power("resume"))
     idle.reset()
+    idle.markResume(wallMs: Clock.wallMs())
     suspendIdle(false)
   default:
     break
