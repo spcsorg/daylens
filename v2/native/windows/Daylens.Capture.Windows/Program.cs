@@ -11,7 +11,7 @@ namespace Daylens.Capture.Windows;
 internal static unsafe class Program
 {
     const string Version = "2.0.0-dev";
-    const nuint TimerHeartbeat = 1, TimerIdle = 2, TimerReconcile = 3, TimerRegister = 4;
+    const nuint TimerHeartbeat = 1, TimerIdle = 2, TimerReconcile = 3, TimerRegister = 4, TimerTitleHook = 5;
     const uint MsgShutdown = Native.WM_APP + 1, MsgSnapshot = Native.WM_APP + 2;
     const long ResolverStuckExitMs = 30_000;
 
@@ -19,6 +19,7 @@ internal static unsafe class Program
     static Resolver _resolver = null!;
     static IdleScheduler _idle = null!;
     static readonly RegistrationRetry _registrations = new();
+    static readonly TitleHookState _titleHook = new();
     static nint _hwnd, _fgHwnd, _nameHook;
     static int _fgPid, _heartbeatS, _idleThresholdS, _reconcileS;
     static bool _idleSuspended;
@@ -156,10 +157,28 @@ internal static unsafe class Program
     {
         if (_nameHook != 0) Native.UnhookWinEvent(_nameHook);
         _nameHook = 0;
-        if (pid == 0) return;
+        if (pid == 0)
+        {
+            _titleHook.Attempted(0, true, Environment.TickCount64);
+            Native.KillTimer(_hwnd, TimerTitleHook);
+            return;
+        }
         var proc = (nint)(delegate* unmanaged<nint, uint, nint, int, int, uint, uint, void>)&OnWinEvent;
         _nameHook = Native.SetWinEventHook(WinEvents.EVENT_OBJECT_NAMECHANGE, WinEvents.EVENT_OBJECT_NAMECHANGE, 0, proc, (uint)pid, 0, Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
-        if (_nameHook == 0) Diag.Write("name_hook_failed");
+        var now = Environment.TickCount64;
+        var wasDegraded = _titleHook.Degraded;
+        _titleHook.Attempted(pid, _nameHook != 0, now);
+        if (_nameHook == 0)
+        {
+            Diag.Write("name_hook_failed");
+            Native.SetTimer(_hwnd, TimerTitleHook, (uint)(_titleHook.NextDelayMs(now) ?? 1000), 0);
+        }
+        else
+        {
+            Native.KillTimer(_hwnd, TimerTitleHook);
+            // Title changes may have been missed while the hook was missing.
+            if (wasDegraded) Focus(FocusTrigger.Reconcile, Native.GetForegroundWindow(), Clock.Now());
+        }
     }
 
     [UnmanagedCallersOnly]
@@ -304,6 +323,12 @@ internal static unsafe class Program
 
     static void OnTimer(nuint id)
     {
+        if (id == TimerTitleHook)
+        {
+            Native.KillTimer(_hwnd, TimerTitleHook);
+            if (_titleHook.ShouldRetry(_fgPid, Environment.TickCount64)) HookTitleChanges(_fgPid);
+            return;
+        }
         if (id == TimerHeartbeat)
         {
             var stall = _resolver.StallMs;
@@ -313,7 +338,7 @@ internal static unsafe class Program
                 Diag.Write("resolver_stuck_exit");
                 Environment.Exit(70);
             }
-            Emit("heartbeat", "helper", Obs.Heartbeat(Clock.AwakeUs(), _registrations.Report(), stall > 3000 ? ChannelState.Stalled : ChannelState.Ok, stall, _emitter.Dropped));
+            Emit("heartbeat", "helper", Obs.Heartbeat(Clock.AwakeUs(), _registrations.Report(), TitleChannel.State(stall, _titleHook.Degraded), stall, _emitter.Dropped));
         }
         else if (id == TimerIdle) CheckIdle();
         else if (id == TimerRegister) RetryRegistrations();
