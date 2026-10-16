@@ -4,7 +4,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { GapPoint, GapReason, GapScope, Normalizer } from './normalize.ts'
 import { MAX_LINE_BYTES, parseLine, type Line, type LineOf, type RejectReason } from './protocol.ts'
-import type { Store } from './store.ts'
+import type { PreviousCoverage, Store } from './store.ts'
 
 export interface SupervisorOptions {
   helperPath: string
@@ -79,6 +79,8 @@ export class Supervisor {
   private linesSinceHello = 0
   private stderrBuf = ''
   private lastAliveTouch = 0
+  private heartbeatHr = 0
+  private downGap: { id: number; prev: PreviousCoverage } | null = null
   private allGap: { id: number; reason: GapReason } | null = null
   // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
   private recovering: { id: number; reason: GapReason } | null = null
@@ -124,10 +126,12 @@ export class Supervisor {
     if (prev) this.store.closeDanglingGaps({ wall_ms: prev.endWallMs, mono_us: null, boot: null })
     this.openAllGap(
       prev ? 'service_down' : 'service_starting',
-      prev ? { wall_ms: Math.min(prev.endWallMs, now), mono_us: null, boot: null } : this.servicePoint(),
+      prev ? { wall_ms: prev.endWallMs, mono_us: prev.monoUs, boot: prev.boot } : this.servicePoint(),
       prev ? { clean_stop: prev.clean } : null,
     )
-    this.store.markServiceStarted()
+    // Refined at the first hello: on the same boot, monotonic time measures the downtime even if the wall clock moved.
+    if (prev && this.allGap) this.downGap = { id: this.allGap.id, prev }
+    this.store.markServiceStarted(now)
     this.store.flush()
     this.lastTick = { wall: now, hr: this.o.hrtimeMs() }
     this.ticker = setInterval(() => this.tick(), this.o.tickMs)
@@ -147,6 +151,7 @@ export class Supervisor {
       clearTimeout(timer)
     }
     const end = this.servicePoint()
+    this.store.writeCheckpoint({ ...this.checkpointNow(end.wall_ms), clean: true })
     this.normalizer.interrupt(end)
     if (this.titlesGap !== null) this.store.closeGap(this.titlesGap, end)
     this.closeRegistrationGaps(end)
@@ -279,7 +284,7 @@ export class Supervisor {
     const late = dWall > this.o.tickMs * 2 || dHr > this.o.tickMs * 2 || dWall < 0
     if (wall - this.lastAliveTouch >= 60_000) {
       this.lastAliveTouch = wall
-      this.store.touchAlive(wall)
+      this.store.writeCheckpoint({ ...this.checkpointNow(wall), clean: false })
     }
     if (late) {
       this.stats.lateTicks++
@@ -434,6 +439,13 @@ export class Supervisor {
     this.awakeSilenceMs = 0
     this.linesSinceHello = 0
     const point: GapPoint = { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
+    const down = this.downGap
+    this.downGap = null
+    if (down && down.prev.monoUs !== null && down.prev.boot === line.boot && line.t.mono_us >= down.prev.monoUs) {
+      const startWall = line.t.wall_ms - Math.round((line.t.mono_us - down.prev.monoUs) / 1000)
+      this.store.setGapStart(down.id, { wall_ms: startWall, mono_us: down.prev.monoUs, boot: down.prev.boot })
+      this.store.updateGap(down.id, { detail: { clean_stop: down.prev.clean, measured: 'monotonic' } })
+    }
     if (this.allGap) {
       this.store.closeGap(this.allGap.id, point)
       this.recovering = this.allGap
@@ -444,6 +456,7 @@ export class Supervisor {
       this.titlesGap = null
     }
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: null, boot: line.boot }
+    this.heartbeatHr = this.o.hrtimeMs()
   }
 
   private onHeartbeat(line: LineOf<'heartbeat'>, point: GapPoint): void {
@@ -464,6 +477,8 @@ export class Supervisor {
     this.stats.heartbeats++
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: line.obs.awake_us, boot: line.boot }
     this.store.recordHeartbeat(line)
+    this.heartbeatHr = this.o.hrtimeMs()
+    this.store.writeCheckpoint({ wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot, clean: false })
     this.onRegistrations(line, point)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
     // The main loop is alive but the title worker is stuck in one call: only a restart frees it.
@@ -483,6 +498,13 @@ export class Supervisor {
       this.store.closeGap(this.titlesGap, point)
       this.titlesGap = null
     }
+  }
+
+  // The helper's monotonic clock, carried forward by this process's own elapsed time since the last heartbeat.
+  private checkpointNow(wallMs: number): Omit<import('./store.ts').Checkpoint, 'clean'> {
+    const hb = this.lastHeartbeat
+    if (!hb) return { wall_ms: wallMs, mono_us: null, boot: null }
+    return { wall_ms: wallMs, mono_us: hb.mono_us + Math.round((this.o.hrtimeMs() - this.heartbeatHr) * 1000), boot: hb.boot }
   }
 
   // An event source the helper could not subscribe to is a gap in that source until it is in place.

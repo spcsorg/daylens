@@ -156,9 +156,20 @@ export interface StoreHealth {
   pendingOps: number
 }
 
+// The last point the service is known to have been running, written in execution order. Wall clocks can move
+// backwards, so the latest write wins rather than the largest time, and it carries boot and monotonic context.
+export interface Checkpoint {
+  wall_ms: number
+  mono_us: number | null
+  boot: string | null
+  clean: boolean
+}
+
 export interface PreviousCoverage {
   endWallMs: number
   clean: boolean
+  monoUs: number | null
+  boot: string | null
 }
 
 export interface StoreOptions {
@@ -257,6 +268,11 @@ export class Store implements Sink {
 
   // Where the last service run's confirmed coverage ended, and whether it stopped cleanly.
   previousCoverage(): PreviousCoverage | null {
+    const cp = this.db.prepare(`SELECT value FROM meta WHERE key = 'checkpoint'`).get() as { value: string } | undefined
+    if (cp) {
+      const c = JSON.parse(cp.value) as Checkpoint
+      return { endWallMs: c.wall_ms, clean: c.clean, monoUs: c.mono_us, boot: c.boot }
+    }
     const run = this.db
       .prepare('SELECT max(coalesce(ended_wall_ms, 0), coalesce(last_heartbeat_wall_ms, 0), started_wall_ms) AS t FROM capture_runs ORDER BY id DESC LIMIT 1')
       .get() as { t: number } | undefined
@@ -266,7 +282,7 @@ export class Store implements Sink {
     const candidates = [run?.t ?? null, obs?.t ?? null, stopped ? Number(stopped.value) : null, alive ? Number(alive.value) : null].filter((v): v is number => v !== null)
     if (candidates.length === 0) return null
     const endWallMs = Math.max(...candidates)
-    return { endWallMs, clean: stopped !== undefined && Number(stopped.value) >= endWallMs }
+    return { endWallMs, clean: stopped !== undefined && Number(stopped.value) >= endWallMs, monoUs: null, boot: null }
   }
 
   // Gaps left open by a service that died are closed where its coverage ended.
@@ -275,8 +291,19 @@ export class Store implements Sink {
     this.db.prepare(`UPDATE capture_runs SET ended_wall_ms = coalesce(last_heartbeat_wall_ms, started_wall_ms), end_reason = 'service_died' WHERE ended_wall_ms IS NULL`).run()
   }
 
-  markServiceStarted(): void {
+  markServiceStarted(wallMs: number): void {
     this.db.prepare(`DELETE FROM meta WHERE key = 'service_stopped_wall_ms'`).run()
+    this.db
+      .prepare(`INSERT INTO meta (key, value) VALUES ('checkpoint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(JSON.stringify({ wall_ms: wallMs, mono_us: null, boot: null, clean: false } satisfies Checkpoint))
+  }
+
+  writeCheckpoint(cp: Checkpoint): void {
+    this.enqueue(`INSERT INTO meta (key, value) VALUES ('checkpoint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [JSON.stringify(cp)])
+  }
+
+  setGapStart(id: number, start: GapPoint): void {
+    this.enqueue('UPDATE capture_gaps SET start_wall_ms = ?, start_mono_us = ?, start_boot = ? WHERE id = ?', [start.wall_ms, start.mono_us, start.boot, id])
   }
 
   // Proof the service itself was running, independent of the helper: bounds a later service_down gap.

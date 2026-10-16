@@ -12,7 +12,8 @@ if (process.env.FAKE_PIDFILE) appendFileSync(process.env.FAKE_PIDFILE, `${proces
 const run = randomUUID()
 const started = Date.now()
 let seq = 0
-const t = () => ({ wall_ms: Date.now(), mono_us: Math.round((performance.timeOrigin + performance.now()) * 1000), tz: 'UTC', tz_offset_min: 0 })
+const wallOffset = Number(process.env.FAKE_WALL_OFFSET_MS ?? 0)
+const t = () => ({ wall_ms: Date.now() + wallOffset, mono_us: Math.round((performance.timeOrigin + performance.now()) * 1000), tz: 'UTC', tz_offset_min: 0 })
 
 function emit(kind: string, obs: unknown, source = 'fake'): void {
   if (mode === 'skip_seq' && seq === 5) seq += 3

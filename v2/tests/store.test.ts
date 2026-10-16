@@ -71,23 +71,34 @@ test('a browser title never reaches the database file or its sidecars', () => {
   }
 })
 
-test('previous coverage: a clean stop and a crash are told apart', () => {
+test('previous coverage: the latest checkpoint wins, a clean stop is authoritative, and a crash is unclean', () => {
   const dir = tmp()
-  let now = T0
-  const s1 = new Store(dir, { now: () => now })
-  s1.markServiceStarted()
-  s1.startRun({ v: 1, run: 'r1', seq: 0, boot: 'b', t: { wall_ms: T0, mono_us: 1, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'hello',
-    obs: { helper: 'h', version: '1', pid: 1, os: 'x', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } } })
-  s1.recordHeartbeat({ v: 1, run: 'r1', seq: 1, boot: 'b', t: { wall_ms: T0 + 15_000, mono_us: 2, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'heartbeat',
-    obs: { awake_us: 2, permissions: { accessibility: 'granted' }, registrations: { focus: true, session: true, power: true }, titles: 'ok', stall_ms: 0, dropped: 0 } })
+  const s1 = new Store(dir)
+  s1.markServiceStarted(T0)
+  s1.writeCheckpoint({ wall_ms: T0 + 15_000, mono_us: 2_000_000, boot: 'b', clean: false })
   s1.close()
   const crashed = new Store(dir)
-  assert.deepEqual(crashed.previousCoverage(), { endWallMs: T0 + 15_000, clean: false })
-  crashed.markServiceStopped(T0 + 20_000)
+  assert.deepEqual(crashed.previousCoverage(), { endWallMs: T0 + 15_000, clean: false, monoUs: 2_000_000, boot: 'b' })
+  crashed.writeCheckpoint({ wall_ms: T0 + 20_000, mono_us: 7_000_000, boot: 'b', clean: true })
   crashed.close()
   const stopped = new Store(dir)
-  assert.deepEqual(stopped.previousCoverage(), { endWallMs: T0 + 20_000, clean: true })
+  assert.deepEqual(stopped.previousCoverage(), { endWallMs: T0 + 20_000, clean: true, monoUs: 7_000_000, boot: 'b' })
   stopped.close()
+})
+
+test('a clock rolled back after a later-dated write does not hide behind the largest wall time', () => {
+  const dir = tmp()
+  const s = new Store(dir)
+  s.insertObservation({
+    run: 'r', seq: 0, boot: 'b', platform: 'macos', source: 's', kind: 'focus', event_wall_ms: T0 + 3_600_000, event_mono_us: 1, tz: 'UTC', tz_offset_min: 0,
+    app_id: null, app_name: null, app_path: null, pid: null, window: null, title: null, title_raw: null, title_state: null, state: null, detail: null,
+  })
+  s.writeCheckpoint({ wall_ms: T0 + 3_600_000, mono_us: 10_000_000, boot: 'b', clean: false })
+  s.writeCheckpoint({ wall_ms: T0 + 60_000, mono_us: 70_000_000, boot: 'b', clean: false })
+  s.close()
+  const again = new Store(dir)
+  assert.equal(again.previousCoverage()!.endWallMs, T0 + 60_000, 'the last checkpoint written, not the largest wall time')
+  again.close()
 })
 
 test('dangling gaps from a dead service are closed at its last coverage', () => {

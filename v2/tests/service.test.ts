@@ -28,10 +28,10 @@ async function waitFor(cond: () => boolean, timeoutMs = 8000): Promise<void> {
   }
 }
 
-function startService(dataDir: string, work: string): { proc: ChildProcess; log: () => string } {
+function startService(dataDir: string, work: string, env: Record<string, string> = {}): { proc: ChildProcess; log: () => string } {
   let log = ''
   const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '1.5', '--tick-ms', '100'], {
-    env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof') },
+    env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof'), ...env },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
   proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
@@ -119,7 +119,7 @@ test('killing the service stops the helper and the next start records an unclean
   await waitFor(() => svc2.log().includes('helper hello'))
   await stopService(svc2.proc)
   const down = gaps(dataDir).find((g) => g.reason === 'service_down')!
-  assert.deepEqual(JSON.parse(down.detail!), { clean_stop: false })
+  assert.equal(JSON.parse(down.detail!).clean_stop, false)
   assert.ok(down.start_wall_ms <= killedAt && killedAt - down.start_wall_ms < 2000, 'starts at the last committed heartbeat')
   assert.ok(down.end_wall_ms! > killedAt + 900)
 })
@@ -136,7 +136,24 @@ test('a clean stop and restart records a clean service_down gap with no overlap'
   await stopService(svc2.proc)
   const g = gaps(dataDir)
   assert.deepEqual(g.map((x) => x.reason), ['service_starting', 'service_down'])
-  assert.deepEqual(JSON.parse(g[1]!.detail!), { clean_stop: true })
+  assert.equal(JSON.parse(g[1]!.detail!).clean_stop, true)
   assert.ok(g[1]!.start_wall_ms >= g[0]!.end_wall_ms!, 'gaps do not overlap')
   assert.ok(g.every((x) => x.end_wall_ms !== null))
+})
+
+test('downtime after a crash is measured even when the clock was set back an hour meanwhile', async () => {
+  const { work, dataDir } = setup()
+  const svc = startService(dataDir, work)
+  await waitFor(() => svc.log().includes('helper hello'))
+  await sleep(1600)
+  svc.proc.kill('SIGKILL')
+  await sleep(2000)
+  const svc2 = startService(dataDir, work, { FAKE_WALL_OFFSET_MS: String(-3_600_000) })
+  await waitFor(() => svc2.log().includes('helper hello'))
+  await sleep(300)
+  await stopService(svc2.proc)
+  const down = gaps(dataDir).find((g) => g.reason === 'service_down')!
+  const span = down.end_wall_ms! - down.start_wall_ms
+  assert.ok(span >= 1900 && span < 6000, `the ~2 s outage is recorded, not collapsed by the rollback (${span} ms)`)
+  assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
 })
