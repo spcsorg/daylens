@@ -171,13 +171,22 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertEqual(d.emit, false, "the state after resume is reported")
     XCTAssertFalse(d.returned, "input from before the sleep is not a return")
     XCTAssertEqual(d.nextCheckS, 2, "keep looking briefly until the user is back")
-    d = s.evaluate(secondsSinceInput: 1, nowWallMs: resume + 1_500)
-    XCTAssertFalse(d.returned, "waking the machine counts as input at the boundary, not a return")
     d = s.evaluate(secondsSinceInput: 0.2, nowWallMs: resume + 9_000)
     XCTAssertNil(d.emit, "never idle, so the state did not change")
     XCTAssertTrue(d.returned, "but the first input after the resume is reported")
     XCTAssertGreaterThan(d.nextCheckS, 100, "and checks go back to their normal pace")
     XCTAssertFalse(s.evaluate(secondsSinceInput: 0.1, nowWallMs: resume + 20_000).returned, "reported once")
+  }
+
+  func testTypingOneSecondAfterWakingThenReadingIsStillAReturn() {
+    var s = IdleScheduler(thresholdS: 120)
+    let resume: Int64 = 1_000_000
+    s.reset()
+    s.markResume(wallMs: resume)
+    _ = s.evaluate(secondsSinceInput: 40, nowWallMs: resume + 200)
+    // One keystroke 1 s after waking, then reading: the next look sees that input, now 2 s old.
+    let d = s.evaluate(secondsSinceInput: 2, nowWallMs: resume + 3_000)
+    XCTAssertTrue(d.returned, "input stamped after the resume is a return, however soon")
   }
 
   func testFlushIsBoundedWhenTheReaderStopsReading() {

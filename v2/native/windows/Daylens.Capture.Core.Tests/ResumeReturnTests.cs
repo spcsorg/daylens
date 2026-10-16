@@ -15,11 +15,21 @@ public class ResumeReturnTests
         Assert.Equal(false, d.Emit);
         Assert.False(d.Returned);
         Assert.Equal(2, d.NextCheckS);
-        Assert.False(s.Evaluate(1, resume + 1_500).Returned);
         d = s.Evaluate(0.2, resume + 9_000);
         Assert.Null(d.Emit);
         Assert.True(d.Returned);
         Assert.True(d.NextCheckS > 100);
         Assert.False(s.Evaluate(0.1, resume + 20_000).Returned);
+    }
+
+    [Fact]
+    public void TypingOneSecondAfterWakingThenReadingIsStillAReturn()
+    {
+        var s = new IdleScheduler(120);
+        const long resume = 1_000_000;
+        s.Reset();
+        s.MarkResume(resume);
+        s.Evaluate(40, resume + 200);
+        Assert.True(s.Evaluate(2, resume + 3_000).Returned);
     }
 }

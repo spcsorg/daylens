@@ -10,9 +10,6 @@ public sealed class IdleScheduler(double thresholdS, double idlePollS = 2)
     /// so without this the user coming back would produce no line at all.
     public long? ResumeBoundaryMs { get; private set; }
 
-    /// Waking the machine can itself count as input at the boundary; only input clearly after it is a return.
-    public const long ReturnMarginMs = 2000;
-
     public readonly record struct Decision(bool? Emit, double NextCheckS, bool Returned = false);
 
     public Decision Evaluate(double secondsSinceInput, long nowWallMs = 0)
@@ -24,7 +21,8 @@ public sealed class IdleScheduler(double thresholdS, double idlePollS = 2)
         var returned = false;
         if (ResumeBoundaryMs is long boundary)
         {
-            if (nowWallMs - (long)(secondsSinceInput * 1000) > boundary + ReturnMarginMs)
+            // Any input stamped after the resume is the return, however soon after waking it came.
+            if (nowWallMs - (long)(secondsSinceInput * 1000) > boundary)
             {
                 returned = true;
                 ResumeBoundaryMs = null;

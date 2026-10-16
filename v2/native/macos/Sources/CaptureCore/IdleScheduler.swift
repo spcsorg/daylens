@@ -9,8 +9,6 @@ public struct IdleScheduler {
   /// Set at a resume; cleared by the first input after it. A short sleep never crosses the idle threshold,
   /// so without this the user coming back would produce no line at all.
   public private(set) var resumeBoundaryMs: Int64? = nil
-  /// Waking the machine can itself count as input at the boundary; only input clearly after it is a return.
-  public static let returnMarginMs: Int64 = 2000
 
   public init(thresholdS: Double, idlePollS: Double = 2) {
     self.thresholdS = thresholdS
@@ -31,7 +29,8 @@ public struct IdleScheduler {
     var next = nowIdle ? idlePollS : max(0.5, thresholdS - secondsSinceInput + 0.25)
     var returned = false
     if let boundary = resumeBoundaryMs {
-      if nowWallMs - Int64(secondsSinceInput * 1000) > boundary + IdleScheduler.returnMarginMs {
+      // Any input stamped after the resume is the return, however soon after waking it came.
+      if nowWallMs - Int64(secondsSinceInput * 1000) > boundary {
         returned = true
         resumeBoundaryMs = nil
       } else {
