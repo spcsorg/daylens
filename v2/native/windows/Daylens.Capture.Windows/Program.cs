@@ -27,6 +27,7 @@ internal static unsafe class Program
     static int Main(string[] args)
     {
         if (BrowserHost.TryRun(args) is int hostExit) return hostExit;
+        if (TcpPeerHost.TryRun(args) is int peerExit) return peerExit;
         _heartbeatS = IntArg(args, "--heartbeat-s", 15, 3600);
         _idleThresholdS = IntArg(args, "--idle-threshold-s", 120, 86400);
         _reconcileS = IntArg(args, "--reconcile-s", 60, 86400);

@@ -156,7 +156,17 @@ public static class TabObs
         w.WriteString("trigger", r.Trigger);
         w.WriteString("state", r.Page ? "page" : "unknown");
         Nullable(w, "reason", r.Reason);
-        w.WriteStartObject("browser");
+        WriteApp(w, "browser", browser);
+        w.WriteString("extension", extensionId);
+        Nullable(w, "window", r.Window);
+        Nullable(w, "tab", r.Tab);
+        Nullable(w, "url", r.Url);
+        Nullable(w, "title", r.Title);
+    };
+
+    public static void WriteApp(Utf8JsonWriter w, string name, AppInfo browser)
+    {
+        w.WriteStartObject(name);
         Nullable(w, "app_id", ExtensionMessage.Clip(browser.AppId, 1024));
         Nullable(w, "name", ExtensionMessage.Clip(browser.Name, 512));
         Nullable(w, "path", ExtensionMessage.Clip(browser.Path, 2048));
@@ -172,12 +182,7 @@ public static class TabObs
         }
         else w.WriteNull("store");
         w.WriteEndObject();
-        w.WriteString("extension", extensionId);
-        Nullable(w, "window", r.Window);
-        Nullable(w, "tab", r.Tab);
-        Nullable(w, "url", r.Url);
-        Nullable(w, "title", r.Title);
-    };
+    }
 
     static void Nullable(Utf8JsonWriter w, string name, string? v)
     {

@@ -39,7 +39,11 @@ internal static unsafe class BrowserHost
     {
         var snapshot = Snapshot();
         var pid = LaunchChain.BrowserPid(Environment.ProcessId, p => snapshot.TryGetValue(p, out var e) ? e : null);
-        if (pid is not int browser) return AppInfo.Unknown(null, IdentityState.Unresolved);
+        return pid is int browser ? Identify(browser) : AppInfo.Unknown(null, IdentityState.Unresolved);
+    }
+
+    internal static AppInfo Identify(int browser)
+    {
         var h = Native.OpenProcess(Native.PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)browser);
         if (h == 0) return AppInfo.Unknown(browser, IdentityState.AccessDenied);
         try
@@ -61,7 +65,7 @@ internal static unsafe class BrowserHost
         finally { Native.CloseHandle(h); }
     }
 
-    static Dictionary<int, ProcessEntry> Snapshot()
+    internal static Dictionary<int, ProcessEntry> Snapshot()
     {
         var map = new Dictionary<int, ProcessEntry>();
         var snap = Native.CreateToolhelp32Snapshot(Native.TH32CS_SNAPPROCESS, 0);

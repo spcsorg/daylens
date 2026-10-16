@@ -24,3 +24,11 @@ internal static unsafe partial class Native
     [LibraryImport("advapi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool OpenProcessToken(nint process, uint access, out nint token);
 }
+
+internal static unsafe partial class Native
+{
+    public const int AF_INET = 2, TCP_TABLE_OWNER_PID_ALL = 5, ERROR_INSUFFICIENT_BUFFER_TCP = 122;
+
+    [LibraryImport("iphlpapi.dll")]
+    public static partial uint GetExtendedTcpTable(byte* table, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order, int af, int tableClass, uint reserved);
+}
