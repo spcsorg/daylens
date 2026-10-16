@@ -158,15 +158,69 @@ test('interrupt closes an open excluded gap so gaps never overlap', () => {
   assert.equal(sink.gaps[1]!.end, null)
 })
 
-test('a stable title is flagged possibly stale only when the title channel stalls', () => {
+test('granted then revoked: the current title is flagged possibly stale', () => {
   const { sink, n } = setup()
   n.handle(focus(app('com.apple.TextEdit'), 'Draft.rtf', T0))
-  n.handle(focus(app('com.apple.TextEdit'), 'Draft.rtf', T0 + 3_600_000, 'reconcile'))
-  n.onTitleChannel('ok', T0 + 3_600_000)
-  assert.deepEqual(sink.rows[0]!.flags, [], 'an hour of work in one document is not stale')
-  n.onTitleChannel('stalled', T0 + 3_700_000)
-  n.onTitleChannel('stalled', T0 + 3_715_000)
+  n.onTitleChannel('ok', T0 + 15_000)
+  assert.deepEqual(sink.rows[0]!.flags, [])
+  n.onTitleChannel('no_permission', T0 + 30_000)
   assert.deepEqual(sink.rows[0]!.flags, ['possibly_stale'])
+})
+
+test('stalled then recovered with the same title: the fresh read is a new row, not merged into the stale one', () => {
+  const { sink, n } = setup()
+  const te = app('com.apple.TextEdit')
+  n.handle(focus(te, 'Draft.rtf', T0))
+  n.onTitleChannel('stalled', T0 + 15_000)
+  n.handle(focus(te, 'Draft.rtf', T0 + 20_000, 'reconcile'))
+  assert.equal(sink.rows.length, 1, 'while still stalled, repeats extend the stale row')
+  n.onTitleChannel('ok', T0 + 30_000)
+  n.handle(focus(te, 'Draft.rtf', T0 + 31_000, 'reconcile'))
+  n.handle(focus(te, 'Draft.rtf', T0 + 60_000, 'reconcile'))
+  assert.equal(sink.rows.length, 2)
+  assert.deepEqual(sink.rows.map((r) => r.flags), [['possibly_stale'], []])
+  assert.equal(sink.rows[1]!.repeat_count, 1, 'later repeats merge into the fresh row')
+})
+
+test('input-aware: a title unchanged for 15 minutes while input continues is flagged; idle time does not count', () => {
+  const { sink, n } = setup()
+  const te = app('com.apple.TextEdit')
+  const input = (state: 'idle' | 'active', t: number) => line('input', { state, last_input_wall_ms: t, threshold_s: 120, snapshot: false }, t)
+  n.handle(input('active', T0))
+  n.handle(focus(te, 'Draft.rtf', T0))
+  n.onTitleChannel('ok', T0 + 10 * 60_000)
+  n.handle(input('idle', T0 + 10 * 60_000))
+  n.onTitleChannel('ok', T0 + 30 * 60_000)
+  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, [], 'reading without input is not stale')
+  n.handle(input('active', T0 + 30 * 60_000))
+  n.onTitleChannel('ok', T0 + 44 * 60_000)
+  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, [])
+  n.onTitleChannel('ok', T0 + 45 * 60_000)
+  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, ['possibly_stale'])
+  n.handle(focus(te, 'Draft.rtf', T0 + 46 * 60_000, 'reconcile'))
+  assert.equal(sink.rows.filter((r) => r.kind === 'focus').length, 1, 'an input-stale title is not "fresh" on the next read')
+})
+
+test('clock and time zone changes are kept as events, and a zone change splits the focus row', () => {
+  const { sink, n } = setup()
+  const te = app('com.apple.TextEdit')
+  const at = (l: ReturnType<typeof focus>, tz: string, off: number) => ({ ...l, t: { ...l.t, tz, tz_offset_min: off } }) as typeof l
+  n.handle(focus(te, 'Draft.rtf', T0))
+  n.handle(line('clock', { change: 'time_changed' }, T0 + 1000))
+  n.handle(line('clock', { change: 'time_changed' }, T0 + 2000))
+  n.handle(line('clock', { change: 'timezone_changed' }, T0 + 3000))
+  n.handle(line('clock', { change: 'timezone_changed' }, T0 + 4000))
+  n.handle(at(focus(te, 'Draft.rtf', T0 + 5000, 'reconcile'), 'Europe/London', 60))
+  n.handle(at(focus(te, 'Draft.rtf', T0 + 6000, 'reconcile'), 'Europe/London', 60))
+  const clocks = sink.rows.filter((r) => r.kind === 'clock')
+  assert.deepEqual(clocks.map((r) => [r.state, r.event_wall_ms]), [
+    ['time_changed', T0 + 1000],
+    ['time_changed', T0 + 2000],
+    ['timezone_changed', T0 + 3000],
+    ['timezone_changed', T0 + 4000],
+  ])
+  const focusRows = sink.rows.filter((r) => r.kind === 'focus')
+  assert.deepEqual(focusRows.map((r) => [r.tz, r.repeat_count]), [['Africa/Kigali', 0], ['Europe/London', 1]])
 })
 
 test('waking is not the user returning; unlock or new input after resume is', () => {

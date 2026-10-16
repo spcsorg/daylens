@@ -164,8 +164,16 @@ interface OpenRow {
   id: number
   key: string
   hasTitle: boolean
-  stale: boolean
+  sinceWall: number
+  // Why the title is possibly stale: the title channel could not update it, or input went on while it never changed.
+  stale: 'channel' | 'input' | null
 }
+
+export interface NormalizerOptions {
+  staleAfterMs?: number
+}
+
+export const DEFAULT_STALE_AFTER_MS = 15 * 60_000
 
 function envelopeRow(line: Line, kind: RowKind): ObservationRow {
   return {
@@ -198,15 +206,19 @@ function point(line: Line): GapPoint {
 
 export class Normalizer {
   private focus: OpenRow | null = null
-  private readonly lastState = new Map<'input' | 'session' | 'power' | 'clock', OpenRow>()
+  private readonly lastState = new Map<'input' | 'session' | 'power', OpenRow>()
   private excludedGap: number | null = null
   private resumedAtWall: number | null = null
+  private titleChannel: ChannelState = 'ok'
+  private activeSince: number | null = null
   private readonly sink: Sink
   private readonly privacy: Privacy
+  private readonly staleAfterMs: number
 
-  constructor(sink: Sink, privacy: Privacy = new Privacy()) {
+  constructor(sink: Sink, privacy: Privacy = new Privacy(), opts: NormalizerOptions = {}) {
     this.sink = sink
     this.privacy = privacy
+    this.staleAfterMs = opts.staleAfterMs ?? DEFAULT_STALE_AFTER_MS
   }
 
   handle(line: Line): void {
@@ -215,21 +227,33 @@ export class Normalizer {
         return this.onFocus(line)
       case 'input':
         this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
+        if (line.obs.state === 'idle') this.activeSince = null
+        else this.activeSince ??= line.t.wall_ms
+        this.checkInputStale(line.t.wall_ms)
         return this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
       case 'session':
         this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
-        if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') this.endExcluded(line)
+        if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') {
+          this.endExcluded(line)
+          this.activeSince = null
+        }
         return this.onState(line, 'session', line.obs.state, null)
       case 'power':
         if (line.obs.state === 'resume') this.resumedAtWall ??= line.t.wall_ms
         this.onPresenceEvidence(line, line.obs.state === 'resume_user')
         if (line.obs.state === 'sleep') {
           this.resumedAtWall = null
+          this.activeSince = null
           this.endExcluded(line)
         }
         return this.onState(line, 'power', line.obs.state, null)
-      case 'clock':
-        return this.onState(line, 'clock', line.obs.change, null)
+      case 'clock': {
+        // Clock changes are events, not states: every one is kept with its own time.
+        const row = envelopeRow(line, 'clock')
+        row.state = line.obs.change
+        this.sink.insertObservation(row)
+        return
+      }
       case 'hello':
       case 'heartbeat':
       case 'loss':
@@ -240,10 +264,23 @@ export class Normalizer {
 
   // Title channel health: a title that cannot update is not evidence of current work.
   onTitleChannel(state: ChannelState, wallMs: number): void {
-    if ((state === 'stalled' || state === 'degraded') && this.focus && this.focus.hasTitle && !this.focus.stale) {
-      this.sink.flagObservation(this.focus.id, 'possibly_stale', wallMs)
-      this.focus.stale = true
-    }
+    this.titleChannel = state
+    if (state !== 'ok') this.flagStale('channel', wallMs)
+    this.checkInputStale(wallMs)
+  }
+
+  // The spec's input-aware rule: a title unchanged for a long time while input keeps happening.
+  private checkInputStale(wallMs: number): void {
+    const f = this.focus
+    if (!f || this.activeSince === null) return
+    if (wallMs - Math.max(f.sinceWall, this.activeSince) >= this.staleAfterMs) this.flagStale('input', wallMs)
+  }
+
+  private flagStale(reason: 'channel' | 'input', wallMs: number): void {
+    const f = this.focus
+    if (!f || !f.hasTitle || f.stale !== null) return
+    this.sink.flagObservation(f.id, 'possibly_stale', wallMs)
+    f.stale = reason
   }
 
   // Lines were lost or the helper went away: forget open rows so the next line starts fresh.
@@ -293,9 +330,12 @@ export class Normalizer {
     }
 
     const known = app.identity_state === 'ok'
-    const key = JSON.stringify([known ? app.app_id : null, app.pid, app.identity_state, win.window, title, titleState])
-    if (this.focus && this.focus.key === key) {
+    const key = JSON.stringify([known ? app.app_id : null, app.pid, app.identity_state, win.window, title, titleState, line.t.tz, line.t.tz_offset_min])
+    // A fresh read after the title channel recovers starts a new row, even with the same title.
+    const freshAfterStale = this.focus?.stale === 'channel' && this.titleChannel === 'ok'
+    if (this.focus && this.focus.key === key && !freshAfterStale) {
       this.sink.extendObservation(this.focus.id, line.t.wall_ms)
+      this.checkInputStale(line.t.wall_ms)
       return
     }
     const row = envelopeRow(line, 'focus')
@@ -309,10 +349,10 @@ export class Normalizer {
     row.title_state = titleState
     row.state = app.identity_state
     row.detail = JSON.stringify({ trigger: line.obs.trigger, ...(known && app.store ? { store: app.store } : {}) })
-    this.focus = { id: this.sink.insertObservation(row), key, hasTitle: title !== null, stale: false }
+    this.focus = { id: this.sink.insertObservation(row), key, hasTitle: title !== null, sinceWall: line.t.wall_ms, stale: null }
   }
 
-  private onState(line: Line, kind: 'input' | 'session' | 'power' | 'clock', state: string, detail: string | null): void {
+  private onState(line: Line, kind: 'input' | 'session' | 'power', state: string, detail: string | null): void {
     const open = this.lastState.get(kind)
     if (open && open.key === state) {
       this.sink.extendObservation(open.id, line.t.wall_ms)
@@ -321,7 +361,7 @@ export class Normalizer {
     const row = envelopeRow(line, kind)
     row.state = state
     row.detail = detail
-    this.lastState.set(kind, { id: this.sink.insertObservation(row), key: state, hasTitle: false, stale: false })
+    this.lastState.set(kind, { id: this.sink.insertObservation(row), key: state, hasTitle: false, sinceWall: line.t.wall_ms, stale: null })
   }
 
   private onPresenceEvidence(line: Line, isEvidence: boolean): void {
