@@ -69,6 +69,7 @@ let nativeMissing = false
 let localAllowed = LOCAL_EVERYWHERE
 let pairing: Pairing | null = null
 let pairPending = false
+let awaitingAllow = false
 let pairTab: number | null = null
 let pairRetry: ReturnType<typeof setTimeout> | null = null
 let browserPause: { until: number | null } | null = null
@@ -80,7 +81,7 @@ let openReply: ((ok: boolean) => void) | null = null
 let statusWaiters: (() => void)[] = []
 
 function popupState(): PopupState {
-  return { ...state, paused: browserPaused(), paused_until_wall_ms: browserPause?.until ?? null, connecting_pair: pairPending }
+  return { ...state, paused: browserPaused(), paused_until_wall_ms: browserPause?.until ?? null, connecting_pair: pairPending, awaiting_allow: awaitingAllow }
 }
 
 function wakeWaiters(): void {
@@ -184,8 +185,23 @@ async function connectLocalNow(): Promise<void> {
       backOff()
       wakeWaiters()
     },
+    {
+      onAwaiting: () => {
+        awaitingAllow = true
+        wakeWaiters()
+      },
+    },
   )
   attempting = false
+  awaitingAllow = false
+  if (r.kind === 'denied') {
+    // Not allowed in Daylens: this pairing is finished; Connect starts a new one.
+    finishPairing()
+    pairing = null
+    await kv.set('pairing', undefined).catch(() => {})
+    state.daylens = 'unpaired'
+    return wakeWaiters()
+  }
   if (r.kind === 'connected') {
     session = r.session
     if (pairing !== tried) return r.session.close()

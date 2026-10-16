@@ -75,7 +75,9 @@ submission.
    no permission is needed.
 2. Install this extension. Click its button: it says **Connected**.
    - On Windows with the Microsoft Store version of Daylens, it says **Not connected to Daylens**. Click **Connect**
-     and allow the browser to open Daylens. It says **Waiting for Daylens…**, then **Connected**.
+     and allow the browser to open Daylens. It says **Waiting for Daylens…**, then **Connected**. In Firefox it says
+     **Allow this browser in Daylens** first: Daylens shows one line asking whether Firefox may connect; click
+     **Allow**.
 3. Open two or three ordinary pages and switch between them for a minute. In Daylens, open **Today**: the current
    hour lists those pages and the time on each.
 4. Open a private or incognito window and visit any page there for a minute. In Daylens, that time shows as browser

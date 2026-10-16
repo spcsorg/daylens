@@ -90,11 +90,17 @@ supervisor.start()
 browserSocket = new BrowserSocket(pages, pause, { log })
 void browserSocket.start()
 if (localEnabled()) {
-  browserLocal = new BrowserLocal(pages, pause, store, { peerCheck: helperPeerCheck(values.helper), clock: () => normalizer.clock(), log })
+  browserLocal = new BrowserLocal(pages, pause, store, {
+    peerCheck: helperPeerCheck(values.helper),
+    clock: () => normalizer.clock(),
+    log,
+    // The app shows Allow / Don't allow and answers with pair_decision on stdin.
+    confirm: (req) => process.stdout.write(JSON.stringify(req) + '\n'),
+  })
   void browserLocal.start()
   // Only the parent (the Daylens app) writes here: daylens://pair links the operating system delivered to it.
   createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (raw) => {
-    let msg: { op?: unknown; link?: unknown; id?: unknown }
+    let msg: { op?: unknown; link?: unknown; id?: unknown; allow?: unknown }
     try {
       msg = JSON.parse(raw)
     } catch {
@@ -102,6 +108,7 @@ if (localEnabled()) {
     }
     if (msg.op === 'pair' && typeof msg.link === 'string') browserLocal?.addPairLink(msg.link)
     else if (msg.op === 'unpair' && typeof msg.id === 'string') browserLocal?.unpair(msg.id)
+    else if (msg.op === 'pair_decision' && typeof msg.id === 'string' && typeof msg.allow === 'boolean') browserLocal?.decide(msg.id, msg.allow)
     else log('control rejected reason=unknown_op')
   })
 }

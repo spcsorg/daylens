@@ -22,20 +22,22 @@ export interface Session {
   close(): void
 }
 
-export type ConnectResult = { kind: 'connected'; session: Session } | { kind: 'unpaired' } | { kind: 'unreachable' }
+export type ConnectResult = { kind: 'connected'; session: Session } | { kind: 'unpaired' } | { kind: 'denied' } | { kind: 'unreachable' }
 
 export interface LocalOptions {
   ports?: readonly number[]
   // How long one port gets to finish the handshake.
   attemptMs?: number
   keepaliveMs?: number
+  // Daylens holds the connection until the person allows this browser (Firefox).
+  onAwaiting?: () => void
 }
 
 // The service worker stays alive while messages flow; Chrome stops an idle one after 30 s.
 const KEEPALIVE_MS = 20_000
 const ATTEMPT_MS = 5_000
 
-type Outcome = { kind: 'connected'; session: Session } | { kind: 'unpaired' } | { kind: 'failed' }
+type Outcome = { kind: 'connected'; session: Session } | { kind: 'unpaired' } | { kind: 'denied' } | { kind: 'failed' }
 
 function attempt(
   open: WsFactory,
@@ -43,7 +45,7 @@ function attempt(
   pairing: Pairing,
   onMessage: (msg: Record<string, unknown>) => void,
   onClose: () => void,
-  opts: Required<LocalOptions>,
+  opts: Required<Omit<LocalOptions, 'onAwaiting'>> & Pick<LocalOptions, 'onAwaiting'>,
 ): Promise<Outcome> {
   return new Promise((resolve) => {
     let ws: WsLike
@@ -102,6 +104,12 @@ function attempt(
       }
       if (phase === 'status') {
         // The service answers a good proof with its status; only then is the connection used.
+        if (msg.t === 'awaiting') {
+          clearTimeout(timer)
+          opts.onAwaiting?.()
+          return
+        }
+        if (msg.t === 'denied') return finish({ kind: 'denied' })
         if (msg.t !== 'status') return finish({ kind: 'failed' })
         const session: Session = {
           port,
@@ -126,11 +134,11 @@ export async function connectLocal(
   onClose: () => void,
   options: LocalOptions = {},
 ): Promise<ConnectResult> {
-  const opts = { ports: options.ports ?? LOCAL_PORTS, attemptMs: options.attemptMs ?? ATTEMPT_MS, keepaliveMs: options.keepaliveMs ?? KEEPALIVE_MS }
+  const opts = { ports: options.ports ?? LOCAL_PORTS, attemptMs: options.attemptMs ?? ATTEMPT_MS, keepaliveMs: options.keepaliveMs ?? KEEPALIVE_MS, onAwaiting: options.onAwaiting }
   let unpaired = false
   for (const port of opts.ports) {
     const o = await attempt(open, port, pairing, onMessage, onClose, opts)
-    if (o.kind === 'connected') return o
+    if (o.kind === 'connected' || o.kind === 'denied') return o
     if (o.kind === 'unpaired') unpaired = true
   }
   return unpaired ? { kind: 'unpaired' } : { kind: 'unreachable' }

@@ -129,6 +129,14 @@ Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
 - A link only makes a pending pairing (at most 8, oldest dropped). It becomes stored (meta key `browser_pairings`)
   only when a connection from that same origin proves it, and then replaces earlier pairings for that origin. The app
   can remove one with `{"op":"unpair","id":"<id>"}`.
+- A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own
+  pairing. A new Firefox pairing therefore waits for the person: once proven, the service holds the connection in a
+  confirm phase, sends the extension `{"t":"awaiting"}`, and writes `{"op":"confirm_pairing","id":"<id>","browser":"<app
+  name>"}` to its stdout. The app shows one line with Allow and Don't allow and answers on stdin with
+  `{"op":"pair_decision","id":"<id>","allow":true|false}`. Allow completes the held connection (and any later one for
+  that pairing, without asking again). Don't allow drops the pairing and sends `{"t":"denied"}`; the extension forgets
+  it and shows Connect again. Nothing about pages is accepted before Allow. Chromium origins, pinned to known IDs, are
+  never asked about.
 
 ### Handshake
 
@@ -138,7 +146,8 @@ All messages are JSON text frames, at most 16 KiB. No page is sent before step 4
 2. Service: `{"t":"unpaired"}` and close, or `{"t":"challenge","v":1,"nonce":"<32 random bytes>","proof":<P_service>}`.
 3. The extension checks `P_service` and only then sends `{"t":"proof","proof":<P_extension>}`. A server without the
    key never sees a proof it could replay.
-4. Service checks `P_extension`, then sends `status` and `snapshot`; from here the connection is a browser host.
+4. Service checks `P_extension`. A new Firefox pairing first waits for Allow (above). Then the service sends `status`
+   and `snapshot`; from here the connection is a browser host.
 
 `P_role = HMAC-SHA256(key, "daylens-browser-pair-v1\n<role>\n<origin>\n127.0.0.1:<port>\n<id>\n<extension nonce>\n<service nonce>")`,
 base64url, compared in constant time. Binding the port means a squatter on one port cannot relay a proof made by the

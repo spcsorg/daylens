@@ -79,9 +79,23 @@ interface Stored extends Pairing {
   paired_wall_ms: number
 }
 
+// Firefox gives each install a random origin, so any Firefox extension could make and prove its own pairing. A new
+// Firefox pairing therefore needs the person's Allow in the app; Chromium origins are pinned to known IDs.
+export function needsConfirmation(origin: string): boolean {
+  return origin.startsWith('moz-extension://')
+}
+
+export interface ConfirmRequest {
+  op: 'confirm_pairing'
+  id: string
+  browser: string | null
+}
+
 export interface BrowserLocalOptions {
   ports?: readonly number[]
   peerCheck: PeerCheck
+  // Asks the app to show Allow / Don't allow; the answer comes back through decide().
+  confirm?: (req: ConfirmRequest) => void
   // The capture helper's clock, so service-stamped tab lines sort with the helper's own lines.
   clock: () => ClockPoint | null
   log?: (msg: string) => void
@@ -133,7 +147,7 @@ function reject(socket: net.Socket, status: number): void {
   socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () => socket.destroy())
 }
 
-type Phase = 'peer' | 'hello' | 'proof' | 'ready' | 'closed'
+type Phase = 'peer' | 'hello' | 'proof' | 'confirm' | 'ready' | 'closed'
 
 class Conn {
   readonly socket: net.Socket
@@ -142,7 +156,7 @@ class Conn {
   phase: Phase = 'peer'
   browser: AppIdentity | null = null
   hello: { pair: string; nonce: string } | null = null
-  pairing: (Pairing & { pending: boolean }) | null = null
+  pairing: (Pairing & { pending: boolean; approved?: boolean }) | null = null
   svcNonce = ''
   pagesId: number | null = null
   readonly run = randomUUID()
@@ -173,7 +187,9 @@ export class BrowserLocal {
   private server: http.Server | null = null
   private readonly conns = new Set<Conn>()
   private paired: Stored[]
-  private readonly pending: Pairing[] = []
+  private readonly pending: (Pairing & { approved?: boolean })[] = []
+  private readonly asked = new Set<string>()
+  private readonly confirm: (req: ConfirmRequest) => void
   port: number | null = null
 
   constructor(pages: BrowserPages, pause: Pause, store: PairingStore, opts: BrowserLocalOptions) {
@@ -182,6 +198,7 @@ export class BrowserLocal {
     this.store = store
     this.ports = opts.ports ?? LOCAL_PORTS
     this.peerCheck = opts.peerCheck
+    this.confirm = opts.confirm ?? (() => {})
     this.clock = opts.clock
     this.log = opts.log ?? (() => {})
     this.now = opts.now ?? Date.now
@@ -244,7 +261,11 @@ export class BrowserLocal {
     }
     if (this.pending.some((x) => x.id === p.id) || this.paired.some((x) => x.id === p.id)) return true
     this.pending.push(p)
-    if (this.pending.length > MAX_PENDING) this.pending.shift()
+    if (this.pending.length > MAX_PENDING) {
+      const dropped = this.pending.shift()!
+      // A pairing waiting on the person's answer can be pushed out by a flood of links; its connections end cleanly.
+      if (this.asked.delete(dropped.id)) for (const c of [...this.conns]) if (c.phase === 'confirm' && c.pairing?.id === dropped.id) this.close(c, 1008)
+    }
     this.log(`browser pairing received pending=${this.pending.length}`)
     return true
   }
@@ -367,6 +388,47 @@ export class BrowserLocal {
     const want = await proof(p.key, transcript('extension', c.origin, port, p.id, c.hello!.nonce, c.svcNonce))
     if (c.phase !== 'proof') return
     if (!sameProof(theirs, want)) return this.refuse(c, 'bad_proof')
+    const live = this.pending.find((x) => x.id === p.id)
+    if (p.pending && needsConfirmation(p.origin) && !live?.approved) {
+      // Proven, so a real extension in a real browser made it; the person decides whether it may connect.
+      if (c.timer) clearTimeout(c.timer)
+      c.timer = null
+      c.phase = 'confirm'
+      c.send({ t: 'awaiting' })
+      if (!this.asked.has(p.id)) {
+        this.asked.add(p.id)
+        this.confirm({ op: 'confirm_pairing', id: p.id, browser: c.browser?.name ?? null })
+        this.log('browser pairing awaiting confirmation')
+      }
+      return
+    }
+    this.ready(c, p)
+  }
+
+  // The app's answer to a confirm_pairing request.
+  decide(id: string, allow: boolean): boolean {
+    const p = this.pending.find((x) => x.id === id)
+    if (!p || !this.asked.has(id)) return false
+    this.asked.delete(id)
+    const waiting = [...this.conns].filter((c) => c.phase === 'confirm' && c.pairing?.id === id)
+    if (!allow) {
+      this.pending.splice(this.pending.indexOf(p), 1)
+      for (const c of waiting) {
+        c.send({ t: 'denied' })
+        this.close(c, 1008)
+      }
+      this.log('browser pairing denied')
+      return true
+    }
+    p.approved = true
+    this.log('browser pairing allowed')
+    const [first, ...rest] = waiting
+    for (const c of rest) this.close(c, 1008)
+    if (first) this.ready(first, first.pairing!)
+    return true
+  }
+
+  private ready(c: Conn, p: Pairing & { pending: boolean }): void {
     if (p.pending) {
       // The first proven connection makes the pairing real and replaces any earlier one for the same extension.
       const i = this.pending.findIndex((x) => x.id === p.id)

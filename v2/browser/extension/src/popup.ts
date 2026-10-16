@@ -24,6 +24,7 @@ function at(ms: number): string {
 function statusLine(s: PopupState): [string, 'ok' | 'warn' | 'none'] {
   if (s.daylens === 'connecting') return ['Connecting…', 'none']
   if (s.daylens === 'not_installed') return ['Daylens isn’t installed on this computer', 'none']
+  if (s.awaiting_allow) return ['Allow this browser in Daylens', 'none']
   if (s.connecting_pair && s.daylens !== 'connected') return ['Waiting for Daylens…', 'none']
   if (s.daylens === 'unpaired') return ['Not connected to Daylens', 'none']
   if (s.daylens === 'not_running') return ['Daylens isn’t running', 'warn']

@@ -88,6 +88,7 @@ function servePages(): Promise<Pages> {
 
 class Service {
   proc: ChildProcess | null = null
+  readonly confirmations: { browser: string | null }[] = []
   readonly dataDir: string
   readonly logFile: string
   constructor(dataDir: string, logFile: string) {
@@ -98,8 +99,25 @@ class Service {
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
     this.proc = spawn(process.execPath, [SERVICE, '--helper', values.helper!, '--data-dir', this.dataDir], {
       env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath(), ...(LOCAL ? { DAYLENS_V2_BROWSER_LOCAL: '1' } : {}) },
-      stdio: [LOCAL ? 'pipe' : 'ignore', 'ignore', 'pipe'],
+      stdio: [LOCAL ? 'pipe' : 'ignore', LOCAL ? 'pipe' : 'ignore', 'pipe'],
     })
+    // Plays the app's part: a Firefox pairing asks Allow / Don't allow, and the runner allows it.
+    if (LOCAL) {
+      let buf = ''
+      this.proc.stdout!.setEncoding('utf8').on('data', (c: string) => {
+        buf += c
+        for (let nl = buf.indexOf('\n'); nl !== -1; nl = buf.indexOf('\n')) {
+          const line = buf.slice(0, nl)
+          buf = buf.slice(nl + 1)
+          try {
+            const m = JSON.parse(line) as { op?: string; id?: string; browser?: string }
+            if (m.op !== 'confirm_pairing' || !m.id) continue
+            this.confirmations.push({ browser: m.browser ?? null })
+            this.proc!.stdin!.write(JSON.stringify({ op: 'pair_decision', id: m.id, allow: true }) + '\n')
+          } catch {}
+        }
+      })
+    }
     this.proc.stderr!.pipe(logStream)
     const start = Date.now()
     while (!existsSync(this.logFile) || !readFileSync(this.logFile, 'utf8').includes('browser socket listening')) {
@@ -299,7 +317,13 @@ class ChromiumDriver implements Driver {
     const [port, wsPath] = readFileSync(portFile, 'utf8').trim().split('\n')
     this.cdp = await Rpc.connect(`ws://127.0.0.1:${port}${wsPath}`)
     await this.waitTarget((t) => t.type === 'service_worker' && t.url.startsWith(`chrome-extension://${DEV_CHROMIUM_ID}/`), 15_000, 'extension service worker')
-    await this.waitTarget((t) => t.type === 'page' && t.url.startsWith(url), 15_000, 'first page')
+    try {
+      await this.waitTarget((t) => t.type === 'page' && t.url.startsWith(url), 8_000, 'first page')
+    } catch {
+      // Dia opens its own first screen instead of the start URL; open the page in a window of its own.
+      await this.openWindow(url)
+      await this.waitTarget((t) => t.type === 'page' && t.url.startsWith(url), 8_000, 'first page')
+    }
   }
   private async targets(): Promise<{ targetId: string; type: string; url: string; browserContextId?: string }[]> {
     return (await this.cdp.send('Target.getTargets')).targetInfos
@@ -903,7 +927,7 @@ async function pairThroughPopup(d: Driver, svc: Service, dir: string): Promise<u
   await d.close(popup)
   log(`pairing: ${connected ? 'connected' : 'NOT connected'}; popup "${before}" -> "${after}"; daylens:// tabs while pairing ${pairTabs.length}, left after ${leftover}`)
   if (!connected) throw new Error('the local connection did not come up after pairing')
-  return { popup_before: before, popup_after: after, daylens_tabs_during: pairTabs, daylens_tabs_after: leftover }
+  return { popup_before: before, popup_after: after, daylens_tabs_during: pairTabs, daylens_tabs_after: leftover, allow_asked: svc.confirmations }
 }
 
 // --- soak --------------------------------------------------------------------------------------------------------

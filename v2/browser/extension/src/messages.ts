@@ -15,5 +15,7 @@ export interface PopupState {
   paused_until_wall_ms: number | null
   // Connect was pressed and Daylens has not confirmed yet.
   connecting_pair: boolean
+  // Daylens is asking the person whether this browser may connect.
+  awaiting_allow: boolean
   opened?: boolean
 }
