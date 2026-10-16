@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
@@ -27,11 +27,43 @@ export function assertNotV1(dir: string): void {
   const resolved = existsSync(dir) ? realpathSync(dir) : path.resolve(dir)
   const parts = resolved.split(/[\\/]+/).map((p) => p.toLowerCase())
   for (const p of parts) {
-    if (V1_DIR_NAMES.has(p)) throw new Error(`refusing V1 data folder: ${resolved}`)
+    if (V1_DIR_NAMES.has(p)) throw new Error('refusing V1 data folder')
   }
   for (const f of V1_FILE_NAMES) {
-    if (existsSync(path.join(resolved, f))) throw new Error(`refusing a folder that holds a V1 database: ${resolved}`)
+    if (existsSync(path.join(resolved, f))) throw new Error('refusing a folder that holds a V1 database')
   }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as { code?: string }).code === 'EPERM'
+  }
+}
+
+// One writer per data folder: ids are allocated in memory, so a second writer would collide.
+export function acquireWriterLock(dir: string): () => void {
+  const file = path.join(dir, 'capture.lock')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(file, 'wx')
+      writeSync(fd, String(process.pid))
+      closeSync(fd)
+      return () => {
+        try {
+          unlinkSync(file)
+        } catch {}
+      }
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'EEXIST') throw err
+      const holder = Number(readFileSync(file, 'utf8').trim())
+      if (Number.isInteger(holder) && holder > 0 && holder !== process.pid && pidAlive(holder)) throw new Error('another capture service is writing this folder')
+      unlinkSync(file)
+    }
+  }
+  throw new Error('could not take the capture lock')
 }
 
 const SCHEMA = `
@@ -152,6 +184,7 @@ export class Store implements Sink {
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
   private overflowing = false
+  private readonly releaseLock: () => void
   onOverflow: () => void = () => {}
   onRecovered: () => void = () => {}
   private readonly maxPendingOps: number
@@ -160,6 +193,7 @@ export class Store implements Sink {
     assertNotV1(dir)
     mkdirSync(dir, { recursive: true })
     assertNotV1(dir)
+    this.releaseLock = acquireWriterLock(dir)
     this.file = path.join(dir, DB_FILE)
     this.now = opts.now ?? Date.now
     this.onError = opts.onError ?? (() => {})
@@ -200,9 +234,10 @@ export class Store implements Sink {
     const run = this.db
       .prepare('SELECT max(coalesce(ended_wall_ms, 0), coalesce(last_heartbeat_wall_ms, 0), started_wall_ms) AS t FROM capture_runs ORDER BY id DESC LIMIT 1')
       .get() as { t: number } | undefined
-    const obs = this.db.prepare('SELECT max(last_seen_wall_ms) AS t FROM observations').get() as { t: number | null }
+    const obs = this.db.prepare('SELECT last_seen_wall_ms AS t FROM observations ORDER BY id DESC LIMIT 1').get() as { t: number } | undefined
     const stopped = this.db.prepare(`SELECT value FROM meta WHERE key = 'service_stopped_wall_ms'`).get() as { value: string } | undefined
-    const candidates = [run?.t ?? null, obs.t, stopped ? Number(stopped.value) : null].filter((v): v is number => v !== null)
+    const alive = this.db.prepare(`SELECT value FROM meta WHERE key = 'service_alive_wall_ms'`).get() as { value: string } | undefined
+    const candidates = [run?.t ?? null, obs?.t ?? null, stopped ? Number(stopped.value) : null, alive ? Number(alive.value) : null].filter((v): v is number => v !== null)
     if (candidates.length === 0) return null
     const endWallMs = Math.max(...candidates)
     return { endWallMs, clean: stopped !== undefined && Number(stopped.value) >= endWallMs }
@@ -216,6 +251,11 @@ export class Store implements Sink {
 
   markServiceStarted(): void {
     this.db.prepare(`DELETE FROM meta WHERE key = 'service_stopped_wall_ms'`).run()
+  }
+
+  // Proof the service itself was running, independent of the helper: bounds a later service_down gap.
+  touchAlive(wallMs: number): void {
+    this.enqueue(`INSERT INTO meta (key, value) VALUES ('service_alive_wall_ms', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(wallMs)])
   }
 
   markServiceStopped(wallMs: number): void {
@@ -283,7 +323,15 @@ export class Store implements Sink {
   }
 
   closeGap(id: number, end: GapPoint): void {
-    this.enqueue('UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE id = ? AND end_wall_ms IS NULL', [end.wall_ms, end.mono_us, end.boot, id])
+    // An end before the start (a hang found after a later gap opened) collapses to an empty gap, never a negative one.
+    this.enqueue(
+      'UPDATE capture_gaps SET end_wall_ms = max(?, start_wall_ms), end_mono_us = ?, end_boot = ? WHERE id = ? AND end_wall_ms IS NULL',
+      [end.wall_ms, end.mono_us, end.boot, id],
+    )
+  }
+
+  setGapEnd(id: number, end: GapPoint): void {
+    this.enqueue('UPDATE capture_gaps SET end_wall_ms = max(?, start_wall_ms), end_mono_us = ?, end_boot = ? WHERE id = ?', [end.wall_ms, end.mono_us, end.boot, id])
   }
 
   reopenGap(id: number): void {
@@ -338,9 +386,16 @@ export class Store implements Sink {
     } catch (err) {
       const code = errorCode(err)
       this.onError(code)
-      if (isStatementError(code)) {
-        this.runSkippingBadOps(ops)
-      } else {
+      let retry = !isStatementError(code)
+      if (!retry) {
+        try {
+          this.runSkippingBadOps(ops)
+        } catch (inner) {
+          this.onError(errorCode(inner))
+          retry = true
+        }
+      }
+      if (retry) {
         if (this.health.failingSinceWallMs === null) {
           this.health.failingSinceWallMs = this.now()
           this.failingStart = { wall_ms: this.health.failingSinceWallMs, mono_us: null, boot: null }
@@ -382,7 +437,10 @@ export class Store implements Sink {
         try {
           this.stmt(op.sql).run(...(op.params as unknown[]))
         } catch (err) {
-          this.onError(errorCode(err))
+          const code = errorCode(err)
+          // Only a statement that can never succeed is dropped; anything else fails the batch for a retry.
+          if (!isStatementError(code)) throw err
+          this.onError(code)
           this.health.droppedOps++
         }
       }
@@ -396,6 +454,7 @@ export class Store implements Sink {
   close(): void {
     this.flush()
     this.db.close()
+    this.releaseLock()
   }
 
   // Test and tooling access; never used by capture itself.

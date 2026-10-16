@@ -100,15 +100,15 @@ internal static unsafe class Program
     static void Focus(FocusTrigger trigger, nint hwnd, EventTime time, bool force = false)
     {
         Native.GetWindowThreadProcessId(hwnd, out var pid);
-        if (hwnd != _fgHwnd || (int)pid != _fgPid)
+        _fgHwnd = hwnd;
+        if ((int)pid != _fgPid)
         {
-            _fgHwnd = hwnd;
             _fgPid = (int)pid;
             HookTitleChanges(_fgPid);
         }
         var window = ReadTitle(hwnd);
         // A stuck resolver must not hold back focus changes; report them without identity.
-        if (_resolver.StallMs > 2000)
+        if (_resolver.StallMs > 3000)
         {
             _resolver.Abandon();
             Emit("focus", "win_event", Obs.Focus(trigger, AppInfo.Unknown((int)pid, IdentityState.Timeout), window), time);
@@ -133,11 +133,13 @@ internal static unsafe class Program
     {
         try
         {
+            // Filter first: the foreground process can raise many name changes for its own controls.
+            var trigger = ev == WinEvents.EVENT_SYSTEM_FOREGROUND ? FocusTrigger.AppChanged
+                : ev == WinEvents.EVENT_OBJECT_NAMECHANGE && WinEvents.IsForegroundTitleChange(hwnd, idObject, idChild, _fgHwnd) ? FocusTrigger.TitleChanged
+                : (FocusTrigger?)null;
+            if (trigger is null) return;
             var (wall, mono) = Win32Time.BackDate(Clock.WallMs(), Clock.MonoUs(), Native.GetTickCount(), msEventTime);
-            var time = Clock.At(wall, mono);
-            if (ev == WinEvents.EVENT_SYSTEM_FOREGROUND) Focus(FocusTrigger.AppChanged, hwnd, time);
-            else if (ev == WinEvents.EVENT_OBJECT_NAMECHANGE && WinEvents.IsForegroundTitleChange(hwnd, idObject, idChild, _fgHwnd))
-                Focus(FocusTrigger.TitleChanged, hwnd, time);
+            Focus(trigger.Value, hwnd, Clock.At(wall, mono));
         }
         catch { Diag.Write("winevent_failed"); }
     }
@@ -164,6 +166,7 @@ internal static unsafe class Program
     }
 
     static bool _locked;
+    static bool _displaySeen;
 
     static void SuspendIdle(bool suspend)
     {
@@ -238,6 +241,22 @@ internal static unsafe class Program
                     _emitter.Flush(TimeSpan.FromSeconds(1));
                     Native.PostQuitMessage(0);
                     return 0;
+                case Native.WM_CLOSE:
+                    // Restart Manager or a plain taskkill asks politely; the window and its timers must survive.
+                    Diag.Write("close_ignored");
+                    return 0;
+                case Native.WM_QUERYENDSESSION:
+                    return 1;
+                case Native.WM_ENDSESSION:
+                    if (wParam != 0)
+                    {
+                        Emit("bye", "helper", Obs.Bye("session_end"));
+                        _emitter.Flush(TimeSpan.FromSeconds(1));
+                    }
+                    return 0;
+                case Native.WM_DESTROY:
+                    Native.PostQuitMessage(0);
+                    return 0;
             }
         }
         catch { Diag.Write("wndproc_failed"); }
@@ -255,7 +274,7 @@ internal static unsafe class Program
                 Diag.Write("resolver_stuck_exit");
                 Environment.Exit(70);
             }
-            Emit("heartbeat", "helper", Obs.Heartbeat(stall > 2000 ? ChannelState.Stalled : ChannelState.Ok, stall, _emitter.Dropped));
+            Emit("heartbeat", "helper", Obs.Heartbeat(Clock.AwakeUs(), stall > 3000 ? ChannelState.Stalled : ChannelState.Ok, stall, _emitter.Dropped));
         }
         else if (id == TimerIdle) CheckIdle();
         else if (id == TimerReconcile)
@@ -277,6 +296,12 @@ internal static unsafe class Program
         }
         var state = Power.Classify(pbt, setting, value);
         if (state is null) return;
+        // Registering for display status delivers the current value at once; that is not a change.
+        if (setting == Power.GUID_SESSION_DISPLAY_STATUS && !_displaySeen)
+        {
+            _displaySeen = true;
+            return;
+        }
         Emit("power", "power", Obs.Power(state));
         if (state == "sleep") SuspendIdle(true);
         else if (state == "resume")

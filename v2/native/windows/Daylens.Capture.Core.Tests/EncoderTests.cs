@@ -13,7 +13,7 @@ public class GoldenFixtureTests
     static readonly Dictionary<string, Action<Utf8JsonWriter>> Builders = new()
     {
         ["win_hello"] = Obs.Hello("daylens-capture-windows", "2.0.0-dev", 7000, "Windows 10.0.26100", 15, 120, 60),
-        ["win_heartbeat"] = Obs.Heartbeat(ChannelState.Ok, 0, 3),
+        ["win_heartbeat"] = Obs.Heartbeat(612_345_678_901, ChannelState.Ok, 0, 3),
         ["win_focus_store"] = Obs.Focus(FocusTrigger.AppChanged, Calculator, WindowInfo.Read("0x1A2B3C", "Calculator")),
         ["win_focus_access_denied"] = Obs.Focus(FocusTrigger.AppChanged, AppInfo.Unknown(4, IdentityState.AccessDenied), WindowInfo.Read("0x2B", "Administrator: Task Manager")),
         ["win_focus_unicode"] = Obs.Focus(FocusTrigger.TitleChanged, Calculator, WindowInfo.Read("0x1A2B3C", UnicodeTitle)),

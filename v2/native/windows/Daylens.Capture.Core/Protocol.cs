@@ -97,8 +97,9 @@ public static class Obs
         w.WriteEndObject();
     };
 
-    public static Action<Utf8JsonWriter> Heartbeat(ChannelState titles, long stallMs, long dropped) => w =>
+    public static Action<Utf8JsonWriter> Heartbeat(long awakeUs, ChannelState titles, long stallMs, long dropped) => w =>
     {
+        w.WriteNumber("awake_us", awakeUs);
         Permissions(w);
         w.WriteString("titles", Names.Of(titles));
         w.WriteNumber("stall_ms", stallMs);

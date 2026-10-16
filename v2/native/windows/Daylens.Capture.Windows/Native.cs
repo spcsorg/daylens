@@ -7,6 +7,7 @@ internal static unsafe partial class Native
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000, WINEVENT_SKIPOWNPROCESS = 0x0002;
     public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     public const int ERROR_INSUFFICIENT_BUFFER = 122, APPMODEL_ERROR_NO_APPLICATION = 15703, APPMODEL_ERROR_NO_PACKAGE = 15700;
+    public const uint WM_QUERYENDSESSION = 0x0011, WM_ENDSESSION = 0x0016;
     public const uint WM_DESTROY = 0x0002, WM_CLOSE = 0x0010, WM_TIMER = 0x0113, WM_POWERBROADCAST = 0x0218, WM_TIMECHANGE = 0x001E;
     public const uint WM_WTSSESSION_CHANGE = 0x02B1, WM_APP = 0x8000;
     public const uint NOTIFY_FOR_THIS_SESSION = 0;
@@ -72,6 +73,7 @@ internal static unsafe partial class Native
     [LibraryImport("kernel32.dll")] public static partial int GetPackageFullName(nint process, ref uint length, char* buf);
     [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16)] public static partial int GetPackagePathByFullName(string fullName, ref uint length, char* buf);
     [LibraryImport("kernel32.dll")] public static partial void QueryInterruptTimePrecise(out ulong time);
+    [LibraryImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static partial bool QueryUnbiasedInterruptTime(out ulong time);
     [LibraryImport("kernel32.dll")] public static partial void GetSystemTimePreciseAsFileTime(out long fileTime);
     [LibraryImport("kernel32.dll")] public static partial uint GetTickCount();
     [LibraryImport("kernel32.dll")] public static partial nint GetModuleHandleW(nint name);

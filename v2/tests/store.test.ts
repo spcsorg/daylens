@@ -77,7 +77,7 @@ test('previous coverage: a clean stop and a crash are told apart', () => {
   s1.startRun({ v: 1, run: 'r1', seq: 0, boot: 'b', t: { wall_ms: T0, mono_us: 1, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'hello',
     obs: { helper: 'h', version: '1', pid: 1, os: 'x', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } } })
   s1.recordHeartbeat({ v: 1, run: 'r1', seq: 1, boot: 'b', t: { wall_ms: T0 + 15_000, mono_us: 2, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'heartbeat',
-    obs: { permissions: { accessibility: 'granted' }, titles: 'ok', stall_ms: 0, dropped: 0 } })
+    obs: { awake_us: 2, permissions: { accessibility: 'granted' }, titles: 'ok', stall_ms: 0, dropped: 0 } })
   s1.close()
   const crashed = new Store(dir)
   assert.deepEqual(crashed.previousCoverage(), { endWallMs: T0 + 15_000, clean: false })
@@ -172,4 +172,23 @@ test('a nested V1-looking path below the data dir is refused too', () => {
   const nested = path.join(base, 'Daylens', 'sub')
   mkdirSync(nested, { recursive: true })
   assert.throws(() => new Store(nested), /refusing V1/)
+})
+
+test('only one service may write a data folder at a time', () => {
+  const dir = tmp()
+  const a = new Store(dir)
+  assert.throws(() => new Store(dir), /another capture service/)
+  a.close()
+  const b = new Store(dir)
+  b.close()
+})
+
+test('a gap closed before it started collapses to empty instead of going negative', () => {
+  const dir = tmp()
+  const s = new Store(dir)
+  const id = s.openGap({ reason: 'excluded', scope: 'all', run: null, start: { wall_ms: T0 + 5000, mono_us: null, boot: null }, detail: null })
+  s.closeGap(id, { wall_ms: T0, mono_us: null, boot: null })
+  s.flush()
+  assert.deepEqual(s.query('SELECT start_wall_ms, end_wall_ms FROM capture_gaps'), [{ start_wall_ms: T0 + 5000, end_wall_ms: T0 + 5000 }])
+  s.close()
 })

@@ -53,8 +53,10 @@ async function shutdown(signal: string): Promise<void> {
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'))
 process.on('SIGINT', () => void shutdown('SIGINT'))
-// An interface parent that dies closes this pipe; capture stops with it.
-if (process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
+process.on('SIGHUP', () => void shutdown('SIGHUP'))
+if (process.platform === 'win32') process.on('SIGBREAK', () => void shutdown('SIGBREAK'))
+// Windows has no SIGTERM: the parent stops capture by closing this pipe, and a parent that dies closes it too.
+if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
 
-log(`started pid=${process.pid} db=${store.file}`)
+log(`started pid=${process.pid}`)
 supervisor.start()

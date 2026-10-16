@@ -22,7 +22,7 @@ final class CaptureCoreTests: XCTestCase {
     let p = Permissions(accessibility: "granted")
     try assertMatches("mac_hello", seq: 0, source: "helper", kind: "hello",
                       Obs.hello(helper: "daylens-capture-macos", version: "2.0.0-dev", pid: 4242, os: "macOS 27.0.1", permissions: p, heartbeatS: 15, idleThresholdS: 120, reconcileS: 60))
-    try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(permissions: p, titles: .ok, stallMs: 0, dropped: 0))
+    try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(awakeUs: 612_345_678_901, permissions: p, titles: .ok, stallMs: 0, dropped: 0))
     try assertMatches("mac_focus_app", seq: 2, source: "nsworkspace", kind: "focus",
                       Obs.focus(trigger: .app_changed, app: term, window: .read(window: "w-1", title: "daylens — zsh — 80×24")))
     try assertMatches("mac_focus_title", seq: 3, source: "ax_observer", kind: "focus",

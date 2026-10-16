@@ -49,6 +49,7 @@ func requestFocus(_ trigger: FocusTrigger, _ app: NSRunningApplication?, time: E
 var idle = IdleScheduler(thresholdS: Double(idleThresholdS))
 let idleTimer = DispatchSource.makeTimerSource(queue: .main)
 var idleSuspended = false
+var screenIsLocked = false
 
 func secondsSinceInput() -> Double {
   CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
@@ -66,8 +67,10 @@ func checkIdle(snapshot: Bool = false) {
   }
 }
 
-// Nobody types on a locked or sleeping Mac; look again when it comes back.
+// Nobody types on a locked or sleeping Mac; look again when it is back and unlocked.
 func suspendIdle(_ suspend: Bool) {
+  if !suspend && screenIsLocked { return }
+  if suspend == idleSuspended { return }
   idleSuspended = suspend
   if suspend { idleTimer.schedule(deadline: .distantFuture) } else { checkIdle() }
 }
@@ -83,16 +86,20 @@ func snapshot() {
   requestFocus(.snapshot, NSWorkspace.shared.frontmostApplication, force: true)
   checkIdle(snapshot: true)
   let locked = screenLocked()
+  screenIsLocked = locked ?? false
+  if screenIsLocked { suspendIdle(true) }
   emit("session", "cg_session", Obs.session(locked.map { $0 ? "locked" : "unlocked" } ?? "unknown", snapshot: true))
 }
 
 final class DistributedObserver: NSObject {
   @objc func locked(_ n: Notification) {
     emit("session", "distributed_notification", Obs.session("locked", snapshot: false))
+    screenIsLocked = true
     suspendIdle(true)
   }
   @objc func unlocked(_ n: Notification) {
     emit("session", "distributed_notification", Obs.session("unlocked", snapshot: false))
+    screenIsLocked = false
     suspendIdle(false)
     requestFocus(.reconcile, NSWorkspace.shared.frontmostApplication)
   }
@@ -168,7 +175,7 @@ heartbeat.setEventHandler {
   let p = permissions()
   let stall = titles.stallMs
   let state: ChannelState = p.accessibility != "granted" ? .no_permission : stall > 2000 ? .stalled : titles.degraded ? .degraded : .ok
-  emit("heartbeat", "helper", Obs.heartbeat(permissions: p, titles: state, stallMs: stall, dropped: emitter.dropped))
+  emit("heartbeat", "helper", Obs.heartbeat(awakeUs: Clock.awakeUs(), permissions: p, titles: state, stallMs: stall, dropped: emitter.dropped))
 }
 heartbeat.resume()
 
@@ -189,13 +196,13 @@ Thread.detachNewThread {
       DispatchQueue.main.async {
         emit("bye", "helper", Obs.bye("shutdown"))
         emitter.flush()
-        exit(0)
+        _exit(0)
       }
     } else if line.contains("\"snapshot\"") {
       DispatchQueue.main.async { snapshot() }
     }
   }
-  exit(0)
+  _exit(0)
 }
 
 frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0

@@ -214,11 +214,15 @@ export class Normalizer {
         return this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
       case 'session':
         this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
+        if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') this.endExcluded(line)
         return this.onState(line, 'session', line.obs.state, null)
       case 'power':
         if (line.obs.state === 'resume') this.resumedAtWall ??= line.t.wall_ms
         this.onPresenceEvidence(line, line.obs.state === 'resume_user')
-        if (line.obs.state === 'sleep') this.resumedAtWall = null
+        if (line.obs.state === 'sleep') {
+          this.resumedAtWall = null
+          this.endExcluded(line)
+        }
         return this.onState(line, 'power', line.obs.state, null)
       case 'clock':
         return this.onState(line, 'clock', line.obs.change, null)
@@ -245,6 +249,14 @@ export class Normalizer {
       this.sink.closeGap(this.excludedGap, at)
       this.excludedGap = null
     }
+  }
+
+  // Locked or asleep is not time in the excluded app; the next focus snapshot reopens the gap if it is still in front.
+  private endExcluded(line: Line): void {
+    if (this.excludedGap === null) return
+    this.sink.closeGap(this.excludedGap, point(line))
+    this.excludedGap = null
+    this.focus = null
   }
 
   private onFocus(line: LineOf<'focus'>): void {

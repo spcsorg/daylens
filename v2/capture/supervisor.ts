@@ -65,8 +65,10 @@ export class Supervisor {
   private run: string | null = null
   private lastSeq = -1
   private lastLine: GapPoint | null = null
-  private lastHeartbeat: { point: GapPoint; mono_us: number; boot: string } | null = null
-  private lastSleep: { mono_us: number; boot: string } | null = null
+  private lastHeartbeat: { point: GapPoint; mono_us: number; awake_us: number | null; boot: string } | null = null
+  private linesSinceHello = 0
+  private stderrBuf = ''
+  private lastAliveTouch = 0
   private allGap: { id: number; reason: GapReason } | null = null
   // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
   private recovering: { id: number; reason: GapReason } | null = null
@@ -172,18 +174,34 @@ export class Supervisor {
       return
     }
     this.child = child
-    child.on('error', (err) => this.onSpawnError(err))
+    this.stderrBuf = ''
+    // A failed kill also raises 'error'; only a child that never got a pid failed to spawn.
+    child.on('error', (err) => {
+      if (child.pid === undefined && this.child === child) this.onSpawnError(err)
+    })
     child.stdin?.on('error', () => {})
     child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => this.onStdout(chunk))
+    child.stdout?.on('data', (chunk: string) => {
+      if (this.child === child) this.onStdout(chunk)
+    })
     child.stderr?.setEncoding('utf8')
     child.stderr?.on('data', (chunk: string) => {
-      for (const l of chunk.split('\n')) {
-        const t = l.trim()
-        if (t) this.o.log(SAFE_STDERR.test(t) ? `helper ${t}` : 'helper stderr line redacted')
-      }
+      if (this.child === child) this.onStderr(chunk)
     })
-    child.on('exit', (code, signal) => this.onExit(child, code, signal))
+    // 'close' fires after stdout has drained, so no line from this child can arrive after its gap opens.
+    child.on('close', (code, signal) => this.onExit(child, code, signal))
+  }
+
+  private onStderr(chunk: string): void {
+    let buf = this.stderrBuf + chunk
+    let nl = buf.indexOf('\n')
+    while (nl !== -1) {
+      const t = buf.slice(0, nl).trim()
+      buf = buf.slice(nl + 1)
+      if (t) this.o.log(SAFE_STDERR.test(t) ? `helper ${t}` : 'helper stderr line redacted')
+      nl = buf.indexOf('\n')
+    }
+    this.stderrBuf = buf.length > 1024 ? '' : buf
   }
 
   private onSpawnError(err: unknown): void {
@@ -197,10 +215,12 @@ export class Supervisor {
   private onExit(child: ChildProcess, code: number | null, signal: NodeJS.Signals | null): void {
     if (this.child !== child) return
     this.child = null
-    if (this.stdoutBuf) this.onStdout('\n')
+    // A half-written last line is lost with the process; it is not a protocol error.
+    this.stdoutBuf = ''
     if (this.stopping) return
     const upMs = this.o.hrtimeMs() - this.spawnedAtHr
     const at = this.lastLine ?? this.servicePoint()
+    if (this.run) this.store.endRun(this.run, at.wall_ms, this.killedForHang ? 'hung' : 'crashed')
     if (this.killedForHang) {
       this.o.log('helper killed after hang')
     } else {
@@ -244,6 +264,10 @@ export class Supervisor {
     const dWall = wall - last.wall
     const dHr = hr - last.hr
     const late = dWall > this.o.tickMs * 2 || dHr > this.o.tickMs * 2 || dWall < 0
+    if (wall - this.lastAliveTouch >= 60_000) {
+      this.lastAliveTouch = wall
+      this.store.touchAlive(wall)
+    }
     if (late) {
       this.stats.lateTicks++
       return
@@ -302,7 +326,7 @@ export class Supervisor {
     if (this.rejectGap && now - this.rejectGap.startWall < 60_000) {
       this.rejectGap.count++
       this.store.updateGap(this.rejectGap.id, { detail: { count: this.rejectGap.count } })
-      this.store.closeGap(this.rejectGap.id, { wall_ms: now, mono_us: null, boot: null })
+      this.store.setGapEnd(this.rejectGap.id, { wall_ms: now, mono_us: null, boot: null })
       return
     }
     const id = this.store.openGap({ reason: 'protocol_rejected', scope: 'all', run: this.run, start: { wall_ms: now, mono_us: null, boot: null }, detail: { count: 1 } })
@@ -339,6 +363,7 @@ export class Supervisor {
     }
     this.lastSeq = line.seq
     this.lastLine = point
+    this.linesSinceHello++
 
     switch (line.kind) {
       case 'hello':
@@ -346,9 +371,12 @@ export class Supervisor {
       case 'heartbeat':
         return this.onHeartbeat(line, point)
       case 'power':
-        if (line.obs.state === 'sleep') this.lastSleep = { mono_us: line.t.mono_us, boot: line.boot }
         this.normalizer.handle(line)
         if (line.obs.state === 'resume') this.send({ op: 'snapshot' })
+        return
+      case 'session':
+        this.normalizer.handle(line)
+        if (line.obs.state === 'unlocked' && !line.obs.snapshot) this.send({ op: 'snapshot' })
         return
       case 'bye':
         this.o.log(`helper bye reason=${/^[a-z_]{1,32}$/.test(line.obs.reason) ? line.obs.reason : 'other'}`)
@@ -363,37 +391,33 @@ export class Supervisor {
     this.o.log(`helper hello pid=${line.obs.pid} accessibility=${line.obs.permissions.accessibility}`)
     this.store.startRun(line)
     this.awakeSilenceMs = 0
-    this.lastSleep = null
+    this.linesSinceHello = 0
     const point: GapPoint = { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
     if (this.allGap) {
       this.store.closeGap(this.allGap.id, point)
       this.recovering = this.allGap
       this.allGap = null
     }
-    this.lastHeartbeat = { point, mono_us: line.t.mono_us, boot: line.boot }
+    this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: null, boot: line.boot }
   }
 
   private onHeartbeat(line: LineOf<'heartbeat'>, point: GapPoint): void {
     this.awakeSilenceMs = 0
     this.recovering = null
     const prev = this.lastHeartbeat
-    // Event-time continuity: a long silence between heartbeats with no sleep reported means the helper itself stalled.
-    // A heartbeat can still slip out between the sleep notice and the actual suspend, hence the look-back.
-    const sleepExplains =
-      this.lastSleep !== null && this.lastSleep.boot === line.boot && this.lastSleep.mono_us >= (prev?.mono_us ?? 0) - this.o.heartbeatMs * 2000
-    if (prev && prev.boot === line.boot && !sleepExplains) {
-      const gapUs = line.t.mono_us - prev.mono_us
-      if (gapUs > this.o.heartbeatMs * 2.5 * 1000) {
-        this.o.log(`helper stalled between heartbeats ms=${Math.round(gapUs / 1000)}`)
-        const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { silence_ms: Math.round(gapUs / 1000) } })
+    // Awake time stops while the machine sleeps (dark wakes included), so a long awake gap between
+    // heartbeats means the helper itself stalled, whether or not a sleep notice arrived.
+    if (prev && prev.awake_us !== null && prev.boot === line.boot) {
+      const awakeGapMs = Math.round((line.obs.awake_us - prev.awake_us) / 1000)
+      this.stats.heartbeatMaxGapMs = Math.max(this.stats.heartbeatMaxGapMs, awakeGapMs)
+      if (awakeGapMs > this.o.heartbeatMs * 2.5) {
+        this.o.log(`helper stalled between heartbeats awake_ms=${awakeGapMs}`)
+        const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { awake_silence_ms: awakeGapMs } })
         this.store.closeGap(id, point)
       }
     }
     this.stats.heartbeats++
-    if (prev && prev.boot === line.boot && !sleepExplains) {
-      this.stats.heartbeatMaxGapMs = Math.max(this.stats.heartbeatMaxGapMs, Math.round((line.t.mono_us - prev.mono_us) / 1000))
-    }
-    this.lastHeartbeat = { point, mono_us: line.t.mono_us, boot: line.boot }
+    this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: line.obs.awake_us, boot: line.boot }
     this.store.recordHeartbeat(line)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
     const titlesDown = line.obs.titles !== 'ok'
@@ -422,11 +446,12 @@ export class Supervisor {
       this.store.closeGap(this.titlesGap, start)
       this.titlesGap = null
     }
-    if (!this.allGap && this.recovering) {
+    // A helper that dies right after hello, before sending anything else, continues the same outage.
+    if (!this.allGap && this.recovering && this.linesSinceHello <= 1) {
       this.store.reopenGap(this.recovering.id)
       this.allGap = this.recovering
-      this.recovering = null
     }
+    this.recovering = null
     if (this.allGap) {
       this.store.updateGap(this.allGap.id, { detail: { ...detail, also: reason } })
       return

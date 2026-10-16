@@ -91,8 +91,8 @@ public enum Obs {
       ("config", .object([("heartbeat_s", .int(heartbeatS)), ("idle_threshold_s", .int(idleThresholdS)), ("reconcile_s", .int(reconcileS))])),
     ])
   }
-  public static func heartbeat(permissions: Permissions, titles: ChannelState, stallMs: Int64, dropped: Int64) -> JSON {
-    .object([("permissions", permissions.json), ("titles", .string(titles.rawValue)), ("stall_ms", .int(stallMs)), ("dropped", .int(dropped))])
+  public static func heartbeat(awakeUs: Int64, permissions: Permissions, titles: ChannelState, stallMs: Int64, dropped: Int64) -> JSON {
+    .object([("awake_us", .int(awakeUs)), ("permissions", permissions.json), ("titles", .string(titles.rawValue)), ("stall_ms", .int(stallMs)), ("dropped", .int(dropped))])
   }
   public static func focus(trigger: FocusTrigger, app: AppInfo, window: WindowInfo) -> JSON {
     .object([("trigger", .string(trigger.rawValue)), ("app", app.json), ("window", window.json)])

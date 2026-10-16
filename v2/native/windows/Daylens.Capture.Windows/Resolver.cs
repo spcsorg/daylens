@@ -19,6 +19,8 @@ internal sealed unsafe class Resolver
     readonly Dictionary<(int Pid, long Created), AppInfo> _identities = new();
     readonly Dictionary<string, string?> _packageNames = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, string?> _exeNames = new(StringComparer.OrdinalIgnoreCase);
+    // Packaged browsers declare http/https in their manifest instead of a registry command.
+    readonly Dictionary<string, bool> _webPackages = new(StringComparer.OrdinalIgnoreCase);
     HashSet<string> _browserExes = new(StringComparer.OrdinalIgnoreCase);
     long _browsersLoadedMs;
     long _busySinceMs;
@@ -28,7 +30,12 @@ internal sealed unsafe class Resolver
     public Resolver(Emitter emitter)
     {
         _emitter = emitter;
-        new Thread(Loop) { IsBackground = true, Name = "daylens.capture.resolver" }.Start();
+        new Thread(() =>
+        {
+            // Warm the browser list before the first lookup so it never counts against a stall.
+            try { LoadBrowsers(); } catch { Diag.Write("browser_registry_failed"); }
+            Loop();
+        }) { IsBackground = true, Name = "daylens.capture.resolver" }.Start();
     }
 
     public long StallMs
@@ -131,8 +138,10 @@ internal sealed unsafe class Resolver
         uint size = 4096;
         if (!Native.QueryFullProcessImageName(h, 0, buf, ref size))
         {
+            // ERROR_GEN_FAILURE: the process is exiting.
+            var gone = System.Runtime.InteropServices.Marshal.GetLastPInvokeError() == 31;
             Native.CloseHandle(h);
-            return new(IdentityState.AccessDenied, 0, null, 0);
+            return new(gone ? IdentityState.Gone : IdentityState.AccessDenied, 0, null, 0);
         }
         var created = Native.GetProcessTimes(h, out var c, out _, out _, out _) ? c : 0;
         return new(IdentityState.Ok, h, new string(buf, 0, (int)size), created);
@@ -150,6 +159,7 @@ internal sealed unsafe class Resolver
         if (aumid is not null)
         {
             var name = package is null ? null : PackageDisplayName(aumid, package);
+            browser |= package is not null && _webPackages.TryGetValue(package, out var web) && web;
             return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package));
         }
         return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null);
@@ -184,7 +194,9 @@ internal sealed unsafe class Resolver
             if (appId is not null && Native.GetPackagePathByFullName(packageFullName, ref len, buf) == 0)
             {
                 var manifest = Path.Combine(new string(buf, 0, (int)len - 1), "AppxManifest.xml");
-                var raw = StoreApps.ManifestDisplayName(File.ReadAllText(manifest), appId);
+                var xml = File.ReadAllText(manifest);
+                _webPackages[packageFullName] = StoreApps.ManifestDeclaresWebProtocols(xml);
+                var raw = StoreApps.ManifestDisplayName(xml, appId);
                 if (raw is not null)
                 {
                     var indirect = StoreApps.IndirectString(raw, packageFullName, packageFullName.Split('_')[0]);

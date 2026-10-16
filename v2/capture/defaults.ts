@@ -51,6 +51,9 @@ export const KNOWN_BROWSER_APP_IDS: ReadonlySet<string> = new Set(
     'org.torproject.torbrowser',
     'io.gitlab.librewolf-community',
     'net.waterfox.waterfox',
+    'com.duckduckgo.macos.browser',
+    'net.mullvad.mullvadbrowser',
+    'org.mozilla.librewolf',
   ].map((s) => s.toLowerCase()),
 )
 
@@ -73,4 +76,6 @@ export const KNOWN_BROWSER_EXES: ReadonlySet<string> = new Set([
   'thorium.exe',
   'iexplore.exe',
   'tor.exe',
+  'duckduckgo.exe',
+  'mullvadbrowser.exe',
 ])

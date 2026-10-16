@@ -24,6 +24,13 @@ internal static class Clock
         return Win32Time.InterruptTimeToMonoUs(t);
     }
 
+    // Unbiased interrupt time stops while the machine sleeps, which lets the service tell sleep from a stall.
+    public static long AwakeUs()
+    {
+        Native.QueryUnbiasedInterruptTime(out var t);
+        return Win32Time.InterruptTimeToMonoUs(t);
+    }
+
     public static EventTime Now() => At(WallMs(), MonoUs());
 
     public static EventTime At(long wallMs, long monoUs)

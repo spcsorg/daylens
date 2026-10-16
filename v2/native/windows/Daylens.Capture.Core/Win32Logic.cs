@@ -142,6 +142,23 @@ public static class StoreApps
         return $"@{{{packageFullName}?{uri}}}";
     }
 
+    /// Whether a package manifest declares the http and https protocols, which makes the app a browser.
+    public static bool ManifestDeclaresWebProtocols(string manifestXml)
+    {
+        var doc = new XmlDocument { XmlResolver = null };
+        using (var reader = XmlReader.Create(new StringReader(manifestXml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null }))
+            doc.Load(reader);
+        bool http = false, https = false;
+        foreach (XmlNode n in doc.GetElementsByTagName("*"))
+        {
+            if (n is not XmlElement e || e.LocalName != "Protocol") continue;
+            var name = e.GetAttribute("Name");
+            http |= name.Equals("http", StringComparison.OrdinalIgnoreCase);
+            https |= name.Equals("https", StringComparison.OrdinalIgnoreCase);
+        }
+        return http && https;
+    }
+
     /// SHLoadIndirectString can "succeed" by echoing an unresolved reference.
     public static bool IsResolved(string? s) =>
         !string.IsNullOrWhiteSpace(s) && !s.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase) && !s.StartsWith("@{", StringComparison.Ordinal);

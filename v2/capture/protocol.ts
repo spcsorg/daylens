@@ -28,6 +28,7 @@ export interface HelloObs {
   config: { heartbeat_s: number; idle_threshold_s: number; reconcile_s: number }
 }
 export interface HeartbeatObs {
+  awake_us: number
   permissions: Permissions
   titles: ChannelState
   stall_ms: number
@@ -233,6 +234,7 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
     }
   },
   heartbeat: (o) => ({
+    awake_us: int(o, 'awake_us'),
     permissions: permissions(o.permissions),
     titles: oneOf(o, 'titles', CHANNEL_STATES),
     stall_ms: int(o, 'stall_ms'),

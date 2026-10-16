@@ -200,3 +200,15 @@ test('Windows resume followed by user resume gives one return and idempotent pow
     'power:resume_user:1',
   ])
 })
+
+test('locking or sleeping ends an excluded gap; a later snapshot reopens it', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.1password.1password'), CANARY, T0, 'app_changed'))
+  n.handle(line('session', { state: 'locked', snapshot: false }, T0 + 1000))
+  n.handle(line('power', { state: 'sleep' }, T0 + 2000))
+  assert.equal(sink.gaps[0]!.end!.wall_ms, T0 + 1000)
+  n.handle(line('power', { state: 'resume' }, T0 + 8 * 3_600_000))
+  n.handle(focus(app('com.1password.1password'), CANARY, T0 + 8 * 3_600_000 + 10, 'snapshot'))
+  assert.equal(sink.gaps.length, 2)
+  assert.equal(sink.gaps[1]!.start.wall_ms, T0 + 8 * 3_600_000 + 10, 'the night is not counted as excluded')
+})

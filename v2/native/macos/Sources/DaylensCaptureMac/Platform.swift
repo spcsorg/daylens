@@ -6,6 +6,8 @@ import Foundation
 enum Clock {
   // CLOCK_MONOTONIC_RAW keeps counting while the Mac sleeps (CLOCK_UPTIME_RAW does not).
   static func monoUs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1000) }
+  // CLOCK_UPTIME_RAW stops while asleep, dark wakes aside, which lets the service tell sleep from a stall.
+  static func awakeUs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000) }
   static func wallMs() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded(.down)) }
 
   private static let tzLock = NSLock()
@@ -89,7 +91,7 @@ func writeStdout(_ s: String) {
     let n = data.withUnsafeMutableBytes { Darwin.write(1, $0.baseAddress! + off, $0.count - off) }
     if n < 0 {
       if errno == EINTR { continue }
-      exit(0)  // reader is gone
+      _exit(0)  // reader is gone; skip atexit teardown on this writer thread
     }
     off += n
   }

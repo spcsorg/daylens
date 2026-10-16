@@ -48,6 +48,7 @@
    "source": "helper",
    "kind": "heartbeat",
    "obs": {
+    "awake_us": 612345678901,
     "permissions": {
      "accessibility": "granted"
     },
@@ -320,6 +321,7 @@
    "source": "helper",
    "kind": "heartbeat",
    "obs": {
+    "awake_us": 612345678901,
     "permissions": {
      "accessibility": "not_applicable"
     },

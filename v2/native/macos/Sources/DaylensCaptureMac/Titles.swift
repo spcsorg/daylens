@@ -155,9 +155,10 @@ final class TitleWorker: Thread {
       return
     }
     observer = obs
-    for n in [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXTitleChangedNotification] {
+    // Title changes are watched on the focused window only; on the app element they also fire for every label and button.
+    for n in [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification] {
       let err = AXObserverAddNotification(obs, element, n as CFString, refcon)
-      if err != .success && err != .notificationAlreadyRegistered && n != kAXTitleChangedNotification {
+      if err != .success && err != .notificationAlreadyRegistered {
         registrationFailed = true
         diag("ax_add_notification_failed", String(err.rawValue))
       }

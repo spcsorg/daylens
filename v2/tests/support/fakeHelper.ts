@@ -37,8 +37,13 @@ if (mode === 'crash_always') process.exit(3)
 snapshot()
 
 let heartbeats = true
+let asleep = false
+let sleepStart = 0
+let sleptUs = 0
+const awakeUs = () => t().mono_us - sleptUs
 const hb = setInterval(() => {
-  if (heartbeats) emit('heartbeat', { permissions: { accessibility: 'granted' }, titles: mode === 'titles_stalled' ? 'stalled' : 'ok', stall_ms: 0, dropped: 0 })
+  if (heartbeats && !asleep)
+    emit('heartbeat', { awake_us: awakeUs(), permissions: { accessibility: 'granted' }, titles: mode === 'titles_stalled' ? 'stalled' : 'ok', stall_ms: 0, dropped: 0 })
 }, hbMs)
 setInterval(() => {
   n++
@@ -66,8 +71,17 @@ setTimeout(() => {
   }
 }, afterMs)
 
-process.on('SIGUSR1', () => emit('power', { state: 'sleep' }))
-process.on('SIGUSR2', () => emit('power', { state: 'resume' }))
+// Simulated sleep: awake time stops between these two signals, as CLOCK_UPTIME_RAW does.
+process.on('SIGUSR1', () => {
+  emit('power', { state: 'sleep' })
+  asleep = true
+  sleepStart = t().mono_us
+})
+process.on('SIGUSR2', () => {
+  if (asleep) sleptUs += t().mono_us - sleepStart
+  asleep = false
+  emit('power', { state: 'resume' })
+})
 
 createInterface({ input: process.stdin })
   .on('line', (l) => {
