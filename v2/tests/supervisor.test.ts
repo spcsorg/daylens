@@ -181,14 +181,17 @@ test('a title channel that stalls opens a titles-only gap', async () => {
   await h.finish()
 })
 
-test('focus work dropped inside the helper becomes a gap with its time range', async () => {
+test('dropped focus work keeps focus uncertain from the first drop until the next focus line', async () => {
   const h = harness({ FAKE_MODE: 'loss', FAKE_AFTER_MS: '300' })
   h.sup.start()
-  await waitFor(() => h.gaps().some((g) => g.reason === 'events_dropped'))
+  await waitFor(() => h.gaps().some((g) => g.reason === 'events_dropped' && g.end_wall_ms !== null))
   const g = h.gaps().find((x) => x.reason === 'events_dropped')!
   assert.equal(g.scope, 'focus')
-  assert.equal(g.end_wall_ms! - g.start_wall_ms, 200)
-  assert.deepEqual(JSON.parse(g.detail!), { count: 7 })
+  assert.deepEqual(JSON.parse(g.detail!), { count: 1 })
+  h.store.flush()
+  const at = h.store.query<{ n: number }>(`SELECT count(*) AS n FROM observations WHERE kind = 'focus' AND event_wall_ms = ?`, g.end_wall_ms)[0]!
+  assert.equal(at.n, 1, 'the gap ends exactly at a recorded focus line')
+  assert.ok(g.end_wall_ms! - g.start_wall_ms >= 8000, `the 8 s after the dropped switch are uncertain, not credited to the previous app (${g.end_wall_ms! - g.start_wall_ms} ms)`)
   await h.finish()
 })
 

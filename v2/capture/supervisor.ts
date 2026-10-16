@@ -83,6 +83,8 @@ export class Supervisor {
   // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
   private recovering: { id: number; reason: GapReason } | null = null
   private titlesGap: number | null = null
+  // Open from the first dropped focus request until the next focus line, which the helper sends after the drop.
+  private focusLossGap: { id: number; count: number } | null = null
   private registrationGaps = new Map<'focus' | 'session' | 'power', number>()
   private rejectGap: { id: number; count: number; startWall: number } | null = null
   private awakeSilenceMs = 0
@@ -148,6 +150,7 @@ export class Supervisor {
     this.normalizer.interrupt(end)
     if (this.titlesGap !== null) this.store.closeGap(this.titlesGap, end)
     this.closeRegistrationGaps(end)
+    this.closeFocusLossGap(end)
     if (this.allGap) this.store.closeGap(this.allGap.id, end)
     if (this.run) this.store.endRun(this.run, end.wall_ms, 'service_stopped')
     this.store.markServiceStopped(end.wall_ms)
@@ -391,19 +394,37 @@ export class Supervisor {
       case 'loss': {
         const o = line.obs
         this.o.log(`helper dropped focus work count=${o.count}`)
-        const id = this.store.openGap({ reason: 'events_dropped', scope: 'focus', run: this.run, start: { wall_ms: o.from_wall_ms, mono_us: null, boot: line.boot }, detail: { count: o.count } })
-        this.store.closeGap(id, { wall_ms: o.to_wall_ms, mono_us: null, boot: line.boot })
-        // What was dropped may include the latest change; re-read the present.
-        this.normalizer.interrupt({ wall_ms: o.to_wall_ms, mono_us: null, boot: line.boot })
+        // Which app was in front is unknown from the first drop until a focus line arrives, not only at the dropped instants.
+        if (this.focusLossGap) {
+          this.focusLossGap.count += o.count
+          this.store.updateGap(this.focusLossGap.id, { detail: { count: this.focusLossGap.count } })
+        } else {
+          const id = this.store.openGap({ reason: 'events_dropped', scope: 'focus', run: this.run, start: { wall_ms: o.from_wall_ms, mono_us: null, boot: line.boot }, detail: { count: o.count } })
+          this.focusLossGap = { id, count: o.count }
+        }
+        this.normalizer.interrupt({ wall_ms: o.from_wall_ms, mono_us: null, boot: line.boot })
         this.send({ op: 'snapshot' })
         return
       }
       case 'bye':
         this.o.log(`helper bye reason=${/^[a-z_]{1,32}$/.test(line.obs.reason) ? line.obs.reason : 'other'}`)
         return
+      case 'focus':
+        if (this.focusLossGap) {
+          this.store.closeGap(this.focusLossGap.id, point)
+          this.focusLossGap = null
+        }
+        this.normalizer.handle(line)
+        return
       default:
         this.normalizer.handle(line)
     }
+  }
+
+  private closeFocusLossGap(at: GapPoint): void {
+    if (!this.focusLossGap) return
+    this.store.closeGap(this.focusLossGap.id, at)
+    this.focusLossGap = null
   }
 
   private onHello(line: LineOf<'hello'>): void {
@@ -503,6 +524,7 @@ export class Supervisor {
       this.titlesGap = null
     }
     this.closeRegistrationGaps(start)
+    this.closeFocusLossGap(start)
     // A helper that dies right after hello, before sending anything else, continues the same outage.
     if (!this.allGap && this.recovering && this.linesSinceHello <= 1) {
       this.store.reopenGap(this.recovering.id)

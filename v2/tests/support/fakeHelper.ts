@@ -53,7 +53,9 @@ const hb = setInterval(() => {
       dropped: 0,
     })
 }, hbMs)
+let focusPaused = false
 setInterval(() => {
+  if (focusPaused) return
   n++
   focus(n % 2 === 1 ? 'app_changed' : 'title_changed')
 }, Number(process.env.FAKE_FOCUS_MS ?? 150))
@@ -70,7 +72,13 @@ setTimeout(() => {
       heartbeats = false
       break
     case 'loss':
-      emit('loss', { channel: 'focus', count: 7, from_wall_ms: Date.now() - 300, to_wall_ms: Date.now() - 100 })
+      // A switch to B was dropped 8 s ago; the next focus line (C) is the first trustworthy one.
+      focusPaused = true
+      emit('loss', { channel: 'focus', count: 1, from_wall_ms: Date.now() - 8000, to_wall_ms: Date.now() - 8000 })
+      setTimeout(() => {
+        focusPaused = false
+        focus('app_changed')
+      }, 400)
       break
     case 'session_unregistered':
       emit('session', { state: 'locked', snapshot: false })
