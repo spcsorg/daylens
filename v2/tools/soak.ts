@@ -18,6 +18,8 @@ const { values } = parseArgs({
     'warmup-s': { type: 'string', default: '60' },
     'interval-s': { type: 'string', default: '10' },
     summarize: { type: 'boolean', default: false },
+    'from-ms': { type: 'string' },
+    'to-ms': { type: 'string' },
   },
 })
 const out = values.out!
@@ -52,12 +54,12 @@ function linearSlope(xs: number[], ys: number[]): number {
   return den === 0 ? 0 : num / den
 }
 
-export function summarize(dir: string, warmupS: number): Record<string, unknown> {
+export function summarize(dir: string, warmupS: number, window: { from?: number; to?: number } = {}): Record<string, unknown> {
   const samples: Sample[] = readFileSync(path.join(dir, 'samples.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   const owned = samples.filter((s) => s.name === 'node' || s.name.startsWith('daylens-capture'))
   const times = [...new Set(owned.map((s) => s.t_ms))].sort((a, b) => a - b)
   const t0 = times[0]!
-  const measured = times.filter((t) => t - t0 >= warmupS * 1000)
+  const measured = times.filter((t) => t - t0 >= warmupS * 1000 && t >= (window.from ?? 0) && t <= (window.to ?? Infinity))
   const from = measured[0]!
   const to = measured[measured.length - 1]!
   const wallS = (to - from) / 1000
@@ -144,5 +146,6 @@ async function run(): Promise<void> {
   console.log(JSON.stringify(summary, null, 2))
 }
 
-if (values.summarize) console.log(JSON.stringify(summarize(out, Number(values['warmup-s'])), null, 2))
+const window = { from: values['from-ms'] ? Number(values['from-ms']) : undefined, to: values['to-ms'] ? Number(values['to-ms']) : undefined }
+if (values.summarize) console.log(JSON.stringify(summarize(out, Number(values['warmup-s']), window), null, 2))
 else await run()

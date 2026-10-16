@@ -50,10 +50,13 @@ async function main(): Promise<void> {
   osa('tell application "Terminal" to activate')
   await sleep(800)
   for (let i = 0; i < 5; i++) {
+    // Another app can take the front at any time; a title change only counts on the focused window.
+    osa('tell application "Terminal" to activate')
+    await sleep(400)
     const title = `daylens-marker-${i}`
     markers.push({ t_ms: Date.now(), kind: 'title', app_id: APPS.Terminal!, title })
     osa(`tell application "Terminal" to set custom title of front window to "${title}"`)
-    await sleep(1000)
+    await sleep(800)
   }
   await sleep(1500)
   svc.kill('SIGTERM')
