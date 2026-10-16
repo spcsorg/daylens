@@ -596,6 +596,12 @@ function frontPid(): number | null {
   }
 }
 
+// The lock screen is in front while the Mac is locked; nothing can run until someone unlocks it.
+function locked(): boolean {
+  const f = frontPid()
+  return f !== null && commandOf(f).includes('loginwindow')
+}
+
 function pidOfApp(name: string): number | null {
   try {
     return Number(execFileSync('/usr/bin/pgrep', ['-nx', name], { encoding: 'utf8' }).trim()) || null
@@ -616,8 +622,8 @@ async function announce(what: string, seconds: number): Promise<void> {
   if (HEADLESS) return
   const need = Number(values['idle-s'])
   for (let said = false; ; ) {
-    if (idleSeconds() < need) {
-      if (!said) log(`${what}: waiting for ${need} s without keyboard or mouse input`)
+    if (idleSeconds() < need || locked()) {
+      if (!said) log(`${what}: waiting for an unlocked Mac with ${need} s without keyboard or mouse input`)
       said = true
       await sleep(10_000)
       continue
@@ -777,12 +783,14 @@ async function canary(): Promise<void> {
       markers.at(-1)!.label += ` (interrupted by pid ${foreign}, redone)`
       log(`  interrupted by ${foreign === -1 ? 'keyboard or mouse input' : `pid ${foreign}`}`)
       if (attempt >= 4) throw new Error(`step kept being interrupted: ${label}`)
-      if (foreign === -1) await announce('The canary test, continuing', 15)
+      if (foreign === -1 || locked()) await announce('The canary test, continuing', 15)
       if (front === 'browser') activateApp(values.app!)
     }
   }
   try {
     await announce(`The ${kind} canary test`, 30)
+    // Keeps the display awake, and so the screen unlocked, only while this run lasts.
+    if (!HEADLESS) spawn('/usr/bin/caffeinate', ['-d', '-i', '-w', String(process.pid)], { stdio: 'ignore', detached: true }).unref()
     await svc.start()
     await d.launch(shared)
     activateApp(values.app!)
