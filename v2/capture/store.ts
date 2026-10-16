@@ -59,7 +59,7 @@ export function acquireWriterLock(dir: string): () => void {
     } catch (err) {
       if ((err as { code?: string }).code !== 'EEXIST') throw err
       const holder = Number(readFileSync(file, 'utf8').trim())
-      if (Number.isInteger(holder) && holder > 0 && holder !== process.pid && pidAlive(holder)) throw new Error('another capture service is writing this folder')
+      if (Number.isInteger(holder) && holder > 0 && pidAlive(holder)) throw new Error('another capture service is writing this folder')
       unlinkSync(file)
     }
   }
