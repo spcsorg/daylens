@@ -5,6 +5,7 @@
   "description": "Lets Daylens on this computer see which page you're on, so you can find it again. Never in private windows.",
   "permissions": ["tabs", "nativeMessaging"],
   "incognito": "not_allowed",
+  "content_security_policy": { "extension_pages": "script-src 'self'" },
   "background": { "scripts": ["background.js"], "type": "module" },
   "action": {
     "default_title": "Daylens",

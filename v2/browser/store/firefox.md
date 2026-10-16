@@ -12,6 +12,7 @@ Package: `dist/daylens-firefox-<version>.zip`. Source package: `dist/daylens-fir
 | Privacy policy | The public Daylens privacy policy page |
 | Notes to reviewer | [listing.md, Reviewer notes](listing.md#reviewer-notes), plus the build steps below |
 | Source code | Required, because the shipped JavaScript is compiled from TypeScript |
+| Content security policy | `extension_pages: script-src 'self'`. Firefox's default adds `upgrade-insecure-requests`, which turns the local connection's `ws://127.0.0.1` into `wss://` and breaks it. No host permission is needed. The extension loads no remote content, so nothing else changes. |
 
 ## Build steps for the reviewer
 

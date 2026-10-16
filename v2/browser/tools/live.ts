@@ -38,6 +38,10 @@ const { values, positionals } = parseArgs({
     activate: { type: 'string' },
     // The local connection instead of native messaging: no host manifest, the listener on, pairing through the popup.
     local: { type: 'boolean', default: false },
+    // Firefox only: no screen, for the pairing and permission check (focus steps need a real window).
+    headless: { type: 'boolean', default: false },
+    // An unpacked extension folder to load instead of the dev build, for manifest experiments.
+    'ext-dir': { type: 'string' },
     'idle-s': { type: 'string', default: '120' },
     hold: { type: 'string', default: '5000' },
   },
@@ -47,6 +51,7 @@ const kind = values.browser as 'cft' | 'dia' | 'firefox'
 const out = path.resolve(values.out!)
 const HOLD = Number(values.hold)
 const LOCAL = values.local!
+const HEADLESS = values.headless!
 // Fixed so the runner can open the Firefox popup page; Firefox otherwise picks a random UUID per install.
 const FIREFOX_UUID = '6f2b7d1e-5c3a-4a8e-9d10-2b6e7f9a4c31'
 const FIREFOX_ID = 'browser@daylens.app'
@@ -451,12 +456,15 @@ class FirefoxDriver implements Driver {
         'user_pref("browser.tabs.warnOnClose", false);',
         'user_pref("app.update.disabledForTesting", true);',
         'user_pref("browser.privatebrowsing.autostart", false);',
+        // Extension console output goes to the browser log, where the runner can read why a connection failed.
+        'user_pref("devtools.console.stdout.chrome", true);',
+        'user_pref("devtools.console.stdout.content", true);',
         `user_pref("extensions.webextensions.uuids", ${JSON.stringify(JSON.stringify({ [FIREFOX_ID]: FIREFOX_UUID }))});`,
       ].join('\n') + '\n',
     )
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
     // System access lets the runner open the extension's own popup page, which BiDi navigation refuses.
-    this.proc = spawn(this.binary, ['-profile', this.profile, '--remote-debugging-port', String(this.port), '--remote-allow-system-access', url], {
+    this.proc = spawn(this.binary, ['-profile', this.profile, '--remote-debugging-port', String(this.port), '--remote-allow-system-access', ...(HEADLESS ? ['-headless'] : []), url], {
       env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -561,7 +569,7 @@ class FirefoxDriver implements Driver {
 
 function makeDriver(dir: string): Driver {
   const dist = path.join(v2, 'browser', 'dist')
-  if (kind === 'firefox') return new FirefoxDriver(values.app!, dir, path.join(dist, LOCAL ? 'firefox-dev' : 'firefox'))
+  if (kind === 'firefox') return new FirefoxDriver(values.app!, dir, values['ext-dir'] ?? path.join(dist, LOCAL ? 'firefox-dev' : 'firefox'))
   return new ChromiumDriver(kind, values.app!, dir, path.join(dist, 'chromium-dev'))
 }
 
@@ -605,6 +613,7 @@ function idleSeconds(): number {
 // Waits until nobody has touched the Mac for a while, tells them the screen is about to be taken over, and starts
 // only if the countdown passes untouched.
 async function announce(what: string, seconds: number): Promise<void> {
+  if (HEADLESS) return
   const need = Number(values['idle-s'])
   for (let said = false; ; ) {
     if (idleSeconds() < need) {
@@ -779,6 +788,10 @@ async function canary(): Promise<void> {
     activateApp(values.app!)
     const normal = await (d as ChromiumDriver | FirefoxDriver).firstPage(pages.base)
     if (LOCAL) pairingSeen = await pairThroughPopup(d, svc, dir)
+    if (HEADLESS) {
+      log('headless: pairing checked; focus steps need a real window, stopping here')
+      return
+    }
     await step('normal window: shared page', shared, false, () => d.activate(normal))
     await step('normal window: normal canary', normalUrl, false, () => d.navigate(normal, normalUrl))
     await step('normal window: shared page again', shared, false, () => d.navigate(normal, shared))
@@ -942,7 +955,19 @@ async function pairThroughPopup(d: Driver, svc: Service, dir: string): Promise<u
   if (d instanceof ChromiumDriver) await d.capture(popup, path.join(dir, 'popup-local.png'), false)
   await d.close(popup)
   log(`pairing: ${connected ? 'connected' : 'NOT connected'}; popup "${before}" -> "${after}"; daylens:// tabs while pairing ${pairTabs.length}, left after ${leftover}`)
-  if (!connected) throw new Error('the local connection did not come up after pairing')
+  if (!connected) {
+    // Why not: the same WebSocket from the extension's own page (same origin and CSP as its background), and its state.
+    const tabsNow = (await d.tabs()).map((t) => t.url.split('?')[0])
+    const page = await d.openWindow(d.popupUrl())
+    await sleep(1000)
+    const probe = await d.evaluate(
+      page,
+      `new Promise((resolve) => { const out = {}; try { const ws = new WebSocket('ws://127.0.0.1:27481/daylens/browser'); ws.onopen = () => { out.open = true; ws.close(); resolve(out) }; ws.onerror = () => { out.error = true }; ws.onclose = (e) => { out.close = e.code; resolve(out) }; setTimeout(() => resolve(out), 4000) } catch (e) { out.threw = String(e); resolve(out) } })`,
+    )
+    const status = await d.evaluate(page, `(globalThis.browser ?? globalThis.chrome).runtime.sendMessage({ t: 'status' })`)
+    log(`local connection did not come up. tabs ${JSON.stringify(tabsNow)}; websocket from the extension page: ${JSON.stringify(probe)}; extension state: ${JSON.stringify(status)}`)
+    throw new Error('the local connection did not come up after pairing')
+  }
   return { popup_before: before, popup_after: after, daylens_tabs_during: pairTabs, daylens_tabs_after: leftover, allow_asked: svc.confirmations }
 }
 
