@@ -2,7 +2,11 @@
 // Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
 
 import { parseArgs } from 'node:util'
-import { Normalizer, Privacy } from './normalize.ts'
+import { BrowserPages } from './browser.ts'
+import { BrowserSocket, statusMsg } from './browserSocket.ts'
+import { Privacy } from './normalize.ts'
+import { Pause } from './pause.ts'
+import { ServiceNormalizer } from './pipeline.ts'
 import { defaultDataDir, Store } from './store.ts'
 import { Supervisor } from './supervisor.ts'
 
@@ -27,8 +31,23 @@ if (!values.helper) {
 const heartbeatS = Number(values['heartbeat-s'])
 const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
 const store = new Store(values['data-dir'] ?? defaultDataDir(), { onError: (code) => log(`storage error code=${code}`) })
-const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
-const supervisor = new Supervisor(store, normalizer, {
+const privacy = new Privacy(store.exclusions())
+const pages = new BrowserPages(store, privacy, { log })
+let supervisor: Supervisor | null = null
+let browserSocket: BrowserSocket | null = null
+const pause = new Pause(store, {
+  onChange: (state, at) => {
+    log(`capture ${state.paused ? 'paused' : 'resumed'}`)
+    normalizer.interrupt(at)
+    if (!state.paused) {
+      supervisor?.requestSnapshot()
+      pages.requestSnapshots()
+    }
+    browserSocket?.broadcast(statusMsg(state))
+  },
+})
+const normalizer = new ServiceNormalizer(store, privacy, pause, pages)
+supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
   helperArgs: [
     ...(values['helper-arg'] ?? []),
@@ -47,7 +66,9 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
   log(`stopping signal=${signal}`)
-  await supervisor.stop()
+  pause.stop()
+  await browserSocket?.stop()
+  await supervisor!.stop()
   store.close()
   process.exit(0)
 }
@@ -59,4 +80,7 @@ if (process.platform === 'win32') process.on('SIGBREAK', () => void shutdown('SI
 if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
 
 log(`started pid=${process.pid}`)
+pause.restore()
 supervisor.start()
+browserSocket = new BrowserSocket(pages, pause, { log })
+void browserSocket.start()
