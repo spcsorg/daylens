@@ -182,23 +182,17 @@ test('stalled then recovered with the same title: the fresh read is a new row, n
   assert.equal(sink.rows[1]!.repeat_count, 1, 'later repeats merge into the fresh row')
 })
 
-test('input-aware: a title unchanged for 15 minutes while input continues is flagged; idle time does not count', () => {
+test('a title that stays the same through long active work is never flagged; only losing the ability to read it is', () => {
   const { sink, n } = setup()
   const te = app('com.apple.TextEdit')
-  const input = (state: 'idle' | 'active', t: number) => line('input', { state, last_input_wall_ms: t, threshold_s: 120, snapshot: false }, t)
-  n.handle(input('active', T0))
+  n.handle(line('input', { state: 'active', last_input_wall_ms: T0, threshold_s: 120, snapshot: false }, T0))
   n.handle(focus(te, 'Draft.rtf', T0))
-  n.onTitleChannel('ok', T0 + 10 * 60_000)
-  n.handle(input('idle', T0 + 10 * 60_000))
-  n.onTitleChannel('ok', T0 + 30 * 60_000)
-  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, [], 'reading without input is not stale')
-  n.handle(input('active', T0 + 30 * 60_000))
-  n.onTitleChannel('ok', T0 + 44 * 60_000)
-  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, [])
-  n.onTitleChannel('ok', T0 + 45 * 60_000)
+  for (let m = 1; m <= 180; m++) n.onTitleChannel('ok', T0 + m * 60_000)
+  n.handle(focus(te, 'Draft.rtf', T0 + 181 * 60_000, 'reconcile'))
+  assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, [], 'three hours in one document with input throughout is not stale')
+  assert.equal(sink.rows.filter((r) => r.kind === 'focus').length, 1)
+  n.onTitleChannel('stalled', T0 + 182 * 60_000)
   assert.deepEqual(sink.rows.find((r) => r.kind === 'focus')!.flags, ['possibly_stale'])
-  n.handle(focus(te, 'Draft.rtf', T0 + 46 * 60_000, 'reconcile'))
-  assert.equal(sink.rows.filter((r) => r.kind === 'focus').length, 1, 'an input-stale title is not "fresh" on the next read')
 })
 
 test('clock and time zone changes are kept as events, and a zone change splits the focus row', () => {
