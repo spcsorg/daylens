@@ -15,6 +15,7 @@ export type RowKind = 'focus' | 'input' | 'session' | 'power' | 'clock' | 'prese
 export type StoredTitleState =
   | 'ok'
   | 'empty'
+  | 'no_window'
   | 'no_permission'
   | 'timeout'
   | 'unavailable'

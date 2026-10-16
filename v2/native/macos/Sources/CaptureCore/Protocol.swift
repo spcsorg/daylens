@@ -17,7 +17,7 @@ public struct EventTime {
 }
 
 public enum IdentityState: String { case ok, access_denied, timeout, gone, none, unresolved }
-public enum TitleState: String { case ok, empty, no_permission, timeout, unavailable }
+public enum TitleState: String { case ok, empty, no_window, no_permission, timeout, unavailable }
 public enum ChannelState: String { case ok, degraded, stalled, no_permission }
 public enum FocusTrigger: String { case app_changed, window_changed, title_changed, reconcile, snapshot }
 

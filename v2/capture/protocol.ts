@@ -50,7 +50,7 @@ export interface AppIdentity {
   identity_state: IdentityState
   store: { aumid: string; package: string | null } | null
 }
-export type TitleState = 'ok' | 'empty' | 'no_permission' | 'timeout' | 'unavailable'
+export type TitleState = 'ok' | 'empty' | 'no_window' | 'no_permission' | 'timeout' | 'unavailable'
 export interface WindowInfo {
   window: string | null
   title: string | null
@@ -181,7 +181,7 @@ const PLATFORMS = ['macos', 'windows', 'linux'] as const
 const PERMISSION_STATES = ['granted', 'denied', 'not_applicable'] as const
 const CHANNEL_STATES = ['ok', 'degraded', 'stalled', 'no_permission'] as const
 const IDENTITY_STATES = ['ok', 'access_denied', 'timeout', 'gone', 'none', 'unresolved'] as const
-const TITLE_STATES = ['ok', 'empty', 'no_permission', 'timeout', 'unavailable'] as const
+const TITLE_STATES = ['ok', 'empty', 'no_window', 'no_permission', 'timeout', 'unavailable'] as const
 const FOCUS_TRIGGERS = ['app_changed', 'window_changed', 'title_changed', 'reconcile', 'snapshot'] as const
 const SESSION_STATES = [
   'locked',

@@ -66,7 +66,7 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `store` is set for packaged Windows apps: `aumid` (the application user model ID) and `package` (the package full name).
 
-`title_state`: `ok` (`title` is present); `empty` (the window has no title); `no_permission` (Accessibility is not granted); `timeout` (the read hung); `unavailable` (no focused window or the read failed). `title` is present exactly when `title_state` is `ok`, truncated to 1024 UTF-16 code units. Helpers send titles unmodified; cleaning happens in shared code.
+`title_state`: `ok` (`title` is present); `empty` (the window has no title); `no_window` (the app has no window to report: closed, hidden, or a desktop such as Finder's); `no_permission` (Accessibility is not granted); `timeout` (the read hung); `unavailable` (no focused window or the read failed). `title` is present exactly when `title_state` is `ok`, truncated to 1024 UTF-16 code units. Helpers send titles unmodified; cleaning happens in shared code.
 
 ## Contract tests
 

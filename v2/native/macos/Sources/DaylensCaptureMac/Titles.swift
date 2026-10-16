@@ -121,9 +121,8 @@ final class TitleWorker: Thread {
       emitIfChanged(r.trigger, WindowInfo(window: nil, title: nil, titleState: .no_permission), time: r.time, force: true, generation: r.generation)
       return
     }
-    let win = focused()
-    if !CFEqualOptional(win, focusedWindow) { watchWindow(win) }
-    emitIfChanged(r.trigger, readTitle(win), time: r.time, force: r.force || r.trigger == .app_changed, generation: r.generation)
+    if !pendingNotifications.isEmpty { registerPending() }
+    emitIfChanged(r.trigger, currentWindowInfo(), time: r.time, force: r.force || r.trigger == .app_changed, generation: r.generation)
   }
 
   private func setBusy(_ busy: Bool) {
@@ -134,10 +133,12 @@ final class TitleWorker: Thread {
     if let obs = observer {
       CFRunLoopRemoveSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
     }
+    cancelRefresh()
     observer = nil
     appElement = nil
     focusedWindow = nil
     observedPid = 0
+    pendingNotifications = []
   }
 
   private func observe(pid: pid_t, app: AppInfo) {
@@ -145,11 +146,10 @@ final class TitleWorker: Thread {
     observedPid = pid
     observedApp = app
     registrationFailed = false
+    refreshAttempt = 0
     guard pid > 0, AXIsProcessTrusted() else { updateDegraded(); return }
-    let element = AXUIElementCreateApplication(pid)
-    appElement = element
+    appElement = AXUIElementCreateApplication(pid)
     var obs: AXObserver?
-    let refcon = Unmanaged.passUnretained(self).toOpaque()
     guard AXObserverCreate(pid, axCallback, &obs) == .success, let obs else {
       registrationFailed = true
       diag("ax_observer_create_failed")
@@ -157,16 +157,63 @@ final class TitleWorker: Thread {
       return
     }
     observer = obs
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
     // Title changes are watched on the focused window only; on the app element they also fire for every label and button.
-    for n in [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification] {
+    pendingNotifications = [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification]
+    registerPending()
+  }
+
+  /// A just-launched or busy app answers -25204 until its Accessibility server is ready; those registrations are retried.
+  private func registerPending() {
+    guard let obs = observer, let element = appElement else { return }
+    let refcon = Unmanaged.passUnretained(self).toOpaque()
+    for n in pendingNotifications {
       let err = AXObserverAddNotification(obs, element, n as CFString, refcon)
-      if err != .success && err != .notificationAlreadyRegistered {
+      switch err {
+      case .success, .notificationAlreadyRegistered:
+        pendingNotifications.remove(n)
+      case .cannotComplete:
+        // A busy app may still have taken the registration; the retry confirms it. Stop asking it for now.
+        diag("ax_add_notification_pending", String(err.rawValue))
+        updateDegraded()
+        scheduleRefresh()
+        return
+      default:
+        pendingNotifications.remove(n)
         registrationFailed = true
         diag("ax_add_notification_failed", String(err.rawValue))
       }
     }
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
     updateDegraded()
+    if pendingNotifications.isEmpty { refreshAttempt = 0 }
+  }
+
+  // MARK: refresh with backoff
+
+  private var pendingNotifications: Set<String> = []
+  private var refreshTimer: CFRunLoopTimer?
+  private var refreshAttempt = 0
+  private static let refreshDelays: [Double] = [0.3, 1, 2, 4, 8, 15, 30, 60]
+
+  private func scheduleRefresh() {
+    guard refreshTimer == nil else { return }
+    let delay = TitleWorker.refreshDelays[min(refreshAttempt, TitleWorker.refreshDelays.count - 1)]
+    refreshAttempt += 1
+    let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + delay, 0, 0, 0) { [weak self] _ in
+      guard let self else { return }
+      self.refreshTimer = nil
+      self.setBusy(true)
+      defer { self.setBusy(false) }
+      if !self.pendingNotifications.isEmpty { self.registerPending() }
+      self.emitIfChanged(.window_changed, self.currentWindowInfo(), time: Clock.now(), force: false)
+    }
+    refreshTimer = timer
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, .defaultMode)
+  }
+
+  private func cancelRefresh() {
+    if let t = refreshTimer { CFRunLoopTimerInvalidate(t) }
+    refreshTimer = nil
   }
 
   private func watchWindow(_ win: AXUIElement?) {
@@ -179,25 +226,109 @@ final class TitleWorker: Thread {
     guard let obs = observer, let win else { return }
     let e1 = AXObserverAddNotification(obs, win, kAXTitleChangedNotification as CFString, refcon)
     _ = AXObserverAddNotification(obs, win, kAXUIElementDestroyedNotification as CFString, refcon)
-    registrationFailed = !(e1 == .success || e1 == .notificationAlreadyRegistered)
-    if registrationFailed { diag("ax_title_observer_failed", String(e1.rawValue)) }
+    switch e1 {
+    case .success, .notificationAlreadyRegistered:
+      registrationFailed = false
+    case .invalidUIElement:
+      // The window closed between finding it and watching it.
+      focusedWindow = nil
+    case .cannotComplete:
+      focusedWindow = nil
+      scheduleRefresh()
+    default:
+      registrationFailed = true
+      diag("ax_title_observer_failed", String(e1.rawValue))
+    }
     updateDegraded()
   }
 
   private func updateDegraded() {
-    lock.lock(); _degraded = registrationFailed; lock.unlock()
+    lock.lock(); _degraded = registrationFailed || !pendingNotifications.isEmpty; lock.unlock()
   }
 
-  private func focused() -> AXUIElement? {
-    guard let app = appElement else { return nil }
-    var ref: CFTypeRef?
-    let err = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &ref)
-    guard err == .success, let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+  private enum WindowLookup {
+    case window(AXUIElement)
+    case noWindow
+    case busy
+    case failed
+  }
+
+  private func element(_ ref: CFTypeRef?) -> AXUIElement? {
+    guard let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
     return (ref as! AXUIElement)
   }
 
-  private func readTitle(_ win: AXUIElement?) -> WindowInfo {
-    guard let win else { return WindowInfo(window: nil, title: nil, titleState: .unavailable) }
+  private func string(_ el: AXUIElement, _ attr: String) -> String? {
+    var ref: CFTypeRef?
+    return AXUIElementCopyAttributeValue(el, attr as CFString, &ref) == .success ? ref as? String : nil
+  }
+
+  private func isWindow(_ el: AXUIElement) -> Bool { string(el, kAXRoleAttribute) == kAXWindowRole }
+
+  /// Focused window, then main window, then the first real window. A busy reply ends the pass at once,
+  /// so one slow app costs at most one timeout.
+  private func lookUpWindow() -> WindowLookup {
+    guard let app = appElement else { return .failed }
+    var sawNoValue = false
+    for attr in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+      var ref: CFTypeRef?
+      switch AXUIElementCopyAttributeValue(app, attr as CFString, &ref) {
+      case .success:
+        if let w = element(ref), isWindow(w) { return .window(w) }
+      case .cannotComplete:
+        return .busy
+      case .noValue:
+        sawNoValue = true
+      default:
+        break
+      }
+    }
+    var ref: CFTypeRef?
+    switch AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) {
+    case .success:
+      let windows = ((ref as? [AnyObject]) ?? []).compactMap { element($0) }.filter { w in
+        guard isWindow(w) else { return false }
+        var m: CFTypeRef?
+        return !(AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &m) == .success && (m as? Bool) == true)
+      }
+      if let standard = windows.first(where: { string($0, kAXSubroleAttribute) == kAXStandardWindowSubrole }) { return .window(standard) }
+      if let any = windows.first { return .window(any) }
+      return .noWindow
+    case .cannotComplete:
+      return .busy
+    case .noValue:
+      return .noWindow
+    default:
+      return sawNoValue ? .noWindow : .failed
+    }
+  }
+
+  /// Resolves the window to report, watches it, and reads its title.
+  private func currentWindowInfo() -> WindowInfo {
+    switch lookUpWindow() {
+    case .window(let w):
+      if !CFEqualOptional(w, focusedWindow) { watchWindow(w) }
+      let info = readTitle(w)
+      if info.titleState == .unavailable, focusedWindow == nil, case .window(let again) = lookUpWindow() {
+        // The window went away mid-read; one fresh look.
+        watchWindow(again)
+        return readTitle(again)
+      }
+      if info.titleState == .timeout { scheduleRefresh() }
+      return info
+    case .noWindow:
+      if focusedWindow != nil { watchWindow(nil) }
+      return WindowInfo(window: nil, title: nil, titleState: .no_window)
+    case .busy:
+      scheduleRefresh()
+      return WindowInfo(window: nil, title: nil, titleState: .timeout)
+    case .failed:
+      if !pendingNotifications.isEmpty { scheduleRefresh() }
+      return WindowInfo(window: nil, title: nil, titleState: .unavailable)
+    }
+  }
+
+  private func readTitle(_ win: AXUIElement) -> WindowInfo {
     let id = "ax-\(CFHash(win))"
     var ref: CFTypeRef?
     switch AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &ref) {
@@ -205,6 +336,9 @@ final class TitleWorker: Thread {
     case .noValue: return WindowInfo(window: id, title: nil, titleState: .empty)
     case .apiDisabled: return WindowInfo(window: id, title: nil, titleState: .no_permission)
     case .cannotComplete: return WindowInfo(window: id, title: nil, titleState: .timeout)
+    case .invalidUIElement:
+      focusedWindow = nil
+      return WindowInfo(window: id, title: nil, titleState: .unavailable)
     default: return WindowInfo(window: id, title: nil, titleState: .unavailable)
     }
   }
@@ -222,19 +356,11 @@ final class TitleWorker: Thread {
     setBusy(true)
     defer { setBusy(false) }
     switch name {
-    case kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXUIElementDestroyedNotification:
-      let win = focused()
-      if !CFEqualOptional(win, focusedWindow) { watchWindow(win) }
-      emitIfChanged(.window_changed, readTitle(win), time: time, force: false)
     case kAXTitleChangedNotification:
-      // App-level registrations also report title changes of buttons and other elements.
-      guard let fw = focusedWindow, CFEqual(fw, element) else {
-        let win = focused()
-        if !CFEqualOptional(win, focusedWindow) { watchWindow(win) }
-        emitIfChanged(.window_changed, readTitle(win), time: time, force: false)
-        return
-      }
+      guard let fw = focusedWindow, CFEqual(fw, element) else { fallthrough }
       emitIfChanged(.title_changed, readTitle(fw), time: time, force: false)
+    case kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXUIElementDestroyedNotification:
+      emitIfChanged(.window_changed, currentWindowInfo(), time: time, force: false)
     default:
       break
     }
