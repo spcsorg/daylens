@@ -87,6 +87,7 @@
      "path": "/System/Applications/Utilities/Terminal.app",
      "pid": 501,
      "registered_browser": false,
+     "engine": "none",
      "identity_state": "ok",
      "store": null
     },
@@ -122,6 +123,7 @@
      "path": "/System/Applications/Utilities/Terminal.app",
      "pid": 501,
      "registered_browser": false,
+     "engine": "none",
      "identity_state": "ok",
      "store": null
     },
@@ -157,6 +159,7 @@
      "path": "/System/Applications/Utilities/Terminal.app",
      "pid": 501,
      "registered_browser": false,
+     "engine": "none",
      "identity_state": "ok",
      "store": null
     },
@@ -365,6 +368,7 @@
      "path": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe",
      "pid": 9120,
      "registered_browser": false,
+     "engine": "none",
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -403,6 +407,7 @@
      "path": null,
      "pid": 4,
      "registered_browser": false,
+     "engine": "unknown",
      "identity_state": "access_denied",
      "store": null
     },
@@ -438,6 +443,7 @@
      "path": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe",
      "pid": 9120,
      "registered_browser": false,
+     "engine": "none",
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -596,6 +602,7 @@
      "path": null,
      "pid": 7712,
      "registered_browser": false,
+     "engine": "unknown",
      "identity_state": "unresolved",
      "store": null
     },

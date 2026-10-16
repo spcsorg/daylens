@@ -26,6 +26,7 @@ export function app(appId: string | null, extra: Partial<AppIdentity> = {}): App
     path: null,
     pid: 100,
     registered_browser: false,
+    engine: 'none',
     identity_state: appId === null ? 'access_denied' : 'ok',
     store: null,
     ...extra,

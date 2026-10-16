@@ -41,12 +41,15 @@ export interface HeartbeatObs {
   dropped: number
 }
 export type IdentityState = 'ok' | 'access_denied' | 'timeout' | 'gone' | 'none' | 'unresolved'
+// What the app's own files say about its web engine. A platform fact; shared code decides what it means.
+export type Engine = 'browser' | 'app_runtime' | 'none' | 'unknown'
 export interface AppIdentity {
   app_id: string | null
   name: string | null
   path: string | null
   pid: number | null
   registered_browser: boolean
+  engine: Engine
   identity_state: IdentityState
   store: { aumid: string; package: string | null } | null
 }
@@ -220,6 +223,7 @@ function appIdentity(v: unknown): AppIdentity {
     path: strOrNull(o, 'path', 2048),
     pid: intOrNull(o, 'pid'),
     registered_browser: bool(o, 'registered_browser'),
+    engine: oneOf(o, 'engine', ['browser', 'app_runtime', 'none', 'unknown'] as const),
     identity_state: oneOf(o, 'identity_state', IDENTITY_STATES),
     store,
   }

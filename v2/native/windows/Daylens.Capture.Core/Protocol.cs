@@ -16,7 +16,7 @@ public sealed record StoreIdentity(string Aumid, string? Package);
 /// Whether each event source's subscription is in place.
 public readonly record struct Registrations(bool Focus, bool Session, bool Power);
 
-public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store)
+public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store, Engine Engine = Engine.Unknown)
 {
     public static readonly AppInfo NoneInFront = new(null, null, null, null, false, IdentityState.None, null);
     public static AppInfo Unknown(int? pid, IdentityState state) => new(null, null, null, pid, false, state, null);
@@ -53,6 +53,10 @@ public sealed record WindowInfo
 
 public static class Names
 {
+    public static string Of(Engine e) => e switch
+    {
+        Engine.Browser => "browser", Engine.AppRuntime => "app_runtime", Engine.None => "none", _ => "unknown",
+    };
     public static string Of(IdentityState s) => s switch
     {
         IdentityState.Ok => "ok", IdentityState.AccessDenied => "access_denied", IdentityState.Timeout => "timeout",
@@ -124,6 +128,7 @@ public static class Obs
         WriteNullable(w, "path", Clip(app.Path, 2048));
         if (app.Pid is int pid) w.WriteNumber("pid", pid); else w.WriteNull("pid");
         w.WriteBoolean("registered_browser", app.RegisteredBrowser);
+        w.WriteString("engine", Names.Of(app.Engine));
         w.WriteString("identity_state", Names.Of(app.IdentityState));
         if (app.Store is { } s)
         {

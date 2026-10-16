@@ -62,6 +62,8 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `identity_state`: `ok`; `access_denied` (the process could not be queried, identity fields are null); `timeout` (the query hung and was abandoned); `gone` (the process exited first); `none` (nothing is in front); `unresolved` (a host window, such as a Windows ApplicationFrameHost frame, whose real app could not be found). Shared code treats any state other than `ok` as unknown and withholds the title.
 
+`engine` is what the app's own files say about its web engine: `browser` (a browser's engine and browser resources: a Chromium framework with its own renderer helper, or Gecko's `browser/omni.ja`; on Windows `chrome.dll`, `msedge.dll`, or Chromium without `resources/app.asar`, or Gecko's `browser/omni.ja`; for packaged apps, a manifest declaring `http` and `https`), `app_runtime` (an app built on a web runtime: Electron's `app.asar` or Electron Framework, or CEF), `none` (no web engine found), `unknown` (the helper could not inspect the app). Shared code withholds titles for `browser` and `unknown`.
+
 `registered_browser` is a platform fact, not a decision: the app is registered to open `http` and `https` links. Shared code decides what that means for privacy.
 
 `store` is set for packaged Windows apps: `aumid` (the application user model ID) and `package` (the package full name).

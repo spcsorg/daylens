@@ -135,3 +135,21 @@ test('a real helper whose title worker is stuck while its main loop lives is res
   assert.ok(titles && titles.end_wall_ms !== null, 'titles gap is closed when the new helper says hello')
   assert.ok(titles.end_wall_ms - titles.start_wall_ms < 8000, `titles gap ${titles.end_wall_ms - titles.start_wall_ms} ms`)
 })
+
+test('the real helper tells installed browsers from Electron and CEF apps by their own files', { skip }, () => {
+  const expected: Record<string, string> = {
+    '/Users/tonny/Applications/Daylens Test Browsers/Google Chrome for Testing.app': 'browser',
+    '/Users/tonny/Applications/Daylens Test Browsers/Firefox.app': 'browser',
+    '/Applications/Dia.app': 'browser',
+    '/Applications/Claude.app': 'app_runtime',
+    '/Applications/Daylens.app': 'app_runtime',
+    '/Applications/Spotify.app': 'app_runtime',
+    '/System/Applications/TextEdit.app': 'none',
+    '/Applications/Does Not Exist.app': 'unknown',
+  }
+  const present = Object.keys(expected).filter((p) => existsSync(p) || p.includes('Does Not Exist'))
+  const out = execFileSync(HELPER, ['--classify', ...present]).toString().trim().split('\n')
+  const got = Object.fromEntries(out.map((l) => l.split('\t').reverse()))
+  for (const p of present) assert.equal(got[p], expected[p], p)
+  assert.ok(present.length >= 4, 'enough real bundles to mean something')
+})

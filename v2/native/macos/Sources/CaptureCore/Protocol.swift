@@ -27,16 +27,18 @@ public struct AppInfo: Equatable {
   public var path: String?
   public var pid: Int?
   public var registeredBrowser: Bool
+  public var engine: Engine
   public var identityState: IdentityState
-  public init(appId: String?, name: String?, path: String?, pid: Int?, registeredBrowser: Bool, identityState: IdentityState) {
+  public init(appId: String?, name: String?, path: String?, pid: Int?, registeredBrowser: Bool, engine: Engine = .unknown, identityState: IdentityState) {
     self.appId = appId; self.name = name; self.path = path; self.pid = pid
-    self.registeredBrowser = registeredBrowser; self.identityState = identityState
+    self.registeredBrowser = registeredBrowser; self.engine = engine; self.identityState = identityState
   }
-  public static let none = AppInfo(appId: nil, name: nil, path: nil, pid: nil, registeredBrowser: false, identityState: .none)
+  public static let none = AppInfo(appId: nil, name: nil, path: nil, pid: nil, registeredBrowser: false, engine: .unknown, identityState: .none)
   var json: JSON {
     .object([
       ("app_id", .str(clip(appId, 1024))), ("name", .str(clip(name, 512))), ("path", .str(clip(path, 2048))), ("pid", .int(pid)),
-      ("registered_browser", .bool(registeredBrowser)), ("identity_state", .string(identityState.rawValue)), ("store", .null),
+      ("registered_browser", .bool(registeredBrowser)), ("engine", .string(engine.rawValue)),
+      ("identity_state", .string(identityState.rawValue)), ("store", .null),
     ])
   }
 }

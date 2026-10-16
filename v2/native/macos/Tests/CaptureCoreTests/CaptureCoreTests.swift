@@ -3,7 +3,7 @@ import XCTest
 
 final class CaptureCoreTests: XCTestCase {
   let time = EventTime(wallMs: 1_792_130_412_345, monoUs: 881_234_567_890, tz: "Africa/Kigali", tzOffsetMin: 120)
-  let term = AppInfo(appId: "com.apple.Terminal", name: "Terminal", path: "/System/Applications/Utilities/Terminal.app", pid: 501, registeredBrowser: false, identityState: .ok)
+  let term = AppInfo(appId: "com.apple.Terminal", name: "Terminal", path: "/System/Applications/Utilities/Terminal.app", pid: 501, registeredBrowser: false, engine: .none, identityState: .ok)
 
   func fixtures() throws -> [String: Any] {
     let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../protocol/fixtures/valid.json").standardized
@@ -142,6 +142,23 @@ final class CaptureCoreTests: XCTestCase {
     _ = q.pop()
     q.recordLoss(wallMs: 10)
     XCTAssertEqual(q.takeLoss(), .init(count: 1, fromWallMs: 10, toWallMs: 10))
+  }
+
+  func testBundleClassifierSeparatesBrowsersFromWebRuntimeApps() {
+    func l(_ res: [String]?, _ fws: [String] = [], gecko: Bool = false, helpers: [String: [String]] = [:]) -> BundleListing {
+      BundleListing(resources: res, frameworks: fws, geckoBrowserResources: gecko, frameworkHelpers: helpers)
+    }
+    XCTAssertEqual(classifyBundle(l(["Info.plist"], ["Google Chrome Framework.framework"],
+                                    helpers: ["Google Chrome Framework.framework": ["Google Chrome Helper.app", "Google Chrome Helper (Renderer).app"]])), .browser)
+    XCTAssertEqual(classifyBundle(l(["omni.ja"], gecko: true)), .browser, "Firefox and portable Gecko browsers")
+    XCTAssertEqual(classifyBundle(l(["app.asar", "icon.icns"], ["Electron Framework.framework"],
+                                    helpers: ["Electron Framework.framework": ["Slack Helper (Renderer).app"]])), .app_runtime, "Electron ships a renderer helper too")
+    XCTAssertEqual(classifyBundle(l(["app.asar"], ["Codex Framework.framework"],
+                                    helpers: ["Codex Framework.framework": ["Codex Helper (Renderer).app"]])), .app_runtime, "a renamed Electron framework still has app.asar")
+    XCTAssertEqual(classifyBundle(l(["icon.icns"], ["Chromium Embedded Framework.framework"])), .app_runtime, "CEF apps such as Spotify")
+    XCTAssertEqual(classifyBundle(l(["Base.lproj"], ["Sparkle.framework"])), .none)
+    XCTAssertEqual(classifyBundle(l(nil)), .unknown, "a bundle that cannot be read is unknown, never normal")
+    XCTAssertEqual(classifyBundle(nil), .unknown)
   }
 
   func testActiveChecksNeverSpinFasterThanHalfASecond() {

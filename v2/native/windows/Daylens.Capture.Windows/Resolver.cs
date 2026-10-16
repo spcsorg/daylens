@@ -164,10 +164,11 @@ internal sealed unsafe class Resolver
         if (aumid is not null)
         {
             var name = package is null ? null : PackageDisplayName(aumid, package);
-            browser |= package is not null && _webPackages.TryGetValue(package, out var web) && web;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package));
+            bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
+            browser |= web == true;
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web));
         }
-        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null);
+        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path));
     }
 
     string? ExeName(string path)
@@ -223,6 +224,41 @@ internal sealed unsafe class Resolver
         catch { Diag.Write("package_name_failed"); }
         _packageNames[key] = name;
         return name;
+    }
+
+    readonly Dictionary<string, Engine> _engines = new(StringComparer.OrdinalIgnoreCase);
+
+    Engine EngineOf(string exePath)
+    {
+        var dir = Path.GetDirectoryName(exePath);
+        if (dir is null) return Engine.Unknown;
+        if (_engines.TryGetValue(dir, out var cached)) return cached;
+        var engine = Engines.Classify(ListShallow(dir));
+        if (_engines.Count > 512) _engines.Clear();
+        _engines[dir] = engine;
+        return engine;
+    }
+
+    // Names in the folder and one level below, enough for resources/app.asar, <version>/chrome.dll and browser/omni.ja.
+    static List<string>? ListShallow(string dir)
+    {
+        try
+        {
+            var entries = new List<string>();
+            foreach (var e in Directory.EnumerateFileSystemEntries(dir).Take(400))
+            {
+                var name = Path.GetFileName(e);
+                entries.Add(name);
+                if (Directory.Exists(e))
+                    foreach (var sub in Directory.EnumerateFileSystemEntries(e).Take(400)) entries.Add(name + "/" + Path.GetFileName(sub));
+            }
+            return entries;
+        }
+        catch
+        {
+            Diag.Write("engine_listing_failed");
+            return null;
+        }
     }
 
     bool IsRegisteredBrowser(string exePath)

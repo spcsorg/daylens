@@ -21,6 +21,7 @@ export type StoredTitleState =
   | 'unavailable'
   | 'withheld_browser'
   | 'withheld_unknown_app'
+  | 'withheld_unclassified'
 
 export interface ObservationRow {
   run: string
@@ -130,7 +131,7 @@ export function cleanTitle(raw: string): CleanTitle {
 
 export interface Classification {
   excluded: boolean
-  title: 'allowed' | 'withheld_browser' | 'withheld_unknown_app'
+  title: 'allowed' | 'withheld_browser' | 'withheld_unknown_app' | 'withheld_unclassified'
 }
 
 function basename(p: string): string {
@@ -158,11 +159,15 @@ export class Privacy {
     if (app.identity_state !== 'ok' || (appId === null && exe === null)) {
       return { excluded: false, title: 'withheld_unknown_app' }
     }
-    const browser =
-      (app.registered_browser && !(appId !== null && KNOWN_NON_BROWSER_APP_IDS.has(appId))) ||
-      (appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) ||
-      (exe !== null && KNOWN_BROWSER_EXES.has(exe))
-    return { excluded: false, title: browser ? 'withheld_browser' : 'allowed' }
+    // Order matters: a known browser is always withheld; a known non-browser overrides the platform facts;
+    // otherwise any sign of a browser, or no way to tell, withholds the title. Unknown is never treated as normal.
+    if ((appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) || (exe !== null && KNOWN_BROWSER_EXES.has(exe))) {
+      return { excluded: false, title: 'withheld_browser' }
+    }
+    if (appId !== null && KNOWN_NON_BROWSER_APP_IDS.has(appId)) return { excluded: false, title: 'allowed' }
+    if (app.registered_browser || app.engine === 'browser') return { excluded: false, title: 'withheld_browser' }
+    if (app.engine === 'unknown') return { excluded: false, title: 'withheld_unclassified' }
+    return { excluded: false, title: 'allowed' }
   }
 }
 

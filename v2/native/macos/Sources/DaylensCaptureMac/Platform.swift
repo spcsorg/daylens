@@ -72,6 +72,42 @@ final class BrowserRegistry {
 
 let browsers = BrowserRegistry()
 
+/// Reads a bundle's own files to tell a browser from an app built on a web runtime; cached per bundle.
+final class EngineRegistry {
+  private let lock = NSLock()
+  private var cache: [String: Engine] = [:]
+
+  func engine(bundleURL: URL?) -> Engine {
+    guard let url = bundleURL else { return .unknown }
+    lock.lock()
+    if let e = cache[url.path] { lock.unlock(); return e }
+    lock.unlock()
+    let e = classifyBundle(listing(url))
+    lock.lock(); cache[url.path] = e; lock.unlock()
+    return e
+  }
+
+  private func listing(_ url: URL) -> BundleListing? {
+    let fm = FileManager.default
+    let contents = url.appendingPathComponent("Contents")
+    let res = contents.appendingPathComponent("Resources")
+    let fwDir = contents.appendingPathComponent("Frameworks")
+    guard let resources = try? fm.contentsOfDirectory(atPath: res.path) else { return nil }
+    let frameworks = (try? fm.contentsOfDirectory(atPath: fwDir.path)) ?? []
+    var helpers: [String: [String]] = [:]
+    for fw in frameworks where fw.hasSuffix(".framework") {
+      let base = fwDir.appendingPathComponent(fw)
+      helpers[fw] = (try? fm.contentsOfDirectory(atPath: base.appendingPathComponent("Versions/Current/Helpers").path))
+        ?? (try? fm.contentsOfDirectory(atPath: base.appendingPathComponent("Helpers").path)) ?? []
+    }
+    return BundleListing(resources: resources, frameworks: frameworks,
+                         geckoBrowserResources: fm.fileExists(atPath: res.appendingPathComponent("browser/omni.ja").path),
+                         frameworkHelpers: helpers)
+  }
+}
+
+let engines = EngineRegistry()
+
 func appInfo(_ app: NSRunningApplication?) -> AppInfo {
   guard let app else { return .none }
   if app.isTerminated {
@@ -83,6 +119,7 @@ func appInfo(_ app: NSRunningApplication?) -> AppInfo {
     path: app.bundleURL?.path ?? app.executableURL?.path,
     pid: Int(app.processIdentifier),
     registeredBrowser: browsers.isRegisteredBrowser(bundleURL: app.bundleURL, bundleId: app.bundleIdentifier),
+    engine: engines.engine(bundleURL: app.bundleURL),
     identityState: .ok)
 }
 

@@ -59,7 +59,8 @@ static class TestSupport
         9120,
         false,
         IdentityState.Ok,
-        new StoreIdentity("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", "Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe"));
+        new StoreIdentity("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", "Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe"),
+        Engine.None);
 
     /// True when the string has no unpaired surrogate.
     public static bool IsWellFormedUtf16(string s)

@@ -282,7 +282,7 @@ test('Codex registers for web links but is not a browser; Atlas stays withheld',
 
 test('Codex keeps its titles only while its window is not reported private; exclusions still apply', () => {
   const { sink, n } = setup()
-  const codex = app('com.openai.codex', { name: 'ChatGPT', registered_browser: true })
+  const codex = app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, engine: 'app_runtime' })
   const at = (mode: 'normal' | 'private' | 'unknown' | undefined, title: string, t: number) => {
     const l = focus(codex, title, t, 'title_changed') as unknown as { obs: { window: Record<string, unknown> } }
     if (mode) l.obs.window.mode = mode
@@ -301,4 +301,32 @@ test('Codex keeps its titles only while its window is not reported private; excl
   assert.equal(sink.gaps.at(-1)!.reason, 'excluded')
   assert.ok(!JSON.stringify(sink).includes(CANARY))
   assert.ok(sink.rows.every((r) => !('url' in r)), 'no address is ever stored')
+})
+
+test('a browser on no list and without a link registration is still withheld when its engine says browser', () => {
+  const { sink, n } = setup()
+  const palemoon = app('C:\\Tools\\PaleMoonPortable\\App\\Palemoon\\palemoon.exe', {
+    path: 'C:\\Tools\\PaleMoonPortable\\App\\Palemoon\\palemoon.exe',
+    registered_browser: false,
+    engine: 'browser',
+  })
+  n.handle(focus(palemoon, `${CANARY} Private Browsing`, T0, 'app_changed'))
+  assert.equal(sink.rows[0]!.title_state, 'withheld_browser')
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
+test('when the helper cannot tell what engine an app has, its title is withheld', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.example.NewBrowser', { registered_browser: false, engine: 'unknown' }), `${CANARY} private`, T0, 'app_changed'))
+  assert.equal(sink.rows[0]!.title_state, 'withheld_unclassified')
+  assert.equal(sink.rows[0]!.app_id, 'com.example.NewBrowser', 'the app time is still recorded')
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
+test('Electron and CEF apps keep their titles; they ship Chromium but are not browsers', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', pid: 1 }), 'general - Slack', T0, 'app_changed'))
+  n.handle(focus(app('com.microsoft.VSCode', { engine: 'app_runtime', pid: 2 }), 'store.ts — v2', T0 + 1, 'app_changed'))
+  n.handle(focus(app('com.spotify.client', { engine: 'app_runtime', pid: 3 }), 'Spotify Premium', T0 + 2, 'app_changed'))
+  assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'ok', 'ok'])
 })
