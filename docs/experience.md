@@ -78,7 +78,7 @@ Ask answers questions about any day from the same record.
 
 Offered after onboarding, from Settings and from an hour Daylens could not read, never as an onboarding step. One click per browser, with a one-line explanation: it lets Daylens see which page you were on, never in private windows.
 
-The extension's own popup shows whether it is connected to Daylens, a pause button, and a link that opens Daylens. Nothing else.
+The extension's own popup shows whether it is connected to Daylens, a pause for that browser only, and a link that opens Daylens. Nothing else. On Windows, before the first connection, it shows one button to connect. The browser's toolbar hides the extension in private windows, so the popup has no private-window state.
 
 ## Tray and menu bar
 
