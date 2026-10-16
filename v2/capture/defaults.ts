@@ -54,8 +54,18 @@ export const KNOWN_BROWSER_APP_IDS: ReadonlySet<string> = new Set(
     'com.duckduckgo.macos.browser',
     'net.mullvad.mullvadbrowser',
     'org.mozilla.librewolf',
+    'com.openai.atlas',
+    'com.openai.atlas.beta',
+    'com.openai.chatgpt.atlas',
   ].map((s) => s.toLowerCase()),
 )
+
+// Apps that register as http/https handlers only to open links, and show no web pages of their own.
+// The known-browser list above still wins over this one.
+export const KNOWN_NON_BROWSER_APP_IDS: ReadonlySet<string> = new Set(['com.openai.codex'].map((s) => s.toLowerCase()))
+
+// Apps whose bundle names itself after a different product.
+export const DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([['com.openai.codex', 'Codex']])
 
 export const KNOWN_BROWSER_EXES: ReadonlySet<string> = new Set([
   'chrome.exe',

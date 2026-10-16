@@ -266,3 +266,16 @@ test('locking or sleeping ends an excluded gap; a later snapshot reopens it', ()
   assert.equal(sink.gaps.length, 2)
   assert.equal(sink.gaps[1]!.start.wall_ms, T0 + 8 * 3_600_000 + 10, 'the night is not counted as excluded')
 })
+
+test('Codex registers for web links but is not a browser; Atlas stays withheld', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, pid: 1 }), 'Fix capture tests', T0, 'app_changed'))
+  n.handle(focus(app('com.openai.atlas', { name: 'ChatGPT Atlas', registered_browser: true, pid: 2 }), `${CANARY} page`, T0 + 1, 'app_changed'))
+  n.handle(focus(app('com.openai.atlas.beta', { name: 'ChatGPT Atlas', registered_browser: false, pid: 3 }), `${CANARY} beta`, T0 + 2, 'app_changed'))
+  const [codex, atlas, beta] = sink.rows
+  assert.equal(codex!.title, 'Fix capture tests')
+  assert.equal(codex!.app_name, 'Codex', 'named after the product, not the bundle name')
+  assert.equal(atlas!.title_state, 'withheld_browser')
+  assert.equal(beta!.title_state, 'withheld_browser', 'Atlas is withheld even without a URL registration')
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})

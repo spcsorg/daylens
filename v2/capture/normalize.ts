@@ -1,7 +1,14 @@
 // Shared normalization: everything between a validated helper line and storage.
 // Privacy decisions are made per line from the identity that line carries.
 
-import { DEFAULT_EXCLUSIONS, KNOWN_BROWSER_APP_IDS, KNOWN_BROWSER_EXES, type ExclusionRule } from './defaults.ts'
+import {
+  DEFAULT_EXCLUSIONS,
+  DISPLAY_NAME_OVERRIDES,
+  KNOWN_BROWSER_APP_IDS,
+  KNOWN_BROWSER_EXES,
+  KNOWN_NON_BROWSER_APP_IDS,
+  type ExclusionRule,
+} from './defaults.ts'
 import type { AppIdentity, ChannelState, Line, LineOf } from './protocol.ts'
 
 export type RowKind = 'focus' | 'input' | 'session' | 'power' | 'clock' | 'presence'
@@ -151,7 +158,7 @@ export class Privacy {
       return { excluded: false, title: 'withheld_unknown_app' }
     }
     const browser =
-      app.registered_browser ||
+      (app.registered_browser && !(appId !== null && KNOWN_NON_BROWSER_APP_IDS.has(appId))) ||
       (appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) ||
       (exe !== null && KNOWN_BROWSER_EXES.has(exe))
     return { excluded: false, title: browser ? 'withheld_browser' : 'allowed' }
@@ -340,7 +347,7 @@ export class Normalizer {
     }
     const row = envelopeRow(line, 'focus')
     row.app_id = known ? app.app_id : null
-    row.app_name = known ? app.name : null
+    row.app_name = known ? ((app.app_id && DISPLAY_NAME_OVERRIDES.get(app.app_id)) ?? app.name) : null
     row.app_path = known ? app.path : null
     row.pid = app.pid
     row.window = win.window
