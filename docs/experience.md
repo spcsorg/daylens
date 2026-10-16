@@ -13,6 +13,8 @@ Windows, macOS and Linux share one design. These are the only differences, each 
 | Shortcut modifier | Ctrl | Cmd | Ctrl |
 | Permissions in onboarding | None needed for window titles | One step: Accessibility, plus browser access | Depends on the desktop; see [System design](system-design.md#linux) |
 | Sign-in options | Google, email | Apple, Google, email | Google, email |
+| Install and updates | Microsoft Store | Download from the website; updates in the app | Nightly packages |
+| Browser extension | Each browser is paired once, with one confirmation | Connects without a prompt | Connects without a prompt |
 
 Everything else is identical: layout, type, color, motion, copy, features, and performance budgets. Copy never names a platform-specific mechanism ("Keychain", "Full Disk Access") on a shared screen; where a platform needs its own step, that step is drawn separately for that platform.
 

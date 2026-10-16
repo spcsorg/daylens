@@ -34,8 +34,7 @@
 - **Captured text is untrusted.** Page titles, document names and agent logs can contain instructions. The writer has no tools and no authority, its output is validated in code, and all text is rendered as plain text.
 - **No feedback loops.** Daylens's written text is never used as evidence for later writing.
 - **Secrets** (API keys, account tokens) are stored in the platform's secure storage and never written to logs or the database.
-- **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, Authenticode on Windows (installer, app and helper, timestamped and verified after packaging), signed packages on Linux.
-- **Updates on Windows** refuse to install when the publisher cannot be verified; a missing publisher setting fails the release.
+- **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, signed packages on Linux. On Windows, Daylens ships through the Microsoft Store, which signs the package and installs its updates. Any Windows build distributed outside the Store is Authenticode-signed (installer, app and helper, timestamped and verified after packaging), and its updates refuse to install when the publisher cannot be verified.
 - **Updates** are signed and verified before install.
 - **The MCP server** is read-only and local to the machine.
 - **Payments.** Card data is entered only in the payment provider's hosted checkout.

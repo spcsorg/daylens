@@ -7,8 +7,8 @@ V2 is built one step at a time. Each step is planned, reviewed by a different mo
 | Step | What | Done when |
 |---|---|---|
 | 1 | **Capture foundation.** The shared protocol, the helper supervisor with heartbeat and capture health, event-driven app, title, idle, lock and sleep capture on macOS and Windows, title normalization | Kill, hang and sleep tests produce explained gaps and recovery; transitions match timestamped markers; background budgets met |
-| 1b | **Browsers.** History readers, the normal/private/unknown gate, the extension and its native messaging host for Chrome, Edge and Firefox, Arc and Dia checks. The extension goes to the stores as soon as it works, because store review can take five weeks | The private-window acceptance suite passes in every supported browser on both platforms; the extension is submitted to all three stores |
-| 1c | **Signed packages.** Signed per-user Windows installer and macOS app with the helpers inside, launch at login, and updates from one version to the next | A standard user installs and updates with no warnings beyond first-download reputation; every executable verifies; capture and settings survive the update |
+| 1b | **Browsers.** History readers, the normal/private/unknown gate, the extension and its connection to Daylens (native messaging on macOS and Linux, a paired local connection on Windows) for Chrome, Edge and Firefox, Arc and Dia checks. The extension goes to the stores as soon as it works, because store review can take five weeks | The private-window acceptance suite passes in every supported browser on both platforms; the extension is submitted to all three stores |
+| 1c | **Packages.** The Windows Store package and the signed, notarized macOS app, with the helpers inside, launch at login, and updates from one version to the next | A standard user installs and updates with no warnings; the Windows package passes the Windows App Certification Kit and a private Store submission; every executable verifies; capture and settings survive the update; the MCP server and CLI find the database from outside the package |
 | 2 | **Storage.** The single source of truth and its change announcements | Correction, deletion, pause and exclusion tests pass at the storage level |
 | 3 | **Today, facts first.** The shell and Today on real data, on all three platforms | Paint and launch budgets met; screens match the design on every platform |
 | 4 | **Agent sessions.** Claude Code and Codex readers | Agent work on gold days is attributed correctly, with no false durations |
@@ -26,11 +26,12 @@ V2 is built one step at a time. Each step is planned, reviewed by a different mo
 - [ ] Budgets met on every platform from signed, packaged builds.
 - [ ] Security review complete; findings fixed or accepted in writing.
 - [ ] Terms and Privacy page published and linked from onboarding and Settings.
-- [ ] Signed installers for Windows and macOS, a nightly for Linux; updates verified.
-- [ ] If Windows signing goes through the SignPath Foundation: the code-signing policy page (team roles, what gets signed, approval rule) and the SignPath attribution are published on the download page, and two-factor authentication is on for every account that can approve a release.
-- [ ] A public privacy policy page that the stores, SignPath and the Terms & Privacy screen all link to.
+- [ ] The Windows package published in the Microsoft Store, the signed and notarized macOS app, a nightly for Linux; updates verified.
+- [ ] The Microsoft Store listing passes certification: privacy policy, the `runFullTrust` justification, and any disclosure Store policy requires for AI features.
+- [ ] A public privacy policy page that the Microsoft Store listing, the extension stores and the Terms & Privacy screen all link to.
+- [ ] Two-factor authentication is on for every account that can publish a release.
 - [ ] The browser extension published in the Chrome, Edge and Firefox stores, with privacy disclosures, permission justifications and reviewer test steps that use a downloadable desktop build.
-- [ ] A Windows gold day recorded on the physical laptop from the signed build.
+- [ ] A Windows gold day recorded on the physical laptop from the Store build.
 - [ ] Billing in production mode with confirmed webhooks, and prices set.
 - [ ] Operations runbooks checked against the code.
 - [ ] V1 users' existing data opens in V2.

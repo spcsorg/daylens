@@ -48,6 +48,14 @@ Each platform has a small helper that reports what is happening and nothing else
 
 The macOS helper is Swift and the Windows helper is C#, published self-contained so users install nothing extra. Both are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang (such as UI Automation on Windows) runs on its own thread so it can never stop capture. Each observation carries a protocol version, a sequence number and defined clock units.
 
+### Packages
+
+- **Windows:** a full-trust Microsoft Store package whose only restricted capability is `runFullTrust`. Microsoft signs it and the Store installs updates. Launch at login is the package's startup task, which Windows registers at the first launch; if the user turns it off in Windows Settings, only Windows Settings can turn it back on.
+- A packaged app's new files under AppData go to the package's private folder, which processes outside the package cannot see, such as the MCP server an assistant starts or the CLI. The database lives where those processes can read it. V1's database under `%APPDATA%\Daylens` is copied before it is imported, never opened in place.
+- The install folder of a Store package changes with every version, so assistants start the MCP server through a path that survives updates.
+- **macOS:** a Developer ID–signed, notarized app, downloaded from the website and updated in the app.
+- **Linux:** nightly packages.
+
 ## Capture
 
 ### Signals by platform
@@ -76,9 +84,10 @@ Every browser window is in one of three states: **normal**, **private** or **unk
 - **Pages come from browser history files.** Browsers do not write private browsing to history. Readers take only real visits from verified profiles, skip Guest profiles, and ignore bookmarks, downloads and other history sources. Visits synced from other devices or added by extensions are kept apart where the browser marks them. A page from history is searchable, but it gets no time on its own: a visit shows that a page was opened, not that it was read.
 - **Live window titles and addresses are stored only when the window is confirmed normal** by the browser itself: a browser automation property, or the Daylens browser extension. A title that lacks "Incognito", or that matches a history entry, is not confirmation.
 - **The Daylens browser extension** is optional and offered after onboarding, not during it. It is not allowed in private windows, reports the focused tab of normal windows, and gives exact pages and times. It ships at launch for Chrome, Edge and Firefox; Arc and Dia use the Chrome Web Store build, and each is verified on each platform before it is claimed.
-  - Permissions: `tabs` and `nativeMessaging` only, with `"incognito": "not_allowed"`. No host permissions, content scripts, history or scripting access.
+  - Permissions: `tabs` and `nativeMessaging`, with `"incognito": "not_allowed"`. No content scripts, history or scripting access, and no host permission except `127.0.0.1` where a browser needs it for the Windows connection below.
   - It listens for tab activation, window focus and address or title changes, and forwards only the focused tab of a focused normal window. When focus moves somewhere the extension cannot see, it tells Daylens, and Daylens stops attributing the last page.
-  - It talks only to the Daylens app on the same computer, through a native messaging host that the installer registers for each browser. Chrome Web Store and Edge Add-ons assign different extension IDs, and Firefox uses its add-on ID, so the host allows each one explicitly.
+  - It talks only to Daylens on the same computer. On macOS and Linux that is a native messaging host the app registers for each browser. Chrome Web Store and Edge Add-ons assign different extension IDs, and Firefox uses its add-on ID, so the host allows each one explicitly.
+  - On Windows, Daylens ships as a Microsoft Store package, whose registry writes are private to the package, so browsers can never find a native messaging host. The extension connects to the capture service over `127.0.0.1` instead. Each browser is paired once through a `daylens://` link. Before any page is sent, both sides prove they hold the pairing secret, so another user's process listening on the port receives nothing. Daylens accepts the connection only from a browser process running as the same user.
   - It has a small popup: connection status, pause, and open Daylens. Store policies expect browsing data to serve a visible feature.
   - On Firefox it uses Firefox's built-in data consent, declares browsing activity, and targets Firefox 140 and later.
 - **Private windows** are never recorded with a page or title. Few browsers can confirm a private window (Chrome on macOS through its scripting `mode`), so in practice private time is stored the same way as unknown time: browser time with no page.
