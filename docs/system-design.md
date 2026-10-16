@@ -112,7 +112,7 @@ Applied once, when observations are written:
 - Private and incognito windows are never stored.
 - Titles are cleaned: spinner and progress characters are removed, so an animated title is one observation, not one per second.
 - Repeated identical observations are merged.
-- A title that stays the same for a long time while input happens elsewhere is flagged as possibly stale, so it is never treated as evidence of current work.
+- A title is flagged as possibly stale when Daylens loses the ability to read it (permission lost, title reader stalled), so it is never treated as evidence of current work. When reading recovers, the title is read again and stored fresh.
 - Media playing while input is idle is not counted as away.
 - Every observation keeps its event time, the time it was recorded, and the time zone.
 
