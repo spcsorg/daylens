@@ -57,6 +57,16 @@ export interface SupervisorStats {
   heartbeatMaxGapMs: number
 }
 
+// Dropped writes may include rows the normalizer is still extending, from the first overflow or any later one.
+// Before the recovery snapshot, open rows are forgotten so the snapshot inserts fresh ones instead of extending lost ids.
+export function wireStorageRecovery(store: Store, normalizer: Normalizer, at: () => GapPoint, requestSnapshot: () => void): void {
+  store.onOverflow = () => normalizer.interrupt(at())
+  store.onRecovered = () => {
+    normalizer.interrupt(at())
+    requestSnapshot()
+  }
+}
+
 export class Supervisor {
   private readonly o: Required<SupervisorOptions>
   private readonly store: Store
@@ -103,9 +113,7 @@ export class Supervisor {
     this.store = store
     this.normalizer = normalizer
     this.backoffMs = this.o.backoffInitialMs
-    // Dropped writes may include the row the normalizer is extending: start fresh and re-read the present state.
-    store.onOverflow = () => normalizer.interrupt(this.lastLine ?? this.servicePoint())
-    store.onRecovered = () => this.send({ op: 'snapshot' })
+    wireStorageRecovery(store, normalizer, () => this.lastLine ?? this.servicePoint(), () => this.send({ op: 'snapshot' }))
   }
 
   start(): void {

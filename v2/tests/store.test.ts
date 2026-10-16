@@ -7,7 +7,8 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { Normalizer, Privacy } from '../capture/normalize.ts'
 import { assertNotV1, DB_FILE, Store } from '../capture/store.ts'
-import { app, focus } from './support/lines.ts'
+import { wireStorageRecovery } from '../capture/supervisor.ts'
+import { app, focus, line } from './support/lines.ts'
 
 const T0 = 1_792_130_000_000
 const CANARY = 'CANARY-5c1d-browser-title'
@@ -236,4 +237,41 @@ test('a writer that dies without cleaning up does not block the next one', async
   spawnSync(process.execPath, ['--input-type=module', '-e', code])
   const s = new Store(dir)
   s.close()
+})
+
+test('continued overflow while one title stays unchanged: after recovery that title has a stored row', () => {
+  const dir = tmp()
+  let now = T0
+  const store = new Store(dir, { busyTimeoutMs: 10, maxPendingOps: 4, now: () => now })
+  const n = new Normalizer(store)
+  const term = app('com.apple.Terminal')
+  let snapshots = 0
+  wireStorageRecovery(store, n, () => ({ wall_ms: now, mono_us: null, boot: null }), () => {
+    snapshots++
+    n.handle(focus(term, 'build — zsh', now, 'snapshot'))
+  })
+  const blocker = new Database(path.join(dir, DB_FILE))
+  blocker.exec('BEGIN EXCLUSIVE')
+  n.handle(focus(term, 'build — zsh', T0, 'app_changed'))
+  // Repeats of the same title keep overflowing the queue, past the first overflow, dropping every insert.
+  // Other writes (input changes) keep overflowing the queue past the first overflow, while the same window stays in front.
+  for (let i = 1; i <= 40; i++) {
+    now = T0 + i * 60_000
+    n.handle(line('input', { state: i % 2 ? 'idle' : 'active', last_input_wall_ms: now, threshold_s: 120, snapshot: false }, now))
+    n.handle(line('input', { state: i % 2 ? 'active' : 'idle', last_input_wall_ms: now, threshold_s: 120, snapshot: false }, now + 1))
+    n.handle(focus(term, 'build — zsh', now + 2, 'reconcile'))
+    store.flush()
+  }
+  blocker.exec('COMMIT')
+  blocker.close()
+  now = T0 + 41 * 60_000
+  assert.equal(store.flush(), true)
+  store.flush()
+  n.handle(focus(term, 'build — zsh', now + 5000, 'reconcile'))
+  store.flush()
+  assert.equal(snapshots, 1)
+  const rows = store.query<{ title: string; last_seen_wall_ms: number }>(`SELECT title, last_seen_wall_ms FROM observations WHERE title = 'build — zsh'`)
+  assert.ok(rows.length >= 1, 'the current window is stored after recovery')
+  assert.equal(Math.max(...rows.map((r) => r.last_seen_wall_ms)), now + 5000, 'and keeps being extended')
+  store.close()
 })
