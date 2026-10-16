@@ -102,16 +102,14 @@ internal sealed unsafe class Resolver
         if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
         try
         {
-            if (StoreApps.IsFrameHost(p.Path))
+            var host = StoreApps.ResolveHost(p.Path, pid, () => Children(hwnd));
+            if (host.Kind == HostKind.Unresolved) return host.UnresolvedApp();
+            if (host.Kind == HostKind.Content)
             {
-                var content = StoreApps.SelectContentWindow(pid, Children(hwnd));
-                if (content is { } c)
-                {
-                    Native.CloseHandle(p.Handle);
-                    pid = c.Pid;
-                    p = OpenProcess(pid);
-                    if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
-                }
+                Native.CloseHandle(p.Handle);
+                pid = host.Pid;
+                p = OpenProcess(pid);
+                if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
             }
             // A creation time of 0 means it could not be read; then a reused pid could hit a stale entry.
             if (p.Created != 0 && _identities.TryGetValue((pid, p.Created), out var cached)) return cached;

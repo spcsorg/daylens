@@ -81,8 +81,24 @@ public static class Sessions
 
 public readonly record struct ChildWindow(nint Hwnd, int Pid, string ClassName);
 
+public enum HostKind { NotAHost, Content, Unresolved }
+
+/// Pid is the process to describe: the content's for Content, the foreground process's otherwise.
+public readonly record struct HostResolution(HostKind Kind, int Pid)
+{
+    /// No identity: the frame shows another app's title, and only that app's identity may carry it.
+    public AppInfo UnresolvedApp() => AppInfo.Unknown(Pid, IdentityState.Unresolved);
+}
+
 public static class StoreApps
 {
+    /// A frame host is never reported as itself. Children are enumerated only for a frame host.
+    public static HostResolution ResolveHost(string? exePath, int pid, Func<IEnumerable<ChildWindow>> children)
+    {
+        if (!IsFrameHost(exePath)) return new(HostKind.NotAHost, pid);
+        return SelectContentWindow(pid, children()) is { } c ? new(HostKind.Content, c.Pid) : new(HostKind.Unresolved, pid);
+    }
+
     public static bool IsFrameHost(string? exePath) =>
         exePath is not null && Path.GetFileName(exePath.Replace('\\', '/')).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase);
 
