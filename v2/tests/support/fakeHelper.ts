@@ -49,7 +49,7 @@ const hb = setInterval(() => {
       awake_us: awakeUs(),
       permissions: { accessibility: 'granted' },
       registrations: { focus: true, session: !(mode === 'session_unregistered' && Date.now() - started < afterMs), power: true },
-      titles: mode === 'titles_stalled' || mode === 'titles_stuck' ? 'stalled' : 'ok',
+      titles: mode === 'titles_stalled' || mode === 'titles_stuck' || (mode === 'titles_recover' && Date.now() - started < afterMs) ? 'stalled' : 'ok',
       stall_ms: mode === 'titles_stuck' ? Date.now() - started : 0,
       dropped: 0,
     })

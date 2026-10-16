@@ -223,3 +223,17 @@ test('a stuck title worker restarts the helper even while heartbeats continue, a
   assert.ok(titles.end_wall_ms! - titles.start_wall_ms < 5000)
   await h.finish()
 })
+
+test('when the title channel recovers, a forced snapshot replaces the possibly stale title', async () => {
+  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'snap-')), 'snaps')
+  const h = harness({ FAKE_MODE: 'titles_recover', FAKE_AFTER_MS: '600', FAKE_SNAPFILE: snapfile, FAKE_FOCUS_MS: '100000' })
+  h.sup.start()
+  await waitFor(() => h.gaps().some((g) => g.reason === 'titles_unavailable' && g.end_wall_ms !== null))
+  await waitFor(() => readFileSync(snapfile, 'utf8').split('\n').filter(Boolean).length >= 2)
+  h.store.flush()
+  const rows = h.store.query<{ title: string; possibly_stale_since_wall_ms: number | null }>(`SELECT title, possibly_stale_since_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
+  assert.ok(rows[0]!.possibly_stale_since_wall_ms !== null, 'the title read before the stall was flagged')
+  assert.equal(rows.at(-1)!.possibly_stale_since_wall_ms, null, 'the re-read after recovery is a fresh row')
+  assert.equal(rows.at(-1)!.title, rows[0]!.title, 'even though the title is the same')
+  await h.finish()
+})

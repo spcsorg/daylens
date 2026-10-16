@@ -497,6 +497,8 @@ export class Supervisor {
     } else if (!titlesDown && this.titlesGap !== null) {
       this.store.closeGap(this.titlesGap, point)
       this.titlesGap = null
+      // The helper skips repeats of the last title it sent; after a stall that title may be stale, so ask for a forced re-read.
+      this.send({ op: 'snapshot' })
     }
   }
 
