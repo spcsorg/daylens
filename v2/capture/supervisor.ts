@@ -152,6 +152,11 @@ export class Supervisor {
     )
   }
 
+  // Re-read the present from the helper, as after lost lines.
+  requestSnapshot(): void {
+    this.send({ op: 'snapshot' })
+  }
+
   helperPid(): number | null {
     return this.child?.pid ?? null
   }
