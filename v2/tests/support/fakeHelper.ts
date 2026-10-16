@@ -15,9 +15,17 @@ let seq = 0
 const wallOffset = Number(process.env.FAKE_WALL_OFFSET_MS ?? 0)
 const t = () => ({ wall_ms: Date.now() + wallOffset, mono_us: Math.round((performance.timeOrigin + performance.now()) * 1000), tz: 'UTC', tz_offset_min: 0 })
 
+// How the Windows helper names the boot: the kernel counter (stable), or the old wall-minus-uptime formula.
+function bootId(time: { wall_ms: number; mono_us: number }): string {
+  if (process.env.FAKE_BOOT === 'counter') return 'boot-812'
+  if (process.env.FAKE_BOOT === 'clock') return `bootclock-${Math.floor((time.wall_ms - time.mono_us / 1000) / 60_000)}`
+  return 'boot-fake'
+}
+
 function emit(kind: string, obs: unknown, source = 'fake'): void {
   if (mode === 'skip_seq' && seq === 5) seq += 3
-  process.stdout.write(JSON.stringify({ v: 1, run, seq: seq++, boot: 'boot-fake', t: t(), platform: 'macos', source, kind, obs }) + '\n')
+  const time = t()
+  process.stdout.write(JSON.stringify({ v: 1, run, seq: seq++, boot: bootId(time), t: time, platform: 'macos', source, kind, obs }) + '\n')
 }
 
 const term = { app_id: 'com.apple.Terminal', name: 'Terminal', path: null, pid: 501, registered_browser: false, engine: 'none', identity_state: 'ok', store: null }

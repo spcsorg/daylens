@@ -157,3 +157,30 @@ test('downtime after a crash is measured even when the clock was set back an hou
   assert.ok(span >= 1900 && span < 6000, `the ~2 s outage is recorded, not collapsed by the rollback (${span} ms)`)
   assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
 })
+
+async function rollbackOutage(boot: 'counter' | 'clock'): Promise<Gap> {
+  const { work, dataDir } = setup()
+  const svc = startService(dataDir, work, { FAKE_BOOT: boot })
+  await waitFor(() => svc.log().includes('helper hello'))
+  await sleep(1600)
+  svc.proc.kill('SIGKILL')
+  await sleep(2000)
+  const svc2 = startService(dataDir, work, { FAKE_BOOT: boot, FAKE_WALL_OFFSET_MS: String(-3_600_000) })
+  await waitFor(() => svc2.log().includes('helper hello'))
+  await sleep(300)
+  await stopService(svc2.proc)
+  return gaps(dataDir).find((g) => g.reason === 'service_down')!
+}
+
+test('Windows boot identity: with the kernel boot counter, a clock set back an hour still shows the outage', async () => {
+  const down = await rollbackOutage('counter')
+  const span = down.end_wall_ms! - down.start_wall_ms
+  assert.ok(span >= 1900 && span < 6000, `outage ${span} ms`)
+  assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
+})
+
+test('Windows boot identity: the old wall-minus-uptime formula loses that outage, which is why it is only a fallback', async () => {
+  const down = await rollbackOutage('clock')
+  assert.notEqual(JSON.parse(down.detail!).measured, 'monotonic')
+  assert.ok(down.end_wall_ms! - down.start_wall_ms < 500, 'the rollback collapses the gap when the boot looks new')
+})

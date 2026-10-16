@@ -61,10 +61,19 @@ internal static class Clock
 
     static string Sanitize(string id) => id.Length <= 64 ? id : id[..64];
 
+    // HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters\BootId
+    // is incremented by the kernel each boot and does not change when the clock is set.
     public static string BootId()
     {
-        var bootUnixS = (WallMs() - MonoUs() / 1000) / 1000;
-        return $"boot-{bootUnixS / 60}";
+        uint? counter = null;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters");
+            if (key?.GetValue("BootId") is int v) counter = unchecked((uint)v);
+        }
+        catch { Diag.Write("boot_id_unavailable"); }
+        if (counter is null) Diag.Write("boot_id_fallback_clock");
+        return BootIdentity.Compute(counter, WallMs(), MonoUs());
     }
 }
 
