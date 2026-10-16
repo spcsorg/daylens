@@ -13,7 +13,8 @@ public class GoldenFixtureTests
     static readonly Dictionary<string, Action<Utf8JsonWriter>> Builders = new()
     {
         ["win_hello"] = Obs.Hello("daylens-capture-windows", "2.0.0-dev", 7000, "Windows 10.0.26100", 15, 120, 60),
-        ["win_heartbeat"] = Obs.Heartbeat(612_345_678_901, ChannelState.Ok, 0, 3),
+        ["win_heartbeat"] = Obs.Heartbeat(612_345_678_901, new Registrations(true, true, true), ChannelState.Ok, 0, 3),
+        ["win_heartbeat_session_unregistered"] = Obs.Heartbeat(612_345_678_901, new Registrations(Focus: true, Session: false, Power: true), ChannelState.Ok, 0, 0),
         ["win_focus_store"] = Obs.Focus(FocusTrigger.AppChanged, Calculator, WindowInfo.Read("0x1A2B3C", "Calculator")),
         ["win_focus_access_denied"] = Obs.Focus(FocusTrigger.AppChanged, AppInfo.Unknown(4, IdentityState.AccessDenied), WindowInfo.Read("0x2B", "Administrator: Task Manager")),
         ["win_focus_unicode"] = Obs.Focus(FocusTrigger.TitleChanged, Calculator, WindowInfo.Read("0x1A2B3C", UnicodeTitle)),
@@ -21,6 +22,8 @@ public class GoldenFixtureTests
         ["win_power_resume_user"] = Obs.Power(Power.Classify(Power.PBT_APMRESUMESUSPEND)!),
         ["win_session_snapshot"] = Obs.Session(Sessions.FromSessionFlags(1), true),
         ["win_input_active"] = Obs.Input(false, 1_792_130_412_000, 120, true),
+        ["win_focus_unresolved_host"] = Obs.Focus(FocusTrigger.AppChanged, AppInfo.Unknown(7712, IdentityState.Unresolved), WindowInfo.Read("0x3C4D", "Some hosted window")),
+        ["win_loss"] = Obs.Loss(12, 1_792_130_410_000, 1_792_130_412_000),
     };
 
     public static TheoryData<string> WindowsFixtureNames()
@@ -198,7 +201,7 @@ public class NamesTests
     [Fact]
     public void EveryEnumValueHasItsProtocolName()
     {
-        Assert.Equal(new[] { "ok", "access_denied", "timeout", "gone", "none" }, Enum.GetValues<IdentityState>().Select(Names.Of).ToArray());
+        Assert.Equal(new[] { "ok", "access_denied", "timeout", "gone", "none", "unresolved" }, Enum.GetValues<IdentityState>().Select(Names.Of).ToArray());
         Assert.Equal(new[] { "ok", "empty", "no_permission", "timeout", "unavailable" }, Enum.GetValues<TitleState>().Select(Names.Of).ToArray());
         Assert.Equal(new[] { "ok", "degraded", "stalled", "no_permission" }, Enum.GetValues<ChannelState>().Select(Names.Of).ToArray());
         Assert.Equal(new[] { "app_changed", "window_changed", "title_changed", "reconcile", "snapshot" }, Enum.GetValues<FocusTrigger>().Select(Names.Of).ToArray());

@@ -6,12 +6,15 @@ namespace Daylens.Capture.Core;
 
 public readonly record struct EventTime(long WallMs, long MonoUs, string Tz, int TzOffsetMin);
 
-public enum IdentityState { Ok, AccessDenied, Timeout, Gone, None }
+public enum IdentityState { Ok, AccessDenied, Timeout, Gone, None, Unresolved }
 public enum TitleState { Ok, Empty, NoPermission, Timeout, Unavailable }
 public enum ChannelState { Ok, Degraded, Stalled, NoPermission }
 public enum FocusTrigger { AppChanged, WindowChanged, TitleChanged, Reconcile, Snapshot }
 
 public sealed record StoreIdentity(string Aumid, string? Package);
+
+/// Whether each event source's subscription is in place.
+public readonly record struct Registrations(bool Focus, bool Session, bool Power);
 
 public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store)
 {
@@ -53,7 +56,7 @@ public static class Names
     public static string Of(IdentityState s) => s switch
     {
         IdentityState.Ok => "ok", IdentityState.AccessDenied => "access_denied", IdentityState.Timeout => "timeout",
-        IdentityState.Gone => "gone", _ => "none",
+        IdentityState.Gone => "gone", IdentityState.Unresolved => "unresolved", _ => "none",
     };
     public static string Of(TitleState s) => s switch
     {
@@ -97,10 +100,15 @@ public static class Obs
         w.WriteEndObject();
     };
 
-    public static Action<Utf8JsonWriter> Heartbeat(long awakeUs, ChannelState titles, long stallMs, long dropped) => w =>
+    public static Action<Utf8JsonWriter> Heartbeat(long awakeUs, Registrations registrations, ChannelState titles, long stallMs, long dropped) => w =>
     {
         w.WriteNumber("awake_us", awakeUs);
         Permissions(w);
+        w.WriteStartObject("registrations");
+        w.WriteBoolean("focus", registrations.Focus);
+        w.WriteBoolean("session", registrations.Session);
+        w.WriteBoolean("power", registrations.Power);
+        w.WriteEndObject();
         w.WriteString("titles", Names.Of(titles));
         w.WriteNumber("stall_ms", stallMs);
         w.WriteNumber("dropped", dropped);
@@ -149,6 +157,14 @@ public static class Obs
 
     public static Action<Utf8JsonWriter> Power(string state) => w => w.WriteString("state", state);
     public static Action<Utf8JsonWriter> Clock(string change) => w => w.WriteString("change", change);
+    public static Action<Utf8JsonWriter> Loss(int count, long fromWallMs, long toWallMs) => w =>
+    {
+        w.WriteString("channel", "focus");
+        w.WriteNumber("count", count);
+        w.WriteNumber("from_wall_ms", fromWallMs);
+        w.WriteNumber("to_wall_ms", toWallMs);
+    };
+
     public static Action<Utf8JsonWriter> Bye(string reason) => w => w.WriteString("reason", reason);
 
     static string? Clip(string? s, int max)

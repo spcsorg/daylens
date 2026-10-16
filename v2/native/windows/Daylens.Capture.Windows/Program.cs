@@ -11,13 +11,14 @@ namespace Daylens.Capture.Windows;
 internal static unsafe class Program
 {
     const string Version = "2.0.0-dev";
-    const nuint TimerHeartbeat = 1, TimerIdle = 2, TimerReconcile = 3;
+    const nuint TimerHeartbeat = 1, TimerIdle = 2, TimerReconcile = 3, TimerRegister = 4;
     const uint MsgShutdown = Native.WM_APP + 1, MsgSnapshot = Native.WM_APP + 2;
     const long ResolverStuckExitMs = 30_000;
 
     static Emitter _emitter = null!;
     static Resolver _resolver = null!;
     static IdleScheduler _idle = null!;
+    static readonly RegistrationRetry _registrations = new();
     static nint _hwnd, _fgHwnd, _nameHook;
     static int _fgPid, _heartbeatS, _idleThresholdS, _reconcileS;
     static bool _idleSuspended;
@@ -37,14 +38,7 @@ internal static unsafe class Program
 
         _hwnd = CreateMessageWindow();
         if (_hwnd == 0) { Diag.Write("create_window_failed"); return 2; }
-        if (!Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION)) Diag.Write("wts_register_failed");
-        // Required for suspend and resume notices on Modern Standby machines.
-        if (Native.RegisterSuspendResumeNotification(_hwnd, Native.DEVICE_NOTIFY_WINDOW_HANDLE) == 0) Diag.Write("suspend_resume_register_failed");
-        if (Native.RegisterPowerSettingNotification(_hwnd, Power.GUID_SESSION_DISPLAY_STATUS, Native.DEVICE_NOTIFY_WINDOW_HANDLE) == 0) Diag.Write("display_status_register_failed");
-
-        var fgProc = (nint)(delegate* unmanaged<nint, uint, nint, int, int, uint, uint, void>)&OnWinEvent;
-        if (Native.SetWinEventHook(WinEvents.EVENT_SYSTEM_FOREGROUND, WinEvents.EVENT_SYSTEM_FOREGROUND, 0, fgProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS) == 0)
-            Diag.Write("foreground_hook_failed");
+        RetryRegistrations();
 
         Native.SetTimer(_hwnd, TimerHeartbeat, (uint)_heartbeatS * 1000, 0);
         Native.SetCoalescableTimer(_hwnd, TimerReconcile, (uint)_reconcileS * 1000, 0, (uint)Math.Max(1000, _reconcileS * 100));
@@ -80,6 +74,46 @@ internal static unsafe class Program
 
     static void Emit(string kind, string source, Action<System.Text.Json.Utf8JsonWriter> obs, EventTime? time = null) =>
         _emitter.Emit(kind, source, time ?? Clock.Now(), obs, kind is "focus" or "input" ? Emitter.Priority.Normal : Emitter.Priority.Critical);
+
+    // --- registrations --------------------------------------------------------
+
+    static string DiagCode(RegistrationRetry.Source source) => source switch
+    {
+        RegistrationRetry.Source.Session => "wts_register",
+        RegistrationRetry.Source.Power => "suspend_resume_register",
+        RegistrationRetry.Source.Display => "display_status_register",
+        _ => "foreground_hook",
+    };
+
+    static bool Register(RegistrationRetry.Source source)
+    {
+        var ok = source switch
+        {
+            RegistrationRetry.Source.Session => Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION),
+            // Required for suspend and resume notices on Modern Standby machines.
+            RegistrationRetry.Source.Power => Native.RegisterSuspendResumeNotification(_hwnd, Native.DEVICE_NOTIFY_WINDOW_HANDLE) != 0,
+            RegistrationRetry.Source.Display => Native.RegisterPowerSettingNotification(_hwnd, Power.GUID_SESSION_DISPLAY_STATUS, Native.DEVICE_NOTIFY_WINDOW_HANDLE) != 0,
+            _ => Native.SetWinEventHook(WinEvents.EVENT_SYSTEM_FOREGROUND, WinEvents.EVENT_SYSTEM_FOREGROUND, 0,
+                (nint)(delegate* unmanaged<nint, uint, nint, int, int, uint, uint, void>)&OnWinEvent, 0, 0,
+                Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS) != 0,
+        };
+        if (!ok) Diag.Write(DiagCode(source) + "_failed");
+        return ok;
+    }
+
+    static void RetryRegistrations()
+    {
+        var r = _registrations.Run(Environment.TickCount64, Register);
+        if (r.NextDelayMs is long ms) Native.SetTimer(_hwnd, TimerRegister, (uint)ms, 0);
+        else Native.KillTimer(_hwnd, TimerRegister);
+        foreach (var s in r.Recovered) Diag.Write(DiagCode(s) + "_recovered");
+        if (r.SnapshotSession)
+        {
+            SessionSnapshot();
+            SuspendIdle(_locked);
+        }
+        if (r.Recovered.Contains(RegistrationRetry.Source.Focus)) Focus(FocusTrigger.Reconcile, Native.GetForegroundWindow(), Clock.Now());
+    }
 
     // --- focus ----------------------------------------------------------------
 
@@ -192,6 +226,11 @@ internal static unsafe class Program
     {
         Focus(FocusTrigger.Snapshot, Native.GetForegroundWindow(), Clock.Now(), force: true);
         CheckIdle(snapshot: true);
+        SessionSnapshot();
+    }
+
+    static void SessionSnapshot()
+    {
         var state = SessionState();
         _locked = state == "locked";
         Emit("session", "wts", Obs.Session(state, true));
@@ -274,9 +313,10 @@ internal static unsafe class Program
                 Diag.Write("resolver_stuck_exit");
                 Environment.Exit(70);
             }
-            Emit("heartbeat", "helper", Obs.Heartbeat(Clock.AwakeUs(), stall > 3000 ? ChannelState.Stalled : ChannelState.Ok, stall, _emitter.Dropped));
+            Emit("heartbeat", "helper", Obs.Heartbeat(Clock.AwakeUs(), _registrations.Report(), stall > 3000 ? ChannelState.Stalled : ChannelState.Ok, stall, _emitter.Dropped));
         }
         else if (id == TimerIdle) CheckIdle();
+        else if (id == TimerRegister) RetryRegistrations();
         else if (id == TimerReconcile)
         {
             var fg = Native.GetForegroundWindow();
