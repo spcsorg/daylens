@@ -16,7 +16,7 @@ struct FocusRequest {
 final class TitleWorker: Thread {
   private let emitter: Emitter
   private let lock = NSLock()
-  private var queue: [FocusRequest] = []
+  private let queue = RequestQueue<FocusRequest>(capacity: 64)
   private var generation = 0
   private var busySinceUs: Int64 = 0
   private var runLoop: CFRunLoop?
@@ -63,18 +63,13 @@ final class TitleWorker: Thread {
 
   var degraded: Bool { lock.lock(); defer { lock.unlock() }; return _degraded }
 
-  /// Every request is kept in order, so sub-second switches survive a busy worker.
+  /// Every request is kept in order, so sub-second switches survive a busy worker; overflow is reported as a loss.
   func submit(_ r: FocusRequest) {
     lock.lock()
     var next = r
     next.generation = generation
-    if queue.count >= 64 {
-      queue.removeFirst()
-      diag("title_queue_full")
-    }
-    queue.append(next)
     lock.unlock()
-    guard let rl = runLoop else { return }
+    guard queue.push(next, wallMs: r.time.wallMs), let rl = runLoop else { return }
     CFRunLoopPerformBlock(rl, CFRunLoopMode.defaultMode.rawValue) { [weak self] in self?.drain() }
     CFRunLoopWakeUp(rl)
   }
@@ -94,25 +89,32 @@ final class TitleWorker: Thread {
   func abandon() {
     lock.lock()
     generation += 1
-    queue.removeAll()
     lock.unlock()
+    queue.clear()
   }
 
   private var currentGeneration: Int { lock.lock(); defer { lock.unlock() }; return generation }
 
   private func drain() {
-    while true {
-      lock.lock()
-      guard !queue.isEmpty else { lock.unlock(); return }
-      let r = queue.removeFirst()
-      lock.unlock()
+    while let r = queue.pop() {
+      reportLoss()
       drainWith(r)
     }
+    reportLoss()
+  }
+
+  private func reportLoss() {
+    guard let l = queue.takeLoss() else { return }
+    diag("title_queue_loss", String(l.count))
+    emitter.emit(kind: "loss", source: "helper", time: Clock.now(),
+                 obs: Obs.loss(count: l.count, fromWallMs: l.fromWallMs, toWallMs: l.toWallMs), priority: .critical)
   }
 
   private func drainWith(_ r: FocusRequest) {
     setBusy(true)
     defer { setBusy(false) }
+    // Test-only fault: hold this worker in one call, as a hung app would.
+    if faultBlockTitles { while true { Thread.sleep(forTimeInterval: 3600) } }
     let pid = pid_t(r.app.pid ?? 0)
     if pid != observedPid || observer == nil { observe(pid: pid, app: r.app) } else { observedApp = r.app }
     guard AXIsProcessTrusted() else {

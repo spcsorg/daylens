@@ -22,7 +22,7 @@ final class CaptureCoreTests: XCTestCase {
     let p = Permissions(accessibility: "granted")
     try assertMatches("mac_hello", seq: 0, source: "helper", kind: "hello",
                       Obs.hello(helper: "daylens-capture-macos", version: "2.0.0-dev", pid: 4242, os: "macOS 27.0.1", permissions: p, heartbeatS: 15, idleThresholdS: 120, reconcileS: 60))
-    try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(awakeUs: 612_345_678_901, permissions: p, titles: .ok, stallMs: 0, dropped: 0))
+    try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(awakeUs: 612_345_678_901, permissions: p, focusRegistered: true, sessionRegistered: true, powerRegistered: true, titles: .ok, stallMs: 0, dropped: 0))
     try assertMatches("mac_focus_app", seq: 2, source: "nsworkspace", kind: "focus",
                       Obs.focus(trigger: .app_changed, app: term, window: .read(window: "w-1", title: "daylens — zsh — 80×24")))
     try assertMatches("mac_focus_title", seq: 3, source: "ax_observer", kind: "focus",
@@ -34,6 +34,7 @@ final class CaptureCoreTests: XCTestCase {
     try assertMatches("mac_power_sleep", seq: 7, source: "nsworkspace", kind: "power", Obs.power("sleep"))
     try assertMatches("mac_clock", seq: 8, source: "notification", kind: "clock", Obs.clock("timezone_changed"))
     try assertMatches("mac_bye", seq: 9, source: "helper", kind: "bye", Obs.bye("shutdown"))
+    try assertMatches("mac_loss", seq: 20, source: "helper", kind: "loss", Obs.loss(count: 3, fromWallMs: 1_792_130_410_000, toWallMs: 1_792_130_411_000))
   }
 
   func testEscapingSurvivesHostileTitles() throws {
@@ -102,6 +103,37 @@ final class CaptureCoreTests: XCTestCase {
     let a = (try JSONSerialization.jsonObject(with: Data(s.utf8)) as! [String: Any])["app"] as! [String: Any]
     XCTAssertEqual((a["app_id"] as! String).count, 1024)
     XCTAssertEqual((a["name"] as! String).count, 512)
+  }
+
+  func testOverflowWhileBlockedIsRecordedWithItsTimeRange() {
+    let q = RequestQueue<Int>(capacity: 64)
+    for i in 0..<100 { _ = q.push(i, wallMs: 1000 + Int64(i)) }
+    XCTAssertEqual(q.count, 64)
+    XCTAssertEqual(q.takeLoss(), .init(count: 36, fromWallMs: 1000, toWallMs: 1035))
+    XCTAssertNil(q.takeLoss(), "a loss is reported once")
+    var seen: [Int] = []
+    while let x = q.pop() { seen.append(x) }
+    XCTAssertEqual(seen, Array(36..<100), "the newest work survives, in order")
+  }
+
+  func testABurstWhileBlockedSchedulesOneDrainAndStaysBounded() {
+    let q = RequestQueue<Int>(capacity: 64)
+    var wakes = 0
+    for i in 0..<100_000 where q.push(i, wallMs: Int64(i)) { wakes += 1 }
+    XCTAssertEqual(wakes, 1, "pending drains do not grow while the worker is stuck")
+    XCTAssertEqual(q.count, 64)
+    XCTAssertEqual(q.takeLoss()?.count, 100_000 - 64)
+    while q.pop() != nil {}
+    XCTAssertTrue(q.push(1, wallMs: 1), "after the queue drains, the next push schedules again")
+  }
+
+  func testAbandonedWorkCountsAsLost() {
+    let q = RequestQueue<Int>(capacity: 64)
+    _ = q.push(1, wallMs: 10)
+    _ = q.push(2, wallMs: 20)
+    q.clear()
+    XCTAssertEqual(q.takeLoss(), .init(count: 2, fromWallMs: 10, toWallMs: 20))
+    XCTAssertNil(q.pop())
   }
 
   func testActiveChecksNeverSpinFasterThanHalfASecond() {

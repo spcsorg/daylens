@@ -16,7 +16,7 @@ public struct EventTime {
   }
 }
 
-public enum IdentityState: String { case ok, access_denied, timeout, gone, none }
+public enum IdentityState: String { case ok, access_denied, timeout, gone, none, unresolved }
 public enum TitleState: String { case ok, empty, no_permission, timeout, unavailable }
 public enum ChannelState: String { case ok, degraded, stalled, no_permission }
 public enum FocusTrigger: String { case app_changed, window_changed, title_changed, reconcile, snapshot }
@@ -91,8 +91,10 @@ public enum Obs {
       ("config", .object([("heartbeat_s", .int(heartbeatS)), ("idle_threshold_s", .int(idleThresholdS)), ("reconcile_s", .int(reconcileS))])),
     ])
   }
-  public static func heartbeat(awakeUs: Int64, permissions: Permissions, titles: ChannelState, stallMs: Int64, dropped: Int64) -> JSON {
-    .object([("awake_us", .int(awakeUs)), ("permissions", permissions.json), ("titles", .string(titles.rawValue)), ("stall_ms", .int(stallMs)), ("dropped", .int(dropped))])
+  public static func heartbeat(awakeUs: Int64, permissions: Permissions, focusRegistered: Bool, sessionRegistered: Bool, powerRegistered: Bool,
+                               titles: ChannelState, stallMs: Int64, dropped: Int64) -> JSON {
+    .object([("awake_us", .int(awakeUs)), ("permissions", permissions.json),
+             ("registrations", .object([("focus", .bool(focusRegistered)), ("session", .bool(sessionRegistered)), ("power", .bool(powerRegistered))])), ("titles", .string(titles.rawValue)), ("stall_ms", .int(stallMs)), ("dropped", .int(dropped))])
   }
   public static func focus(trigger: FocusTrigger, app: AppInfo, window: WindowInfo) -> JSON {
     .object([("trigger", .string(trigger.rawValue)), ("app", app.json), ("window", window.json)])
@@ -105,6 +107,9 @@ public enum Obs {
   }
   public static func power(_ state: String) -> JSON { .object([("state", .string(state))]) }
   public static func clock(_ change: String) -> JSON { .object([("change", .string(change))]) }
+  public static func loss(count: Int, fromWallMs: Int64, toWallMs: Int64) -> JSON {
+    .object([("channel", .string("focus")), ("count", .int(count)), ("from_wall_ms", .int(fromWallMs)), ("to_wall_ms", .int(toWallMs))])
+  }
   public static func bye(_ reason: String) -> JSON { .object([("reason", .string(reason))]) }
 }
 
