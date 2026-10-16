@@ -27,3 +27,50 @@ public func classifyBundle(_ b: BundleListing?) -> Engine {
   }
   return .none
 }
+
+/// Reads what classifyBundle needs. A folder that is missing is empty; a folder that exists but cannot be
+/// read makes the whole scan uncertain (nil), so a partial view can never pass for "no engine".
+public func scanBundle(at url: URL, fileManager fm: FileManager = .default) -> BundleListing? {
+  enum Read { case entries([String]), absent, failed }
+  func read(_ u: URL) -> Read {
+    do { return .entries(try fm.contentsOfDirectory(atPath: u.path)) } catch {
+      let code = (error as NSError).code
+      if (error as NSError).domain == NSCocoaErrorDomain && (code == NSFileReadNoSuchFileError || code == NSFileNoSuchFileError) {
+        return .absent
+      }
+      return .failed
+    }
+  }
+  let contents = url.appendingPathComponent("Contents")
+  let res = contents.appendingPathComponent("Resources")
+  guard case .entries(let resources) = read(res) else { return nil }
+  var gecko = false
+  if resources.contains("browser") {
+    switch read(res.appendingPathComponent("browser")) {
+    case .entries(let b): gecko = b.contains("omni.ja")
+    case .absent: break
+    case .failed: return nil
+    }
+  }
+  var frameworks: [String] = []
+  switch read(contents.appendingPathComponent("Frameworks")) {
+  case .entries(let f): frameworks = f
+  case .absent: break
+  case .failed: return nil
+  }
+  var helpers: [String: [String]] = [:]
+  for fw in frameworks where fw.hasSuffix(".framework") {
+    let base = contents.appendingPathComponent("Frameworks").appendingPathComponent(fw)
+    var found: [String]? = nil
+    for sub in ["Versions/Current/Helpers", "Helpers"] {
+      switch read(base.appendingPathComponent(sub)) {
+      case .entries(let h): found = h
+      case .absent: continue
+      case .failed: return nil
+      }
+      break
+    }
+    helpers[fw] = found ?? []
+  }
+  return BundleListing(resources: resources, frameworks: frameworks, geckoBrowserResources: gecko, frameworkHelpers: helpers)
+}

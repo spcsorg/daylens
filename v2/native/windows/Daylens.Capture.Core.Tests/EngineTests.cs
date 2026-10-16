@@ -46,4 +46,51 @@ public class EngineTests
             Obs.Focus(FocusTrigger.AppChanged, new AppInfo("x", "x", "C:\\x.exe", 1, false, IdentityState.Ok, null, Engine.AppRuntime), WindowInfo.Read("w", "t")));
         Assert.Contains("\"engine\":\"app_runtime\"", System.Text.Encoding.UTF8.GetString(line));
     }
+
+    static string TempDir(params string[] files)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "daylens-engine-" + Guid.NewGuid());
+        foreach (var f in files)
+        {
+            var p = Path.Combine(dir, f);
+            if (f.EndsWith('/')) Directory.CreateDirectory(p);
+            else { Directory.CreateDirectory(Path.GetDirectoryName(p)!); File.WriteAllText(p, ""); }
+        }
+        return dir;
+    }
+
+    [Fact]
+    public void AFullListingIsClassifiedNormally()
+    {
+        var dir = TempDir("chrome.exe", "131.0.1/chrome.dll");
+        Assert.Equal(Engine.Browser, Engines.Classify(Engines.Scan(dir)));
+    }
+
+    [Fact]
+    public void ATruncatedListingIsUncertainNotNone()
+    {
+        var dir = TempDir("app.exe");
+        for (var i = 0; i < 20; i++) File.WriteAllText(Path.Combine(dir, $"f{i}.bin"), "");
+        Assert.Null(Engines.Scan(dir, limit: 10));
+        Assert.Equal(Engine.Unknown, Engines.Classify(Engines.Scan(dir, limit: 10)));
+    }
+
+    [Fact]
+    public void ATruncatedNestedListingIsUncertain()
+    {
+        var dir = TempDir("app.exe", "big/");
+        for (var i = 0; i < 20; i++) File.WriteAllText(Path.Combine(dir, "big", $"f{i}.bin"), "");
+        Assert.Null(Engines.Scan(dir, limit: 10));
+    }
+
+    [Fact]
+    public void AnUnreadableNestedFolderIsUncertainNotNone()
+    {
+        if (OperatingSystem.IsWindows()) return; // permissions are set the Unix way here; Windows ACLs are covered on the VM
+        var dir = TempDir("browser.exe", "131.0.1/chrome.dll");
+        var nested = Path.Combine(dir, "131.0.1");
+        File.SetUnixFileMode(nested, UnixFileMode.None);
+        try { Assert.Equal(Engine.Unknown, Engines.Classify(Engines.Scan(dir))); }
+        finally { File.SetUnixFileMode(nested, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
 }

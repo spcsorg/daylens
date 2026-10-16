@@ -25,6 +25,35 @@ public static class Engines
         return Engine.None;
     }
 
+    public const int ScanLimit = 400;
+
+    /// Names in the folder and one level below, enough for resources/app.asar, version/chrome.dll and browser/omni.ja.
+    /// Any error, or a folder with more entries than the limit, makes the scan uncertain (null): a partial
+    /// listing must never pass for "no engine".
+    public static List<string>? Scan(string dir, int limit = ScanLimit)
+    {
+        try
+        {
+            var entries = new List<string>();
+            var top = Directory.EnumerateFileSystemEntries(dir).Take(limit + 1).ToList();
+            if (top.Count > limit) return null;
+            foreach (var e in top)
+            {
+                var name = Path.GetFileName(e);
+                entries.Add(name);
+                if (!Directory.Exists(e)) continue;
+                var sub = Directory.EnumerateFileSystemEntries(e).Take(limit + 1).ToList();
+                if (sub.Count > limit) return null;
+                foreach (var s in sub) entries.Add(name + "/" + Path.GetFileName(s));
+            }
+            return entries;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// Packaged apps: the manifest says whether the app handles web links; unreadable means unknown.
     public static Engine ForPackage(bool? declaresWebProtocols) => declaresWebProtocols switch
     {

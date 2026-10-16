@@ -200,6 +200,44 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertTrue(e.flush(timeout: 1))
   }
 
+  private func makeBundle(_ layout: [String]) throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("daylens-bundle-\(UUID().uuidString)/Test.app")
+    for path in layout {
+      let u = root.appendingPathComponent(path)
+      if path.hasSuffix("/") { try FileManager.default.createDirectory(at: u, withIntermediateDirectories: true) }
+      else {
+        try FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: u.path, contents: Data())
+      }
+    }
+    return root
+  }
+
+  private func withUnreadable<T>(_ u: URL, _ body: () -> T) -> T {
+    chmod(u.path, 0)
+    defer { chmod(u.path, 0o755) }
+    return body()
+  }
+
+  func testAnUnreadableHelpersFolderMakesTheScanUncertainNotEmpty() throws {
+    let app = try makeBundle(["Contents/Resources/x.icns", "Contents/Frameworks/Some Framework.framework/Versions/Current/Helpers/Some Helper (Renderer).app/"])
+    XCTAssertEqual(classifyBundle(scanBundle(at: app)), .browser, "readable, it is a browser")
+    let helpers = app.appendingPathComponent("Contents/Frameworks/Some Framework.framework/Versions/Current/Helpers")
+    XCTAssertEqual(withUnreadable(helpers) { classifyBundle(scanBundle(at: app)) }, .unknown, "unreadable, it must not drop to none")
+  }
+
+  func testAnUnreadableFrameworksOrBrowserFolderMakesTheScanUncertain() throws {
+    let app = try makeBundle(["Contents/Resources/browser/omni.ja", "Contents/Frameworks/"])
+    XCTAssertEqual(classifyBundle(scanBundle(at: app)), .browser)
+    XCTAssertEqual(withUnreadable(app.appendingPathComponent("Contents/Resources/browser")) { classifyBundle(scanBundle(at: app)) }, .unknown)
+    XCTAssertEqual(withUnreadable(app.appendingPathComponent("Contents/Frameworks")) { classifyBundle(scanBundle(at: app)) }, .unknown)
+  }
+
+  func testMissingFoldersAreSimplyEmpty() throws {
+    let app = try makeBundle(["Contents/Resources/x.icns"])
+    XCTAssertEqual(classifyBundle(scanBundle(at: app)), .none)
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

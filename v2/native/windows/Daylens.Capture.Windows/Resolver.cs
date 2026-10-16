@@ -233,32 +233,13 @@ internal sealed unsafe class Resolver
         var dir = Path.GetDirectoryName(exePath);
         if (dir is null) return Engine.Unknown;
         if (_engines.TryGetValue(dir, out var cached)) return cached;
-        var engine = Engines.Classify(ListShallow(dir));
+        var listing = Engines.Scan(dir);
+        if (listing is null) Diag.Write("engine_scan_uncertain");
+        var engine = Engines.Classify(listing);
         if (_engines.Count > 512) _engines.Clear();
-        _engines[dir] = engine;
+        // An uncertain scan is retried next time rather than remembered.
+        if (engine != Engine.Unknown) _engines[dir] = engine;
         return engine;
-    }
-
-    // Names in the folder and one level below, enough for resources/app.asar, <version>/chrome.dll and browser/omni.ja.
-    static List<string>? ListShallow(string dir)
-    {
-        try
-        {
-            var entries = new List<string>();
-            foreach (var e in Directory.EnumerateFileSystemEntries(dir).Take(400))
-            {
-                var name = Path.GetFileName(e);
-                entries.Add(name);
-                if (Directory.Exists(e))
-                    foreach (var sub in Directory.EnumerateFileSystemEntries(e).Take(400)) entries.Add(name + "/" + Path.GetFileName(sub));
-            }
-            return entries;
-        }
-        catch
-        {
-            Diag.Write("engine_listing_failed");
-            return null;
-        }
     }
 
     bool IsRegisteredBrowser(string exePath)

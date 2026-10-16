@@ -82,28 +82,12 @@ final class EngineRegistry {
     lock.lock()
     if let e = cache[url.path] { lock.unlock(); return e }
     lock.unlock()
-    let e = classifyBundle(listing(url))
-    lock.lock(); cache[url.path] = e; lock.unlock()
+    let e = classifyBundle(scanBundle(at: url))
+    // An uncertain scan is retried next time rather than remembered.
+    if e != .unknown { lock.lock(); cache[url.path] = e; lock.unlock() }
     return e
   }
 
-  private func listing(_ url: URL) -> BundleListing? {
-    let fm = FileManager.default
-    let contents = url.appendingPathComponent("Contents")
-    let res = contents.appendingPathComponent("Resources")
-    let fwDir = contents.appendingPathComponent("Frameworks")
-    guard let resources = try? fm.contentsOfDirectory(atPath: res.path) else { return nil }
-    let frameworks = (try? fm.contentsOfDirectory(atPath: fwDir.path)) ?? []
-    var helpers: [String: [String]] = [:]
-    for fw in frameworks where fw.hasSuffix(".framework") {
-      let base = fwDir.appendingPathComponent(fw)
-      helpers[fw] = (try? fm.contentsOfDirectory(atPath: base.appendingPathComponent("Versions/Current/Helpers").path))
-        ?? (try? fm.contentsOfDirectory(atPath: base.appendingPathComponent("Helpers").path)) ?? []
-    }
-    return BundleListing(resources: resources, frameworks: frameworks,
-                         geckoBrowserResources: fm.fileExists(atPath: res.appendingPathComponent("browser/omni.ja").path),
-                         frameworkHelpers: helpers)
-  }
 }
 
 let engines = EngineRegistry()
