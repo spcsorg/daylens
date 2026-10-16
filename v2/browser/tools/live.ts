@@ -36,6 +36,8 @@ const { values, positionals } = parseArgs({
     minutes: { type: 'string', default: '60' },
     procstat: { type: 'string' },
     activate: { type: 'string' },
+    // The local connection instead of native messaging: no host manifest, the listener on, pairing through the popup.
+    local: { type: 'boolean', default: false },
     'idle-s': { type: 'string', default: '120' },
     hold: { type: 'string', default: '5000' },
   },
@@ -44,6 +46,10 @@ const mode = positionals[0]
 const kind = values.browser as 'cft' | 'dia' | 'firefox'
 const out = path.resolve(values.out!)
 const HOLD = Number(values.hold)
+const LOCAL = values.local!
+// Fixed so the runner can open the Firefox popup page; Firefox otherwise picks a random UUID per install.
+const FIREFOX_UUID = '6f2b7d1e-5c3a-4a8e-9d10-2b6e7f9a4c31'
+const FIREFOX_ID = 'browser@daylens.app'
 
 function log(msg: string): void {
   process.stdout.write(`[live ${new Date().toISOString().slice(11, 23)}] ${msg}\n`)
@@ -91,8 +97,8 @@ class Service {
   async start(): Promise<void> {
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
     this.proc = spawn(process.execPath, [SERVICE, '--helper', values.helper!, '--data-dir', this.dataDir], {
-      env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
-      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath(), ...(LOCAL ? { DAYLENS_V2_BROWSER_LOCAL: '1' } : {}) },
+      stdio: [LOCAL ? 'pipe' : 'ignore', 'ignore', 'pipe'],
     })
     this.proc.stderr!.pipe(logStream)
     const start = Date.now()
@@ -100,6 +106,18 @@ class Service {
       if (Date.now() - start > 10_000) throw new Error('service did not start its browser socket')
       await sleep(100)
     }
+  }
+  // What the Daylens app does with a daylens://pair link the operating system hands it.
+  pair(link: string): void {
+    this.proc!.stdin!.write(JSON.stringify({ op: 'pair', link }) + '\n')
+  }
+  async waitLog(text: string, ms: number): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < ms) {
+      if (readFileSync(this.logFile, 'utf8').includes(text)) return true
+      await sleep(200)
+    }
+    return false
   }
   async stop(): Promise<void> {
     const p = this.proc
@@ -128,6 +146,9 @@ interface Driver {
   mainPid(): number
   extensionPids(): number[]
   screenshot?(url: string, file: string, dark: boolean): Promise<void>
+  evaluate(handle: string, expression: string): Promise<unknown>
+  popupUrl(): string
+  tabs(): Promise<{ url: string; title?: string }[]>
 }
 
 class Rpc {
@@ -343,6 +364,12 @@ class ChromiumDriver implements Driver {
     await this.cdp.send('Target.detachFromTarget', { sessionId })
     return r.result?.value
   }
+  popupUrl(): string {
+    return `chrome-extension://${DEV_CHROMIUM_ID}/popup.html`
+  }
+  async tabs(): Promise<{ url: string; title?: string }[]> {
+    return (await this.targets()).filter((t) => t.type === 'page').map((t) => ({ url: t.url, title: (t as { title?: string }).title }))
+  }
   async capture(handle: string, file: string, dark: boolean): Promise<void> {
     const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
     await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] }, sessionId)
@@ -400,6 +427,7 @@ class FirefoxDriver implements Driver {
         'user_pref("browser.tabs.warnOnClose", false);',
         'user_pref("app.update.disabledForTesting", true);',
         'user_pref("browser.privatebrowsing.autostart", false);',
+        `user_pref("extensions.webextensions.uuids", ${JSON.stringify(JSON.stringify({ [FIREFOX_ID]: FIREFOX_UUID }))});`,
       ].join('\n') + '\n',
     )
     const logStream = createWriteStream(this.logFile, { flags: 'a' })
@@ -479,11 +507,21 @@ class FirefoxDriver implements Driver {
   extensionPids(): number[] {
     return childPids(this.mainPid()).filter((p) => /-isForBrowser.*extension|extension/.test(commandOf(p)))
   }
+  popupUrl(): string {
+    return `moz-extension://${FIREFOX_UUID}/popup.html`
+  }
+  async tabs(): Promise<{ url: string; title?: string }[]> {
+    return (await this.tops()).map((c) => ({ url: c.url }))
+  }
+  async evaluate(handle: string, expression: string): Promise<unknown> {
+    const r = await this.bidi.send('script.evaluate', { expression, target: { context: handle }, awaitPromise: true })
+    return r?.result?.value
+  }
 }
 
 function makeDriver(dir: string): Driver {
   const dist = path.join(v2, 'browser', 'dist')
-  if (kind === 'firefox') return new FirefoxDriver(values.app!, dir, path.join(dist, 'firefox'))
+  if (kind === 'firefox') return new FirefoxDriver(values.app!, dir, path.join(dist, LOCAL ? 'firefox-dev' : 'firefox'))
   return new ChromiumDriver(kind, values.app!, dir, path.join(dist, 'chromium-dev'))
 }
 
@@ -660,7 +698,9 @@ async function canary(): Promise<void> {
   const svc = new Service(dataDir, svcLog)
   const d = makeDriver(dir)
   const hosts = hostDir(d)
-  register(kind === 'firefox' ? 'firefox' : 'chromium', hosts, values.helper!)
+  if (LOCAL) unregister(hosts)
+  else register(kind === 'firefox' ? 'firefox' : 'chromium', hosts, values.helper!)
+  let pairingSeen: unknown = null
   const markers: Marker[] = []
   const mark = (label: string, page: string | null | undefined, isPrivate: boolean) => {
     markers.push({ t: Date.now(), label, expect: page === undefined ? undefined : { page }, private: isPrivate })
@@ -698,6 +738,7 @@ async function canary(): Promise<void> {
     await d.launch(shared)
     activateApp(values.app!)
     const normal = await (d as ChromiumDriver | FirefoxDriver).firstPage(pages.base)
+    if (LOCAL) pairingSeen = await pairThroughPopup(d, svc, dir)
     await step('normal window: shared page', shared, false, () => d.activate(normal))
     await step('normal window: normal canary', normalUrl, false, () => d.navigate(normal, normalUrl))
     await step('normal window: shared page again', shared, false, () => d.navigate(normal, shared))
@@ -808,6 +849,8 @@ async function canary(): Promise<void> {
       app: values.app,
       canaries: { private: [PRIVATE, PRIVATE_TICK], normal: NORMAL },
       host_processes_seen: hostCount,
+      transport: LOCAL ? 'local' : 'native',
+      pairing: pairingSeen,
       interrupted_steps_redone: interruptions,
       private_hits: { while_open: openHits, after_close: closedHits, after_restart: restartHits },
       normal_canary_stored: normalHits.length > 0,
@@ -835,6 +878,32 @@ async function canary(): Promise<void> {
       execFileSync('/usr/bin/killall', ['Calculator'], { stdio: 'ignore' })
     } catch {}
   }
+}
+
+// Presses Connect in the popup, reads the daylens://pair link the extension made, and hands it to the service the
+// way the app would. Records what the browser did with the daylens:// tab, since nothing on this Mac handles it.
+async function pairThroughPopup(d: Driver, svc: Service, dir: string): Promise<unknown> {
+  const popup = await d.openWindow(d.popupUrl())
+  await sleep(1500)
+  const before = await d.evaluate(popup, `document.getElementById('status').textContent`)
+  await d.evaluate(popup, `document.getElementById('connect').click()`)
+  await sleep(2000)
+  const link = (await d.evaluate(
+    popup,
+    `(async () => { const kv = await import('./kv.js'); const pr = await import('./pairing.js'); const p = await kv.get('pairing'); return p ? pr.pairLink(p) : null })()`,
+  )) as string | null
+  const tabs = await d.tabs()
+  const pairTabs = tabs.filter((t) => t.url.startsWith('daylens:')).map((t) => ({ title: t.title ?? null, scheme_only: t.url.split('?')[0] }))
+  if (!link) throw new Error('the extension made no pairing link')
+  svc.pair(link)
+  const connected = await svc.waitLog('browser connected transport=local', 30_000)
+  const after = await d.evaluate(popup, `document.getElementById('status').textContent`)
+  const leftover = (await d.tabs()).filter((t) => t.url.startsWith('daylens:')).length
+  if (d instanceof ChromiumDriver) await d.capture(popup, path.join(dir, 'popup-local.png'), false)
+  await d.close(popup)
+  log(`pairing: ${connected ? 'connected' : 'NOT connected'}; popup "${before}" -> "${after}"; daylens:// tabs while pairing ${pairTabs.length}, left after ${leftover}`)
+  if (!connected) throw new Error('the local connection did not come up after pairing')
+  return { popup_before: before, popup_after: after, daylens_tabs_during: pairTabs, daylens_tabs_after: leftover }
 }
 
 // --- soak --------------------------------------------------------------------------------------------------------
