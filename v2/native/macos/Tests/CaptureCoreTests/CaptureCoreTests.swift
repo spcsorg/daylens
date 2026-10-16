@@ -65,7 +65,7 @@ final class CaptureCoreTests: XCTestCase {
     e.emit(kind: "power", source: "t", time: time, obs: Obs.power("sleep"), priority: .critical)
     e.emit(kind: "power", source: "t", time: time, obs: Obs.power("sleep"), priority: .critical)
     for _ in 0..<10 { gate.signal() }
-    e.flush()
+    e.flush(timeout: 5)
     XCTAssertEqual(e.dropped, 4)
     let seqs = out.map { (try! JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any])["seq"] as! Int }
     XCTAssertEqual(seqs, [0, 1, 5], "two normal lines fit, the reserve takes one critical line, the gap shows as a seq jump")
@@ -178,6 +178,17 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertTrue(d.returned, "but the first input after the resume is reported")
     XCTAssertGreaterThan(d.nextCheckS, 100, "and checks go back to their normal pace")
     XCTAssertFalse(s.evaluate(secondsSinceInput: 0.1, nowWallMs: resume + 20_000).returned, "reported once")
+  }
+
+  func testFlushIsBoundedWhenTheReaderStopsReading() {
+    let blocked = DispatchSemaphore(value: 0)
+    let e = Emitter(run: "r", boot: "b", platform: "macos") { _ in blocked.wait() }
+    e.emit(kind: "power", source: "t", time: time, obs: Obs.power("sleep"), priority: .critical)
+    let start = Date()
+    XCTAssertFalse(e.flush(timeout: 0.1), "a blocked pipe is reported, not waited on")
+    XCTAssertLessThan(Date().timeIntervalSince(start), 0.5, "sleep acknowledgement is never held up by stdout")
+    blocked.signal()
+    XCTAssertTrue(e.flush(timeout: 1))
   }
 
   func testActiveChecksNeverSpinFasterThanHalfASecond() {

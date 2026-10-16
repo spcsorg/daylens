@@ -146,9 +146,10 @@ rootPowerPort = IORegisterForSystemPower(nil, &powerPortRef, { _, _, type, arg i
   case kMessageCanSystemSleep:
     IOAllowPowerChange(rootPowerPort, Int(bitPattern: arg))
   case kMessageSystemWillSleep:
+    // Acknowledge sleep whatever the pipe is doing: the sleep line gets a short chance to leave, no more.
     emit("power", "iokit", Obs.power("sleep"))
     suspendIdle(true)
-    emitter.flush()
+    emitter.flush(timeout: 0.2)
     IOAllowPowerChange(rootPowerPort, Int(bitPattern: arg))
   case kMessageSystemHasPoweredOn:
     emit("power", "iokit", Obs.power("resume"))
@@ -225,7 +226,7 @@ Thread.detachNewThread {
     if line.contains("\"shutdown\"") {
       DispatchQueue.main.async {
         emit("bye", "helper", Obs.bye("shutdown"))
-        emitter.flush()
+        emitter.flush(timeout: 1)
         _exit(0)
       }
     } else if line.contains("\"snapshot\"") {

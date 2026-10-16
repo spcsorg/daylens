@@ -45,5 +45,12 @@ public final class Emitter {
     }
   }
 
-  public func flush() { queue.sync {} }
+  /// Waits for queued lines to be written, but never longer than `timeout`: a reader that stopped
+  /// reading must not hold up anything time-critical. Returns false when it gave up.
+  @discardableResult
+  public func flush(timeout: TimeInterval) -> Bool {
+    let done = DispatchSemaphore(value: 0)
+    queue.async { done.signal() }
+    return done.wait(timeout: .now() + timeout) == .success
+  }
 }
