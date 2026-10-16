@@ -2,7 +2,7 @@
 
 V2 ships as a stable release on Windows 11 and macOS; Linux ships as a nightly. Speed is checked at every step.
 
-V2 is built one step at a time. Each step is planned, reviewed by a different model or person before and after it is built, and measured. The next step starts only when the current one meets its measure on every platform.
+V2 is built one step at a time. Each step is planned, reviewed by a different model or person before and after it is built, and measured. A step is accepted when it meets its measure on macOS; work that does not depend on platform behavior can then begin. Windows must meet the measure for steps 1, 1b and 1c before step 3 begins, and every step must pass on every platform before release.
 
 | Step | What | Done when |
 |---|---|---|
