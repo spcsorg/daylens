@@ -27,6 +27,8 @@ V2 is built one step at a time. Each step is planned, reviewed by a different mo
 - [ ] Security review complete; findings fixed or accepted in writing.
 - [ ] Terms and Privacy page published and linked from onboarding and Settings.
 - [ ] Signed installers for Windows and macOS, a nightly for Linux; updates verified.
+- [ ] If Windows signing goes through the SignPath Foundation: the code-signing policy page (team roles, what gets signed, approval rule) and the SignPath attribution are published on the download page, and two-factor authentication is on for every account that can approve a release.
+- [ ] A public privacy policy page that the stores, SignPath and the Terms & Privacy screen all link to.
 - [ ] The browser extension published in the Chrome, Edge and Firefox stores, with privacy disclosures, permission justifications and reviewer test steps that use a downloadable desktop build.
 - [ ] A Windows gold day recorded on the physical laptop from the signed build.
 - [ ] Billing in production mode with confirmed webhooks, and prices set.
