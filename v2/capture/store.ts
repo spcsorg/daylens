@@ -7,7 +7,7 @@ import type { GapDetail, GapPoint, GapReason, GapStart, ObservationRow, Sink } f
 import type { Line, LineOf } from './protocol.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const FLUSH_INTERVAL_MS = 1000
 const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS observations_event_wall ON observations(event_wall_ms
 CREATE TABLE IF NOT EXISTS capture_gaps (
   id INTEGER PRIMARY KEY,
   reason TEXT NOT NULL,
-  scope TEXT NOT NULL CHECK (scope IN ('all', 'titles')),
+  scope TEXT NOT NULL CHECK (scope IN ('all', 'titles', 'focus', 'session', 'power')),
   run TEXT,
   start_wall_ms INTEGER NOT NULL,
   start_mono_us INTEGER,
@@ -207,10 +207,25 @@ export class Store implements Sink {
     this.db.exec(SCHEMA)
     const version = this.db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined
     if (!version) this.db.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION))
+    else if (Number(version.value) === 1) this.migrateV1()
     else if (Number(version.value) !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
     this.seedExclusions()
     this.nextObsId = ((this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0) + 1
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
+  }
+
+  // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
+  private migrateV1(): void {
+    this.db.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE capture_gaps RENAME TO capture_gaps_v1;
+        ${SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS capture_gaps'), SCHEMA.indexOf('CREATE INDEX IF NOT EXISTS capture_gaps_start'))}
+        INSERT INTO capture_gaps SELECT * FROM capture_gaps_v1;
+        DROP TABLE capture_gaps_v1;
+        CREATE INDEX IF NOT EXISTS capture_gaps_start ON capture_gaps(start_wall_ms);
+      `)
+      this.db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION))
+    })()
   }
 
   private seedExclusions(): void {

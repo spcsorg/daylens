@@ -43,12 +43,13 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 | Kind | `obs` |
 |---|---|
 | `hello` | `helper`, `version`, `pid`, `os`, `permissions`, `config: {heartbeat_s, idle_threshold_s, reconcile_s}`. First line of every run, followed by a snapshot. |
-| `heartbeat` | `awake_us` (monotonic microseconds since boot **excluding** time asleep: macOS `CLOCK_UPTIME_RAW`, Windows `QueryUnbiasedInterruptTime`; the service compares it between heartbeats to tell a stalled helper from a sleeping machine, including dark wakes and missed sleep notices), `permissions`, `titles` (title channel: `ok`, `degraded`, `stalled`, `no_permission`), `stall_ms` (how long a worker has been stuck in one call, 0 if none), `dropped` (lines dropped at the queue since start). Sent every `heartbeat_s` from the helper's main event thread, so a stuck event loop stops heartbeats even if other threads still emit. |
+| `heartbeat` | `awake_us` (monotonic microseconds since boot **excluding** time asleep: macOS `CLOCK_UPTIME_RAW`, Windows `QueryUnbiasedInterruptTime`; the service compares it between heartbeats to tell a stalled helper from a sleeping machine, including dark wakes and missed sleep notices), `permissions`, `registrations` (`{focus, session, power}`: whether the helper's subscription to that event source is in place; a failed one is retried and the service records the time it was missing), `titles` (title channel: `ok`, `degraded`, `stalled`, `no_permission`), `stall_ms` (how long a worker has been stuck in one call, 0 if none), `dropped` (lines dropped at the queue since start). Sent every `heartbeat_s` from the helper's main event thread, so a stuck event loop stops heartbeats even if other threads still emit. |
 | `focus` | `trigger`, `app`, `window`. The front app, the focused window or its title changed; or reconciliation found a difference; or a snapshot was requested. Every `focus` line carries the identity of the app that owns the window, so privacy rules are decided per line and never depend on line order. |
 | `input` | `state` (`idle` or `active`), `last_input_wall_ms`, `threshold_s`, `snapshot`. Input crossed the idle threshold, or a snapshot. |
 | `session` | `state`: `locked`, `unlocked`, `console_disconnect`, `console_connect`, `remote_connect`, `remote_disconnect`, `logoff`, `logon`, `unknown`; `snapshot`. |
 | `power` | `state`: `sleep`, `resume`, `resume_user`, `display_off`, `display_on`, `display_dim`. `resume` means the system is running again, cause unknown. `resume_user` is evidence that a person caused or followed the resume (Windows `PBT_APMRESUMESUSPEND`). Waking alone is never the user returning. |
 | `clock` | `change`: `time_changed` or `timezone_changed`. |
+| `loss` | `channel` (`focus`), `count`, `from_wall_ms`, `to_wall_ms`. Focus work was dropped inside the helper before it became a line (an internal queue was full), so no `seq` shows it. Sent once the queue drains. |
 | `bye` | `reason`. Last line of a clean exit. |
 
 `trigger`: `app_changed`, `window_changed`, `title_changed`, `reconcile`, `snapshot`.
@@ -59,7 +60,7 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 
-`identity_state`: `ok`; `access_denied` (the process could not be queried, identity fields are null); `timeout` (the query hung and was abandoned); `gone` (the process exited first); `none` (nothing is in front). Shared code treats any state other than `ok` as unknown and withholds the title.
+`identity_state`: `ok`; `access_denied` (the process could not be queried, identity fields are null); `timeout` (the query hung and was abandoned); `gone` (the process exited first); `none` (nothing is in front); `unresolved` (a host window, such as a Windows ApplicationFrameHost frame, whose real app could not be found). Shared code treats any state other than `ok` as unknown and withholds the title.
 
 `registered_browser` is a platform fact, not a decision: the app is registered to open `http` and `https` links. Shared code decides what that means for privacy.
 

@@ -52,6 +52,11 @@
     "permissions": {
      "accessibility": "granted"
     },
+    "registrations": {
+     "focus": true,
+     "session": true,
+     "power": true
+    },
     "titles": "ok",
     "stall_ms": 0,
     "dropped": 0
@@ -325,6 +330,11 @@
     "permissions": {
      "accessibility": "not_applicable"
     },
+    "registrations": {
+     "focus": true,
+     "session": true,
+     "power": true
+    },
     "titles": "ok",
     "stall_ms": 0,
     "dropped": 3
@@ -527,6 +537,121 @@
     "last_input_wall_ms": 1792130412000,
     "threshold_s": 120,
     "snapshot": true
+   }
+  }
+ },
+ {
+  "name": "win_heartbeat_session_unregistered",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 17,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "heartbeat",
+   "obs": {
+    "awake_us": 612345678901,
+    "permissions": {
+     "accessibility": "not_applicable"
+    },
+    "registrations": {
+     "focus": true,
+     "session": false,
+     "power": true
+    },
+    "titles": "ok",
+    "stall_ms": 0,
+    "dropped": 0
+   }
+  }
+ },
+ {
+  "name": "win_focus_unresolved_host",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 18,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": null,
+     "name": null,
+     "path": null,
+     "pid": 7712,
+     "registered_browser": false,
+     "identity_state": "unresolved",
+     "store": null
+    },
+    "window": {
+     "window": "0x3C4D",
+     "title": "Some hosted window",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_loss",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 19,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "loss",
+   "obs": {
+    "channel": "focus",
+    "count": 12,
+    "from_wall_ms": 1792130410000,
+    "to_wall_ms": 1792130412000
+   }
+  }
+ },
+ {
+  "name": "mac_loss",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 20,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "loss",
+   "obs": {
+    "channel": "focus",
+    "count": 3,
+    "from_wall_ms": 1792130410000,
+    "to_wall_ms": 1792130411000
    }
   }
  }

@@ -47,6 +47,8 @@ export type GapReason =
   | 'lines_lost'
   | 'protocol_rejected'
   | 'storage_failed'
+  | 'events_dropped'
+  | 'events_unavailable'
   | 'titles_unavailable'
   | 'excluded'
   | 'paused'
@@ -59,9 +61,11 @@ export interface GapPoint {
   boot: string | null
 }
 
+export type GapScope = 'all' | 'titles' | 'focus' | 'session' | 'power'
+
 export interface GapStart {
   reason: GapReason
-  scope: 'all' | 'titles'
+  scope: GapScope
   run: string | null
   start: GapPoint
   detail: GapDetail | null
@@ -228,6 +232,7 @@ export class Normalizer {
         return this.onState(line, 'clock', line.obs.change, null)
       case 'hello':
       case 'heartbeat':
+      case 'loss':
       case 'bye':
         return
     }

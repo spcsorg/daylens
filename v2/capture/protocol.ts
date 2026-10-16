@@ -27,14 +27,20 @@ export interface HelloObs {
   permissions: Permissions
   config: { heartbeat_s: number; idle_threshold_s: number; reconcile_s: number }
 }
+export interface Registrations {
+  focus: boolean
+  session: boolean
+  power: boolean
+}
 export interface HeartbeatObs {
   awake_us: number
   permissions: Permissions
+  registrations: Registrations
   titles: ChannelState
   stall_ms: number
   dropped: number
 }
-export type IdentityState = 'ok' | 'access_denied' | 'timeout' | 'gone' | 'none'
+export type IdentityState = 'ok' | 'access_denied' | 'timeout' | 'gone' | 'none' | 'unresolved'
 export interface AppIdentity {
   app_id: string | null
   name: string | null
@@ -83,6 +89,12 @@ export interface PowerObs {
 export interface ClockObs {
   change: 'time_changed' | 'timezone_changed'
 }
+export interface LossObs {
+  channel: 'focus'
+  count: number
+  from_wall_ms: number
+  to_wall_ms: number
+}
 export interface ByeObs {
   reason: string
 }
@@ -95,6 +107,7 @@ export interface ObsByKind {
   session: SessionObs
   power: PowerObs
   clock: ClockObs
+  loss: LossObs
   bye: ByeObs
 }
 export type Kind = keyof ObsByKind
@@ -167,7 +180,7 @@ function oneOf<T extends string>(o: Obj, k: string, allowed: readonly T[]): T {
 const PLATFORMS = ['macos', 'windows', 'linux'] as const
 const PERMISSION_STATES = ['granted', 'denied', 'not_applicable'] as const
 const CHANNEL_STATES = ['ok', 'degraded', 'stalled', 'no_permission'] as const
-const IDENTITY_STATES = ['ok', 'access_denied', 'timeout', 'gone', 'none'] as const
+const IDENTITY_STATES = ['ok', 'access_denied', 'timeout', 'gone', 'none', 'unresolved'] as const
 const TITLE_STATES = ['ok', 'empty', 'no_permission', 'timeout', 'unavailable'] as const
 const FOCUS_TRIGGERS = ['app_changed', 'window_changed', 'title_changed', 'reconcile', 'snapshot'] as const
 const SESSION_STATES = [
@@ -233,13 +246,17 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
       },
     }
   },
-  heartbeat: (o) => ({
-    awake_us: int(o, 'awake_us'),
-    permissions: permissions(o.permissions),
-    titles: oneOf(o, 'titles', CHANNEL_STATES),
-    stall_ms: int(o, 'stall_ms'),
-    dropped: int(o, 'dropped'),
-  }),
+  heartbeat: (o) => {
+    const r = obj(o.registrations, 'registrations')
+    return {
+      awake_us: int(o, 'awake_us'),
+      permissions: permissions(o.permissions),
+      registrations: { focus: bool(r, 'focus'), session: bool(r, 'session'), power: bool(r, 'power') },
+      titles: oneOf(o, 'titles', CHANNEL_STATES),
+      stall_ms: int(o, 'stall_ms'),
+      dropped: int(o, 'dropped'),
+    }
+  },
   focus: (o) => ({
     trigger: oneOf(o, 'trigger', FOCUS_TRIGGERS),
     app: appIdentity(o.app),
@@ -254,6 +271,12 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
   session: (o) => ({ state: oneOf(o, 'state', SESSION_STATES), snapshot: boolOr(o, 'snapshot', false) }),
   power: (o) => ({ state: oneOf(o, 'state', POWER_STATES) }),
   clock: (o) => ({ change: oneOf(o, 'change', CLOCK_CHANGES) }),
+  loss: (o) => {
+    const from_wall_ms = int(o, 'from_wall_ms')
+    const to_wall_ms = int(o, 'to_wall_ms')
+    if (to_wall_ms < from_wall_ms) fail('to_wall_ms: before from_wall_ms')
+    return { channel: oneOf(o, 'channel', ['focus'] as const), count: int(o, 'count', 1), from_wall_ms, to_wall_ms }
+  },
   bye: (o) => ({ reason: str(o, 'reason', 128) }),
 }
 

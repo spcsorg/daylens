@@ -77,7 +77,7 @@ test('previous coverage: a clean stop and a crash are told apart', () => {
   s1.startRun({ v: 1, run: 'r1', seq: 0, boot: 'b', t: { wall_ms: T0, mono_us: 1, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'hello',
     obs: { helper: 'h', version: '1', pid: 1, os: 'x', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } } })
   s1.recordHeartbeat({ v: 1, run: 'r1', seq: 1, boot: 'b', t: { wall_ms: T0 + 15_000, mono_us: 2, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 'helper', kind: 'heartbeat',
-    obs: { awake_us: 2, permissions: { accessibility: 'granted' }, titles: 'ok', stall_ms: 0, dropped: 0 } })
+    obs: { awake_us: 2, permissions: { accessibility: 'granted' }, registrations: { focus: true, session: true, power: true }, titles: 'ok', stall_ms: 0, dropped: 0 } })
   s1.close()
   const crashed = new Store(dir)
   assert.deepEqual(crashed.previousCoverage(), { endWallMs: T0 + 15_000, clean: false })
