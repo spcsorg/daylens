@@ -51,12 +51,13 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 | `clock` | `change`: `time_changed` or `timezone_changed`. |
 | `loss` | `channel` (`focus`), `count`, `from_wall_ms`, `to_wall_ms`. Focus work was dropped inside the helper before it became a line (an internal queue was full), so no `seq` shows it. Sent once the queue drains. |
 | `bye` | `reason`. Last line of a clean exit. |
+| `tab` | Browser host only, never a capture helper. `trigger` (`activated`, `focus`, `updated`, `removed`, `snapshot`, `startup`, `paused`), `state` (`page` or `unknown`), `reason`, `browser`, `extension`, `window`, `tab`, `url`, `title`. See [Browser host](#browser-host). |
 
 `trigger`: `app_changed`, `window_changed`, `title_changed`, `reconcile`, `snapshot`.
 
 `app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
 
-`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet; browser windows get it with the browser step. A `private` window never has its title stored.
+`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet. A `private` window never has its title stored. A browser window's title stays withheld even while the extension reports pages, because the window in front may be one the extension cannot see.
 
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 
@@ -71,3 +72,31 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 ## Contract tests
 
 `fixtures/valid.json` holds one golden line per kind and platform; `fixtures/invalid.json` holds lines the service must reject, with the reason. The TypeScript validator, the Swift encoder and the C# encoder are all tested against these files.
+
+## Browser host
+
+The Daylens browser extension talks to a native messaging host: the capture helper started by the browser, which then forwards to the capture service. The helper runs as the host only when the browser starts it with an extension origin (Chromium: `chrome-extension://<id>/`, plus `--parent-window=` on Windows; Firefox: the host manifest path and the add-on ID) and the ID is on the helper's allowlist. In this mode it captures nothing.
+
+### Transport
+
+- The capture service listens on a local endpoint. macOS and Linux: a Unix socket, `<per-user temp folder>/daylens-v2/browser.sock` (macOS: `confstr(_CS_DARWIN_USER_TEMP_DIR)`; Linux: `$XDG_RUNTIME_DIR`), in a folder only the user can open, socket mode 0600. Windows: the named pipe `\\.\pipe\daylens-v2-browser-<user name>`. `DAYLENS_V2_BROWSER_SOCKET` overrides the path for both sides.
+- The host checks that the listener runs as the same user (`getpeereid` on macOS, the pipe server's process token on Windows) before sending anything.
+- Host to service: one JSON line per message, UTF-8, at most 16 KiB. A line is either a protocol line of kind `tab` with the host's own `run` and `seq`, or a control op: `{"op":"pause","for":"hour"|"tomorrow"|"until_resumed"}`, `{"op":"resume"}`, `{"op":"status"}`.
+- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change and in answer to `status`; `{"op":"snapshot"}` when the service needs the present state (the browser came to the front, or lines were lost).
+- A host that cannot reach the service retries on every extension message, and on macOS when the socket folder changes; on Windows every 30 s.
+
+### `tab`
+
+| Field | Meaning |
+|---|---|
+| `trigger` | The browser event behind the line. |
+| `state` | `page`: the focused tab of a focused normal window. `unknown`: anything the extension cannot see or does not count: another app, a private window, devtools, a popup, no window. |
+| `reason` | `null` for a page; for unknown one of `no_focused_window`, `not_normal`, `no_tab`, `no_address`, `paused`. |
+| `browser` | The process that started the host, found by the host from its own parent (on Windows, the parent of `cmd.exe` when Chromium puts it in between), in the same shape as `app`. Never reported by the extension. `registered_browser` is not read for tab lines. |
+| `extension` | The extension ID: 32 letters `a`–`p` for Chromium, the add-on ID for Firefox. |
+| `window`, `tab` | The browser's own IDs, as strings; only meaningful within one browser run. |
+| `url` | The page address after the shared address rule (`capture/address.ts`): no user name or password, no fragment, no query parameters that carry secrets, at most 2048 characters. Present exactly when `state` is `page`. |
+| `title` | The tab title, at most 1024 UTF-16 code units, or `null`. Only with `page`. |
+
+`t` is when the host received the message. The service stores a page only while the helper's latest focus line shows that same browser in front (same `pid`, same `app_id`) and the extension spoke after the browser came to the front. Everything else is stored as browser time with no page.
+

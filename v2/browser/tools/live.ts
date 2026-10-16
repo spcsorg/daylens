@@ -1,0 +1,938 @@
+// Live tests of the extension, its host and the capture service in a real browser with a separate test profile.
+// It takes over the screen while it runs. Nothing touches a real browser profile.
+//
+//   node browser/tools/live.ts canary --browser cft|dia|firefox --app <path to .app> --helper <capture helper> --out <dir>
+//   node browser/tools/live.ts soak   --browser cft --app <path> --helper <path> --out <dir> --minutes 60 --procstat <path>
+//
+// canary: unique pages in a private window next to a normal window showing the same page, then proof that nothing
+// from the private window reached the database, logs or diagnostics, while open, after closing and after a restart,
+// and that private time is stored as browser time with no page.
+// soak: an hour of scripted normal browsing while procstat samples the host, the extension's process and the service.
+
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
+import { parseArgs } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import Database from 'better-sqlite3'
+import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const v2 = path.join(here, '..', '..')
+const SERVICE = path.join(v2, 'capture', 'service.ts')
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    browser: { type: 'string' },
+    app: { type: 'string' },
+    helper: { type: 'string' },
+    out: { type: 'string' },
+    minutes: { type: 'string', default: '60' },
+    procstat: { type: 'string' },
+    activate: { type: 'string' },
+    'idle-s': { type: 'string', default: '120' },
+    hold: { type: 'string', default: '5000' },
+  },
+})
+const mode = positionals[0]
+const kind = values.browser as 'cft' | 'dia' | 'firefox'
+const out = path.resolve(values.out!)
+const HOLD = Number(values.hold)
+
+function log(msg: string): void {
+  process.stdout.write(`[live ${new Date().toISOString().slice(11, 23)}] ${msg}\n`)
+}
+
+function socketPath(): string {
+  const tmp = execFileSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).trim()
+  return path.join(tmp, 'daylens-v2-live', 'browser.sock')
+}
+
+// --- canary pages -----------------------------------------------------------------------------------------------
+
+interface Pages {
+  base: string
+  close(): void
+}
+
+function servePages(): Promise<Pages> {
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? '/', 'http://x')
+    const title = u.searchParams.get('title') ?? u.pathname.slice(1)
+    const ticking = u.searchParams.get('tick') === '1'
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(`<!doctype html><title>${title.replace(/</g, '')}</title><body style="font:20px system-ui;padding:40px"><h1>${title.replace(/</g, '')}</h1>
+<script>${ticking ? `let n=0;setInterval(()=>{document.title='('+(++n)+') '+${JSON.stringify(title)}},2000)` : ''}</script>`)
+  })
+  return new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => {
+      const port = (server.address() as AddressInfo).port
+      resolve({ base: `http://127.0.0.1:${port}`, close: () => server.close() })
+    }),
+  )
+}
+
+// --- capture service ---------------------------------------------------------------------------------------------
+
+class Service {
+  proc: ChildProcess | null = null
+  readonly dataDir: string
+  readonly logFile: string
+  constructor(dataDir: string, logFile: string) {
+    this.dataDir = dataDir
+    this.logFile = logFile
+  }
+  async start(): Promise<void> {
+    const logStream = createWriteStream(this.logFile, { flags: 'a' })
+    this.proc = spawn(process.execPath, [SERVICE, '--helper', values.helper!, '--data-dir', this.dataDir], {
+      env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    this.proc.stderr!.pipe(logStream)
+    const start = Date.now()
+    while (!existsSync(this.logFile) || !readFileSync(this.logFile, 'utf8').includes('browser socket listening')) {
+      if (Date.now() - start > 10_000) throw new Error('service did not start its browser socket')
+      await sleep(100)
+    }
+  }
+  async stop(): Promise<void> {
+    const p = this.proc
+    if (!p || p.exitCode !== null) return
+    const done = new Promise((r) => p.once('exit', r))
+    p.kill('SIGTERM')
+    await done
+  }
+}
+
+// --- browser drivers ---------------------------------------------------------------------------------------------
+
+interface Driver {
+  readonly name: string
+  readonly profile: string
+  readonly logFile: string
+  readonly bundleId: string
+  launch(url: string): Promise<void>
+  openWindow(url: string): Promise<string>
+  openPrivate(url: string): Promise<string>
+  activate(handle: string): Promise<void>
+  navigate(handle: string, url: string): Promise<void>
+  newTab(handle: string, url: string): Promise<string>
+  close(handle: string): Promise<void>
+  quit(): Promise<void>
+  mainPid(): number
+  extensionPids(): number[]
+  screenshot?(url: string, file: string, dark: boolean): Promise<void>
+}
+
+class Rpc {
+  private ws: WebSocket
+  private id = 0
+  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>()
+  private constructor(ws: WebSocket) {
+    this.ws = ws
+    ws.addEventListener('message', (ev) => {
+      const m = JSON.parse(String(ev.data))
+      if (typeof m.id !== 'number') return
+      const p = this.pending.get(m.id)
+      if (!p) return
+      this.pending.delete(m.id)
+      if (m.error) p.reject(new Error(typeof m.error === 'string' ? `${m.error}: ${m.message}` : JSON.stringify(m.error)))
+      else p.resolve(m.result)
+    })
+  }
+  static connect(url: string): Promise<Rpc> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url)
+      ws.addEventListener('open', () => resolve(new Rpc(ws)))
+      ws.addEventListener('error', () => reject(new Error('websocket failed')))
+    })
+  }
+  send(method: string, params: object = {}, sessionId?: string): Promise<any> {
+    if (this.ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('connection closed'))
+    const id = ++this.id
+    this.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`${method} timed out`))
+      }, 15_000)
+      this.pending.set(id, {
+        resolve: (v) => (clearTimeout(timer), resolve(v)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      })
+    })
+  }
+  close(): void {
+    this.ws.close()
+  }
+}
+
+function binaryOf(app: string): string {
+  const plist = path.join(app, 'Contents', 'Info.plist')
+  const exe = execFileSync('/usr/bin/defaults', ['read', plist, 'CFBundleExecutable'], { encoding: 'utf8' }).trim()
+  return path.join(app, 'Contents', 'MacOS', exe)
+}
+
+function bundleIdOf(app: string): string {
+  return execFileSync('/usr/bin/defaults', ['read', path.join(app, 'Contents', 'Info.plist'), 'CFBundleIdentifier'], { encoding: 'utf8' }).trim()
+}
+
+function childPids(pid: number): number[] {
+  try {
+    const kids = execFileSync('/usr/bin/pgrep', ['-P', String(pid)], { encoding: 'utf8' }).split('\n').filter(Boolean).map(Number)
+    return kids.flatMap((k) => [k, ...childPids(k)])
+  } catch {
+    return []
+  }
+}
+
+function commandOf(pid: number): string {
+  try {
+    return execFileSync('/bin/ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })
+  } catch {
+    return ''
+  }
+}
+
+class ChromiumDriver implements Driver {
+  readonly profile: string
+  readonly logFile: string
+  readonly bundleId: string
+  private proc: ChildProcess | null = null
+  private cdp!: Rpc
+  private readonly binary: string
+  private readonly privateHandles = new Set<string>()
+  readonly name: string
+  readonly app: string
+  readonly extensionDir: string
+  constructor(name: string, app: string, dir: string, extensionDir: string) {
+    this.name = name
+    this.app = app
+    this.extensionDir = extensionDir
+    this.profile = path.join(dir, `${name}-profile`)
+    this.logFile = path.join(dir, `${name}-browser.log`)
+    this.binary = binaryOf(app)
+    this.bundleId = bundleIdOf(app)
+  }
+  private args(): string[] {
+    return [
+      `--user-data-dir=${this.profile}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--use-mock-keychain',
+      '--password-store=basic',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--enable-logging=stderr',
+      `--load-extension=${this.extensionDir}`,
+      `--disable-extensions-except=${this.extensionDir}`,
+      '--remote-debugging-port=0',
+    ]
+  }
+  // Before Dia is ever given the extension, prove this launch is a new instance on the test profile. A launch that
+  // hands off to the user's running Dia would never write the port file into the test profile.
+  private async proveIsolated(): Promise<void> {
+    mkdirSync(this.profile, { recursive: true })
+    rmSync(path.join(this.profile, 'DevToolsActivePort'), { force: true })
+    const args = this.args().filter((a) => !a.startsWith('--load-extension') && !a.startsWith('--disable-extensions-except'))
+    const p = spawn(this.binary, [...args, 'about:blank'], { stdio: 'ignore' })
+    const start = Date.now()
+    while (!existsSync(path.join(this.profile, 'DevToolsActivePort'))) {
+      if (p.exitCode !== null || Date.now() - start > 20_000) {
+        p.kill('SIGKILL')
+        throw new Error(`${this.name} did not start on the test profile; stopping before the extension is loaded anywhere`)
+      }
+      await sleep(100)
+    }
+    const [port, wsPath] = readFileSync(path.join(this.profile, 'DevToolsActivePort'), 'utf8').trim().split('\n')
+    const cdp = await Rpc.connect(`ws://127.0.0.1:${port}${wsPath}`)
+    await cdp.send('Browser.close').catch(() => {})
+    cdp.close()
+    await Promise.race([new Promise((r) => p.once('exit', r)), sleep(10_000).then(() => p.kill('SIGKILL'))])
+    log(`${this.name}: a separate instance on the test profile, confirmed`)
+  }
+  async launch(url: string): Promise<void> {
+    if (this.name === 'dia') await this.proveIsolated()
+    mkdirSync(this.profile, { recursive: true })
+    rmSync(path.join(this.profile, 'DevToolsActivePort'), { force: true })
+    const logStream = createWriteStream(this.logFile, { flags: 'a' })
+    this.proc = spawn(this.binary, [...this.args(), url], { env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() }, stdio: ['ignore', 'pipe', 'pipe'] })
+    this.proc.stdout!.pipe(logStream)
+    this.proc.stderr!.pipe(logStream)
+    activatePid = this.proc.pid ?? null
+    const portFile = path.join(this.profile, 'DevToolsActivePort')
+    const start = Date.now()
+    while (!existsSync(portFile)) {
+      if (Date.now() - start > 20_000) throw new Error(`${this.name} did not open its debugging port`)
+      await sleep(100)
+    }
+    const [port, wsPath] = readFileSync(portFile, 'utf8').trim().split('\n')
+    this.cdp = await Rpc.connect(`ws://127.0.0.1:${port}${wsPath}`)
+    await this.waitTarget((t) => t.type === 'service_worker' && t.url.startsWith(`chrome-extension://${DEV_CHROMIUM_ID}/`), 15_000, 'extension service worker')
+    await this.waitTarget((t) => t.type === 'page' && t.url.startsWith(url), 15_000, 'first page')
+  }
+  private async targets(): Promise<{ targetId: string; type: string; url: string; browserContextId?: string }[]> {
+    return (await this.cdp.send('Target.getTargets')).targetInfos
+  }
+  private async waitTarget(pred: (t: { type: string; url: string }) => boolean, ms: number, what: string): Promise<string> {
+    const start = Date.now()
+    for (;;) {
+      const t = (await this.targets()).find(pred)
+      if (t) return (t as { targetId: string }).targetId
+      if (Date.now() - start > ms) throw new Error(`${this.name}: no ${what}`)
+      await sleep(150)
+    }
+  }
+  async firstPage(prefix: string): Promise<string> {
+    return this.waitTarget((t) => t.type === 'page' && t.url.startsWith(prefix), 5000, 'page')
+  }
+  async openWindow(url: string): Promise<string> {
+    return (await this.cdp.send('Target.createTarget', { url, newWindow: true })).targetId
+  }
+  async openPrivate(url: string): Promise<string> {
+    // A real incognito window, opened the way a person opens one, not a DevTools browser context.
+    execFileSync(this.binary, [`--user-data-dir=${this.profile}`, '--incognito', url], { env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() }, stdio: 'ignore' })
+    const id = await this.waitTarget((t) => t.type === 'page' && t.url === url, 10_000, 'private window')
+    this.privateHandles.add(id)
+    return id
+  }
+  async activate(handle: string): Promise<void> {
+    await this.cdp.send('Target.activateTarget', { targetId: handle })
+  }
+  async navigate(handle: string, url: string): Promise<void> {
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
+    await this.cdp.send('Page.navigate', { url }, sessionId)
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+  }
+  async newTab(handle: string, url: string): Promise<string> {
+    // DevTools cannot open a tab in an incognito window it did not create; the command line opens one there.
+    if (this.privateHandles.has(handle)) return this.openPrivate(url)
+    const info = (await this.targets()).find((t) => t.targetId === handle)
+    return (await this.cdp.send('Target.createTarget', { url, ...(info?.browserContextId ? { browserContextId: info.browserContextId } : {}) })).targetId
+  }
+  async close(handle: string): Promise<void> {
+    await this.cdp.send('Target.closeTarget', { targetId: handle })
+  }
+  async quit(): Promise<void> {
+    const p = this.proc
+    if (!p || p.exitCode !== null) return
+    try {
+      await this.cdp.send('Browser.close')
+    } catch {}
+    this.cdp?.close()
+    if (p && p.exitCode === null) await Promise.race([new Promise((r) => p.once('exit', r)), sleep(10_000).then(() => p.kill('SIGKILL'))])
+  }
+  mainPid(): number {
+    return this.proc!.pid!
+  }
+  extensionPids(): number[] {
+    return childPids(this.mainPid()).filter((p) => commandOf(p).includes('--extension-process'))
+  }
+  async evaluate(handle: string, expression: string): Promise<unknown> {
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
+    const r = await this.cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+    return r.result?.value
+  }
+  async capture(handle: string, file: string, dark: boolean): Promise<void> {
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
+    await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] }, sessionId)
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: 300, height: 240, deviceScaleFactor: 2, mobile: false }, sessionId)
+    await sleep(400)
+    const shot = await this.cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId)
+    writeFileSync(file, Buffer.from(shot.data, 'base64'))
+    await this.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sessionId)
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+  }
+  async screenshot(url: string, file: string, dark: boolean): Promise<void> {
+    const id = await this.openWindow(url)
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: id, flatten: true })
+    await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] }, sessionId)
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: 300, height: 220, deviceScaleFactor: 2, mobile: false }, sessionId)
+    await this.cdp.send('Page.reload', {}, sessionId)
+    await sleep(1200)
+    const shot = await this.cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId)
+    writeFileSync(file, Buffer.from(shot.data, 'base64'))
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+    await this.close(id)
+  }
+}
+
+class FirefoxDriver implements Driver {
+  readonly name = 'firefox'
+  readonly profile: string
+  readonly logFile: string
+  readonly bundleId: string
+  private proc: ChildProcess | null = null
+  private bidi!: Rpc
+  private readonly binary: string
+  private readonly port = 9300 + Math.floor(Math.random() * 500)
+  readonly app: string
+  readonly extensionDir: string
+  constructor(app: string, dir: string, extensionDir: string) {
+    this.app = app
+    this.extensionDir = extensionDir
+    this.profile = path.join(dir, 'firefox-profile')
+    this.logFile = path.join(dir, 'firefox-browser.log')
+    this.binary = binaryOf(app)
+    this.bundleId = bundleIdOf(app)
+  }
+  async launch(url: string): Promise<void> {
+    mkdirSync(this.profile, { recursive: true })
+    writeFileSync(
+      path.join(this.profile, 'user.js'),
+      [
+        'user_pref("browser.shell.checkDefaultBrowser", false);',
+        'user_pref("browser.aboutwelcome.enabled", false);',
+        'user_pref("datareporting.policy.dataSubmissionEnabled", false);',
+        'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);',
+        'user_pref("browser.startup.homepage_override.mstone", "ignore");',
+        'user_pref("startup.homepage_welcome_url", "");',
+        'user_pref("browser.tabs.warnOnClose", false);',
+        'user_pref("app.update.disabledForTesting", true);',
+        'user_pref("browser.privatebrowsing.autostart", false);',
+      ].join('\n') + '\n',
+    )
+    const logStream = createWriteStream(this.logFile, { flags: 'a' })
+    this.proc = spawn(this.binary, ['-profile', this.profile, '--remote-debugging-port', String(this.port), url], {
+      env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    this.proc.stdout!.pipe(logStream)
+    this.proc.stderr!.pipe(logStream)
+    const start = Date.now()
+    for (;;) {
+      try {
+        this.bidi = await Rpc.connect(`ws://127.0.0.1:${this.port}/session`)
+        break
+      } catch {
+        if (Date.now() - start > 30_000) throw new Error('firefox did not open BiDi')
+        await sleep(300)
+      }
+    }
+    await this.bidi.send('session.new', { capabilities: {} })
+    await this.bidi.send('webExtension.install', { extensionData: { type: 'path', path: this.extensionDir } })
+    await sleep(1500)
+  }
+  private async tops(): Promise<{ context: string; url: string }[]> {
+    return (await this.bidi.send('browsingContext.getTree', { maxDepth: 0 })).contexts
+  }
+  async firstPage(prefix: string): Promise<string> {
+    const start = Date.now()
+    for (;;) {
+      const c = (await this.tops()).find((x) => x.url.startsWith(prefix))
+      if (c) return c.context
+      if (Date.now() - start > 10_000) throw new Error('firefox: no first page')
+      await sleep(200)
+    }
+  }
+  async openWindow(url: string): Promise<string> {
+    const { context } = await this.bidi.send('browsingContext.create', { type: 'window' })
+    await this.navigate(context, url)
+    return context
+  }
+  async openPrivate(url: string): Promise<string> {
+    execFileSync(this.binary, ['-profile', this.profile, '-private-window', url], { stdio: 'ignore', env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() } })
+    const start = Date.now()
+    for (;;) {
+      const c = (await this.tops()).find((x) => x.url === url)
+      if (c) return c.context
+      if (Date.now() - start > 10_000) throw new Error('firefox: private window not visible to BiDi')
+      await sleep(200)
+    }
+  }
+  async activate(handle: string): Promise<void> {
+    await this.bidi.send('browsingContext.activate', { context: handle })
+  }
+  async navigate(handle: string, url: string): Promise<void> {
+    await this.bidi.send('browsingContext.navigate', { context: handle, url, wait: 'complete' })
+  }
+  async newTab(handle: string, url: string): Promise<string> {
+    const { context } = await this.bidi.send('browsingContext.create', { type: 'tab', referenceContext: handle })
+    await this.navigate(context, url)
+    return context
+  }
+  async close(handle: string): Promise<void> {
+    await this.bidi.send('browsingContext.close', { context: handle })
+  }
+  async quit(): Promise<void> {
+    const p = this.proc
+    if (!p || p.exitCode !== null) return
+    try {
+      await this.bidi.send('browser.close')
+    } catch {}
+    this.bidi?.close()
+    if (p && p.exitCode === null) await Promise.race([new Promise((r) => p.once('exit', r)), sleep(10_000).then(() => p.kill('SIGKILL'))])
+  }
+  mainPid(): number {
+    return this.proc!.pid!
+  }
+  extensionPids(): number[] {
+    return childPids(this.mainPid()).filter((p) => /-isForBrowser.*extension|extension/.test(commandOf(p)))
+  }
+}
+
+function makeDriver(dir: string): Driver {
+  const dist = path.join(v2, 'browser', 'dist')
+  if (kind === 'firefox') return new FirefoxDriver(values.app!, dir, path.join(dist, 'firefox'))
+  return new ChromiumDriver(kind, values.app!, dir, path.join(dist, 'chromium-dev'))
+}
+
+function hostDir(d: Driver): string {
+  if (kind === 'firefox') return path.join(os.homedir(), 'Library', 'Application Support', 'Mozilla', 'NativeMessagingHosts')
+  return path.join(d.profile, 'NativeMessagingHosts')
+}
+
+function hostPids(): number[] {
+  try {
+    return execFileSync('/usr/bin/pgrep', ['-f', `${values.helper!} (chrome-extension://|/.*\\.json browser@)`], { encoding: 'utf8' }).split('\n').filter(Boolean).map(Number)
+  } catch {
+    return []
+  }
+}
+
+function frontPid(): number | null {
+  try {
+    const asn = execFileSync('/usr/bin/lsappinfo', ['front'], { encoding: 'utf8' }).trim()
+    const m = /pid = (\d+)/.exec(execFileSync('/usr/bin/lsappinfo', ['info', '-only', 'pid', asn], { encoding: 'utf8' }))
+    return m ? Number(m[1]) : null
+  } catch {
+    return null
+  }
+}
+
+function pidOfApp(name: string): number | null {
+  try {
+    return Number(execFileSync('/usr/bin/pgrep', ['-nx', name], { encoding: 'utf8' }).trim()) || null
+  } catch {
+    return null
+  }
+}
+
+function idleSeconds(): number {
+  const out = execFileSync('/usr/sbin/ioreg', ['-c', 'IOHIDSystem', '-d', '4'], { encoding: 'utf8' })
+  const m = /"HIDIdleTime" = (\d+)/.exec(out)
+  return m ? Number(m[1]) / 1e9 : 0
+}
+
+// Waits until nobody has touched the Mac for a while, tells them the screen is about to be taken over, and starts
+// only if the countdown passes untouched.
+async function announce(what: string, seconds: number): Promise<void> {
+  const need = Number(values['idle-s'])
+  for (let said = false; ; ) {
+    if (idleSeconds() < need) {
+      if (!said) log(`${what}: waiting for ${need} s without keyboard or mouse input`)
+      said = true
+      await sleep(10_000)
+      continue
+    }
+    try {
+      execFileSync('/usr/bin/osascript', ['-e', `display notification "${what} starts in ${seconds} seconds and takes over the screen. Touch the keyboard or mouse to hold it off." with title "Daylens browser test"`])
+    } catch {}
+    log(`${what}: starting in ${seconds} s`)
+    const start = Date.now()
+    let touched = false
+    while (Date.now() - start < seconds * 1000) {
+      await sleep(1000)
+      if (idleSeconds() < (Date.now() - start) / 1000 - 0.5) touched = true
+      if (touched) break
+    }
+    if (!touched) return
+    log(`${what}: input during the countdown; waiting again`)
+  }
+}
+
+// A second instance of an app the user also runs (Dia) is brought forward by pid, never by name.
+let activatePid: number | null = null
+function activateApp(app: string): void {
+  if (kind === 'dia' && activatePid !== null) execFileSync(values.activate!, [String(activatePid)])
+  else execFileSync('/usr/bin/open', ['-a', app])
+}
+
+// --- evidence ---------------------------------------------------------------------------------------------------
+
+interface Marker {
+  t: number
+  label: string
+  // undefined: the step is not checked (the harness itself is on screen).
+  expect: { page: string | null } | undefined
+  private: boolean
+}
+
+interface PageRow {
+  id: number
+  event_wall_ms: number
+  last_seen_wall_ms: number
+  state: string
+  url: string | null
+  title: string | null
+  app_id: string | null
+  pid: number | null
+  detail: string | null
+}
+
+function filesUnder(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => path.join(e.parentPath, e.name))
+}
+
+function grep(files: string[], needles: string[]): { file: string; needle: string }[] {
+  const hits: { file: string; needle: string }[] = []
+  for (const f of files) {
+    let buf: Buffer
+    try {
+      if (statSync(f).size > 512 * 1024 * 1024) continue
+      buf = readFileSync(f)
+    } catch {
+      continue
+    }
+    for (const n of needles) {
+      for (const enc of ['utf8', 'utf16le'] as const) if (buf.includes(Buffer.from(n, enc))) hits.push({ file: f, needle: `${n} (${enc})` })
+    }
+  }
+  return hits
+}
+
+function pageRows(dataDir: string): PageRow[] {
+  const db = new Database(path.join(dataDir, 'daylens-v2.sqlite'), { readonly: true })
+  try {
+    return db.prepare(`SELECT id, event_wall_ms, last_seen_wall_ms, state, url, title, app_id, pid, detail FROM observations WHERE kind = 'page' ORDER BY event_wall_ms, id`).all() as PageRow[]
+  } finally {
+    db.close()
+  }
+}
+
+function focusRows(dataDir: string): { event_wall_ms: number; last_seen_wall_ms: number; app_id: string | null; pid: number | null; title: string | null; title_state: string | null }[] {
+  const db = new Database(path.join(dataDir, 'daylens-v2.sqlite'), { readonly: true })
+  try {
+    return db.prepare(`SELECT event_wall_ms, last_seen_wall_ms, app_id, pid, title, title_state FROM observations WHERE kind = 'focus' ORDER BY event_wall_ms, id`).all() as never
+  } finally {
+    db.close()
+  }
+}
+
+function gapsOf(dataDir: string, reason: string): unknown[] {
+  const db = new Database(path.join(dataDir, 'daylens-v2.sqlite'), { readonly: true })
+  try {
+    return db.prepare(`SELECT start_wall_ms, end_wall_ms, detail FROM capture_gaps WHERE reason = ? ORDER BY id`).all(reason)
+  } finally {
+    db.close()
+  }
+}
+
+function effectivePage(rows: PageRow[], t: number): PageRow | null {
+  let cur: PageRow | null = null
+  for (const r of rows) {
+    if (r.event_wall_ms > t) break
+    cur = r
+  }
+  return cur && cur.state === 'normal' ? cur : null
+}
+
+// --- canary ------------------------------------------------------------------------------------------------------
+
+async function canary(): Promise<void> {
+  const dir = path.join(out, `${kind}-canary`)
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const dataDir = path.join(dir, 'data')
+  const svcLog = path.join(dir, 'service.log')
+  const id = randomUUID().slice(0, 13)
+  const PRIVATE = `PRIVATECANARY${id.replace(/-/g, '')}`
+  const PRIVATE_TICK = `PRIVATETICK${id.replace(/-/g, '')}`
+  const NORMAL = `NORMALCANARY${id.replace(/-/g, '')}`
+  const pages = await servePages()
+  const shared = `${pages.base}/shared?title=Daylens+shared+page`
+  const normalUrl = `${pages.base}/${NORMAL}?title=${NORMAL}+normal+page`
+  const privateUrl = `${pages.base}/${PRIVATE}?q=${PRIVATE}&title=${PRIVATE}+private+page`
+  const privateTick = `${pages.base}/${PRIVATE_TICK}?tick=1&title=${PRIVATE_TICK}`
+  const svc = new Service(dataDir, svcLog)
+  const d = makeDriver(dir)
+  const hosts = hostDir(d)
+  register(kind === 'firefox' ? 'firefox' : 'chromium', hosts, values.helper!)
+  const markers: Marker[] = []
+  const mark = (label: string, page: string | null | undefined, isPrivate: boolean) => {
+    markers.push({ t: Date.now(), label, expect: page === undefined ? undefined : { page }, private: isPrivate })
+    log(label)
+  }
+  let interruptions = 0
+  // Runs one step and holds it; if anything but the expected process came to the front, the step is redone.
+  const step = async (label: string, page: string | null, isPrivate: boolean, act: () => Promise<void>, front: 'browser' | 'calculator' = 'browser') => {
+    for (let attempt = 1; ; attempt++) {
+      await act()
+      mark(label, page, isPrivate)
+      const want = () => (front === 'browser' ? d.mainPid() : pidOfApp('Calculator'))
+      let foreign: number | null = null
+      const started = Date.now()
+      const until = started + HOLD
+      while (Date.now() < until) {
+        await sleep(250)
+        const f = frontPid()
+        if (f !== null && f !== want()) foreign = f
+        if (idleSeconds() < (Date.now() - started) / 1000 - 0.5) foreign ??= -1
+      }
+      if (foreign === null) return
+      interruptions++
+      markers.at(-1)!.expect = undefined
+      markers.at(-1)!.label += ` (interrupted by pid ${foreign}, redone)`
+      log(`  interrupted by ${foreign === -1 ? 'keyboard or mouse input' : `pid ${foreign}`}`)
+      if (attempt >= 4) throw new Error(`step kept being interrupted: ${label}`)
+      if (foreign === -1) await announce('The canary test, continuing', 15)
+      if (front === 'browser') activateApp(values.app!)
+    }
+  }
+  try {
+    await announce(`The ${kind} canary test`, 30)
+    await svc.start()
+    await d.launch(shared)
+    activateApp(values.app!)
+    const normal = await (d as ChromiumDriver | FirefoxDriver).firstPage(pages.base)
+    await step('normal window: shared page', shared, false, () => d.activate(normal))
+    await step('normal window: normal canary', normalUrl, false, () => d.navigate(normal, normalUrl))
+    await step('normal window: shared page again', shared, false, () => d.navigate(normal, shared))
+
+    let priv = ''
+    await step('private window: private canary', null, true, async () => {
+      if (!priv) priv = await d.openPrivate(privateUrl)
+      await d.activate(priv)
+    })
+    await step('private window: same shared page as the normal window', null, true, async () => {
+      await d.activate(priv)
+      await d.navigate(priv, shared)
+    })
+    let privTab = ''
+    await step('private window: title-changing canary tab', null, true, async () => {
+      if (!privTab) privTab = await d.newTab(priv, privateTick)
+      await d.activate(privTab)
+    })
+    await step('another app in front', null, false, async () => {
+      execFileSync('/usr/bin/open', ['-a', 'Calculator'])
+      await sleep(300)
+    }, 'calculator')
+    await step('back to the browser, straight into the private window', null, true, async () => {
+      activateApp(values.app!)
+      await d.activate(privTab)
+    })
+    await step('normal window again', shared, false, () => d.activate(normal))
+    await step('private window again', null, true, () => d.activate(privTab))
+
+    const openHits = grep([...filesUnder(dataDir), svcLog, d.logFile], [PRIVATE, PRIVATE_TICK])
+    log(`while the private window is open: ${openHits.length} hits`)
+
+    await d.close(privTab)
+    await d.close(priv)
+    await step('private window closed; normal window', shared, false, () => d.activate(normal))
+    let pauseGap: unknown = null
+    if (d instanceof ChromiumDriver) {
+      // The popup page in a tab: its own buttons pause and resume all of Daylens.
+      mark('popup open in a tab (harness on screen, not checked)', undefined, false)
+      const popup = await d.openWindow(`chrome-extension://${DEV_CHROMIUM_ID}/popup.html`)
+      await sleep(1200)
+      await d.capture(popup, path.join(dir, 'popup-connected-light.png'), false)
+      await d.capture(popup, path.join(dir, 'popup-connected-dark.png'), true)
+      await d.evaluate(popup, `document.getElementById('pause').click()`)
+      await d.capture(popup, path.join(dir, 'popup-choices.png'), false)
+      await d.evaluate(popup, `document.querySelector('[data-for="until_resumed"]').click(); new Promise(r => setTimeout(r, 800))`)
+      const pausedText = await d.evaluate(popup, `document.getElementById('status').textContent`)
+      await d.capture(popup, path.join(dir, 'popup-paused.png'), false)
+      await step(`paused from the popup (popup said "${pausedText}"); normal window`, null, false, () => d.activate(normal))
+      await d.activate(popup)
+      await d.evaluate(popup, `document.getElementById('resume').click(); new Promise(r => setTimeout(r, 800))`)
+      const resumedText = await d.evaluate(popup, `document.getElementById('status').textContent`)
+      await d.close(popup)
+      await step(`resumed from the popup (popup said "${resumedText}"); normal window`, shared, false, () => d.activate(normal))
+      pauseGap = { paused_text: pausedText, resumed_text: resumedText }
+    }
+    const hostCount = hostPids().length
+    await d.quit()
+    mark('browser quit', null, false)
+    await sleep(2000)
+    await svc.stop()
+    const closedHits = grep([...filesUnder(dataDir), svcLog, d.logFile], [PRIVATE, PRIVATE_TICK])
+
+    // Restart everything with the same data and profile; the private window is gone, and nothing may come back.
+    await svc.start()
+    await d.launch(shared)
+    activateApp(values.app!)
+    const again = await (d as ChromiumDriver | FirefoxDriver).firstPage(pages.base)
+    await step('after restart: normal window', shared, false, () => d.activate(again))
+    await d.quit()
+    await sleep(1500)
+    await svc.stop()
+    const restartHits = grep([...filesUnder(dataDir), svcLog, d.logFile], [PRIVATE, PRIVATE_TICK])
+    const normalHits = grep([path.join(dataDir, 'daylens-v2.sqlite'), path.join(dataDir, 'daylens-v2.sqlite-wal')], [NORMAL])
+
+    const rows = pageRows(dataDir)
+    const fr = focusRows(dataDir)
+    const paused = gapsOf(dataDir, 'paused') as { start_wall_ms: number; end_wall_ms: number | null }[]
+    const pageAt = (t: number) => (paused.some((g) => t >= g.start_wall_ms && (g.end_wall_ms === null || t < g.end_wall_ms)) ? null : (effectivePage(rows, t)?.url ?? null))
+    const SETTLE = 1500
+    const checks = markers.flatMap((m, i) => {
+      if (!m.expect) return []
+      const expect = m.expect
+      const end = (markers[i + 1]?.t ?? m.t + HOLD) - 50
+      const samples: number[] = []
+      for (let t = m.t + SETTLE; t < end; t += 250) samples.push(t)
+      const wrong = samples.filter((t) => pageAt(t) !== expect.page)
+      const browserFront = samples.filter((t) => {
+        const f = [...fr].reverse().find((r) => r.event_wall_ms <= t)
+        return f && f.app_id?.toLowerCase() === d.bundleId.toLowerCase()
+      }).length
+      const firstMatch = rows.find((r) => r.event_wall_ms >= m.t - 200 && (expect.page === null ? r.state === 'unknown' : r.url === expect.page))
+      return [{
+        step: m.label,
+        private: m.private,
+        expected_page: expect.page,
+        samples: samples.length,
+        wrong_samples: wrong.length,
+        browser_in_front_samples: browserFront,
+        latency_ms: firstMatch ? firstMatch.event_wall_ms - m.t : null,
+      }]
+    })
+    const privateBrowserTime = markers
+      .filter((m) => m.private)
+      .map((m) => fr.filter((r) => r.app_id?.toLowerCase() === d.bundleId.toLowerCase() && r.event_wall_ms <= m.t + SETTLE && r.last_seen_wall_ms >= m.t - 1000).map((r) => ({ title: r.title, title_state: r.title_state })))
+    const report = {
+      browser: kind,
+      app: values.app,
+      canaries: { private: [PRIVATE, PRIVATE_TICK], normal: NORMAL },
+      host_processes_seen: hostCount,
+      interrupted_steps_redone: interruptions,
+      private_hits: { while_open: openHits, after_close: closedHits, after_restart: restartHits },
+      normal_canary_stored: normalHits.length > 0,
+      popup_pause: pauseGap,
+      paused_gaps: gapsOf(dataDir, 'paused'),
+      steps: checks,
+      browser_focus_rows_during_private_steps: privateBrowserTime,
+      page_rows: rows.map((r) => ({ t: r.event_wall_ms, state: r.state, url: r.url, title: r.title, detail: r.detail })),
+      service_log: readFileSync(svcLog, 'utf8').split('\n').filter(Boolean),
+      host_diagnostics: readFileSync(d.logFile, 'utf8').split('\n').filter((l) => /^browser_host_|^[a-z_]+=[A-Za-z0-9_.:-]*$/.test(l)),
+    }
+    writeFileSync(path.join(dir, 'report.json'), JSON.stringify(report, null, 2))
+    const failed =
+      openHits.length + closedHits.length + restartHits.length > 0 || !report.normal_canary_stored || checks.some((c) => c.wrong_samples > 0)
+    log(`report: ${path.join(dir, 'report.json')} ${failed ? 'FAILED' : 'passed'}`)
+    for (const c of checks) log(`  ${c.wrong_samples === 0 ? 'ok  ' : 'FAIL'} ${c.step}: ${c.samples - c.wrong_samples}/${c.samples} samples, latency ${c.latency_ms ?? '-'} ms, browser in front ${c.browser_in_front_samples}/${c.samples}`)
+    log(`  private canary hits: open ${openHits.length}, closed ${closedHits.length}, restart ${restartHits.length}; normal canary stored: ${report.normal_canary_stored}`)
+    process.exitCode = failed ? 1 : 0
+  } finally {
+    await d.quit().catch(() => {})
+    await svc.stop().catch(() => {})
+    pages.close()
+    if (kind === 'firefox') unregister(hosts)
+    try {
+      execFileSync('/usr/bin/killall', ['Calculator'], { stdio: 'ignore' })
+    } catch {}
+  }
+}
+
+// --- soak --------------------------------------------------------------------------------------------------------
+
+async function soak(): Promise<void> {
+  const dir = path.join(out, `${kind}-soak`)
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const dataDir = path.join(dir, 'data')
+  const svc = new Service(dataDir, path.join(dir, 'service.log'))
+  const pages = await servePages()
+  const d = makeDriver(dir)
+  const hosts = hostDir(d)
+  register(kind === 'firefox' ? 'firefox' : 'chromium', hosts, values.helper!)
+  const minutes = Number(values.minutes)
+  const stats: ChildProcess[] = []
+  const actions: Record<string, number> = {}
+  let seed = 7
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
+  const pick = <T,>(xs: T[]) => xs[Math.floor(rand() * xs.length)]!
+  const url = () => `${pages.base}/page-${Math.floor(rand() * 200)}?title=${encodeURIComponent(pick(['Inbox', 'Budget plan', 'Search results', 'Docs', 'Video', 'Issue tracker', 'News']))}+${Math.floor(rand() * 1000)}${rand() < 0.15 ? '&tick=1' : ''}`
+  try {
+    await announce(`An hour of scripted browsing in ${kind}`, 60)
+    await svc.start()
+    await d.launch(url())
+    activateApp(values.app!)
+    const winA = await (d as ChromiumDriver | FirefoxDriver).firstPage(pages.base)
+    const tabsA = [winA, await d.newTab(winA, url()), await d.newTab(winA, url())]
+    const winB = await d.openWindow(url())
+    const tabsB = [winB, await d.newTab(winB, url())]
+    await d.activate(winA)
+    await sleep(3000)
+    const hostsNow = hostPids()
+    const extPids = d.extensionPids()
+    const svcPid = svc.proc!.pid!
+    log(`hosts ${hostsNow.join(',')} extension ${extPids.join(',')} service ${svcPid}`)
+    for (const [label, pid] of [...hostsNow.map((p) => ['host', p] as const), ...extPids.map((p) => ['extension', p] as const), ['service', svcPid] as const]) {
+      const f = createWriteStream(path.join(dir, `procstat-${label}-${pid}.jsonl`))
+      const p = spawn(values.procstat!, ['--root', String(pid), '--interval-s', '10'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      p.stdout!.pipe(f)
+      stats.push(p)
+    }
+    const end = Date.now() + minutes * 60_000
+    while (Date.now() < end) {
+      const r = rand()
+      const tabs = rand() < 0.7 ? tabsA : tabsB
+      try {
+        if (r < 0.35) {
+          await d.activate(pick(tabs))
+          actions.switch_tab = (actions.switch_tab ?? 0) + 1
+        } else if (r < 0.6) {
+          const t = pick(tabs)
+          await d.activate(t)
+          await d.navigate(t, url())
+          actions.navigate = (actions.navigate ?? 0) + 1
+        } else if (r < 0.7) {
+          await d.activate(pick(rand() < 0.5 ? tabsA : tabsB))
+          actions.switch_window = (actions.switch_window ?? 0) + 1
+        } else if (r < 0.8) {
+          execFileSync('/usr/bin/open', ['-a', pick(['Calculator', 'TextEdit'])])
+          await sleep(3000 + rand() * 20_000)
+          activateApp(values.app!)
+          await d.activate(pick(tabs))
+          actions.other_app = (actions.other_app ?? 0) + 1
+        } else if (r < 0.88 && tabs.length < 6) {
+          tabs.push(await d.newTab(tabs[0]!, url()))
+          await d.activate(tabs.at(-1)!)
+          actions.new_tab = (actions.new_tab ?? 0) + 1
+        } else if (tabs.length > 2) {
+          const t = tabs.pop()!
+          await d.close(t)
+          actions.close_tab = (actions.close_tab ?? 0) + 1
+        }
+      } catch (e) {
+        actions.errors = (actions.errors ?? 0) + 1
+        log(`action failed: ${(e as Error).message}`)
+      }
+      await sleep(5000 + rand() * 35_000)
+    }
+    for (const p of stats) p.kill('SIGTERM')
+    await sleep(500)
+    const rows = pageRows(dataDir)
+    writeFileSync(path.join(dir, 'actions.json'), JSON.stringify({ minutes, actions, page_rows: rows.length, hosts: hostsNow, extension: extPids, service: svcPid }, null, 2))
+    log(`done: ${JSON.stringify(actions)} page rows ${rows.length}`)
+  } finally {
+    for (const p of stats) p.kill('SIGTERM')
+    await d.quit().catch(() => {})
+    await svc.stop().catch(() => {})
+    pages.close()
+    if (kind === 'firefox') unregister(hosts)
+    for (const app of ['Calculator', 'TextEdit']) {
+      try {
+        execFileSync('/usr/bin/killall', [app], { stdio: 'ignore' })
+      } catch {}
+    }
+  }
+}
+
+if (mode === 'canary') await canary()
+else if (mode === 'soak') await soak()
+else {
+  process.stderr.write('usage: live.ts canary|soak --browser cft|dia|firefox --app <app> --helper <bin> --out <dir>\n')
+  process.exit(64)
+}

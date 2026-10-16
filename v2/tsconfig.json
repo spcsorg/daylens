@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["capture/**/*.ts", "tests/**/*.ts", "tools/**/*.ts"]
+  "include": ["capture/**/*.ts", "tests/**/*.ts", "tools/**/*.ts", "browser/tools/**/*.ts", "browser/build.ts"]
 }
