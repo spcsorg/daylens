@@ -81,7 +81,7 @@ Every browser window is in one of three states: **normal**, **private** or **unk
   - It talks only to the Daylens app on the same computer, through a native messaging host that the installer registers for each browser. Chrome Web Store and Edge Add-ons assign different extension IDs, and Firefox uses its add-on ID, so the host allows each one explicitly.
   - It has a small popup: connection status, pause, and open Daylens. Store policies expect browsing data to serve a visible feature.
   - On Firefox it uses Firefox's built-in data consent, declares browsing activity, and targets Firefox 140 and later.
-- **Confirmed private windows** are not recorded at all.
+- **Private windows** are never recorded with a page or title. Few browsers can confirm a private window (Chrome on macOS through its scripting `mode`), so in practice private time is stored the same way as unknown time: browser time with no page.
 - **Unknown windows** are recorded as browser time without a page or title. The engine then looks for other evidence of what happened in that time: history visits, commits, agent sessions, files and calendar events. If it still cannot tell, the hour asks the user for context in a few words, the same way a correction works, and offers the extension.
 - Browser history files are read with short read transactions while the browser runs, never by copying the database files, and never by changing the browser's settings.
 
