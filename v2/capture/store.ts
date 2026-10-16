@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
@@ -47,36 +47,33 @@ export function assertRealDatabaseFiles(dir: string): void {
   }
 }
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as { code?: string }).code === 'EPERM'
-  }
-}
-
 // One writer per data folder: ids are allocated in memory, so a second writer would collide.
+// The lock is an exclusive SQLite transaction on a separate file: the OS holds it, a dead process
+// releases it, and there is no half-written state for another process to mistake as abandoned.
 export function acquireWriterLock(dir: string): () => void {
-  const file = path.join(dir, 'capture.lock')
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const lock = new Database(path.join(dir, 'capture-writer.lock'))
+  lock.pragma('busy_timeout = 0')
+  // Simultaneous starters can each block the other's upgrade, so a busy reply is retried briefly;
+  // once one process holds the lock, the others keep getting busy and give up.
+  for (let attempt = 0; ; attempt++) {
     try {
-      const fd = openSync(file, 'wx')
-      writeSync(fd, String(process.pid))
-      closeSync(fd)
-      return () => {
-        try {
-          unlinkSync(file)
-        } catch {}
-      }
+      lock.exec('BEGIN EXCLUSIVE')
+      break
     } catch (err) {
-      if ((err as { code?: string }).code !== 'EEXIST') throw err
-      const holder = Number(readFileSync(file, 'utf8').trim())
-      if (Number.isInteger(holder) && holder > 0 && pidAlive(holder)) throw new Error('another capture service is writing this folder')
-      unlinkSync(file)
+      const code = (err as { code?: unknown }).code
+      const busy = typeof code === 'string' && code.startsWith('SQLITE_BUSY')
+      if (!busy || attempt >= 20) {
+        lock.close()
+        throw busy ? new Error('another capture service is writing this folder') : err
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 + Math.floor(Math.random() * 20))
     }
   }
-  throw new Error('could not take the capture lock')
+  return () => {
+    try {
+      lock.close()
+    } catch {}
+  }
 }
 
 const SCHEMA = `

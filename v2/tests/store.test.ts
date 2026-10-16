@@ -208,3 +208,32 @@ test('a database file linked to another database is refused and the target is un
   }
   assert.equal(hash(), before)
 })
+
+test('two processes starting at the same instant: exactly one gets the writer lock, every time', async () => {
+  const { spawn } = await import('node:child_process')
+  const racer = new URL('./support/lockRacer.ts', import.meta.url).pathname
+  for (let round = 0; round < 8; round++) {
+    const dir = tmp()
+    const go = path.join(dir, 'go')
+    const procs = [0, 1, 2].map(() => {
+      const p = spawn(process.execPath, [racer, dir, go], { stdio: ['ignore', 'pipe', 'inherit'] })
+      let out = ''
+      p.stdout!.setEncoding('utf8').on('data', (c: string) => (out += c))
+      return new Promise<string>((r) => p.on('exit', () => r(out.trim())))
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    writeFileSync(go, '')
+    const results = await Promise.all(procs)
+    assert.equal(results.filter((x) => x === 'locked').length, 1, `round ${round}: ${results.join(',')}`)
+    assert.equal(results.filter((x) => x === 'refused').length, 2, `round ${round}: ${results.join(',')}`)
+  }
+})
+
+test('a writer that dies without cleaning up does not block the next one', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const dir = tmp()
+  const code = `import { Store } from ${JSON.stringify(new URL('../capture/store.ts', import.meta.url).pathname)}; new Store(${JSON.stringify(dir)}); process.kill(process.pid, 'SIGKILL')`
+  spawnSync(process.execPath, ['--input-type=module', '-e', code])
+  const s = new Store(dir)
+  s.close()
+})
