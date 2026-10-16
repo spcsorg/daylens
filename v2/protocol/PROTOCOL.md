@@ -100,3 +100,53 @@ The Daylens browser extension talks to a native messaging host: the capture help
 
 `t` is when the host received the message. The service stores a page only while the helper's latest focus line shows that same browser in front (same `pid`, same `app_id`) and the extension spoke after the browser came to the front. Everything else is stored as browser time with no page.
 
+
+## Local connection
+
+Where the browser cannot find a native messaging host (the Microsoft Store package on Windows), the extension talks to
+the capture service directly over a WebSocket on `127.0.0.1`. Store builds use it only on Windows and only after native
+messaging reports that the host is not installed; the dev builds allow it everywhere. The service listens only on
+Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
+
+### Listener
+
+- The first free port of 27481, 37471, 46417, on `127.0.0.1` only, path `/daylens/browser`. Every other request gets
+  404. At most 32 connections.
+- An upgrade is refused unless the peer address is `127.0.0.1`, `Host` is exactly `127.0.0.1:<port>` (no DNS
+  rebinding), and `Origin` is an allowed extension: `chrome-extension://<id>` with an ID on the list in
+  `capture/pairing.ts`, or any `moz-extension://<uuid>` (Firefox gives each install its own UUID).
+- The service then asks the capture helper which process owns the other end: `<helper> --tcp-peer <service port>
+  <peer port>` prints `{"ok":true,"browser":<app identity>}` or `{"ok":false,"reason":"no_socket"|"other_user"|"no_app"}`.
+  macOS finds the socket with libproc and climbs to the nearest regular app; Windows reads the TCP table and climbs
+  through parents running the same executable. Every process on the way must belong to this user. That identity is
+  the `browser` of every tab line on the connection, exactly as a native host would stamp it.
+
+### Pairing
+
+- The extension makes a pairing (`id`: 16 random bytes, `key`: 32 random bytes, both base64url, and its own origin)
+  and opens `daylens://pair?v=1&id=<id>&key=<key>&origin=<origin>`. The operating system hands the link to the Daylens
+  app, which writes `{"op":"pair","link":"<link>"}` to the service's stdin. The key never crosses the socket.
+- A link only makes a pending pairing (at most 8, oldest dropped). It becomes stored (meta key `browser_pairings`)
+  only when a connection from that same origin proves it, and then replaces earlier pairings for that origin. The app
+  can remove one with `{"op":"unpair","id":"<id>"}`.
+
+### Handshake
+
+All messages are JSON text frames, at most 16 KiB. No page is sent before step 4.
+
+1. Extension: `{"t":"hello","v":1,"pair":"<id>","nonce":"<32 random bytes>"}`.
+2. Service: `{"t":"unpaired"}` and close, or `{"t":"challenge","v":1,"nonce":"<32 random bytes>","proof":<P_service>}`.
+3. The extension checks `P_service` and only then sends `{"t":"proof","proof":<P_extension>}`. A server without the
+   key never sees a proof it could replay.
+4. Service checks `P_extension`, then sends `status` and `snapshot`; from here the connection is a browser host.
+
+`P_role = HMAC-SHA256(key, "daylens-browser-pair-v1\n<role>\n<origin>\n127.0.0.1:<port>\n<id>\n<extension nonce>\n<service nonce>")`,
+base64url, compared in constant time. Binding the port means a squatter on one port cannot relay a proof made by the
+real service on another.
+
+### Messages after the handshake
+
+Extension to service: the same `tab` messages the extension sends a native host, plus `{"t":"status"}` and
+`{"t":"ping"}` every 20 s (Chrome stops an idle service worker after 30 s). The service builds the protocol line
+itself: its own `run` and `seq`, `t` from the helper's clock, `browser` from `--tcp-peer`, `extension` from `Origin`.
+Service to extension: `{"t":"status",...}` and `{"t":"snapshot"}`, as from a native host.
