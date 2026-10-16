@@ -136,6 +136,14 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertNil(q.pop())
   }
 
+  func testInFlightWorkDiscardedAfterAbandonIsCounted() {
+    let q = RequestQueue<Int>(capacity: 64)
+    _ = q.push(1, wallMs: 10)
+    _ = q.pop()
+    q.recordLoss(wallMs: 10)
+    XCTAssertEqual(q.takeLoss(), .init(count: 1, fromWallMs: 10, toWallMs: 10))
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

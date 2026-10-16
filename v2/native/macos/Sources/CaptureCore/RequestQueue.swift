@@ -58,6 +58,13 @@ public final class RequestQueue<T> {
     head = 0
   }
 
+  /// Work taken off the queue but discarded before it was reported (it was in flight when abandoned).
+  public func recordLoss(wallMs: Int64) {
+    lock.lock()
+    defer { lock.unlock() }
+    record(wallMs)
+  }
+
   public func takeLoss() -> Loss? {
     lock.lock()
     defer { lock.unlock() }

@@ -7,7 +7,7 @@ namespace Daylens.Capture.Core;
 public readonly record struct EventTime(long WallMs, long MonoUs, string Tz, int TzOffsetMin);
 
 public enum IdentityState { Ok, AccessDenied, Timeout, Gone, None, Unresolved }
-public enum TitleState { Ok, Empty, NoPermission, Timeout, Unavailable }
+public enum TitleState { Ok, Empty, NoWindow, NoPermission, Timeout, Unavailable }
 public enum ChannelState { Ok, Degraded, Stalled, NoPermission }
 public enum FocusTrigger { AppChanged, WindowChanged, TitleChanged, Reconcile, Snapshot }
 
@@ -60,7 +60,7 @@ public static class Names
     };
     public static string Of(TitleState s) => s switch
     {
-        TitleState.Ok => "ok", TitleState.Empty => "empty", TitleState.NoPermission => "no_permission",
+        TitleState.Ok => "ok", TitleState.Empty => "empty", TitleState.NoWindow => "no_window", TitleState.NoPermission => "no_permission",
         TitleState.Timeout => "timeout", _ => "unavailable",
     };
     public static string Of(ChannelState s) => s switch

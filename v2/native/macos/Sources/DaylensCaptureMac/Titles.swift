@@ -344,7 +344,11 @@ final class TitleWorker: Thread {
   }
 
   private func emitIfChanged(_ trigger: FocusTrigger, _ w: WindowInfo, time: EventTime, force: Bool, generation: Int? = nil) {
-    if let g = generation, g != currentGeneration { return }
+    if let g = generation, g != currentGeneration {
+      queue.recordLoss(wallMs: time.wallMs)
+      reportLoss()
+      return
+    }
     if !force, let last = lastEmitted, last.app == observedApp, last.window == w { return }
     lastEmitted = (observedApp, w)
     emitter.emit(kind: "focus", source: trigger == .reconcile ? "reconcile" : "ax_observer", time: time,

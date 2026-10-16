@@ -202,7 +202,7 @@ public class NamesTests
     public void EveryEnumValueHasItsProtocolName()
     {
         Assert.Equal(new[] { "ok", "access_denied", "timeout", "gone", "none", "unresolved" }, Enum.GetValues<IdentityState>().Select(Names.Of).ToArray());
-        Assert.Equal(new[] { "ok", "empty", "no_permission", "timeout", "unavailable" }, Enum.GetValues<TitleState>().Select(Names.Of).ToArray());
+        Assert.Equal(new[] { "ok", "empty", "no_window", "no_permission", "timeout", "unavailable" }, Enum.GetValues<TitleState>().Select(Names.Of).ToArray());
         Assert.Equal(new[] { "ok", "degraded", "stalled", "no_permission" }, Enum.GetValues<ChannelState>().Select(Names.Of).ToArray());
         Assert.Equal(new[] { "app_changed", "window_changed", "title_changed", "reconcile", "snapshot" }, Enum.GetValues<FocusTrigger>().Select(Names.Of).ToArray());
     }
