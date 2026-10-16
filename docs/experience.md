@@ -76,6 +76,8 @@ Ask answers questions about any day from the same record.
 
 Offered after onboarding, from Settings and from an hour Daylens could not read, never as an onboarding step. One click per browser, with a one-line explanation: it lets Daylens see which page you were on, never in private windows.
 
+The extension's own popup shows whether it is connected to Daylens, a pause button, and a link that opens Daylens. Nothing else.
+
 ## Tray and menu bar
 
 The current hour's title, pause options (one hour, until tomorrow, until resumed), delete the last ten minutes, open Today, and quit. The same menu on every platform.

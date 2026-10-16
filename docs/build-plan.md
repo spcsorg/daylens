@@ -7,7 +7,7 @@ V2 is built one step at a time. Each step is planned, reviewed by a different mo
 | Step | What | Done when |
 |---|---|---|
 | 1 | **Capture foundation.** The shared protocol, the helper supervisor with heartbeat and capture health, event-driven app, title, idle, lock and sleep capture on macOS and Windows, title normalization | Kill, hang and sleep tests produce explained gaps and recovery; transitions match timestamped markers; background budgets met |
-| 1b | **Browsers.** History readers, the normal/private/unknown gate, the extension for Chrome, Edge and Firefox, Arc and Dia investigation | The private-window acceptance suite passes in every supported browser on both platforms |
+| 1b | **Browsers.** History readers, the normal/private/unknown gate, the extension and its native messaging host for Chrome, Edge and Firefox, Arc and Dia checks. The extension goes to the stores as soon as it works, because store review can take five weeks | The private-window acceptance suite passes in every supported browser on both platforms; the extension is submitted to all three stores |
 | 1c | **Signed packages.** Signed per-user Windows installer and macOS app with the helpers inside, launch at login, and updates from one version to the next | A standard user installs and updates with no warnings beyond first-download reputation; every executable verifies; capture and settings survive the update |
 | 2 | **Storage.** The single source of truth and its change announcements | Correction, deletion, pause and exclusion tests pass at the storage level |
 | 3 | **Today, facts first.** The shell and Today on real data, on all three platforms | Paint and launch budgets met; screens match the design on every platform |
@@ -27,7 +27,7 @@ V2 is built one step at a time. Each step is planned, reviewed by a different mo
 - [ ] Security review complete; findings fixed or accepted in writing.
 - [ ] Terms and Privacy page published and linked from onboarding and Settings.
 - [ ] Signed installers for Windows and macOS, a nightly for Linux; updates verified.
-- [ ] The browser extension published in the Chrome, Edge and Firefox stores.
+- [ ] The browser extension published in the Chrome, Edge and Firefox stores, with privacy disclosures, permission justifications and reviewer test steps that use a downloadable desktop build.
 - [ ] A Windows gold day recorded on the physical laptop from the signed build.
 - [ ] Billing in production mode with confirmed webhooks, and prices set.
 - [ ] Operations runbooks checked against the code.
