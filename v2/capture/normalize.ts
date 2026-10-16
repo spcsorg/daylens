@@ -328,8 +328,9 @@ export class Normalizer {
     let title: string | null = null
     let titleRaw: string | null = null
     let titleState: StoredTitleState = win.title_state
-    if (c.title !== 'allowed') {
-      titleState = c.title
+    // A window the platform reports as private is never stored with its title, whatever the app.
+    if (c.title !== 'allowed' || win.mode === 'private') {
+      titleState = c.title !== 'allowed' ? c.title : 'withheld_browser'
     } else if (win.title !== null) {
       const cleaned = cleanTitle(win.title)
       title = cleaned.title

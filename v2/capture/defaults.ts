@@ -60,8 +60,10 @@ export const KNOWN_BROWSER_APP_IDS: ReadonlySet<string> = new Set(
   ].map((s) => s.toLowerCase()),
 )
 
-// Apps that register as http/https handlers only to open links, and show no web pages of their own.
-// The known-browser list above still wins over this one.
+// Apps that register as http/https handlers but whose window titles are the work context, not browsing.
+// Codex (com.openai.codex) embeds ordinary, non-private pages; its titles are kept. Capture stores no addresses
+// from any app, and when browser pages arrive Codex must not become a page source. Exclusions still apply,
+// and a window reported in private mode is withheld (normalize.ts). The known-browser list above wins over this one.
 export const KNOWN_NON_BROWSER_APP_IDS: ReadonlySet<string> = new Set(['com.openai.codex'].map((s) => s.toLowerCase()))
 
 // Apps whose bundle names itself after a different product.

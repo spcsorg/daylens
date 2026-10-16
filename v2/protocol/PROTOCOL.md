@@ -56,7 +56,7 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
 
-`window`: `window` (an opaque window ID), `title`, `title_state`.
+`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet; browser windows get it with the browser step. A `private` window never has its title stored.
 
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 

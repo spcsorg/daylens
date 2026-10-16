@@ -279,3 +279,26 @@ test('Codex registers for web links but is not a browser; Atlas stays withheld',
   assert.equal(beta!.title_state, 'withheld_browser', 'Atlas is withheld even without a URL registration')
   assert.ok(!JSON.stringify(sink).includes(CANARY))
 })
+
+test('Codex keeps its titles only while its window is not reported private; exclusions still apply', () => {
+  const { sink, n } = setup()
+  const codex = app('com.openai.codex', { name: 'ChatGPT', registered_browser: true })
+  const at = (mode: 'normal' | 'private' | 'unknown' | undefined, title: string, t: number) => {
+    const l = focus(codex, title, t, 'title_changed') as unknown as { obs: { window: Record<string, unknown> } }
+    if (mode) l.obs.window.mode = mode
+    return l as unknown as ReturnType<typeof focus>
+  }
+  n.handle(at(undefined, 'Fix capture tests', T0))
+  n.handle(at('normal', 'Review the diff', T0 + 1))
+  n.handle(at('private', `${CANARY} private page`, T0 + 2))
+  assert.deepEqual(sink.rows.map((r) => [r.title, r.title_state]), [
+    ['Fix capture tests', 'ok'],
+    ['Review the diff', 'ok'],
+    [null, 'withheld_browser'],
+  ])
+  const excluded = new Normalizer(sink, new Privacy([{ match: 'app_id', value: 'com.openai.codex', label: 'Codex' }]))
+  excluded.handle(at(undefined, `${CANARY} excluded`, T0 + 3))
+  assert.equal(sink.gaps.at(-1)!.reason, 'excluded')
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+  assert.ok(sink.rows.every((r) => !('url' in r)), 'no address is ever stored')
+})

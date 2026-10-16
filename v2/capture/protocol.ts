@@ -51,10 +51,13 @@ export interface AppIdentity {
   store: { aumid: string; package: string | null } | null
 }
 export type TitleState = 'ok' | 'empty' | 'no_window' | 'no_permission' | 'timeout' | 'unavailable'
+export type WindowMode = 'normal' | 'private' | 'unknown'
 export interface WindowInfo {
   window: string | null
   title: string | null
   title_state: TitleState
+  // Set only when the platform can tell a private window from a normal one; absent means not reported.
+  mode?: WindowMode
 }
 export type FocusTrigger = 'app_changed' | 'window_changed' | 'title_changed' | 'reconcile' | 'snapshot'
 export interface FocusObs {
@@ -227,7 +230,9 @@ function windowInfo(v: unknown): WindowInfo {
   const title = strOrNull(o, 'title', MAX_TITLE_CHARS)
   const title_state = oneOf(o, 'title_state', TITLE_STATES)
   if ((title === null) === (title_state === 'ok')) fail('title: present exactly when title_state is ok')
-  return { window: strOrNull(o, 'window', 64), title, title_state }
+  const info: WindowInfo = { window: strOrNull(o, 'window', 64), title, title_state }
+  if (o.mode !== undefined && o.mode !== null) info.mode = oneOf(o, 'mode', ['normal', 'private', 'unknown'] as const)
+  return info
 }
 
 const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
