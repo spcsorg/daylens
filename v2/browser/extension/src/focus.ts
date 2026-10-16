@@ -126,7 +126,8 @@ export class Tracker {
     if (tab.incognito) return unknown('not_normal')
     const url = cleanAddress(tab.url)
     if (url === null) return unknown('no_address')
-    const title = tab.title ? clip(tab.title, 1024) : null
+    // A page can set a title with an unpaired surrogate; send well-formed text so no parser on the way trips on it.
+    const title = tab.title ? clip(tab.title.toWellFormed(), 1024) : null
     this.emit({ t: 'tab', state: 'page', trigger, window: String(w.id), tab: tab.id === undefined ? null : String(tab.id), url, title }, force)
   }
 

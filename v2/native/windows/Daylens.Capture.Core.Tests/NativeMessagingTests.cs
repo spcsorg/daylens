@@ -77,6 +77,19 @@ public class NativeMessagingTests
     }
 
     [Fact]
+    public void AnEscapedLoneSurrogateIsDroppedNotFatal()
+    {
+        static ExtensionMessage? P(string s) => ExtensionMessage.Parse(Encoding.UTF8.GetBytes(s));
+        foreach (var bad in new[] { "\\ud800", "\\udc00", "a\\ud800b" })
+        {
+            Assert.Null(P("{\"t\":\"tab\",\"state\":\"page\",\"trigger\":\"focus\",\"window\":\"1\",\"url\":\"https://x\",\"title\":\"" + bad + "\"}"));
+            Assert.Null(P("{\"t\":\"tab\",\"state\":\"page\",\"trigger\":\"focus\",\"window\":\"1\",\"tab\":\"" + bad + "\",\"url\":\"https://x\"}"));
+        }
+        Assert.Null(HostReply.FromService("{\"op\":\"status\",\"capture\":1}"u8));
+        Assert.Null(HostReply.FromService("{\"op\":\"status\",\"capture\":\"\\ud800\"}"u8));
+    }
+
+    [Fact]
     public void ServiceLinesBecomeExtensionStatus()
     {
         Assert.Equal("""{"t":"status","daylens":"connected","capture":"paused","until_wall_ms":1792130412345}""",

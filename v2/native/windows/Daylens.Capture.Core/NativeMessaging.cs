@@ -139,7 +139,8 @@ public abstract record ExtensionMessage
                 default: return null;
             }
         }
-        catch (JsonException) { return null; }
+        // GetString throws InvalidOperationException, not JsonException, on an escaped unpaired surrogate.
+        catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
     }
 
     internal static string? Clip(string? s, int max)
@@ -229,7 +230,7 @@ public static class HostReply
             var o = doc.RootElement;
             if (o.ValueKind != JsonValueKind.Object || !o.TryGetProperty("op", out var op) || op.ValueKind != JsonValueKind.String) return null;
             if (op.GetString() == "snapshot") return Snapshot();
-            if (op.GetString() != "status" || !o.TryGetProperty("capture", out var c) || c.GetString() is not ("running" or "paused")) return null;
+            if (op.GetString() != "status" || !o.TryGetProperty("capture", out var c) || c.ValueKind != JsonValueKind.String || c.GetString() is not ("running" or "paused")) return null;
             var capture = c.GetString()!;
             long? until = o.TryGetProperty("until_wall_ms", out var u) && u.ValueKind == JsonValueKind.Number && u.TryGetInt64(out var ms) ? ms : null;
             return Json(w =>
@@ -240,7 +241,7 @@ public static class HostReply
                 if (until is long v) w.WriteNumber("until_wall_ms", v); else w.WriteNull("until_wall_ms");
             });
         }
-        catch (JsonException) { return null; }
+        catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
     }
 
     public static byte[]? Control(ExtensionMessage m) => m switch

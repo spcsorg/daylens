@@ -190,3 +190,11 @@ test('long titles are cut on a character boundary', async () => {
   const m = sent[0]!
   assert.ok(m.state === 'page' && m.title!.length === 1023)
 })
+
+test('a title with an unpaired surrogate is sent well-formed', async () => {
+  const { b, tr, sent } = setup()
+  b.tabs[0]!.title = 'a\uD800b'
+  await tr.startup()
+  const m = sent[0]!
+  assert.ok(m.state === 'page' && m.title === 'a\uFFFDb')
+})

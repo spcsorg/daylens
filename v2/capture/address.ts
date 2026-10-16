@@ -13,6 +13,10 @@ const SECRET_WORDS = new Set([
   'credentials', 'ticket', 'samlresponse', 'samlrequest', 'assertion',
 ])
 
+// Names written as one lowercase word (accesstoken, sessionkey) still carry these; short words like key or code are
+// matched as whole words only, so keyboard and codec stay.
+const SECRET_PARTS = ['token', 'secret', 'password', 'passwd', 'signature', 'apikey', 'sessionid', 'sessionkey', 'authcode', 'verifier', 'credential']
+
 const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/
 
 function nameWords(name: string): string[] {
@@ -24,7 +28,7 @@ function nameWords(name: string): string[] {
 }
 
 export function isSecretParam(name: string, value: string): boolean {
-  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || JWT_VALUE.test(value)
+  return nameWords(name).some((w) => SECRET_WORDS.has(w) || SECRET_PARTS.some((p) => w.includes(p))) || JWT_VALUE.test(value)
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).

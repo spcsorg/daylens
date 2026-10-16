@@ -21,7 +21,7 @@ test('the useful query stays; parameters that carry secrets go', () => {
 })
 
 test('secret detection works on words, not substrings', () => {
-  for (const name of ['token', 'auth_token', 'refreshToken', 'client-secret', 'sig', 'Signature', 'otp', 'passcode', 'KEY'])
+  for (const name of ['token', 'auth_token', 'refreshToken', 'client-secret', 'sig', 'Signature', 'otp', 'passcode', 'KEY', 'accesstoken', 'authtoken', 'sessionkey', 'oauth_verifier', 'xsrftoken', 'idtoken'])
     assert.ok(isSecretParam(name, 'v'), name)
   for (const name of ['q', 'id', 'passenger', 'keyboard', 'monkey', 'codec', 'country', 'tab', 'page'])
     assert.ok(!isSecretParam(name, 'v'), name)
