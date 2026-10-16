@@ -6,6 +6,7 @@ import ApplicationServices
 import CaptureCore
 import CoreGraphics
 import Foundation
+import IOKit.pwr_mgt
 
 let helperVersion = "2.0.0-dev"
 
@@ -126,14 +127,35 @@ ws.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: 
   frontPid = app?.processIdentifier ?? 0
   requestFocus(.app_changed, app, time: time)
 }
-ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
-  emit("power", "nsworkspace", Obs.power("sleep"))
-  suspendIdle(true)
-}
-ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-  emit("power", "nsworkspace", Obs.power("resume"))
-  idle.reset()
-  suspendIdle(false)
+// System sleep and wake come from IOKit, the route Apple documents for background processes.
+// Sleep must be acknowledged, or the Mac waits 30 s before sleeping.
+let kMessageCanSystemSleep: UInt32 = 0xE000_0270
+let kMessageSystemWillSleep: UInt32 = 0xE000_0280
+let kMessageSystemHasPoweredOn: UInt32 = 0xE000_0300
+var rootPowerPort: io_connect_t = 0
+var powerNotifier: io_object_t = 0
+var powerPortRef: IONotificationPortRef?
+rootPowerPort = IORegisterForSystemPower(nil, &powerPortRef, { _, _, type, arg in
+  switch type {
+  case kMessageCanSystemSleep:
+    IOAllowPowerChange(rootPowerPort, Int(bitPattern: arg))
+  case kMessageSystemWillSleep:
+    emit("power", "iokit", Obs.power("sleep"))
+    suspendIdle(true)
+    emitter.flush()
+    IOAllowPowerChange(rootPowerPort, Int(bitPattern: arg))
+  case kMessageSystemHasPoweredOn:
+    emit("power", "iokit", Obs.power("resume"))
+    idle.reset()
+    suspendIdle(false)
+  default:
+    break
+  }
+}, &powerNotifier)
+if rootPowerPort != 0, let ref = powerPortRef {
+  CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(ref).takeUnretainedValue(), .commonModes)
+} else {
+  diag("power_register_failed")
 }
 ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in
   emit("power", "nsworkspace", Obs.power("display_off"))
@@ -175,7 +197,8 @@ heartbeat.setEventHandler {
   let p = permissions()
   let stall = titles.stallMs
   let state: ChannelState = p.accessibility != "granted" ? .no_permission : stall > 2000 ? .stalled : titles.degraded ? .degraded : .ok
-  emit("heartbeat", "helper", Obs.heartbeat(awakeUs: Clock.awakeUs(), permissions: p, titles: state, stallMs: stall, dropped: emitter.dropped))
+  emit("heartbeat", "helper", Obs.heartbeat(awakeUs: Clock.awakeUs(), permissions: p, focusRegistered: true, sessionRegistered: true,
+                                            powerRegistered: rootPowerPort != 0, titles: state, stallMs: stall, dropped: emitter.dropped))
 }
 heartbeat.resume()
 
@@ -208,4 +231,7 @@ Thread.detachNewThread {
 frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
 snapshot()
 diag("started", AXIsProcessTrusted() ? "ax_granted" : "ax_denied")
-CFRunLoopRun()
+// Screen sleep and wake notices only reach a process that is an NSApplication; .prohibited keeps it out of the Dock and menu bar.
+let nsApp = NSApplication.shared
+nsApp.setActivationPolicy(.prohibited)
+nsApp.run()

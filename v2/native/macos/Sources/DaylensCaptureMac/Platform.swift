@@ -27,6 +27,8 @@ enum Clock {
   }
 }
 
+let faultBlockTitles = ProcessInfo.processInfo.environment["DAYLENS_CAPTURE_FAULT"] == "block_titles"
+
 func bootSessionId() -> String {
   var size = 0
   sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0)

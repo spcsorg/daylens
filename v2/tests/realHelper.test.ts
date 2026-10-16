@@ -31,10 +31,11 @@ function helperPid(servicePid: number): number | null {
   }
 }
 
-function startService(dataDir: string): { proc: ChildProcess; log: () => string } {
+function startService(dataDir: string, env: Record<string, string> = {}): { proc: ChildProcess; log: () => string } {
   let log = ''
   const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200'], {
     stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, ...env },
   })
   proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
   return { proc, log: () => log }
@@ -119,4 +120,18 @@ test('a frozen real helper (SIGSTOP) is detected as hung, replaced, and the gap 
   const span = hung.end_wall_ms - hung.start_wall_ms
   assert.ok(span >= 3000 && span < 10_000, `gap ${span} ms`)
   assert.ok(gaps(dir).every((g) => g.reason !== 'helper_crashed'), 'a hang kill is not also counted as a crash')
+})
+
+test('a real helper whose title worker is stuck while its main loop lives is restarted, with a bounded titles gap', { skip }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const svc = startService(dir, { DAYLENS_CAPTURE_FAULT: 'block_titles' })
+  await waitFor(() => svc.log().includes('title worker stuck') && (svc.log().match(/helper hello/g) ?? []).length >= 2)
+  await sleep(500)
+  await stop(svc.proc)
+  const all = gaps(dir)
+  const hung = all.find((g) => g.reason === 'helper_hung')!
+  assert.equal(JSON.parse(hung.detail!).channel, 'titles')
+  const titles = all.find((g) => g.reason === 'titles_unavailable')!
+  assert.ok(titles && titles.end_wall_ms !== null, 'titles gap is closed when the new helper says hello')
+  assert.ok(titles.end_wall_ms - titles.start_wall_ms < 8000, `titles gap ${titles.end_wall_ms - titles.start_wall_ms} ms`)
 })
