@@ -2,7 +2,7 @@
 // Logs carry codes and counts only, never observation content.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { GapPoint, GapReason, Normalizer } from './normalize.ts'
+import type { GapPoint, GapReason, GapScope, Normalizer } from './normalize.ts'
 import { MAX_LINE_BYTES, parseLine, type Line, type LineOf, type RejectReason } from './protocol.ts'
 import type { Store } from './store.ts'
 
@@ -73,6 +73,7 @@ export class Supervisor {
   // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
   private recovering: { id: number; reason: GapReason } | null = null
   private titlesGap: number | null = null
+  private registrationGaps = new Map<'focus' | 'session' | 'power', number>()
   private rejectGap: { id: number; count: number; startWall: number } | null = null
   private awakeSilenceMs = 0
   private lastTick: { wall: number; hr: number } | null = null
@@ -138,6 +139,7 @@ export class Supervisor {
     const end = this.servicePoint()
     this.normalizer.interrupt(end)
     if (this.titlesGap !== null) this.store.closeGap(this.titlesGap, end)
+    this.closeRegistrationGaps(end)
     if (this.allGap) this.store.closeGap(this.allGap.id, end)
     if (this.run) this.store.endRun(this.run, end.wall_ms, 'service_stopped')
     this.store.markServiceStopped(end.wall_ms)
@@ -378,6 +380,16 @@ export class Supervisor {
         this.normalizer.handle(line)
         if (line.obs.state === 'unlocked' && !line.obs.snapshot) this.send({ op: 'snapshot' })
         return
+      case 'loss': {
+        const o = line.obs
+        this.o.log(`helper dropped focus work count=${o.count}`)
+        const id = this.store.openGap({ reason: 'events_dropped', scope: 'focus', run: this.run, start: { wall_ms: o.from_wall_ms, mono_us: null, boot: line.boot }, detail: { count: o.count } })
+        this.store.closeGap(id, { wall_ms: o.to_wall_ms, mono_us: null, boot: line.boot })
+        // What was dropped may include the latest change; re-read the present.
+        this.normalizer.interrupt({ wall_ms: o.to_wall_ms, mono_us: null, boot: line.boot })
+        this.send({ op: 'snapshot' })
+        return
+      }
       case 'bye':
         this.o.log(`helper bye reason=${/^[a-z_]{1,32}$/.test(line.obs.reason) ? line.obs.reason : 'other'}`)
         return
@@ -397,6 +409,10 @@ export class Supervisor {
       this.store.closeGap(this.allGap.id, point)
       this.recovering = this.allGap
       this.allGap = null
+    }
+    if (this.titlesGap !== null) {
+      this.store.closeGap(this.titlesGap, point)
+      this.titlesGap = null
     }
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: null, boot: line.boot }
   }
@@ -419,7 +435,18 @@ export class Supervisor {
     this.stats.heartbeats++
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: line.obs.awake_us, boot: line.boot }
     this.store.recordHeartbeat(line)
+    this.onRegistrations(line, point)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
+    // The main loop is alive but the title worker is stuck in one call: only a restart frees it.
+    if (line.obs.stall_ms >= this.o.hangAfterMs && this.child) {
+      this.stats.hangs++
+      this.o.log(`title worker stuck stall_ms=${line.obs.stall_ms}; restarting helper`)
+      this.normalizer.interrupt(point)
+      this.ensureAllGap('helper_hung', point, { channel: 'titles', stall_ms: line.obs.stall_ms }, false)
+      this.killedForHang = true
+      this.child.kill('SIGKILL')
+      return
+    }
     const titlesDown = line.obs.titles !== 'ok'
     if (titlesDown && this.titlesGap === null) {
       this.titlesGap = this.store.openGap({ reason: 'titles_unavailable', scope: 'titles', run: this.run, start: point, detail: { state: line.obs.titles } })
@@ -427,6 +454,26 @@ export class Supervisor {
       this.store.closeGap(this.titlesGap, point)
       this.titlesGap = null
     }
+  }
+
+  // An event source the helper could not subscribe to is a gap in that source until it is in place.
+  private onRegistrations(line: LineOf<'heartbeat'>, point: GapPoint): void {
+    for (const source of ['focus', 'session', 'power'] as const) {
+      const ok = line.obs.registrations[source]
+      const open = this.registrationGaps.get(source)
+      if (!ok && open === undefined) {
+        this.o.log(`helper ${source} events unavailable`)
+        this.registrationGaps.set(source, this.store.openGap({ reason: 'events_unavailable', scope: source as GapScope, run: this.run, start: point, detail: null }))
+      } else if (ok && open !== undefined) {
+        this.store.closeGap(open, point)
+        this.registrationGaps.delete(source)
+      }
+    }
+  }
+
+  private closeRegistrationGaps(at: GapPoint): void {
+    for (const id of this.registrationGaps.values()) this.store.closeGap(id, at)
+    this.registrationGaps.clear()
   }
 
   // --- helpers ------------------------------------------------------------
@@ -441,11 +488,13 @@ export class Supervisor {
   }
 
   // One all-scope gap at a time; a second failure before recovery extends the first.
-  private ensureAllGap(reason: GapReason, start: GapPoint, detail: Record<string, number | boolean | string | null>): void {
-    if (this.titlesGap !== null) {
+  private ensureAllGap(reason: GapReason, start: GapPoint, detail: Record<string, number | boolean | string | null>, closeTitles = true): void {
+    // A titles gap that led to this restart stays open until the new helper is up, so it is bounded by recovery.
+    if (closeTitles && this.titlesGap !== null) {
       this.store.closeGap(this.titlesGap, start)
       this.titlesGap = null
     }
+    this.closeRegistrationGaps(start)
     // A helper that dies right after hello, before sending anything else, continues the same outage.
     if (!this.allGap && this.recovering && this.linesSinceHello <= 1) {
       this.store.reopenGap(this.recovering.id)

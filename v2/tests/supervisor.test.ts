@@ -180,3 +180,43 @@ test('a title channel that stalls opens a titles-only gap', async () => {
   assert.equal(g.scope, 'titles')
   await h.finish()
 })
+
+test('focus work dropped inside the helper becomes a gap with its time range', async () => {
+  const h = harness({ FAKE_MODE: 'loss', FAKE_AFTER_MS: '300' })
+  h.sup.start()
+  await waitFor(() => h.gaps().some((g) => g.reason === 'events_dropped'))
+  const g = h.gaps().find((x) => x.reason === 'events_dropped')!
+  assert.equal(g.scope, 'focus')
+  assert.equal(g.end_wall_ms! - g.start_wall_ms, 200)
+  assert.deepEqual(JSON.parse(g.detail!), { count: 7 })
+  await h.finish()
+})
+
+test('an event source the helper could not subscribe to is a gap until it is in place', async () => {
+  const h = harness({ FAKE_MODE: 'session_unregistered', FAKE_AFTER_MS: '500' })
+  h.sup.start()
+  await waitFor(() => h.gaps().some((g) => g.reason === 'events_unavailable' && g.end_wall_ms !== null))
+  const g = h.gaps().find((x) => x.reason === 'events_unavailable')!
+  assert.equal(g.scope, 'session')
+  await new Promise((r) => setTimeout(r, 300))
+  h.store.flush()
+  const sessions = h.store.query<{ state: string }>(
+    `SELECT state FROM observations WHERE kind = 'session' AND event_wall_ms >= ? ORDER BY id`,
+    g.end_wall_ms! - 150,
+  )
+  assert.deepEqual(sessions.map((s) => s.state), ['locked', 'unlocked'], 'lock and unlock after the retry are captured')
+  await h.finish()
+})
+
+test('a stuck title worker restarts the helper even while heartbeats continue, and the titles gap is bounded', async () => {
+  const h = harness({ FAKE_MODE: 'titles_stuck' })
+  h.sup.start()
+  await waitFor(() => h.sup.stats.hangs >= 1 && h.sup.stats.restarts >= 1)
+  await waitFor(() => h.gaps().some((g) => g.reason === 'titles_unavailable' && g.end_wall_ms !== null))
+  const titles = h.gaps().find((g) => g.reason === 'titles_unavailable')!
+  const hung = h.gaps().find((g) => g.reason === 'helper_hung')!
+  assert.equal(JSON.parse(hung.detail!).channel, 'titles')
+  assert.ok(titles.end_wall_ms! >= hung.start_wall_ms, 'the titles gap lasts until the new helper is up')
+  assert.ok(titles.end_wall_ms! - titles.start_wall_ms < 5000)
+  await h.finish()
+})

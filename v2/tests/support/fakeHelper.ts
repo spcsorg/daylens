@@ -10,6 +10,7 @@ const canary = process.env.FAKE_CANARY ?? 'CANARY'
 if (process.env.FAKE_PIDFILE) appendFileSync(process.env.FAKE_PIDFILE, `${process.pid}\n`)
 
 const run = randomUUID()
+const started = Date.now()
 let seq = 0
 const t = () => ({ wall_ms: Date.now(), mono_us: Math.round((performance.timeOrigin + performance.now()) * 1000), tz: 'UTC', tz_offset_min: 0 })
 
@@ -43,7 +44,14 @@ let sleptUs = 0
 const awakeUs = () => t().mono_us - sleptUs
 const hb = setInterval(() => {
   if (heartbeats && !asleep)
-    emit('heartbeat', { awake_us: awakeUs(), permissions: { accessibility: 'granted' }, titles: mode === 'titles_stalled' ? 'stalled' : 'ok', stall_ms: 0, dropped: 0 })
+    emit('heartbeat', {
+      awake_us: awakeUs(),
+      permissions: { accessibility: 'granted' },
+      registrations: { focus: true, session: !(mode === 'session_unregistered' && Date.now() - started < afterMs), power: true },
+      titles: mode === 'titles_stalled' || mode === 'titles_stuck' ? 'stalled' : 'ok',
+      stall_ms: mode === 'titles_stuck' ? Date.now() - started : 0,
+      dropped: 0,
+    })
 }, hbMs)
 setInterval(() => {
   n++
@@ -60,6 +68,13 @@ setTimeout(() => {
     case 'sleep_then_hang':
       emit('power', { state: 'sleep' })
       heartbeats = false
+      break
+    case 'loss':
+      emit('loss', { channel: 'focus', count: 7, from_wall_ms: Date.now() - 300, to_wall_ms: Date.now() - 100 })
+      break
+    case 'session_unregistered':
+      emit('session', { state: 'locked', snapshot: false })
+      emit('session', { state: 'unlocked', snapshot: false })
       break
     case 'garbage':
       process.stdout.write(`not json ${canary}\n`)
