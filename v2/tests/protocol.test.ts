@@ -16,7 +16,7 @@ test('every valid fixture parses and round-trips unchanged', () => {
 })
 
 test('fixtures cover every kind on both stable platforms', () => {
-  const kinds = new Set<Kind>(['hello', 'heartbeat', 'focus', 'input', 'session', 'power', 'clock', 'loss', 'bye'])
+  const kinds = new Set<Kind>(['hello', 'heartbeat', 'focus', 'input', 'session', 'power', 'clock', 'loss', 'bye', 'tab'])
   const seen = new Set(valid.map((v) => (v.line as { kind: Kind }).kind))
   assert.deepEqual([...kinds].filter((k) => !seen.has(k)), [])
   const platforms = new Set(valid.map((v) => (v.line as { platform: string }).platform))

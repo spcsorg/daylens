@@ -3,6 +3,7 @@
 export const PROTOCOL_VERSION = 1
 export const MAX_LINE_BYTES = 16 * 1024
 export const MAX_TITLE_CHARS = 1024
+export const MAX_URL_CHARS = 2048
 
 export type Platform = 'macos' | 'windows' | 'linux'
 
@@ -101,6 +102,21 @@ export interface LossObs {
 export interface ByeObs {
   reason: string
 }
+export type TabTrigger = 'activated' | 'focus' | 'updated' | 'removed' | 'snapshot' | 'startup' | 'paused'
+export type TabUnknownReason = 'no_focused_window' | 'not_normal' | 'no_tab' | 'no_address' | 'paused'
+// From the browser extension through its native host, never from a capture helper. `browser` is the process that
+// launched the host, found by the host itself, not reported by the extension.
+export interface TabObs {
+  trigger: TabTrigger
+  state: 'page' | 'unknown'
+  reason: TabUnknownReason | null
+  browser: AppIdentity
+  extension: string
+  window: string | null
+  tab: string | null
+  url: string | null
+  title: string | null
+}
 
 export interface ObsByKind {
   hello: HelloObs
@@ -112,6 +128,7 @@ export interface ObsByKind {
   clock: ClockObs
   loss: LossObs
   bye: ByeObs
+  tab: TabObs
 }
 export type Kind = keyof ObsByKind
 
@@ -199,6 +216,9 @@ const SESSION_STATES = [
 ] as const
 const POWER_STATES = ['sleep', 'resume', 'resume_user', 'display_off', 'display_on', 'display_dim'] as const
 const CLOCK_CHANGES = ['time_changed', 'timezone_changed'] as const
+const TAB_TRIGGERS = ['activated', 'focus', 'updated', 'removed', 'snapshot', 'startup', 'paused'] as const
+const TAB_UNKNOWN_REASONS = ['no_focused_window', 'not_normal', 'no_tab', 'no_address', 'paused'] as const
+const EXTENSION_ID_RE = /^[A-Za-z0-9@._{}-]{1,128}$/
 const ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/
 const SOURCE_RE = /^[a-z][a-z0-9_]{0,31}$/
 
@@ -283,6 +303,25 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
     return { channel: oneOf(o, 'channel', ['focus'] as const), count: int(o, 'count', 1), from_wall_ms, to_wall_ms }
   },
   bye: (o) => ({ reason: str(o, 'reason', 128) }),
+  tab: (o) => {
+    const state = oneOf(o, 'state', ['page', 'unknown'] as const)
+    const extension = str(o, 'extension', 128)
+    if (!EXTENSION_ID_RE.test(extension)) fail('extension: bad id')
+    const obs: TabObs = {
+      trigger: oneOf(o, 'trigger', TAB_TRIGGERS),
+      state,
+      reason: o.reason === null || o.reason === undefined ? null : oneOf(o, 'reason', TAB_UNKNOWN_REASONS),
+      browser: appIdentity(o.browser),
+      extension,
+      window: strOrNull(o, 'window', 64),
+      tab: strOrNull(o, 'tab', 64),
+      url: strOrNull(o, 'url', MAX_URL_CHARS),
+      title: strOrNull(o, 'title', MAX_TITLE_CHARS),
+    }
+    if (state === 'page' && (obs.url === null || obs.reason !== null)) fail('tab: a page has a url and no reason')
+    if (state === 'unknown' && (obs.url !== null || obs.title !== null || obs.reason === null)) fail('tab: unknown has a reason and no url or title')
+    return obs
+  },
 }
 
 export function parseLine(raw: string): ParseResult {
