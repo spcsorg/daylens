@@ -619,6 +619,16 @@ export class Supervisor {
     this.openAllGap(reason, start, detail)
   }
 
+  /** Asks the helper to re-send current state, for storage changes that break row continuity (pause, deletion, exclusion). */
+  requestSnapshot(): void {
+    this.send({ op: 'snapshot' })
+  }
+
+  /** Where capture currently is, for gaps and interruptions caused outside the helper. */
+  currentPoint(): GapPoint {
+    return this.lastLine ?? this.servicePoint()
+  }
+
   private send(msg: { op: 'shutdown' | 'snapshot' }): void {
     const stdin = this.child?.stdin
     if (stdin && stdin.writable) stdin.write(JSON.stringify(msg) + '\n')

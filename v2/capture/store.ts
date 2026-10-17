@@ -214,7 +214,9 @@ export class Store implements Sink {
   onRecovered: () => void = () => {}
   // Storage decides what may be written (pause, tombstones); a refused observation is never queued.
   acceptObservation: (row: ObservationRow) => boolean = () => true
-  acceptExtension: (lastSeenWallMs: number) => boolean = () => true
+  // Observation ids written by each committed flush, for state derived from observations (intervals, search).
+  onFlushed: (observationIds: number[]) => void = () => {}
+  private touched = new Set<number>()
   private readonly maxPendingOps: number
 
   constructor(dir: string, opts: StoreOptions = {}) {
@@ -371,6 +373,7 @@ export class Store implements Sink {
   insertObservation(row: ObservationRow): number {
     if (!this.acceptObservation(row)) return Store.REFUSED
     const id = this.nextObsId++
+    this.touched.add(id)
     this.enqueue(
       `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
          recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail)
@@ -385,7 +388,8 @@ export class Store implements Sink {
   }
 
   extendObservation(id: number, lastSeenWallMs: number): void {
-    if (id === Store.REFUSED || !this.acceptExtension(lastSeenWallMs)) return
+    if (id === Store.REFUSED) return
+    this.touched.add(id)
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
   }
 
@@ -513,6 +517,11 @@ export class Store implements Sink {
     }
     this.health.committedWallMs = committed
     this.health.pendingOps = 0
+    if (this.touched.size > 0) {
+      const ids = [...this.touched]
+      this.touched.clear()
+      this.onFlushed(ids)
+    }
     return true
   }
 

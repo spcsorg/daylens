@@ -248,10 +248,15 @@ export class Normalizer {
   private resumedAtWall: number | null = null
   private titleChannel: ChannelState = 'ok'
   private readonly sink: Sink
-  private readonly privacy: Privacy
+  private privacy: Privacy
 
   constructor(sink: Sink, privacy: Privacy = new Privacy()) {
     this.sink = sink
+    this.privacy = privacy
+  }
+
+  // New exclusion rules apply from the next line; callers interrupt first so no open row is extended across the change.
+  setPrivacy(privacy: Privacy): void {
     this.privacy = privacy
   }
 
@@ -371,7 +376,9 @@ export class Normalizer {
       ...(known && app.store ? { store: app.store } : {}),
       ...(c.reason && titleState === 'unknown' ? { title_reason: c.reason } : {}),
     })
-    this.focus = { id: this.sink.insertObservation(row), key, hasTitle: title !== null, sinceWall: line.t.wall_ms, stale: false }
+    const id = this.sink.insertObservation(row)
+    // A refused row (paused, deleted range) is never held open, so the first accepted line starts a fresh one.
+    this.focus = id < 0 ? null : { id, key, hasTitle: title !== null, sinceWall: line.t.wall_ms, stale: false }
   }
 
   private onState(line: Line, kind: 'input' | 'session' | 'power', state: string, detail: string | null): void {
@@ -383,7 +390,9 @@ export class Normalizer {
     const row = envelopeRow(line, kind)
     row.state = state
     row.detail = detail
-    this.lastState.set(kind, { id: this.sink.insertObservation(row), key: state, hasTitle: false, sinceWall: line.t.wall_ms, stale: false })
+    const id = this.sink.insertObservation(row)
+    if (id < 0) this.lastState.delete(kind)
+    else this.lastState.set(kind, { id, key: state, hasTitle: false, sinceWall: line.t.wall_ms, stale: false })
   }
 
   private onPresenceEvidence(line: Line, isEvidence: boolean): void {
