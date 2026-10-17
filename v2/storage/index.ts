@@ -11,7 +11,7 @@ import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type Hou
 import { applyMigrations } from './migrations.ts'
 import { DAY_MS, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
-import { isBusy } from './tx.ts'
+import { immediate, isBusy } from './tx.ts'
 
 export type { DeletionResult } from './deletion.ts'
 export { HOUR_FIELDS, readHour, type Hour, type HourField, type HourSource } from './hours.ts'
@@ -167,10 +167,6 @@ export class Storage {
 
   /** Arms the pause and retention timers, and resumes work left unfinished: derivation, and deletions still pending. */
   start(): void {
-    // A mark left by a capture flush whose derivation never ran becomes part of the backfill.
-    this.db.exec(`INSERT INTO meta (key, value) SELECT 'derive_backfill_from', value FROM meta WHERE key = 'derive_from'
-                  ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`)
-    this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
     this.backfill = this.runBackfill()
     this.backfill.catch(() => {})
     for (const t of this.rules.tombstones) {
@@ -196,9 +192,18 @@ export class Storage {
 
   // Busy and other errors are retried with backoff; settled is reported only when the work is done.
   private async runBackfill(): Promise<void> {
-    for (let wait = 50; ; ) {
+    for (let wait = 50, merged = false; ; ) {
       if (this.stopped) throw new Error('storage stopped before derivation caught up')
       try {
+        // A mark left by a capture flush whose derivation never ran becomes part of the backfill.
+        if (!merged) {
+          immediate(this.db, () => {
+            this.db.exec(`INSERT INTO meta (key, value) SELECT 'derive_backfill_from', value FROM meta WHERE key = 'derive_from'
+                          ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`)
+            this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
+          })
+          merged = true
+        }
         if (!this.derived.backfillStep()) return
         wait = 50
         await new Promise((r) => setImmediate(r))
