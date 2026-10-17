@@ -678,7 +678,7 @@ export class Storage {
     this.flushOrThrow()
     return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
       const apps = this.keptTitleApps()
-      if (!apps.some((a) => a.id === entry.id)) this.putSetting('kept_title_apps', [...apps, entry])
+      if (!apps.some((a) => a.id === entry.id)) this.putSetting('kept_title_apps', [...apps, { ...entry, effective_from_wall_ms: this.now() }])
       return entry.id
     }, () => {
       this.installPrivacy()

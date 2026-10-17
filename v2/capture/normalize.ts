@@ -168,9 +168,10 @@ export interface KeptTitleApp {
   id: string
   app_id: string
   signer: string | null
+  effective_from_wall_ms: number
 }
 
-export function keptTitleIdentity(app: AppIdentity): KeptTitleApp | null {
+export function keptTitleIdentity(app: AppIdentity): Omit<KeptTitleApp, 'effective_from_wall_ms'> | null {
   if (app.identity_state !== 'ok' || !app.app_id) return null
   const appId = app.app_id.toLowerCase()
   if (app.store) {
@@ -203,10 +204,10 @@ export class Privacy {
   private readonly byExe = new Set<string>()
 
   private readonly trustedApps: readonly TrustedApp[]
-  private readonly keptApps: ReadonlySet<string>
+  private readonly keptApps: ReadonlyMap<string, number>
 
   constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS, keptApps: readonly KeptTitleApp[] = []) {
-    this.keptApps = new Set(keptApps.map((a) => a.id))
+    this.keptApps = new Map(keptApps.map((a) => [a.id, a.effective_from_wall_ms]))
     this.trustedApps = trustedApps
     for (const r of rules) (r.match === 'app_id' ? this.byAppId : this.byExe).add(r.value.toLowerCase())
   }
@@ -219,7 +220,7 @@ export class Privacy {
     return (id !== null && this.byAppId.has(id)) || (a !== null && this.byAppId.has(a)) || (exe !== null && this.byExe.has(exe))
   }
 
-  classify(app: AppIdentity): Classification {
+  classify(app: AppIdentity, eventWallMs?: number): Classification {
     const appId = app.app_id?.toLowerCase() ?? null
     const exe = app.path ? basename(app.path) : null
     const aumid = app.store?.aumid.toLowerCase() ?? null
@@ -236,7 +237,8 @@ export class Privacy {
     if (app.registered_browser && !entry?.registers_links) return { excluded: false, title: 'withheld_browser' }
     if (app.engine === 'unknown') return { excluded: false, title: 'unknown', reason: 'engine_uncertain' }
     if (app.engine === 'browser') return { excluded: false, title: 'unknown', reason: 'browser_engine' }
-    if (app.engine === 'app_runtime' && !entry && !this.keptApps.has(keptTitleIdentity(app)?.id ?? '')) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
+    const effectiveFrom = this.keptApps.get(keptTitleIdentity(app)?.id ?? '')
+    if (app.engine === 'app_runtime' && !entry && !(effectiveFrom !== undefined && eventWallMs !== undefined && eventWallMs >= effectiveFrom)) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
     return { excluded: false, title: 'allowed' }
   }
 }
@@ -366,7 +368,7 @@ export class Normalizer {
 
   private onFocus(line: LineOf<'focus'>): void {
     const { app, window: win } = line.obs
-    const c = this.privacy.classify(app)
+    const c = this.privacy.classify(app, line.t.wall_ms)
 
     if (c.excluded) {
       this.focus = null

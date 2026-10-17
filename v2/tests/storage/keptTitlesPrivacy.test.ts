@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { KeepTitlesRefused } from '../../storage/index.ts'
 import { app, focus, resetSeq } from '../support/lines.ts'
-import { MIN, rig, T0 } from './support.ts'
+import { diskContains, MIN, rig, T0 } from './support.ts'
 
 const notes = app('com.example.notes', { engine: 'app_runtime', signer: 'TEAMNOTES1' })
 
@@ -62,4 +62,40 @@ test('unverifiable identities and changed Windows product identities cannot use 
   r.feed(focus({ ...exe, version_info: { original_filename: 'jot.exe', product_name: 'Browser' } }, 'ChangedProductCanary', T0 + MIN))
   assert.deepEqual(r.q('SELECT title_state FROM observations ORDER BY id'), [{ title_state: 'ok' }, { title_state: 'unknown' }])
   r.close()
+})
+
+
+test('delayed titles before activation stay off disk and out of observations and search, including after re-add and restart', () => {
+  resetSeq()
+  const r = rig()
+  r.clock.t = T0 + MIN
+  const id = r.storage.keepTitles(notes)
+  r.feed(focus(notes, 'BeforeAddDiskCanary ⠋', T0))
+  r.feed(focus(notes, 'At activation', T0 + MIN, 'window_changed', 'at'))
+  r.clock.t = T0 + 2 * MIN
+  r.storage.stopKeepingTitles(id)
+  r.feed(focus(notes, 'AfterRemovalDiskCanary ⠋', T0 + 3 * MIN))
+  r.feed(focus(notes, 'DelayedAfterRemovalDiskCanary ⠋', T0 + MIN, 'window_changed', 'delayed'))
+  r.clock.t = T0 + 4 * MIN
+  r.storage.keepTitles(notes)
+  r.close()
+  const again = rig(r.dir)
+  try {
+    again.feed(focus(notes, 'BeforeReAddDiskCanary ⠋', T0 + 3 * MIN))
+    again.feed(focus(notes, 'After re-add', T0 + 4 * MIN, 'window_changed', 'after'))
+    assert.deepEqual(again.q('SELECT title, title_raw FROM observations ORDER BY id'), [
+      { title: null, title_raw: null },
+      { title: 'At activation', title_raw: null },
+      { title: null, title_raw: null },
+      { title: null, title_raw: null },
+      { title: null, title_raw: null },
+      { title: 'After re-add', title_raw: null },
+    ])
+    for (const canary of ['BeforeAddDiskCanary', 'AfterRemovalDiskCanary', 'DelayedAfterRemovalDiskCanary', 'BeforeReAddDiskCanary']) {
+      assert.deepEqual(again.storage.search(canary), [])
+      assert.deepEqual(diskContains(again.dir, canary), [])
+    }
+  } finally {
+    again.close()
+  }
 })
