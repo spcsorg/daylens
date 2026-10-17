@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from './normalize.ts'
 import { defaultDataDir, Store } from './store.ts'
 import { Supervisor } from './supervisor.ts'
+import { Storage } from '../storage/index.ts'
 
 const { values } = parseArgs({
   options: {
@@ -26,7 +27,9 @@ if (!values.helper) {
 
 const heartbeatS = Number(values['heartbeat-s'])
 const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
-const store = new Store(values['data-dir'] ?? defaultDataDir(), { onError: (code) => log(`storage error code=${code}`) })
+const dataDir = values['data-dir'] ?? defaultDataDir()
+const store = new Store(dataDir, { onError: (code) => log(`storage error code=${code}`) })
+const storage = new Storage(store, dataDir, { onError: (code) => log(`storage error code=${code}`) })
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
 const supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
@@ -42,12 +45,21 @@ const supervisor = new Supervisor(store, normalizer, {
   log,
 })
 
+storage.attachCapture({
+  interrupt: () => {
+    normalizer.interrupt(supervisor.currentPoint())
+    supervisor.requestSnapshot()
+  },
+  setExclusions: (rules) => normalizer.setPrivacy(new Privacy(rules)),
+})
+
 let stopping = false
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
   log(`stopping signal=${signal}`)
   await supervisor.stop()
+  storage.stop()
   store.close()
   process.exit(0)
 }
@@ -60,3 +72,4 @@ if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EO
 
 log(`started pid=${process.pid}`)
 supervisor.start()
+storage.start()
