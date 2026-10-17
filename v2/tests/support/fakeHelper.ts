@@ -69,9 +69,11 @@ setTimeout(() => {
       emit('power', { state: 'sleep' })
       heartbeats = false
       break
-    case 'loss':
-      emit('loss', { channel: 'focus', count: 7, from_wall_ms: Date.now() - 300, to_wall_ms: Date.now() - 100 })
+    case 'loss': {
+      const now = Date.now()
+      emit('loss', { channel: 'focus', count: 7, from_wall_ms: now - 300, to_wall_ms: now - 100 })
       break
+    }
     case 'session_unregistered':
       emit('session', { state: 'locked', snapshot: false })
       emit('session', { state: 'unlocked', snapshot: false })
