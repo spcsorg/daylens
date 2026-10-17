@@ -401,6 +401,33 @@ test('a failed backfill still starts the readers', async () => {
   r.store.close()
 })
 
+test('an unfinished last line ends the first read, and is read once its writer finishes it', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  const finish = claude.assistant(c, sec(40), 'end_turn')
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'pl1' }), claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 't', name: 'Bash' }] })) + finish.slice(0, 100))
+  const slice = r.reader()
+  assert.equal(await slice.readOnly([file], 1 << 20), false, 'partial EOF is not another slice')
+  await slice.stop()
+  r.store.database.exec('DELETE FROM agent_sources; DELETE FROM agent_turns; DELETE FROM agent_sessions; DELETE FROM agent_events')
+  let children = 0
+  const reader = r.reader({
+    followUpMs: 200,
+    backfill: async (roots) => {
+      const res = await backfill(r.store.database, r.data, roots, () => {}, 64)
+      children = res.children
+      return res.merged
+    },
+  })
+  await reader.start()
+  assert.ok(children >= 1 && children < 10, `children: ${children}`)
+  appendFileSync(file, `${finish.slice(100)}\n`)
+  await waitFor(() => r.store.query<{ n: number }>(`SELECT last_activity_wall_ms AS n FROM agent_turns WHERE turn_key = 'pl1'`)[0]?.n === sec(40))
+  await reader.stop()
+  r.store.close()
+})
+
 test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {
   const [cl, cx, ar] = homeRoots('/h', {}) as [AgentRoot, AgentRoot, AgentRoot]
   assert.ok(classifyFile(cl, '/h/.claude/projects/-p/abc.jsonl'))

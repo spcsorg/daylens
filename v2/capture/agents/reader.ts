@@ -442,15 +442,19 @@ export class AgentReader {
           readAppended(file, from, until, sink, (offset) => {
             if (records.length >= FLUSH_RECORDS) flush(offset)
           })
-        const until = this.budget !== null ? Math.min(st.size, from + this.budget) : st.size
+        let until = this.budget !== null ? Math.min(st.size, from + this.budget) : st.size
         let res = await read(until)
         // A single line longer than the budget is read whole, or the next slice would start at the same place.
-        if (res.next === from && until < st.size) res = await read(st.size)
+        if (res.next === from && until < st.size) {
+          until = st.size
+          res = await read(until)
+        }
         flush(res.next)
         this.stats.bytesRead += res.bytes
         if (this.budget !== null) {
           this.budget -= res.bytes
-          if (res.next < st.size) this.leftOver = true
+          // An unfinished EOF line waits for its writer, not another backfill slice.
+          if (until < st.size && res.next < st.size) this.leftOver = true
         }
       }
       this.stats.filesRead++
