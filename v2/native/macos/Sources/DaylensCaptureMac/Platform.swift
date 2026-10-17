@@ -54,7 +54,7 @@ func diag(_ code: String, _ value: String = "1") {
   FileHandle.standardError.write("\(code)=\(value)\n".data(using: .utf8)!)
 }
 
-/// Whether an app registers to open http and https links. A platform fact; shared code decides what it means.
+/// Whether an app registers to open http or https links; shared code decides what it means.
 /// Keyed on the bundle's current files, and read straight from Info.plist (Bundle caches it), so an update is seen.
 final class BrowserRegistry {
   private let lock = NSLock()
@@ -69,7 +69,7 @@ final class BrowserRegistry {
     let plist = url.appendingPathComponent("Contents/Info.plist")
     if let info = NSDictionary(contentsOf: plist) as? [String: Any], let types = info["CFBundleURLTypes"] as? [[String: Any]] {
       let schemes = Set(types.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] }.map { $0.lowercased() })
-      result = schemes.contains("http") && schemes.contains("https")
+      result = schemes.contains("http") || schemes.contains("https")
     }
     lock.lock()
     if cache.count > 512 { cache.removeAll() }

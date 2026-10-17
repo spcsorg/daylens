@@ -10,7 +10,8 @@ public class WebProtocolTests
         Head + string.Concat(protocols.Select(p => $"""<uap:Extension Category="windows.protocol"><uap:Protocol Name="{p}" /></uap:Extension>""")) + Tail;
 
     [Fact] public void BothWebProtocolsMakeABrowser() => Assert.True(StoreApps.ManifestDeclaresWebProtocols(Manifest("http", "https", "mailto")));
-    [Fact] public void HttpsAloneIsNot() => Assert.False(StoreApps.ManifestDeclaresWebProtocols(Manifest("https")));
+    [Fact] public void HttpsAloneIsABrowser() => Assert.True(StoreApps.ManifestDeclaresWebProtocols(Manifest("https")));
+    [Fact] public void HttpAloneIsABrowser() => Assert.True(StoreApps.ManifestDeclaresWebProtocols(Manifest("http")));
     [Fact] public void OtherProtocolsAreNot() => Assert.False(StoreApps.ManifestDeclaresWebProtocols(Manifest("ms-calculator")));
     [Fact] public void CaseDoesNotMatter() => Assert.True(StoreApps.ManifestDeclaresWebProtocols(Manifest("HTTP", "Https")));
 }

@@ -158,7 +158,7 @@ public static class StoreApps
         return $"@{{{packageFullName}?{uri}}}";
     }
 
-    /// Whether a package manifest declares the http and https protocols, which makes the app a browser.
+    /// Whether a package manifest declares either http or https.
     public static bool ManifestDeclaresWebProtocols(string manifestXml)
     {
         var doc = new XmlDocument { XmlResolver = null };
@@ -172,7 +172,7 @@ public static class StoreApps
             http |= name.Equals("http", StringComparison.OrdinalIgnoreCase);
             https |= name.Equals("https", StringComparison.OrdinalIgnoreCase);
         }
-        return http && https;
+        return http || https;
     }
 
     /// SHLoadIndirectString can "succeed" by echoing an unresolved reference.

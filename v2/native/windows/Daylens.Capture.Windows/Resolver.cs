@@ -313,7 +313,7 @@ internal sealed unsafe class Resolver
         return _browserExes.Contains(exePath);
     }
 
-    // Apps registered for both http and https under RegisteredApplications, plus the StartMenuInternet list.
+    // Apps registered for either http or https, plus the StartMenuInternet list.
     void LoadBrowsers()
     {
         _browsersLoadedMs = Environment.TickCount64;
@@ -362,21 +362,24 @@ internal sealed unsafe class Resolver
         if (apps is null) yield break;
         foreach (var app in apps.GetValueNames())
         {
-            string? exe = null;
-            try
+            foreach (var scheme in new[] { "http", "https" })
             {
-                if (apps.GetValue(app) is string capPath)
+                string? exe = null;
+                try
                 {
-                    using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
-                    if (urls?.GetValue("http") is string progId && urls.GetValue("https") is not null)
+                    if (apps.GetValue(app) is string capPath)
                     {
-                        using var cmd = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
-                        exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
+                        using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
+                        if (urls?.GetValue(scheme) is string progId)
+                        {
+                            using var cmd = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
+                            exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
+                        }
                     }
                 }
+                catch { Diag.Write("browser_registry_entry_failed"); }
+                yield return exe;
             }
-            catch { Diag.Write("browser_registry_entry_failed"); }
-            yield return exe;
         }
     }
 

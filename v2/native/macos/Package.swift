@@ -15,6 +15,7 @@ let package = Package(
       swiftSettings: [.unsafeFlags(["-Osize"], .when(configuration: .release))]
     ),
     .testTarget(name: "CaptureCoreTests", dependencies: ["CaptureCore"]),
+    .testTarget(name: "DaylensCaptureMacTests", dependencies: ["DaylensCaptureMac"]),
   ],
   swiftLanguageModes: [.v5]
 )

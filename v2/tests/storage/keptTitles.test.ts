@@ -110,3 +110,23 @@ test('a Windows app is kept by its package identity, or by executable, publisher
 function line2(a: ReturnType<typeof app>, title: string, t: number) {
   return focus(a, title, t, 'app_changed', a.app_id ?? 'w')
 }
+
+
+for (const scheme of ['http', 'https']) {
+  test(`a ${scheme}-only handler cannot be added or keep titles through an existing entry`, () => {
+    resetSeq()
+    const r = rig()
+    try {
+      r.storage.keepTitles(notes)
+      const handler = { ...notes, registered_browser: true }
+      assert.throws(() => r.storage.keepTitles(handler), (e) => e instanceof KeepTitlesRefused && e.reason === 'opens_web_links')
+      r.feed(focus(handler, `${scheme}HandlerCanary`, T0))
+      assert.deepEqual(r.q('SELECT title, title_raw, title_state FROM observations'), [
+        { title: null, title_raw: null, title_state: 'withheld_browser' },
+      ])
+      assert.deepEqual(r.storage.search(`${scheme}HandlerCanary`), [])
+    } finally {
+      r.close()
+    }
+  })
+}
