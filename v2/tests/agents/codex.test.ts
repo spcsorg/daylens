@@ -252,3 +252,24 @@ test('an event type the reader does not know is never counted as understood', ()
   assert.equal(p.counts.recognized, 1)
   assert.equal(p.counts.turns, 0)
 })
+
+test('a message and its copy split across two reads still count once', () => {
+  const c = codexCtx()
+  const turn = U('split')
+  const first = parser(c)
+  const a = run(first, [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer'), codex.userItem(sec(1), 'go', TYPED), codex.assistant(sec(5)), codex.userItem(sec(9), 'and also this', TYPED)])
+  const second = new CodexParser(c.id, first.state())
+  const b = run(second, [codex.userCompleted(sec(9), turn, 'and also this', 'client-9'), codex.complete(sec(20), turn, sec(1), sec(20))])
+  assert.deepEqual([...of(a, 'user'), ...of(b, 'user')].map((u) => [u.act, u.at]), [
+    ['prompt', sec(1)],
+    ['steer', sec(9)],
+  ])
+  // The older pairing: the user_message event first, then its response item.
+  const legacy = codexCtx()
+  const lt = U('legacy')
+  const l1 = parser(legacy)
+  const x = run(l1, [codex.meta(legacy, sec(0), { originator: 'codex-tui', source: 'cli' }), codex.started(sec(1), lt, undefined), codex.userEvent(sec(1), 'explain this'), codex.assistant(sec(4)), codex.userEvent(sec(6), 'and that')])
+  const l2 = new CodexParser(legacy.id, l1.state())
+  const y = run(l2, [codex.userItem(sec(6), 'and that', null, null), codex.assistant(sec(8))])
+  assert.equal([...of(x, 'user'), ...of(y, 'user')].length, 2)
+})

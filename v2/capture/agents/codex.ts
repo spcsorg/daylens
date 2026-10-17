@@ -23,6 +23,11 @@ interface CodexState {
   turn: OpenTurn | null
   // The session a fork or subagent copied its earlier turns from.
   source?: string | null
+  // Codex writes one sent message twice in a row (a response item then its completed UserMessage item; in older logs
+  // a user_message event then the response item). Kept with the read position, so a pair split across reads is still
+  // one message: lines since the last user message record, and which kind it was.
+  since?: number
+  prevUser?: 'item' | 'event' | null
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -37,6 +42,7 @@ const BULK_TYPES = new Set(['token_usage_record', 'world_state', 'compacted', 'i
 // Bookkeeping Codex writes even while a request is stuck or failing (a usage count arrives with the error), so it
 // is not evidence the agent was doing anything.
 const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state', 'thread_settings_applied'])
+const FAR = 1_000_000
 const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
 const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message'])
 
@@ -95,10 +101,9 @@ export class CodexParser implements LineParser {
   counts = emptyCounts()
   private s: CodexState
   private readonly fileSession: string
-  // Copies of one message (the response item, its completed item, the legacy event) count once per turn.
+  // Copies of one message that are not written next to each other count once per turn. Held in memory only, so
+  // nothing derived from what the person typed is stored.
   private seen = new Set<string>()
-  // The Codex app writes each sent message twice in a row: as a response item, then as a completed UserMessage item.
-  private lastMessageLine = -10
 
   constructor(fileSession: string, saved: string | null) {
     this.fileSession = fileSession
@@ -147,6 +152,8 @@ export class CodexParser implements LineParser {
     const type = m[2]!
     const sub = m[3]
     const t = this.s.turn
+    this.s.since = (this.s.since ?? FAR) + 1
+    const copyOf = (kind: 'item' | 'event') => this.s.prevUser === kind && this.s.since! <= 2
     if (!t && (type === 'response_item' || (type === 'event_msg' && sub !== undefined && OUTPUT_EVENTS.has(sub)))) this.counts.orphan++
 
     // A reply or an instruction to the model is never the person's message; its role is in the line's first bytes.
@@ -162,7 +169,7 @@ export class CodexParser implements LineParser {
       const done = COMPLETED_MS.exec(tail)?.[1]
       const out = t?.live ? this.activity(done !== undefined ? Number(done) : at) : []
       if (kind !== 'UserMessage') return out
-      if (this.counts.lines - this.lastMessageLine <= 2) return out
+      if (copyOf('item')) return out
       const o = this.parse(textOf(), parsed, head, tail, type, 'UserMessage')
       if (!o) return out
       const item = (o.payload as { item?: { content?: unknown; client_id?: unknown } }).item
@@ -196,7 +203,10 @@ export class CodexParser implements LineParser {
           const created = typeof meta?.create_time === 'number' ? Math.round(meta.create_time * 1000) : null
           const kinds = Array.isArray(meta?.content_item_kinds) ? (meta.content_item_kinds as unknown[]) : null
           const out = t?.live ? this.activity(at) : []
-          this.lastMessageLine = this.counts.lines
+          const copy = copyOf('event')
+          this.s.prevUser = 'item'
+          this.s.since = 0
+          if (copy) return out
           if (kinds !== null) {
             const typed = kinds.length > 0 && kinds.every((k) => typeof k === 'string' && k.startsWith('user.'))
             return typed ? out.concat(this.message(words, 'marked', created ?? (t?.live ? at : null))) : out
@@ -299,6 +309,8 @@ export class CodexParser implements LineParser {
         this.counts.recognized++
         const words = typeof p.message === 'string' ? p.message : null
         if (words === null) return []
+        this.s.prevUser = 'event'
+        this.s.since = 0
         return (t?.live ? this.activity(at) : []).concat(this.message(words, null, t?.live ? at : null))
       }
       default:
