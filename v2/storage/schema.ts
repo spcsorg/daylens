@@ -204,6 +204,19 @@ const searchIndex: Migration = {
     `),
 }
 
+const searchPlainDeletes: Migration = {
+  name: 'search_plain_deletes',
+  // FTS5 secure-delete costs 0.26 ms per document (11 s to delete one app from 40 days). Deletions instead
+  // run 'optimize' afterwards, which rewrites the index without the deleted terms; freed pages are zeroed.
+  up: (db) => db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`),
+}
+
+const searchDocsByHour: Migration = {
+  name: 'search_docs_by_hour',
+  // Retention prunes documents by hour; without this every batch scans the whole table (856 ms cold at a year).
+  up: (db) => db.exec('CREATE INDEX search_docs_hour_start ON search_docs(hour_start_wall_ms)'),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -216,4 +229,6 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   planCache,
   assistantReads,
   searchIndex,
+  searchPlainDeletes,
+  searchDocsByHour,
 ]

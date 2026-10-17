@@ -171,8 +171,8 @@ export class Derived {
     const rows = this.db.prepare(`SELECT * FROM intervals WHERE start_wall_ms >= ? AND start_wall_ms < ? ORDER BY id`)
     for (const h of hourStarts) {
       del.run(h)
-      // Offsets other than the hour's own are rare (travel); widen the scan by a day and filter exactly.
-      for (const i of rows.all(h - 86_400_000, h + 86_400_000) as IntervalRow[]) {
+      // An interval belongs to hour h only if it starts within an hour of h, whatever its offset; filter exactly.
+      for (const i of rows.all(h - HOUR_MS, h + HOUR_MS) as IntervalRow[]) {
         if (hourStart(i.start_wall_ms, i.tz_offset_min) === h && (i.title !== null || i.url !== null)) this.upsertDoc.run({ ...i, hour: h })
       }
     }

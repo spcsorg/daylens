@@ -288,3 +288,25 @@ function obsRow(wall: number, appId: string, title: string, url: string): Observ
     url,
   }
 }
+
+test('deletion leaves nothing on disk even when the search index is large and the deleted entry sits in an old segment', () => {
+  resetSeq()
+  const r = rig()
+  // The index keeps terms lowercased and prefix-compressed; a term sharing no prefix with its neighbours is stored whole.
+  const term = 'zqxjvarkcanary'
+  r.feed(focus(chat, `Notes ${term.toUpperCase()}`, T0))
+  r.store.flush()
+  let t = T0 + MIN
+  for (let i = 0; i < 4000; i++) {
+    r.feed(focus(i % 2 ? editor : chat, `filler ${i} ${'lorem ipsum dolor '.repeat(3)}`, t))
+    t += 20_000
+    if (i % 100 === 0) r.store.flush()
+  }
+  r.store.flush()
+  r.store.database.pragma('wal_checkpoint(TRUNCATE)')
+  assert.deepEqual(diskContains(r.dir, term), ['daylens-v2.sqlite'], 'the index term is on disk before deletion')
+  r.storage.deleteRange(T0, T0 + MIN)
+  assert.deepEqual(containsAnywhere(r, term), [])
+  assert.deepEqual(diskContains(r.dir, term), [])
+  r.close()
+})

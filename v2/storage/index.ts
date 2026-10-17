@@ -10,7 +10,7 @@ import { applyMigrations } from './migrations.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
 const DAY_MS = 86_400_000
-const PRUNE_BATCH = 2000
+const PRUNE_BATCH = 500
 const CHANGE_LOG_KEEP_MS = 7 * DAY_MS
 
 export type HourField = 'title' | 'summary' | 'detail' | 'outcome' | 'suggestion'
@@ -164,6 +164,8 @@ export class Storage {
     this.db.pragma('foreign_keys = ON')
     // Freed pages are overwritten, so deleted text does not linger in the file.
     this.db.pragma('secure_delete = ON')
+    // The log is reused, not shrunk, after a large write (a rebuild, a big deletion); this caps what stays on disk.
+    this.db.pragma('journal_size_limit = 16777216')
     applyMigrations(this.db, STORAGE_MIGRATIONS, this.now)
     this.bus = new ChangeBus(this.db, dir, this.now)
     this.derived = new Derived(this.db, (s, e) => {
@@ -331,12 +333,15 @@ export class Storage {
         touchedHours.add(hourStart(row.start_wall_ms, row.tz_offset_min))
       }
       r.intervals = db.prepare(`DELETE FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).run(...matchArgs, from, to).changes
+      // Every activity document of the app or site goes; other documents in those hours are untouched.
       r.searchDocs += db.prepare(`DELETE FROM search_docs WHERE kind = 'activity' AND ${matchSql} AND last_wall_ms > ? AND first_wall_ms < ?`).run(...matchArgs, from, to).changes
     }
 
-    const before = (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n
-    this.derived.rebuildDocs(touchedHours)
-    r.searchDocs += Math.max(0, before - (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n)
+    if (t.kind === 'range') {
+      const before = (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n
+      this.derived.rebuildDocs(touchedHours)
+      r.searchDocs += Math.max(0, before - (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n)
+    }
 
     // Hours: wholly inside a deleted range they go; otherwise any hour that drew on the material loses its text.
     const hours = db.prepare('SELECT id, start_wall_ms, end_wall_ms, sources FROM hours WHERE end_wall_ms > ? AND start_wall_ms < ?').all(from, to) as {
@@ -385,10 +390,12 @@ export class Storage {
     this.indexHour(id)
   }
 
-  // Moves the old pages out of the write-ahead log so deleted text is not left in it. Best effort: a reader holding
-  // an old snapshot keeps the log until it finishes, and the next checkpoint clears it.
+  // A deleted search document is only masked until its index segment is rewritten: 'optimize' rewrites the index now,
+  // and secure_delete zeroes the pages it frees. The checkpoint then moves old pages out of the write-ahead log.
+  // Best effort: a reader holding an old snapshot keeps the log until it finishes, and the next checkpoint clears it.
   private compactAfterDeletion(): void {
     try {
+      this.db.exec(`INSERT INTO search (search) VALUES ('optimize')`)
       this.db.pragma('wal_checkpoint(TRUNCATE)')
     } catch (err) {
       this.onError(`checkpoint_${(err as { code?: string }).code ?? 'failed'}`)
@@ -677,33 +684,43 @@ export class Storage {
 
   // --- retention ---------------------------------------------------------------
 
-  /** Removes one small batch of rows older than the retention window; returns how many went. Short transactions only. */
+  /** Removes one small batch of rows older than the retention window; returns how many went. Each statement is its own short transaction. */
   pruneBatch(batch = PRUNE_BATCH): number {
     const now = this.now()
-    let n = 0
+    let n = this.db.prepare('DELETE FROM change_log WHERE seq IN (SELECT seq FROM change_log WHERE at_wall_ms < ? ORDER BY seq LIMIT ?)').run(now - CHANGE_LOG_KEEP_MS, batch).changes
+    if (this.retentionDays === null) return n
+    const cutoff = now - this.retentionDays * DAY_MS
+    const statements = [
+      'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
+      'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',
+      'DELETE FROM capture_gaps WHERE id IN (SELECT id FROM capture_gaps WHERE end_wall_ms < ? LIMIT ?)',
+      'DELETE FROM assistant_reads WHERE id IN (SELECT id FROM assistant_reads WHERE to_wall_ms < ? LIMIT ?)',
+    ]
+    for (const sql of statements) n += this.db.prepare(sql).run(cutoff, batch).changes
+    // Pruning is spread over many small batches, so here FTS5 secure-delete removes each document's terms as it goes
+    // (about 0.5 ms a document at a year's size) instead of one long 'optimize'. The setting is a literal: FTS5 rejects a bound value.
     this.db.transaction(() => {
-      n += this.db.prepare('DELETE FROM change_log WHERE seq IN (SELECT seq FROM change_log WHERE at_wall_ms < ? ORDER BY seq LIMIT ?)').run(now - CHANGE_LOG_KEEP_MS, batch).changes
-      if (this.retentionDays === null) return
-      const cutoff = now - this.retentionDays * DAY_MS
-      n += this.db.prepare('DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)').run(cutoff, batch).changes
-      n += this.db.prepare('DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)').run(cutoff, batch).changes
-      n += this.db.prepare('DELETE FROM search_docs WHERE id IN (SELECT id FROM search_docs WHERE last_wall_ms < ? LIMIT ?)').run(cutoff, batch).changes
-      n += this.db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?)').run(cutoff, batch).changes
-      n += this.db.prepare('DELETE FROM capture_gaps WHERE id IN (SELECT id FROM capture_gaps WHERE end_wall_ms < ? LIMIT ?)').run(cutoff, batch).changes
-      n += this.db.prepare('DELETE FROM assistant_reads WHERE id IN (SELECT id FROM assistant_reads WHERE to_wall_ms < ? LIMIT ?)').run(cutoff, batch).changes
+      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
+      n += this.db
+        .prepare(`DELETE FROM search_docs WHERE id IN (SELECT id FROM search_docs WHERE hour_start_wall_ms < ? AND last_wall_ms < ? LIMIT ?)`)
+        .run(cutoff, cutoff, Math.ceil(batch / 10)).changes
+      n += this.db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?)').run(cutoff, Math.ceil(batch / 25)).changes
+      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
     })()
     return n
   }
 
-  /** Prunes in batches, yielding to capture between them. */
+  /** Prunes in batches, yielding to capture between them; then moves old pages out of the write-ahead log. */
   async prune(): Promise<number> {
     let total = 0
     for (;;) {
       const n = this.pruneBatch()
       total += n
-      if (n === 0) return total
+      if (n === 0) break
       await new Promise((r) => setImmediate(r))
     }
+    if (total > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
+    return total
   }
 
   private scheduleRetention(delayMs: number): void {

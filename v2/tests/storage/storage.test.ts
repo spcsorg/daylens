@@ -105,3 +105,27 @@ test('retention prunes in short batches and refuses material older than the wind
   assert.deepEqual(r.q(`SELECT 1 FROM observations WHERE title = 'backdated.md - Editor'`), [])
   r.close()
 })
+
+test('pruned material leaves the file too, after the background merge', async () => {
+  resetSeq()
+  const r = rig()
+  const term = 'zqxjoldcanary'
+  r.feed(focus(editor, `Notes ${term.toUpperCase()}`, T0))
+  let t = T0 + MIN
+  for (let i = 0; i < 3000; i++) {
+    r.feed(focus(editor, `filler ${i} ${'lorem ipsum dolor '.repeat(3)}`, t + 3 * 24 * HOUR))
+    t += 20_000
+    if (i % 100 === 0) r.store.flush()
+  }
+  r.store.flush()
+  r.store.database.pragma('wal_checkpoint(TRUNCATE)')
+  const { diskContains } = await import('./support.ts')
+  assert.deepEqual(diskContains(r.dir, term), ['daylens-v2.sqlite'])
+  r.clock.t = T0 + 5 * 24 * HOUR
+  r.storage.setRetentionDays(2)
+  r.storage.stop()
+  await r.storage.prune()
+  assert.deepEqual(r.storage.search(term), [])
+  assert.deepEqual(diskContains(r.dir, term), [])
+  r.close()
+})
