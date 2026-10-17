@@ -88,7 +88,12 @@ export function measureDowntime(
     startBoot: null,
     detail: { measured, uncertain: true, ...extra },
   })
-  if (prev.monoUs !== null && prev.boot === hello.boot && hello.monoUs >= prev.monoUs) {
+  if (prev.monoUs === null || prev.boot === null) {
+    // The last service never got a helper reading (it died before the first hello): no evidence of a reboot,
+    // so the restart interval by wall time is all that is known.
+    return bounded(wallDelta, 'wall_restart_interval')
+  }
+  if (prev.boot === hello.boot && hello.monoUs >= prev.monoUs) {
     return {
       startWallMs: hello.wallMs - Math.round((hello.monoUs - prev.monoUs) / 1000),
       startMonoUs: prev.monoUs,

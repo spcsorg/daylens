@@ -43,3 +43,17 @@ test('OS-named new boot after a long off period: the wall interval stands', () =
   assert.equal(d.startWallMs, T)
   assert.equal(d.detail.measured, 'wall')
 })
+
+test('a service that died before its first helper reading: the restart interval, not an invented reboot', () => {
+  // Restarted 5 s later on a machine that has been up for 30 days.
+  const d = measureDowntime({ endWallMs: T, clean: false, monoUs: null, boot: null }, { wallMs: T + 5000, monoUs: 30 * 24 * H * 1000, boot: 'boot-812', bootIdentity: 'kernel' })
+  assert.equal(span(d, T + 5000), 5000)
+  assert.equal(d.detail.measured, 'wall_restart_interval')
+  assert.equal(d.detail.uncertain, true)
+})
+
+test('no helper reading and the clock set back: still never zero', () => {
+  const d = measureDowntime({ endWallMs: T, clean: false, monoUs: null, boot: null }, { wallMs: T - H, monoUs: 30 * 24 * H * 1000, boot: 'boot-812', bootIdentity: 'kernel' })
+  assert.ok(span(d, T - H) >= 1)
+  assert.equal(d.detail.uncertain, true)
+})
