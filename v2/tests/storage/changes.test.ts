@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { applyMigrations } from '../../storage/migrations.ts'
 import { DB_FILE } from '../../capture/store.ts'
-import { open } from './support.ts'
+import { rig as open } from './support.ts'
 
 test('named migrations apply once and are recorded by name', () => {
   const db = new Database(':memory:')
@@ -21,7 +21,7 @@ test('named migrations apply once and are recorded by name', () => {
 test('a change is announced in-process only after its write commits; a failed write announces nothing', () => {
   const s = open()
   const seen: string[] = []
-  s.storage.bus.on((c) => seen.push(`${c.seq}:${c.kind}`))
+  s.storage.bus.on((c: { seq: number; kind: string }) => seen.push(`${c.seq}:${c.kind}`))
   s.storage.bus.commit('setting', { key: 'k' }, () => s.storage.db.exec("CREATE TABLE IF NOT EXISTS t (x); INSERT INTO t VALUES (1)"))
   assert.throws(() => s.storage.bus.commit('setting', { key: 'boom' }, () => { s.storage.db.exec('INSERT INTO t VALUES (2)'); throw new Error('boom') }))
   assert.deepEqual(seen, ['1:setting'])
