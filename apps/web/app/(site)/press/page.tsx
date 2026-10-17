@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { assetPath } from "@/app/lib/basePath";
 import { SiteFooter, SiteHeader } from "../_components/SiteChrome";
-import { CONTACT_EMAIL, GITHUB_URL, SITE_URL, absoluteUrl } from "../_lib/site";
+import { CONTACT_EMAIL, GITHUB_URL, OPEN_GRAPH_BASE, SITE_URL, TWITTER_BASE, absoluteUrl } from "../_lib/site";
 
 export const metadata: Metadata = {
   title: "Press kit",
   description: "The Daylens logo, a description you can quote, and the facts about Daylens 2.",
   alternates: { canonical: absoluteUrl("/press") },
-  openGraph: { title: "Daylens press kit", url: absoluteUrl("/press") },
+  openGraph: { ...OPEN_GRAPH_BASE, title: "Daylens press kit", url: absoluteUrl("/press") },
+  twitter: TWITTER_BASE,
 };
 
 const DESCRIPTION =

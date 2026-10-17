@@ -2,14 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { assetPath } from "@/app/lib/basePath";
 import { SiteFooter, SiteHeader } from "../_components/SiteChrome";
-import { absoluteUrl } from "../_lib/site";
+import { OPEN_GRAPH_BASE, TWITTER_BASE, absoluteUrl } from "../_lib/site";
 import { POSTS, formatPostDate } from "./posts";
 
 export const metadata: Metadata = {
   title: "Devlog",
   description: "Notes from building Daylens 2: what we built, what we got wrong, and what we changed.",
   alternates: { canonical: absoluteUrl("/devlog") },
-  openGraph: { title: "Daylens devlog", url: absoluteUrl("/devlog") },
+  openGraph: { ...OPEN_GRAPH_BASE, title: "Daylens devlog", url: absoluteUrl("/devlog") },
+  twitter: TWITTER_BASE,
 };
 
 export default function DevlogPage() {

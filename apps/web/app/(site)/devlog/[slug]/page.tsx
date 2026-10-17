@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SiteFooter, SiteHeader } from "../../_components/SiteChrome";
-import { absoluteUrl } from "../../_lib/site";
+import { OPEN_GRAPH_BASE, TWITTER_BASE, absoluteUrl } from "../../_lib/site";
 import { POSTS, formatPostDate, getPost } from "../posts";
 
 export const dynamicParams = false;
@@ -19,7 +19,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     title: post.title,
     description: post.summary,
     alternates: { canonical: url },
-    openGraph: { type: "article", title: post.title, description: post.summary, url, publishedTime: post.date },
+    twitter: TWITTER_BASE,
+    openGraph: { ...OPEN_GRAPH_BASE, type: "article", title: post.title, description: post.summary, url, publishedTime: post.date },
   };
 }
 

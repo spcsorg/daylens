@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteFooter, SiteHeader } from "../_components/SiteChrome";
-import { CONTACT_EMAIL, GITHUB_URL, absoluteUrl } from "../_lib/site";
+import { CONTACT_EMAIL, GITHUB_URL, OPEN_GRAPH_BASE, TWITTER_BASE, absoluteUrl } from "../_lib/site";
 
 const UPDATED = "October 17, 2026";
 
@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   description:
     "What Daylens records, where it is stored, what leaves your computer and when, and how you control it. Covers the Daylens desktop app, its browser extension and this website.",
   alternates: { canonical: absoluteUrl("/privacy") },
-  openGraph: { title: "Daylens privacy policy", url: absoluteUrl("/privacy") },
+  openGraph: { ...OPEN_GRAPH_BASE, title: "Daylens privacy policy", url: absoluteUrl("/privacy") },
+  twitter: TWITTER_BASE,
 };
 
 const SECTIONS = [

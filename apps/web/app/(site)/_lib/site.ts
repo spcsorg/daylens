@@ -11,6 +11,10 @@ export const SITE_DESCRIPTION =
 export const GITHUB_URL = "https://github.com/irachrist1/daylens";
 export const CONTACT_EMAIL = "ctonny111@gmail.com";
 
+// Next replaces, not merges, a parent's openGraph and twitter objects, so every page spreads these.
+export const OPEN_GRAPH_BASE = { type: "website", siteName: "Daylens", locale: "en" } as const;
+export const TWITTER_BASE = { card: "summary_large_image" } as const;
+
 export function absoluteUrl(path: string): string {
   return `${SITE_URL}${path === "/" ? "" : path}`;
 }

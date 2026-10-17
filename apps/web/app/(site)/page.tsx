@@ -4,19 +4,21 @@ import { MAC_DOWNLOAD_HREF, WINDOWS_DOWNLOAD_HREF } from "@/app/lib/platformLink
 import { Rail } from "./_components/Rail";
 import { SiteFooter, SiteHeader } from "./_components/SiteChrome";
 import { WaitlistForm } from "./_components/WaitlistForm";
-import { GITHUB_URL, SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "./_lib/site";
+import { GITHUB_URL, OPEN_GRAPH_BASE, SITE_DESCRIPTION, SITE_TITLE, SITE_URL, TWITTER_BASE } from "./_lib/site";
 
 export const metadata: Metadata = {
   title: { absolute: SITE_TITLE },
   description: SITE_DESCRIPTION,
   alternates: { canonical: SITE_URL },
   openGraph: {
+    ...OPEN_GRAPH_BASE,
     title: "Find anything you saw on your computer. Pick up where you left off.",
     description:
       "Daylens writes your day as hours in plain words and keeps it on your computer. Beta for Windows and Mac from November.",
     url: SITE_URL,
   },
   twitter: {
+    ...TWITTER_BASE,
     title: "Find anything you saw on your computer. Pick up where you left off.",
     description: "Daylens writes your day as hours in plain words and keeps it on your computer.",
   },
