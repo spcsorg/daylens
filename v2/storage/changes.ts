@@ -3,7 +3,7 @@
 // signal file that readers watch with fs.watch. The OS reports the write (FSEvents/kqueue, ReadDirectoryChangesW),
 // so nobody polls; watch events can coalesce, so readers always catch up from the log by sequence number.
 import type Database from 'better-sqlite3'
-import { existsSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
+import { readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import path from 'node:path'
 import type { Migration } from './migrations.ts'
 
@@ -94,6 +94,8 @@ export function changesSince(db: Database.Database, seq: number, limit = 1000): 
 /** For another process (the MCP server, the interface): a read-only view that follows announcements. */
 export class ChangeWatcher {
   private watcher: FSWatcher | null = null
+  private retry: ReturnType<typeof setTimeout> | null = null
+  private retryMs = 25
   private last: number
   private readonly db: Database.Database
   private readonly dir: string
@@ -107,15 +109,27 @@ export class ChangeWatcher {
   }
 
   start(): void {
-    this.watcher = watch(this.dir, (_event, name) => {
-      if (name === SIGNAL_FILE || name === null) this.catchUp()
-    })
-    if (existsSync(path.join(this.dir, SIGNAL_FILE)) && Number(readFileSync(path.join(this.dir, SIGNAL_FILE), 'utf8')) > this.last) this.catchUp()
+    this.watcher = watch(this.dir, (_event, name) => this.onFsEvent(name))
+    // Reconcile regardless of the signal file: a signal can be lost, and changes may predate this reader.
+    this.catchUp()
+    this.followSignal()
+  }
+
+  /** Platforms name the atomic rename differently (the final name, the temporary one, or none). */
+  onFsEvent(name: string | null): void {
+    if (name !== null && !name.startsWith(SIGNAL_FILE)) return
+    this.catchUp()
+    this.followSignal()
+  }
+
+  get delivered(): number {
+    return this.last
   }
 
   catchUp(): void {
     for (;;) {
-      const batch = changesSince(this.db, this.last)
+      // Each page is read in its own transaction, so it sees everything committed before it began.
+      const batch = this.db.transaction(() => changesSince(this.db, this.last))()
       for (const c of batch) {
         this.last = c.seq
         this.onChange(c)
@@ -124,8 +138,36 @@ export class ChangeWatcher {
     }
   }
 
+  // The signal names the sequence that must be delivered; until it is, look again with backoff.
+  private followSignal(): void {
+    if (this.retry || !this.watcher) return
+    const required = this.signalled()
+    if (required <= this.last) {
+      this.retryMs = 25
+      return
+    }
+    this.retry = setTimeout(() => {
+      this.retry = null
+      this.catchUp()
+      this.retryMs = Math.min(this.retryMs * 2, 1000)
+      this.followSignal()
+    }, this.retryMs)
+    this.retry.unref?.()
+  }
+
+  private signalled(): number {
+    try {
+      const n = Number(readFileSync(path.join(this.dir, SIGNAL_FILE), 'utf8'))
+      return Number.isFinite(n) ? n : 0
+    } catch {
+      return 0
+    }
+  }
+
   stop(): void {
     this.watcher?.close()
     this.watcher = null
+    if (this.retry) clearTimeout(this.retry)
+    this.retry = null
   }
 }

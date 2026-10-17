@@ -5,6 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { applyMigrations } from '../../storage/migrations.ts'
+import { ChangeWatcher, SIGNAL_FILE } from '../../storage/changes.ts'
+import { writeFileSync } from 'node:fs'
 import { DB_FILE } from '../../capture/store.ts'
 import { rig as open } from './support.ts'
 
@@ -45,5 +47,39 @@ test('another process follows announcements through the signal file without poll
   child.kill()
   assert.match(out, /correction[\s\S]*deletion/)
   assert.ok(latency < 1000, `seen in ${latency} ms`)
+  s.close()
+})
+
+test('a watcher reconciles the log at start even with no signal, and retries until the signalled change is visible', async () => {
+  const s = open()
+  const reader = new Database(path.join(s.dir, DB_FILE), { readonly: true })
+  const seen: number[] = []
+  const w = new ChangeWatcher(reader, s.dir, (c) => seen.push(c.seq), 0)
+  // Written without a signal (as if the signal write was lost), before the watcher starts.
+  s.storage.db.prepare(`INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (1, 'setting', '{}')`).run()
+  w.start()
+  assert.deepEqual(seen, [1], 'reconciled at start')
+  // A signal that runs ahead of what this reader can see yet.
+  writeFileSync(path.join(s.dir, SIGNAL_FILE), '2')
+  await new Promise((r) => setTimeout(r, 150))
+  s.storage.db.prepare(`INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (2, 'setting', '{}')`).run()
+  const t0 = Date.now()
+  while (seen.length < 2 && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 20))
+  assert.deepEqual(seen, [1, 2], 'retried until the required change arrived')
+  w.stop()
+  reader.close()
+  s.close()
+})
+
+test('a watcher reacts to the signal however the platform names the rename', () => {
+  const s = open()
+  const reader = new Database(path.join(s.dir, DB_FILE), { readonly: true })
+  const seen: number[] = []
+  const w = new ChangeWatcher(reader, s.dir, (c) => seen.push(c.seq), 0)
+  s.storage.db.prepare(`INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (1, 'setting', '{}')`).run()
+  w.onFsEvent(`${SIGNAL_FILE}.tmp`)
+  assert.deepEqual(seen, [1])
+  w.stop()
+  reader.close()
   s.close()
 })
