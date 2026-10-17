@@ -318,3 +318,40 @@ test('a server without the secret cannot get a session by sending status right b
   await fake.close()
 })
 
+
+test('malformed frames before and during authentication close that connection and nothing else', async () => {
+  const [p] = await freePorts(1)
+  const rejections: unknown[] = []
+  const onRejection = (e: unknown) => rejections.push(e)
+  process.on('unhandledRejection', onRejection)
+  try {
+    // A slow peer check, so frames arrive while it is still running.
+    const { local, logs } = await service([p!], async () => {
+      await sleep(300)
+      return { ok: true, browser: chrome }
+    })
+    const pairing = newPairing(ORIGIN)
+    local.addPairLink(pairLink(pairing))
+    const send = async (frames: string[], afterHello: boolean) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${p}/daylens/browser`, { headers: { origin: ORIGIN } } as never)
+      await new Promise<void>((r) => (ws.onopen = () => r()))
+      if (afterHello) ws.send(JSON.stringify({ t: 'hello', v: 1, pair: pairing.id, nonce: 'N'.repeat(43) }))
+      for (const f of frames) ws.send(f)
+      return new Promise<number>((r) => (ws.onclose = (e) => r(e.code)))
+    }
+    for (const bad of ['null', '[]', '5', '"x"', 'true', '{"t":null}', '{"t":"hello","pair":{},"nonce":[]}', '{"t":"proof","proof":null}'])
+      for (const afterHello of [false, true]) {
+        const code = await send([bad], afterHello)
+        assert.ok(code !== 1000 || afterHello, `${bad} afterHello=${afterHello} closed with ${code}`)
+      }
+    await sleep(400)
+    assert.deepEqual(rejections, [], 'no handler failure escapes')
+    const { r } = await connect([p!], pairing)
+    assert.equal(r.kind, 'connected', 'the service still works')
+    if (r.kind === 'connected') r.session.close()
+    assert.ok(logs.some((l) => l.startsWith('browser local refused reason=')))
+    await local.stop()
+  } finally {
+    process.off('unhandledRejection', onRejection)
+  }
+})

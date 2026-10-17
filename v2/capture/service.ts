@@ -106,6 +106,7 @@ if (localEnabled()) {
     } catch {
       return log('control rejected reason=not_json')
     }
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return log('control rejected reason=not_object')
     if (msg.op === 'pair' && typeof msg.link === 'string') browserLocal?.addPairLink(msg.link)
     else if (msg.op === 'unpair' && typeof msg.id === 'string') browserLocal?.unpair(msg.id)
     else if (msg.op === 'pair_decision' && typeof msg.id === 'string' && typeof msg.allow === 'boolean') browserLocal?.decide(msg.id, msg.allow)

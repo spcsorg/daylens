@@ -164,6 +164,8 @@ class Conn {
   readonly run = randomUUID()
   seq = 0
   timer: ReturnType<typeof setTimeout> | null = null
+  // Messages are handled one at a time, in order; a failure in any of them closes this connection only.
+  queue: Promise<void> = Promise.resolve()
 
   constructor(socket: net.Socket, origin: string, extension: string) {
     this.socket = socket
@@ -326,7 +328,10 @@ export class BrowserLocal {
     socket.on('data', (chunk: Buffer) => {
       for (const f of decoder.feed(chunk)) {
         if (c.phase === 'closed') return
-        if (f.op === OP_TEXT) void this.onMessage(c, f.text, port)
+        if (f.op === OP_TEXT) {
+          const text = f.text
+          c.queue = c.queue.then(() => this.onMessage(c, text, port)).catch(() => this.refuse(c, 'handler_failed'))
+        }
         else if (f.op === OP_PING) socket.write(encodeFrame(OP_PONG, f.data))
         else if (f.op === OP_CLOSE) return this.close(c, 1000)
       }
@@ -345,20 +350,23 @@ export class BrowserLocal {
         }
         c.browser = r.browser
         c.phase = 'hello'
-        if (c.hello) void this.challenge(c, port)
+        if (c.hello) c.queue = c.queue.then(() => this.challenge(c, port)).catch(() => this.refuse(c, 'handler_failed'))
       },
-      () => this.close(c, 1008),
+      () => this.refuse(c, 'peer_failed'),
     )
   }
 
   private async onMessage(c: Conn, text: string, port: number): Promise<void> {
+    if (c.phase === 'closed') return
     if (c.phase === 'ready') return this.onReady(c, text)
-    let o: Record<string, unknown>
+    let parsed: unknown
     try {
-      o = JSON.parse(text)
+      parsed = JSON.parse(text)
     } catch {
       return this.refuse(c, 'not_json')
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return this.refuse(c, 'not_object')
+    const o = parsed as Record<string, unknown>
     if (o.t === 'hello' && !c.hello && (c.phase === 'peer' || c.phase === 'hello')) {
       if (o.v !== 1 || !isPairId(o.pair) || !isNonce(o.nonce)) return this.refuse(c, 'bad_hello')
       c.hello = { pair: o.pair, nonce: o.nonce }
@@ -370,7 +378,8 @@ export class BrowserLocal {
   }
 
   private async challenge(c: Conn, port: number): Promise<void> {
-    const hello = c.hello!
+    if (c.phase === 'closed' || !c.hello) return
+    const hello = c.hello
     const stored = this.paired.find((p) => p.id === hello.pair && p.origin === c.origin)
     const pend = stored ? null : this.pending.find((p) => p.id === hello.pair && p.origin === c.origin)
     if (!stored && !pend) {
@@ -382,6 +391,7 @@ export class BrowserLocal {
     c.svcNonce = randomB64url(32)
     c.phase = 'proof'
     const mine = await proof(c.pairing.key, transcript('service', c.origin, port, hello.pair, hello.nonce, c.svcNonce))
+    if (c.phase !== 'proof') return
     c.send({ t: 'challenge', v: 1, nonce: c.svcNonce, proof: mine })
   }
 
