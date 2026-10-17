@@ -28,6 +28,7 @@ import type * as sessionTokens from "../sessionTokens.js";
 import type * as snapshotValidator from "../snapshotValidator.js";
 import type * as snapshots from "../snapshots.js";
 import type * as webAiArtifacts from "../webAiArtifacts.js";
+import type * as waitlist from "../waitlist.js";
 import type * as webAiThreads from "../webAiThreads.js";
 import type * as workspaces from "../workspaces.js";
 
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   snapshotValidator: typeof snapshotValidator;
   snapshots: typeof snapshots;
   webAiArtifacts: typeof webAiArtifacts;
+  waitlist: typeof waitlist;
   webAiThreads: typeof webAiThreads;
   workspaces: typeof workspaces;
 }>;

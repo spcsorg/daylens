@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { GlobalChat } from "@/app/components/GlobalChat";
 import { getConvexClient } from "@/app/lib/convex";
 import { getSession } from "@/app/lib/session";
-import { api } from "../../../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import type { ChatMessage } from "@/app/lib/chat";
 import type { WorkspaceAIMessage } from "@daylens/remote-contract";
 import { appPath } from "@/app/lib/basePath";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { generatedChangelogData } from "../changelog/generatedChangelogData";
+import { generatedChangelogData } from "@/app/(v1)/changelog/generatedChangelogData";
 import { MarketingFooter, MarketingInnerNav } from "./MarketingChrome";
 
 type SurfaceRecord = (typeof generatedChangelogData.surfaces)[number];

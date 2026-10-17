@@ -8,7 +8,7 @@ import {
   MODEL_OPTIONS,
   isAllowedModel,
   type ModelId,
-} from "../../../packages/ai-models/index";
+} from "@/packages/ai-models/index";
 
 const MODEL_STORAGE = "daylens-web:anthropic-model";
 

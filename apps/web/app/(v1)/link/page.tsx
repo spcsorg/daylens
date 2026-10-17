@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import posthog from "posthog-js";
-import { MarketingCursor } from "../components/MarketingEffects";
+import { MarketingCursor } from "@/app/components/MarketingEffects";
 import { apiPath, appPath, assetPath } from "@/app/lib/basePath";
 
 type BarcodeDetectorCtor = new (options: {

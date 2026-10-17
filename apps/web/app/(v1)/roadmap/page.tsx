@@ -1,4 +1,4 @@
-import { RoadmapPageClient } from "../components/RoadmapPageClient";
+import { RoadmapPageClient } from "@/app/components/RoadmapPageClient";
 
 export const metadata = {
   title: "Roadmap — Daylens",

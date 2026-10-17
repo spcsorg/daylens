@@ -1,4 +1,4 @@
-import { ChangelogPageClient } from "../components/ChangelogPageClient";
+import { ChangelogPageClient } from "@/app/components/ChangelogPageClient";
 
 export const metadata = {
   title: "Changelog — Daylens",

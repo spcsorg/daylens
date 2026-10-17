@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Id } from "../../../convex/_generated/dataModel";
+import { Id } from "@/convex/_generated/dataModel";
 import { apiPath } from "@/app/lib/basePath";
 
 export function DisconnectButton({ deviceId }: { deviceId: Id<"devices"> }) {

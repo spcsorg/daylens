@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { MarketingFooter, MarketingInnerNav } from "../components/MarketingChrome";
-import { MarketingCursor } from "../components/MarketingEffects";
+import { MarketingFooter, MarketingInnerNav } from "@/app/components/MarketingChrome";
+import { MarketingCursor } from "@/app/components/MarketingEffects";
 import {
   MAC_DOWNLOAD_HREF,
   WINDOWS_DOWNLOAD_HREF,
-} from "../lib/platformLinks";
+} from "@/app/lib/platformLinks";
 
 export const metadata = {
   title: "Linux Status — Daylens",

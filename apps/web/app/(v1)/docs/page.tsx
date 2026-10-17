@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { MarketingFooter, MarketingInnerNav } from "../components/MarketingChrome";
-import { LINUX_STATUS_HREF } from "../lib/platformLinks";
+import { MarketingFooter, MarketingInnerNav } from "@/app/components/MarketingChrome";
+import { LINUX_STATUS_HREF } from "@/app/lib/platformLinks";
 
 export const metadata = {
   title: "Docs — Daylens",

@@ -8,11 +8,11 @@ import {
   Roboto_Mono,
 } from "next/font/google";
 import { ThemeProvider } from "next-themes";
-import "./globals.css";
-import "./public-v2.css";
-import { ServiceWorker } from "./components/ServiceWorker";
-import { PHProvider } from "./providers";
-import { assetPath } from "./lib/basePath";
+import "@/app/globals.css";
+import "@/app/public-v2.css";
+import { ServiceWorker } from "@/app/components/ServiceWorker";
+import { PHProvider } from "@/app/providers";
+import { assetPath } from "@/app/lib/basePath";
 
 const inter = Inter({
   variable: "--font-inter",

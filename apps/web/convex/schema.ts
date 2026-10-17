@@ -135,6 +135,12 @@ export default defineSchema({
     .index("by_workspace_date", ["workspaceId", "localDate"])
     .index("by_workspace_artifact", ["workspaceId", "artifactId"])
     .index("by_workspace_device_date", ["workspaceId", "deviceId", "localDate"]),
+  waitlist: defineTable({
+    email: v.string(),
+    createdAt: v.number(),
+    source: v.string(),
+    platform: v.optional(v.union(v.literal("windows"), v.literal("macos"))),
+  }).index("by_email", ["email"]),
   http_rate_limits: defineTable({
     key: v.string(),
     count: v.number(),

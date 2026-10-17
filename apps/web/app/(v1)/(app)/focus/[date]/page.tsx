@@ -1,6 +1,6 @@
 import { getSession } from "@/app/lib/session";
 import { getConvexClient } from "@/app/lib/convex";
-import { api } from "../../../../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { redirect } from "next/navigation";
 import { formatDuration, formatFullDate } from "@/app/lib/format";
 import Link from "next/link";

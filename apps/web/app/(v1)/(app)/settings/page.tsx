@@ -1,7 +1,7 @@
 import { getSession } from "@/app/lib/session";
 import { getConvexClient } from "@/app/lib/convex";
-import { api } from "../../../convex/_generated/api";
-import { Id } from "../../../convex/_generated/dataModel";
+import { api } from "@/convex/_generated/api";
+import { Id } from "@/convex/_generated/dataModel";
 import { redirect } from "next/navigation";
 import { formatRelativeTime } from "@/app/lib/format";
 import Link from "next/link";

@@ -316,6 +316,7 @@ const generated = {
 const outputPath = path.join(
   repoRoot,
   "app",
+  "(v1)",
   "changelog",
   "generatedChangelogData.ts"
 );

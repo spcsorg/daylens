@@ -3,6 +3,11 @@ import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import type { DaySnapshot, Platform } from "../packages/snapshot-schema/snapshot";
+import {
+  normalizeWaitlistEmail,
+  parseWaitlistPlatform,
+  parseWaitlistSource,
+} from "./waitlist";
 import type {
   RemoteSyncPayload,
   WorkspaceLivePresence,
@@ -12,6 +17,11 @@ const http = httpRouter();
 const DESKTOP_PLATFORMS = new Set<Platform>(["macos", "windows", "linux"]);
 const CREATE_WORKSPACE_LIMIT = 50;
 const RECOVER_WORKSPACE_LIMIT = 10;
+const WAITLIST_LIMIT = RECOVER_WORKSPACE_LIMIT;
+const WAITLIST_ORIGINS = new Set([
+  "https://christian-tonny.dev",
+  "https://www.christian-tonny.dev",
+]);
 const AI_FEEDBACK_LIMIT = 120;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const AI_FEEDBACK_MAX_BODY_CHARS = 12_000;
@@ -795,6 +805,69 @@ http.route({
     });
 
     return jsonResponse({ success: true }, 200);
+  }),
+});
+
+function waitlistCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") ?? "";
+  const allowed =
+    WAITLIST_ORIGINS.has(origin) || /^http:\/\/localhost:\d+$/.test(origin);
+  return allowed
+    ? {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400",
+        Vary: "Origin",
+      }
+    : { Vary: "Origin" };
+}
+
+function withHeaders(response: Response, headers: Record<string, string>) {
+  for (const [name, value] of Object.entries(headers)) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
+http.route({
+  path: "/waitlist",
+  method: "OPTIONS",
+  handler: httpAction(async (_ctx, req) => {
+    return new Response(null, { status: 204, headers: waitlistCorsHeaders(req) });
+  }),
+});
+
+http.route({
+  path: "/waitlist",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const cors = waitlistCorsHeaders(req);
+    const rateLimited = await enforceRateLimit(ctx, req, "waitlist", WAITLIST_LIMIT);
+    if (rateLimited) {
+      return withHeaders(rateLimited, cors);
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return withHeaders(jsonResponse({ error: "invalid_body" }, 400), cors);
+    }
+
+    const email = normalizeWaitlistEmail(body?.email);
+    if (!email) {
+      return withHeaders(jsonResponse({ error: "invalid_email" }, 400), cors);
+    }
+
+    // The same answer for new and existing emails, so the form can't be used to check who signed up.
+    await ctx.runMutation(internal.waitlist.join, {
+      email,
+      source: parseWaitlistSource(body.source),
+      platform: parseWaitlistPlatform(body.platform),
+    });
+
+    return withHeaders(jsonResponse({ ok: true }, 200), cors);
   }),
 });
 
