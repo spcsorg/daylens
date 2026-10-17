@@ -5,7 +5,7 @@ import type { ExclusionRule } from '../capture/defaults.ts'
 import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
-import { DeletionWorker, fenceEdges, type DeletionResult } from './deletion.ts'
+import { DeletionWorker, fenceEdges, planDeletion, type DeletionResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
@@ -125,7 +125,11 @@ export class Storage {
   private stopped = false
   private readonly deletions: DeletionWorker
 
-  constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void } = {}) {
+  private readonly holdDeletions: boolean
+
+  /** holdDeletions: commit each deletion's fence but leave its removal for the next start (crash tests). */
+  constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
+    this.holdDeletions = opts.holdDeletions ?? false
     this.store = store
     this.db = store.database
     this.now = opts.now ?? Date.now
@@ -293,6 +297,7 @@ export class Storage {
               .run(t.kind, t.from_wall_ms, t.to_wall_ms, t.app_id, t.site, this.now()).lastInsertRowid,
           )
           fenceEdges(this.db, t, () => this.store.allocateObservationId())
+          planDeletion(this.db, id, t)
           return id
         },
         () => {
@@ -305,6 +310,7 @@ export class Storage {
       this.rules.loadTombstones()
       throw err
     }
+    if (this.holdDeletions) return { tombstone, done: new Promise(() => {}), purged: new Promise(() => {}) }
     const done = this.track(this.finishDeletion(tombstone))
     return { tombstone, done, purged: done.then((r) => (r.purged ? undefined : this.purgeWhenFree(tombstone))) }
   }

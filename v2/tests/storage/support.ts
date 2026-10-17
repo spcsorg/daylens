@@ -15,11 +15,11 @@ export function tmpDir(): string {
 }
 
 /** A store, storage and normalizer wired the way the capture service wires them, on a clock the test moves. */
-export function rig(dir = tmpDir()) {
+export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean } = {}) {
   const clock = { t: T0 }
   const now = () => clock.t
   const store = new Store(dir, { now })
-  const storage = new Storage(store, dir, { now })
+  const storage = new Storage(store, dir, { now, holdDeletions: opts.holdDeletions })
   let normalizer = new Normalizer(store, new Privacy(store.exclusions()))
   storage.attachCapture({
     interrupt: () => normalizer.interrupt({ wall_ms: clock.t, mono_us: null, boot: null }),

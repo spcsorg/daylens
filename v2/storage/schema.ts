@@ -277,6 +277,21 @@ const deletionState: Migration = {
   up: (db) => db.exec(`ALTER TABLE deletions ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done', 'purged'))`),
 }
 
+const deletionWork: Migration = {
+  name: 'deletion_work',
+  // What a deletion must still do, written with its tombstone, so a restart resumes from the list and not from
+  // tables the deletion has already changed. Each item goes in the same transaction as its work.
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE deletion_work (
+        tombstone_id INTEGER NOT NULL REFERENCES deletions(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('doc_hour', 'hour', 'thread', 'read')),
+        ref INTEGER NOT NULL,
+        PRIMARY KEY (tombstone_id, kind, ref)
+      ) WITHOUT ROWID;
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -296,4 +311,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   assistantReadItems,
   deriveBackfill,
   deletionState,
+  deletionWork,
 ]

@@ -9,7 +9,8 @@ import type { ObservationRow } from '../../capture/normalize.ts'
 import { ChangeWatcher } from '../../storage/changes.ts'
 import { readHour } from '../../storage/index.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
-import { diskContains, HOUR, MIN, rig, T0 } from './support.ts'
+import { diskContains, HOUR, MIN, rig, T0, tmpDir } from './support.ts'
+import { Deleter, type DeletionStep } from '../../storage/deletion.ts'
 
 type R = ReturnType<typeof rig>
 
@@ -621,4 +622,44 @@ test('while a deletion is pending, every reader already sees the hours and threa
   assert.deepEqual(r.storage.threadsForHour(kept.id), [{ id: thread, title: '' }])
   reader.close()
   r.close()
+})
+
+async function crashedDeletion(stopAfter: DeletionStep) {
+  resetSeq()
+  const r = rig(tmpDir(), { holdDeletions: true })
+  day(r, T0, [[editor, 'before.md - Editor'], [chat, 'Quail canary'], [editor, 'after.md - Editor']], 3 * MIN)
+  r.store.flush()
+  const part = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Quail canary hour' }, r.storage.hourBasis(T0))
+  const keep = r.storage.writeHour({ start_wall_ms: T0 + 3 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Kept' }, r.storage.hourBasis(T0 + 3 * HOUR))
+  const only = r.storage.createThread('Quail canary only', [part.id])
+  const shared = r.storage.createThread('Quail canary shared', [part.id, keep.id])
+  const read = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getDay', from_wall_ms: T0 + HOUR, to_wall_ms: T0 + 2 * HOUR, query: 'what happened?', hours: [part.id] })
+  r.clock.t = T0 + 5 * HOUR
+  const { tombstone } = r.storage.deleteRange(T0 + 3 * MIN, T0 + 6 * MIN)
+  const conn = new Database(path.join(r.dir, DB_FILE))
+  conn.pragma('foreign_keys = ON')
+  conn.pragma('secure_delete = ON')
+  assert.throws(() => new Deleter(conn).run(tombstone, r.clock.t, { stopAfter }), /stopped after/)
+  conn.close()
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 5 * HOUR
+  r2.storage.start()
+  await r2.storage.deletionsSettled()
+  const t0 = Date.now()
+  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 3000) await new Promise((res) => setTimeout(res, 50))
+  assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(containsAnywhere(r2, 'Quail'), [])
+  // The hour is only partly inside the range, so it is cleared, not removed: both threads keep their ids, untitled.
+  assert.deepEqual(r2.q(`SELECT id, title FROM threads ORDER BY id`), [{ id: only, title: '' }, { id: shared, title: '' }])
+  assert.deepEqual(r2.q(`SELECT 1 FROM assistant_reads WHERE id = ?`, read), [])
+  r2.close()
+}
+
+test('a deletion interrupted after its rows and intervals are gone still finishes the search cleanup at the next start', async () => {
+  await crashedDeletion('intervals')
+})
+
+test('a deletion interrupted after its hours still reaches their threads and assistant reads at the next start', async () => {
+  await crashedDeletion('hours')
 })
