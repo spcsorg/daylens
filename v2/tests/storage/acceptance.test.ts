@@ -359,3 +359,19 @@ test('a change made by a listener is delivered after the change that caused it, 
   assert.deepEqual(b, ['first', 'second'], 'not second before first')
   r.close()
 })
+
+test('exclusions apply to imports too: an excluded row leaves only an excluded gap', () => {
+  resetSeq()
+  const r = rig()
+  const vault = { ...obsRow(T0, 'com.1password.1password', 'Gecko canary vault item', 'https://x.example/'), url: undefined } as unknown as ObservationRow
+  const byExe = { ...obsRow(T0 + MIN, 'C:\\\\Apps\\\\KeePass\\\\KeePass.exe', 'Gecko canary keepass', 'https://y.example/'), app_path: 'C:\\\\Apps\\\\KeePass\\\\KeePass.exe', url: undefined } as unknown as ObservationRow
+  const ok = { ...obsRow(T0 + 2 * MIN, 'com.example.editor', 'fine.md - Editor', 'https://z.example/'), url: undefined } as unknown as ObservationRow
+  const res = r.storage.importObservations([vault, byExe, ok])
+  assert.deepEqual(res, { imported: 1, refused: 2 })
+  assert.deepEqual(containsAnywhere(r, 'Gecko'), [])
+  assert.deepEqual(r.q(`SELECT reason, start_wall_ms, end_wall_ms FROM capture_gaps ORDER BY start_wall_ms`), [
+    { reason: 'excluded', start_wall_ms: T0, end_wall_ms: T0 },
+    { reason: 'excluded', start_wall_ms: T0 + MIN, end_wall_ms: T0 + MIN },
+  ])
+  r.close()
+})

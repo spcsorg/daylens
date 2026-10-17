@@ -174,15 +174,19 @@ export class Privacy {
     for (const r of rules) (r.match === 'app_id' ? this.byAppId : this.byExe).add(r.value.toLowerCase())
   }
 
+  /** The exclusion rule itself, shared by capture and by every other way rows enter storage (import). */
+  excludes(appId: string | null, path: string | null, aumid: string | null = null): boolean {
+    const id = appId?.toLowerCase() ?? null
+    const exe = path ? basename(path) : null
+    const a = aumid?.toLowerCase() ?? null
+    return (id !== null && this.byAppId.has(id)) || (a !== null && this.byAppId.has(a)) || (exe !== null && this.byExe.has(exe))
+  }
+
   classify(app: AppIdentity): Classification {
     const appId = app.app_id?.toLowerCase() ?? null
     const exe = app.path ? basename(app.path) : null
     const aumid = app.store?.aumid.toLowerCase() ?? null
-    const excluded =
-      (appId !== null && this.byAppId.has(appId)) ||
-      (aumid !== null && this.byAppId.has(aumid)) ||
-      (exe !== null && this.byExe.has(exe))
-    if (excluded) return { excluded: true, title: 'withheld_unknown_app' }
+    if (this.excludes(app.app_id, app.path, aumid)) return { excluded: true, title: 'withheld_unknown_app' }
     if (app.identity_state !== 'ok' || (appId === null && exe === null)) {
       return { excluded: false, title: 'withheld_unknown_app' }
     }

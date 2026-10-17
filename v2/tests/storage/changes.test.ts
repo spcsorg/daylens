@@ -61,6 +61,8 @@ test('a watcher reconciles the log at start even with no signal, and retries unt
   assert.deepEqual(seen, [1], 'reconciled at start')
   // A signal that runs ahead of what this reader can see yet.
   writeFileSync(path.join(s.dir, SIGNAL_FILE), '2')
+  // The OS event can be slow under load; deliver it directly, since the retry is what is under test.
+  w.onFsEvent(SIGNAL_FILE)
   await new Promise((r) => setTimeout(r, 150))
   s.storage.db.prepare(`INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (2, 'setting', '{}')`).run()
   const t0 = Date.now()

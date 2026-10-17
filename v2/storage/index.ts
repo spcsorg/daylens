@@ -2,7 +2,7 @@
 // writer; every other reader opens the database read-only and follows the change log (changes.ts).
 import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
-import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
+import { Privacy, type GapPoint, type ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
 import { Derived, HOUR_MS, hoursOf, nfc, siteOf } from './derive.ts'
@@ -156,6 +156,7 @@ export class Storage {
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onError: (code: string) => void
   private prunedData = 0
+  private privacy: Privacy
 
   constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void } = {}) {
     this.store = store
@@ -174,9 +175,10 @@ export class Storage {
       return e
     })
     this.loadTombstones()
+    this.privacy = new Privacy(store.exclusions())
     this.pauseState = this.getSetting<PauseState>('pause')
     this.retentionDays = this.getSetting<number>('retention_days')
-    store.acceptObservation = (row) => this.accepts(row.event_wall_ms, row.app_id, (row as { url?: string | null }).url ?? null)
+    store.acceptObservation = (row) => this.admit(row)
     store.onFlushed = (ids) => {
       try {
         this.derived.refresh(ids)
@@ -224,6 +226,29 @@ export class Storage {
       if (t.kind === 'site' && matchesSite(site, t.site!)) return false
     }
     return true
+  }
+
+  /**
+   * The one gate for every row, from capture or import. An excluded app's row becomes an excluded gap; paused,
+   * expired or deleted material is dropped.
+   */
+  private admit(row: ObservationRow & { url?: string | null; last_seen_wall_ms?: number }): boolean {
+    let aumid: string | null = null
+    if (row.detail?.includes('"aumid"')) {
+      try {
+        aumid = (JSON.parse(row.detail) as { store?: { aumid?: string } }).store?.aumid ?? null
+      } catch {
+        aumid = null
+      }
+    }
+    if (row.kind === 'focus' && this.privacy.excludes(row.app_id, row.app_path, aumid)) {
+      if (this.accepts(row.event_wall_ms, null, null)) {
+        const gap = this.store.openGap({ reason: 'excluded', scope: 'all', run: row.run, start: this.point(row.event_wall_ms), detail: null })
+        this.store.closeGap(gap, this.point(Math.max(row.event_wall_ms, row.last_seen_wall_ms ?? row.event_wall_ms)))
+      }
+      return false
+    }
+    return this.accepts(row.event_wall_ms, row.app_id, row.url ?? null)
   }
 
   /** Re-import (a backup, an older Daylens): the same rules as capture, so deleted material stays deleted. */
@@ -601,6 +626,7 @@ export class Storage {
   }
 
   private installExclusions(): void {
+    this.privacy = new Privacy(this.store.exclusions())
     this.capture?.setExclusions(this.store.exclusions())
     this.capture?.interrupt()
   }
