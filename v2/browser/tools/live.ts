@@ -814,26 +814,28 @@ async function canary(): Promise<void> {
   let interruptions = 0
   // Runs one step and holds it; if anything but the expected process came to the front, the step is redone.
   const step = async (label: string, page: string | null, isPrivate: boolean, act: () => Promise<void>, front: 'browser' | 'calculator' = 'browser') => {
-    for (let attempt = 1; ; attempt++) {
+    for (let attempt = 1; ; ) {
       await act()
       mark(label, page, isPrivate)
       const want = () => (front === 'browser' ? d.mainPid() : pidOfApp('Calculator'))
       let foreign: number | null = null
+      let touched = false
       const started = Date.now()
       const until = started + HOLD
       while (Date.now() < until) {
         await sleep(250)
         const f = frontPid()
         if (f !== null && f !== want()) foreign = f
-        if (idleSeconds() < (Date.now() - started) / 1000 - 0.5) foreign ??= -1
+        if (idleSeconds() < (Date.now() - started) / 1000 - 0.5) touched = true
       }
-      if (foreign === null) return
+      if (foreign === null && !touched) return
       interruptions++
       markers.at(-1)!.expect = undefined
-      markers.at(-1)!.label += ` (interrupted by pid ${foreign}, redone)`
-      log(`  interrupted by ${foreign === -1 ? 'keyboard or mouse input' : `pid ${foreign}`}`)
-      if (attempt >= 4) throw new Error(`step kept being interrupted: ${label}`)
-      if (foreign === -1 || locked()) await announce('The canary test, continuing', 15)
+      markers.at(-1)!.label += ` (interrupted${foreign === null ? '' : ` by pid ${foreign}`}${touched ? ' with input' : ''}, redone)`
+      log(`  interrupted${foreign === null ? '' : ` by pid ${foreign}`}${touched ? ' with keyboard or mouse input' : ''}`)
+      // Someone using the Mac only delays the step; four interruptions with nobody at the keyboard end the run.
+      if (touched || locked()) await announce('The canary test, continuing', 15)
+      else if (++attempt > 4) throw new Error(`step kept being interrupted: ${label}`)
       if (front === 'browser') activateApp(values.app!)
     }
   }
