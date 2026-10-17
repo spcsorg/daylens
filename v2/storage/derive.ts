@@ -256,6 +256,12 @@ export class Derived {
     })()
   }
 
+  // The leading range on event_wall_ms lets the index bound the scan; the OR alone would read every row each flush.
+  pageSql(): string {
+    return `SELECT ${this.obsColumns} FROM observations WHERE event_wall_ms >= ? AND (event_wall_ms > ? OR id >= ?) AND (kind = 'focus' OR ${STOPS})
+       ORDER BY event_wall_ms, id LIMIT 1000`
+  }
+
   // The focus row before a time: its end depends on what follows it.
   private startKey(wallMs: number): { e: number; id: number } {
     const r = this.db.prepare(`SELECT event_wall_ms AS e, id FROM observations WHERE kind = 'focus' AND event_wall_ms < ? ORDER BY event_wall_ms DESC, id DESC LIMIT 1`).get(wallMs) as
@@ -282,10 +288,7 @@ export class Derived {
   private derive(start: { e: number; id: number }, until: number | null): void {
     const b = new IntervalBuilder((i) => this.write(i), this.cut, this.admit)
     // Pages, not an open iterator: better-sqlite3 cannot write on a connection while a read is still iterating.
-    const page = this.db.prepare(
-      `SELECT ${this.obsColumns} FROM observations WHERE (event_wall_ms > ? OR (event_wall_ms = ? AND id >= ?)) AND (kind = 'focus' OR ${STOPS})
-       ORDER BY event_wall_ms, id LIMIT 1000`,
-    )
+    const page = this.db.prepare(this.pageSql())
     let key = start
     for (;;) {
       const rows = page.all(key.e, key.e, key.id) as ObsRow[]

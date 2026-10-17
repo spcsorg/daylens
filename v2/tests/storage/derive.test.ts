@@ -130,3 +130,11 @@ test('rows committed by capture but not yet derived when the service died are de
   assert.deepEqual(r2.q(`SELECT obs_id, start_wall_ms, end_wall_ms FROM intervals ORDER BY obs_id`), got)
   r2.close()
 })
+
+test('derivation reads observations through the time index, not by scanning the table', () => {
+  const r = rig()
+  const plan = (r.store.database.prepare(`EXPLAIN QUERY PLAN ${r.storage.derived.pageSql()}`).all(0, 0, 0) as { detail: string }[]).map((p) => p.detail)
+  assert.ok(plan.some((d) => d.startsWith('SEARCH observations USING INDEX observations_event_wall')), plan.join('; '))
+  assert.ok(!plan.some((d) => d.startsWith('SCAN observations')), plan.join('; '))
+  r.close()
+})
