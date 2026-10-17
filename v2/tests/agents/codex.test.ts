@@ -274,6 +274,39 @@ test('a message and its copy split across two reads still count once', () => {
   assert.equal([...of(x, 'user'), ...of(y, 'user')].length, 2)
 })
 
+test('bookkeeping between copies remains deduplicated after rebuilding the parser', () => {
+  const c = codexCtx()
+  const turn = U('bookkeeping')
+  const first = parser(c)
+  const a = run(first, [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer'), codex.userItem(sec(1), 'go', TYPED), codex.assistant(sec(5)), codex.userItem(sec(9), 'and also this', TYPED), codex.tokens(sec(10)), codex.tokens(sec(11))])
+  const second = new CodexParser(c.id, first.state())
+  const b = run(second, [codex.userCompleted(sec(12), turn, 'and also this', 'client-9'), codex.complete(sec(20), turn, sec(1), sec(20))])
+  assert.deepEqual([...of(a, 'user'), ...of(b, 'user')].map((u) => [u.act, u.at]), [
+    ['prompt', sec(1)],
+    ['steer', sec(9)],
+  ])
+})
+
+test('the persisted message fingerprint is bounded and cleared between turns', () => {
+  const c = codexCtx()
+  const turn = U('bounded')
+  let p = parser(c)
+  run(p, [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer')])
+  const baseline = p.state().length
+  for (let i = 0; i < 200; i++) {
+    const words = `private message ${i}`
+    run(p, [codex.userItem(sec(i + 2), words, TYPED)])
+    assert.ok(!p.state().includes(words))
+    assert.ok(p.state().length < baseline + 100)
+    p = new CodexParser(c.id, p.state())
+  }
+  run(p, [codex.tokens(sec(204)), codex.tokens(sec(205))])
+  p = new CodexParser(c.id, p.state())
+  assert.equal(of(run(p, [codex.userCompleted(sec(206), turn, 'private message 199', 'client')]), 'user').length, 0)
+  const next = run(p, [codex.complete(sec(300), turn, sec(1), sec(300)), codex.started(sec(301), U('next'), 'composer'), codex.userItem(sec(301), 'private message 199', TYPED)])
+  assert.equal(of(next, 'user').length, 1)
+})
+
 test('a Claude Code session imported into Codex adds no acts: they are recorded from the Claude Code log itself', () => {
   const c = codexCtx()
   const importedAt = sec(90_000)

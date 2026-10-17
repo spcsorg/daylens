@@ -172,6 +172,27 @@ test('a rewritten or truncated log is read again without duplicating anything', 
   r.store.close()
 })
 
+test('a Codex completed-message copy after bookkeeping is deduplicated across reader restarts', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const file = codexFile(r.home, c)
+  writeFileSync(file, lines(codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text']), codex.assistant(sec(5)), codex.userItem(sec(9), 'also this', ['user.text']), codex.tokens(sec(10)), codex.tokens(sec(11))))
+  const first = r.reader()
+  await first.start()
+  await first.stop()
+  r.store.close()
+  appendFileSync(file, lines(codex.userCompleted(sec(12), 't', 'also this', 'client-9'), codex.complete(sec(20), 't', sec(1), sec(20))))
+  const store = new Store(r.data)
+  const second = new AgentReader(new AgentStore(store.database), r.roots)
+  try {
+    await second.start()
+    assert.deepEqual(store.query("SELECT detail, wall_ms FROM agent_events WHERE kind = 'user' ORDER BY wall_ms"), [{ detail: 'prompt', wall_ms: sec(1) }, { detail: 'steer', wall_ms: sec(9) }])
+  } finally {
+    await second.stop()
+    store.close()
+  }
+})
+
 test('a restart in the middle of a turn continues that turn', async () => {
   const r = rig()
   const c = claudeCtx()

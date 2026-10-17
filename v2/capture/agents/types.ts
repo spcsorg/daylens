@@ -98,7 +98,7 @@ export function parseTime(v: unknown): number | null {
   return Number.isFinite(t) ? t : null
 }
 
-// Short, stable digest used only to tell two copies of the same message apart within one turn; never stored.
+// Short, stable fingerprint for matching copies of a message within a turn.
 export function digest(s: string): string {
   let h1 = 0x811c9dc5
   let h2 = 0x01000193

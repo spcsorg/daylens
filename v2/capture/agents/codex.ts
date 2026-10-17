@@ -31,6 +31,8 @@ interface CodexState {
   // one message: lines since the last user message record, and which kind it was.
   since?: number
   prevUser?: 'item' | 'event' | null
+  // Only the latest accepted message fingerprint crosses reads.
+  lastUser?: string | null
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -105,8 +107,7 @@ export class CodexParser implements LineParser {
   counts = emptyCounts()
   private s: CodexState
   private readonly fileSession: string
-  // Copies of one message that are not written next to each other count once per turn. Held in memory only, so
-  // nothing derived from what the person typed is stored.
+  // Copies written out of order within this read count once per turn.
   private seen = new Set<string>()
 
   constructor(fileSession: string, saved: string | null) {
@@ -289,6 +290,7 @@ export class CodexParser implements LineParser {
         const key = UUID.test(p.turn_id) ? p.turn_id : `${(live ? null : this.s.source) ?? this.session}:${p.turn_id}`
         this.s.turn = { key, live, start, last: start, opener, users: 0, ...(!live && EXTERNAL_IMPORT.test(p.turn_id) ? { external: true } : {}) }
         this.seen.clear()
+        this.s.lastUser = null
         out.push({ t: 'turn', key, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
         if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${key}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
         return out
@@ -329,9 +331,10 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     if (!t || this.s.origin !== 'interactive' || t.external) return []
     const d = digest(text)
-    if (this.seen.has(d)) return []
+    if (this.seen.has(d) || this.s.lastUser === d) return []
     if (basis === null && looksInjected(text)) return []
     this.seen.add(d)
+    this.s.lastUser = d
     const answer = text.trimStart().startsWith(ANSWER)
     const first = t.users === 0
     t.users++
@@ -358,6 +361,7 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     if (!t) return []
     this.s.turn = null
+    this.s.lastUser = null
     return [{ t: 'end', key: t.key, state, at: state === 'missing' ? null : at }]
   }
 
