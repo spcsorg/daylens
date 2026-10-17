@@ -89,6 +89,7 @@
      "registered_browser": false,
      "engine": "none",
      "signer": null,
+     "version_info": null,
      "identity_state": "ok",
      "store": null
     },
@@ -126,6 +127,7 @@
      "registered_browser": false,
      "engine": "none",
      "signer": null,
+     "version_info": null,
      "identity_state": "ok",
      "store": null
     },
@@ -163,6 +165,7 @@
      "registered_browser": false,
      "engine": "none",
      "signer": null,
+     "version_info": null,
      "identity_state": "ok",
      "store": null
     },
@@ -373,6 +376,7 @@
      "registered_browser": false,
      "engine": "none",
      "signer": null,
+     "version_info": null,
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -413,6 +417,7 @@
      "registered_browser": false,
      "engine": "unknown",
      "signer": null,
+     "version_info": null,
      "identity_state": "access_denied",
      "store": null
     },
@@ -450,6 +455,7 @@
      "registered_browser": false,
      "engine": "none",
      "signer": null,
+     "version_info": null,
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -610,6 +616,7 @@
      "registered_browser": false,
      "engine": "unknown",
      "signer": null,
+     "version_info": null,
      "identity_state": "unresolved",
      "store": null
     },

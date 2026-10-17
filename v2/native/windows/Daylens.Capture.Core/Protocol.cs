@@ -13,10 +13,13 @@ public enum FocusTrigger { AppChanged, WindowChanged, TitleChanged, Reconcile, S
 
 public sealed record StoreIdentity(string Aumid, string? Package);
 
+/// The executable's version resource; trusted Windows apps must match it, not only their file name.
+public sealed record VersionInfo(string? OriginalFilename, string? ProductName);
+
 /// Whether each event source's subscription is in place.
 public readonly record struct Registrations(bool Focus, bool Session, bool Power);
 
-public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store, Engine Engine = Engine.Unknown, string? Signer = null)
+public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store, Engine Engine = Engine.Unknown, string? Signer = null, VersionInfo? Version = null)
 {
     public static readonly AppInfo NoneInFront = new(null, null, null, null, false, IdentityState.None, null);
     public static AppInfo Unknown(int? pid, IdentityState state) => new(null, null, null, pid, false, state, null);
@@ -130,6 +133,14 @@ public static class Obs
         w.WriteBoolean("registered_browser", app.RegisteredBrowser);
         w.WriteString("engine", Names.Of(app.Engine));
         WriteNullable(w, "signer", Clip(app.Signer, 256));
+        if (app.Version is { } v)
+        {
+            w.WriteStartObject("version_info");
+            WriteNullable(w, "original_filename", Clip(v.OriginalFilename, 260));
+            WriteNullable(w, "product_name", Clip(v.ProductName, 256));
+            w.WriteEndObject();
+        }
+        else w.WriteNull("version_info");
         w.WriteString("identity_state", Names.Of(app.IdentityState));
         if (app.Store is { } s)
         {

@@ -39,7 +39,7 @@ public struct AppInfo: Equatable {
   var json: JSON {
     .object([
       ("app_id", .str(clip(appId, 1024))), ("name", .str(clip(name, 512))), ("path", .str(clip(path, 2048))), ("pid", .int(pid)),
-      ("registered_browser", .bool(registeredBrowser)), ("engine", .string(engine.rawValue)), ("signer", .str(clip(signer, 256))),
+      ("registered_browser", .bool(registeredBrowser)), ("engine", .string(engine.rawValue)), ("signer", .str(clip(signer, 256))), ("version_info", .null),
       ("identity_state", .string(identityState.rawValue)), ("store", .null),
     ])
   }

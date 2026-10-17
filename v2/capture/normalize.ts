@@ -140,15 +140,22 @@ export interface Classification {
   reason?: TitleReason
 }
 
-function trusted(app: AppIdentity, appId: string | null, exe: string | null, list: readonly TrustedApp[]): boolean {
+function trustedEntry(app: AppIdentity, appId: string | null, exe: string | null, list: readonly TrustedApp[]): TrustedApp | null {
   const signer = app.signer?.toLowerCase() ?? null
-  return list.some((t) => {
+  for (const t of list) {
     if (t.app_id && appId === t.app_id.toLowerCase()) {
       // A Windows package ID already carries the publisher's identity; everything else needs a matching signer.
-      return t.signer ? signer === t.signer.toLowerCase() : app.store !== null
+      if (t.signer ? signer === t.signer.toLowerCase() : app.store !== null) return t
+      continue
     }
-    return !!t.exe && !!t.signer && exe === t.exe && signer === t.signer.toLowerCase()
-  })
+    if (!t.exe || !t.signer || exe !== t.exe || signer !== t.signer.toLowerCase()) continue
+    // The file name alone is not enough: the version resource must agree.
+    const vi = app.version_info
+    const original = vi?.original_filename?.toLowerCase() ?? null
+    const product = vi?.product_name?.toLowerCase() ?? null
+    if (original === t.exe || (t.product !== undefined && product === t.product.toLowerCase())) return t
+  }
+  return null
 }
 
 function basename(p: string): string {
@@ -184,11 +191,12 @@ export class Privacy {
     if ((appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) || (exe !== null && KNOWN_BROWSER_EXES.has(exe))) {
       return { excluded: false, title: 'withheld_browser' }
     }
-    const listed = trusted(app, appId ?? aumid, exe, this.trustedApps)
-    if (app.registered_browser && !listed) return { excluded: false, title: 'withheld_browser' }
+    // A browser engine is never exempted by any list, and a registered http/https handler only where decided.
+    const entry = app.engine === 'browser' ? null : trustedEntry(app, appId ?? aumid, exe, this.trustedApps)
+    if (app.registered_browser && !entry?.registers_links) return { excluded: false, title: 'withheld_browser' }
     if (app.engine === 'unknown') return { excluded: false, title: 'unknown', reason: 'engine_uncertain' }
-    if (app.engine === 'browser' && !listed) return { excluded: false, title: 'unknown', reason: 'browser_engine' }
-    if (app.engine === 'app_runtime' && !listed) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
+    if (app.engine === 'browser') return { excluded: false, title: 'unknown', reason: 'browser_engine' }
+    if (app.engine === 'app_runtime' && !entry) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
     return { excluded: false, title: 'allowed' }
   }
 }

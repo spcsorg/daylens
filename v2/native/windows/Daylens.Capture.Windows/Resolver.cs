@@ -166,9 +166,9 @@ internal sealed unsafe class Resolver
             var name = package is null ? null : PackageDisplayName(aumid, package);
             bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
             browser |= web == true;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, EngineOf(path)), SignerOf(path));
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, EngineOf(path)), SignerOf(path), VersionOf(path));
         }
-        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path), SignerOf(path));
+        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path), SignerOf(path), VersionOf(path));
     }
 
     string? ExeName(string path)
@@ -229,6 +229,24 @@ internal sealed unsafe class Resolver
     // Keyed on the executable's current file, so an update that changes what the app is is never answered from cache.
     readonly Dictionary<FileStamp, Engine> _engines = new();
     readonly Dictionary<FileStamp, string?> _signers = new();
+    readonly Dictionary<FileStamp, VersionInfo?> _versions = new();
+
+    VersionInfo? VersionOf(string exePath)
+    {
+        var stamp = FileStamp.Of(exePath);
+        if (stamp is { } s && _versions.TryGetValue(s, out var cached)) return cached;
+        VersionInfo? info = null;
+        try
+        {
+            var v = FileVersionInfo.GetVersionInfo(exePath);
+            info = new VersionInfo(string.IsNullOrWhiteSpace(v.OriginalFilename) ? null : v.OriginalFilename.Trim(),
+                                   string.IsNullOrWhiteSpace(v.ProductName) ? null : v.ProductName.Trim());
+        }
+        catch { Diag.Write("version_info_failed"); }
+        if (_versions.Count > 512) _versions.Clear();
+        if (stamp is { } key) _versions[key] = info;
+        return info;
+    }
 
     // The Authenticode publisher, only once WinVerifyTrust accepts the file's signature (no network, no revocation fetch).
     string? SignerOf(string exePath)

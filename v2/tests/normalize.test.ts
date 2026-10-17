@@ -339,9 +339,31 @@ test('listed web-runtime apps keep their titles only with a matching OS-verified
   n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', signer: null, pid: 3 }), `${CANARY} unsigned look-alike`, T0 + 2, 'app_changed'))
   n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', signer: 'ABCDE12345', pid: 4 }), `${CANARY} other team`, T0 + 3, 'app_changed'))
   const slackExe = 'C:\\Users\\me\\AppData\\Local\\slack\\app-4.41.0\\slack.exe'
-  n.handle(focus(app(slackExe, { path: slackExe, engine: 'app_runtime', signer: 'Slack Technologies, LLC', pid: 5 }), 'general - Slack', T0 + 4, 'app_changed'))
+  n.handle(focus(app(slackExe, { path: slackExe, engine: 'app_runtime', signer: 'Slack Technologies, LLC', version_info: { original_filename: 'slack.exe', product_name: 'Slack' }, pid: 5 }), 'general - Slack', T0 + 4, 'app_changed'))
   n.handle(focus(app(slackExe, { path: slackExe, engine: 'app_runtime', signer: null, pid: 6 }), `${CANARY} unsigned slack.exe`, T0 + 5, 'app_changed'))
   n.handle(focus(app('MSTeams_8wekyb3d8bbwe!MSTeams', { engine: 'app_runtime', pid: 7, store: { aumid: 'MSTeams_8wekyb3d8bbwe!MSTeams', package: 'MSTeams_25.1.0_x64__8wekyb3d8bbwe' } }), 'Chat | Microsoft Teams', T0 + 6, 'app_changed'))
   assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'ok', 'unknown', 'unknown', 'ok', 'unknown', 'ok'])
   assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
+test('a Windows trusted app must match its version resource; a browser engine or link handler is never exempted', () => {
+  const { sink, n } = setup()
+  const code = 'C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe'
+  const vs = { original_filename: 'Code.exe', product_name: 'Visual Studio Code' }
+  const edge = { original_filename: 'msedge.exe', product_name: 'Microsoft Edge' }
+  const at = (extra: object, title: string, t: number) => focus(app(code, { path: code, signer: 'Microsoft Corporation', pid: t, ...extra }), title, T0 + t, 'app_changed')
+  n.handle(at({ engine: 'app_runtime', version_info: vs }, 'store.ts - v2 - Visual Studio Code', 1))
+  n.handle(at({ engine: 'app_runtime', version_info: edge }, `${CANARY} renamed Edge`, 2))
+  n.handle(at({ engine: 'app_runtime', version_info: null }, `${CANARY} no version resource`, 3))
+  n.handle(at({ engine: 'browser', version_info: vs }, `${CANARY} browser engine under a trusted name`, 4))
+  n.handle(at({ engine: 'app_runtime', version_info: vs, registered_browser: true }, `${CANARY} registered handler`, 5))
+  assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'unknown', 'unknown', 'unknown', 'withheld_browser'])
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
+test('Codex is the one listed app allowed to register for web links, as decided', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.openai.codex', { registered_browser: true, engine: 'app_runtime', signer: '2DC432GLL2', pid: 1 }), 'Fix capture tests', T0, 'app_changed'))
+  n.handle(focus(app('com.tinyspeck.slackmacgap', { registered_browser: true, engine: 'app_runtime', signer: 'BQR82RBBHL', pid: 2 }), `${CANARY} slack as handler`, T0 + 1, 'app_changed'))
+  assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'withheld_browser'])
 })

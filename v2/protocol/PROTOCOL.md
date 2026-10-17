@@ -66,6 +66,8 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `signer` is who signed the app, as verified by the operating system: the Team ID from the running process's code signature on macOS, the Authenticode publisher (after `WinVerifyTrust`) on Windows; `null` when unsigned or not verifiable.
 
+`version_info` (Windows; `null` on macOS) is the executable's version resource: `original_filename` and `product_name`. A trusted Windows executable must match its file name, its publisher and one of these.
+
 `registered_browser` is a platform fact, not a decision: the app is registered to open `http` and `https` links. Shared code decides what that means for privacy.
 
 `store` is set for packaged Windows apps: `aumid` (the application user model ID) and `package` (the package full name).

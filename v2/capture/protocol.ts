@@ -52,6 +52,8 @@ export interface AppIdentity {
   engine: Engine
   // Who signed the app, verified by the OS: the Team ID on macOS, the Authenticode publisher on Windows. Null if unsigned or unverified.
   signer: string | null
+  // Windows only: the executable's version resource, so a trusted app is matched on more than its file name.
+  version_info: { original_filename: string | null; product_name: string | null } | null
   identity_state: IdentityState
   store: { aumid: string; package: string | null } | null
 }
@@ -212,6 +214,12 @@ function permissions(v: unknown): Permissions {
   return { accessibility: oneOf(o, 'accessibility', PERMISSION_STATES) }
 }
 
+function versionInfo(v: unknown): AppIdentity['version_info'] {
+  if (v === null || v === undefined) return null
+  const o = obj(v, 'version_info')
+  return { original_filename: strOrNull(o, 'original_filename', 260), product_name: strOrNull(o, 'product_name', 256) }
+}
+
 function appIdentity(v: unknown): AppIdentity {
   const o = obj(v, 'app')
   let store: AppIdentity['store'] = null
@@ -227,6 +235,7 @@ function appIdentity(v: unknown): AppIdentity {
     registered_browser: bool(o, 'registered_browser'),
     engine: oneOf(o, 'engine', ['browser', 'app_runtime', 'none', 'unknown'] as const),
     signer: strOrNull(o, 'signer', 256),
+    version_info: versionInfo(o.version_info),
     identity_state: oneOf(o, 'identity_state', IDENTITY_STATES),
     store,
   }

@@ -28,6 +28,7 @@ export function app(appId: string | null, extra: Partial<AppIdentity> = {}): App
     registered_browser: false,
     engine: 'none',
     signer: null,
+    version_info: null,
     identity_state: appId === null ? 'access_denied' : 'ok',
     store: null,
     ...extra,

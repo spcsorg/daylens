@@ -114,4 +114,14 @@ public class EngineTests
         try { Assert.Equal(Engine.Unknown, Engines.Classify(Engines.Scan(dir))); }
         finally { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
+
+    [Fact]
+    public void TheVersionResourceIsWrittenOnFocusLines()
+    {
+        var app = new AppInfo("C:\\x\\Code.exe", "Visual Studio Code", "C:\\x\\Code.exe", 1, false, IdentityState.Ok, null, Engine.AppRuntime,
+            "Microsoft Corporation", new VersionInfo("Code.exe", "Visual Studio Code"));
+        var text = System.Text.Encoding.UTF8.GetString(Envelope.Line("r", 0, "b", new EventTime(1, 1, "UTC", 0), "windows", "win_event", "focus",
+            Obs.Focus(FocusTrigger.AppChanged, app, WindowInfo.Read("w", "t"))));
+        Assert.Contains("\"version_info\":{\"original_filename\":\"Code.exe\",\"product_name\":\"Visual Studio Code\"}", text);
+    }
 }
