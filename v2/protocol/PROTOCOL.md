@@ -135,7 +135,8 @@ Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
   exit 2 means no such item. macOS: a generic password in the login Keychain, service `app.daylens.browser.pairing`,
   account `<id>`. Windows: a generic credential in Credential Manager, target `Daylens/browser-pairing/<id>`. The
   database (meta key `browser_pairings`) keeps only `id`, `origin` and `paired_wall_ms`. A key found in the database by
-  an earlier version moves to secure storage at start. A pairing whose key is missing from secure storage is removed
+  an earlier version moves to secure storage at start, and the database is then checkpointed and vacuumed so no older
+  copy of the row is left in the files. A pairing whose key is missing from secure storage is removed
   and the browser shows Connect again; unpairing or replacing a pairing deletes its key.
 - A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own
   pairing. A new Firefox pairing therefore waits for the person: once proven, the service holds the connection in a

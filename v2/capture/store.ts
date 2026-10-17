@@ -313,6 +313,15 @@ export class Store implements Sink {
     else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
   }
 
+  // Removes every older copy of rewritten rows from the files: WAL frames and free pages. Used after a secret is
+  // moved out of the database.
+  scrub(): void {
+    this.flush()
+    this.db.pragma('wal_checkpoint(TRUNCATE)')
+    this.db.exec('VACUUM')
+    this.db.pragma('wal_checkpoint(TRUNCATE)')
+  }
+
   markServiceStarted(): void {
     this.db.prepare(`DELETE FROM meta WHERE key = 'service_stopped_wall_ms'`).run()
   }
