@@ -76,6 +76,7 @@ let browserPause: { until: number | null } | null = null
 let pauseTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = RETRY_MIN_MS
 let nextAttemptAt = 0
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 const state: Pick<PopupState, 'daylens' | 'capture' | 'until_wall_ms'> = { daylens: 'connecting', capture: 'running', until_wall_ms: null }
 let openReply: ((ok: boolean) => void) | null = null
 let statusWaiters: (() => void)[] = []
@@ -143,6 +144,7 @@ function connectNative(): void {
     return onNativeMissing()
   }
   link = { kind: 'native', port: p }
+  cancelReconnect()
   p.onMessage.addListener(onDaylensMessage)
   p.onDisconnect.addListener(() => {
     if (link?.kind !== 'native' || link.port !== p) return
@@ -206,6 +208,7 @@ async function connectLocalNow(): Promise<void> {
     session = r.session
     if (pairing !== tried) return r.session.close()
     link = { kind: 'local', session }
+    cancelReconnect()
     retryMs = RETRY_MIN_MS
     nextAttemptAt = 0
     tracker.reset()
@@ -218,9 +221,20 @@ async function connectLocalNow(): Promise<void> {
   wakeWaiters()
 }
 
+// After a failed connect or a lost connection, try again on a timer: 1 s, doubling to 5 minutes.
 function backOff(): void {
   nextAttemptAt = Date.now() + retryMs
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    ensureLink()
+  }, retryMs)
   retryMs = Math.min(retryMs * 2, RETRY_MAX_MS)
+}
+
+function cancelReconnect(): void {
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  reconnectTimer = null
 }
 
 function onDaylensMessage(msg: Record<string, unknown>): void {
