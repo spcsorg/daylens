@@ -19,7 +19,7 @@ test('only search and page-identity parameters stay; every other parameter goes'
   )
   assert.equal(cleanAddress('https://x.example.com/p?SAMLResponse=PHNhbWw&RelayState=r&page=3'), 'https://x.example.com/p?page=3')
   assert.equal(cleanAddress('https://shop.example.com/item?utm_source=news&fbclid=IwAR0&gclid=Cj0&ref=nb&sort=price&item=42'), 'https://shop.example.com/item?sort=price&item=42')
-  for (const name of ['q', 'Query', 'search', 's', 'k', 'hl', 'lang', 'v', 'list', 't', 'page', 'p', 'id', 'ids', 'node-id', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'm', 'sha', 'commit', 'rev', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
+  for (const name of ['q', 'Query', 'search', 's', 'k', 'search_query', 'term', '_nkw', 'hl', 'lang', 'v', 'list', 't', 'page', 'p', 'id', 'ids', 'node-id', 'sourcedoc', 'th', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'm', 'sha', 'commit', 'rev', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
     assert.notEqual(keptParam(name), null, name)
   for (const name of ['state', 'next', 'returnUrl', 'redirect', 'h', 'x', 'rlkey', 'tok', 'authkey', 'resourcekey', 'utm_source', 'utm_id', 'ref', 'oobCode', 'mode', 'sv', 'se', 'sp', 'fbclid', 'gclid', 'msclkid', 'ttclid', 'mc_cid', 'mc_eid', 'igshid', 'srsltid', '_hsenc'])
     assert.equal(keptParam(name), null, name)
@@ -209,3 +209,17 @@ test('a display setting that is a UUID or long hex goes', () => {
   same('https://x.example.com/?sort=price&tab=files&view=grid&id=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f')
 })
 
+test('the named search and identity parameters of common sites stay; calendar src and new tracking IDs go', () => {
+  same('https://www.youtube.com/results?search_query=lofi+beats')
+  same('https://pubmed.ncbi.nlm.nih.gov/?term=crispr+off-target')
+  assert.equal(cleanAddress('https://www.ebay.com/sch/i.html?_nkw=lego+technic&_sacat=0'), 'https://www.ebay.com/sch/i.html?_nkw=lego+technic')
+  assert.equal(
+    cleanAddress('https://acme.sharepoint.com/:w:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc=%7B12345678-1234-1234-1234-123456789ABC%7D&file=Plan.docx&action=default'),
+    'https://acme.sharepoint.com/:w:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc=%7B12345678-1234-1234-1234-123456789ABC%7D&file=Plan.docx',
+  )
+  same('https://mail.google.com/mail/u/0/?th=18c2f3a4b5d6e7f8')
+  assert.equal(cleanAddress('https://calendar.google.com/calendar/embed?src=ana%40example.com&ctz=UTC'), 'https://calendar.google.com/calendar/embed')
+  assert.equal(cleanAddress('https://shop.example.com/p?gbraid=0AAAAAo&wbraid=CjkKCQ&q=shoes'), 'https://shop.example.com/p?q=shoes')
+  const tracking = '_ga _gl gclid gclsrc dclid gbraid wbraid fbclid msclkid ttclid twclid li_fat_id yclid ysclid igshid srsltid mc_cid mc_eid _hsenc _hsmi __hssc __hstc hsCtaTracking mkt_tok oly_enc_id oly_anon_id vero_id vero_conv rb_clickid s_kwcid ef_id _openstat trk trkCampaign cmpid campaignid campaign_id adgroupid adid ad_id creative keyword matchtype network device placement utm_source utm_medium utm_campaign utm_term utm_content utm_id ref ref_src ref_url si spm scm share_id feature pp sxsrf ved ei gs_lcrp sca_esv rlz oq aqs sourceid ie uact zx'
+  for (const name of tracking.split(' ')) assert.equal(keptParam(name), null, name)
+})

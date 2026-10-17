@@ -8,8 +8,8 @@ const KEPT_SCHEMES = new Set(['http:', 'https:', 'file:'])
 
 // Names are compared lowercased with separators removed, so node-id, nodeId and NODE_ID are the same name.
 // Searches hold typed text and identities are random by design, so neither gets a value-shape rule.
-const SEARCH_NAMES = new Set(['q', 'query', 'search', 's', 'k'])
-const IDENTITY_NAMES = new Set(['id', 'ids', 'v', 'list', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev'])
+const SEARCH_NAMES = new Set(['q', 'query', 'search', 's', 'k', 'searchquery', 'term', 'nkw'])
+const IDENTITY_NAMES = new Set(['id', 'ids', 'v', 'list', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev', 'sourcedoc', 'th'])
 // Short generic names carry credentials on some sites, so they keep only the one shape they mean.
 const NUMBER_NAMES = new Set(['p', 'page'])
 const TIME_NAMES = new Set(['t'])
@@ -21,7 +21,7 @@ const UUID_VALUE = /^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const LONG_HEX = /^[0-9a-f]{32,}$/i
 
 // Click and campaign tracking IDs name the visit, not the page.
-const TRACKING_NAME = /^(utm|mc|hs)|clk?id$|^(igshid|lifatid|srsltid|mkteid)$/
+const TRACKING_NAME = /^(utm|mc|hs)|clk?id$|^(igshid|lifatid|srsltid|mkteid|gbraid|wbraid)$/
 
 // Vetoes a listed name, whatever the list holds.
 const SECRET_WORDS = new Set([
