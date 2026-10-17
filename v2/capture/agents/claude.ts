@@ -30,6 +30,8 @@ const SKIPPED_HEAD = /^\{"type":"(?:api-request-blob|api-request|api-request-sha
 const TOP_TIME = /"uuid":"([^"]+)","timestamp":"([^"]+)"/
 const USER_APPROVAL_TAIL = /"permissionDecision":\{"decision":"accept","source":"user/
 const TOOL_USE_ID = /"tool_use_id":"([^"]+)"/
+const FAILED_RESULT = /"is_error":true/
+const STRING_RESULT = /"toolUseResult":"/
 
 // Text the CLI writes into a user-role message on the person's behalf, or that a person never typed.
 const INJECTED_PREFIXES = [
@@ -284,11 +286,15 @@ export class ClaudeParser implements LineParser {
     }
     const out: AgentRecord[] = []
     const turn = this.s.turn?.key ?? null
+    // Only a person-driven session has a person to answer or approve; a script or a parent agent does it otherwise.
+    const humanCapable = !this.subagentFile && !this.s.automated
     if (asked !== undefined && id !== undefined) {
       delete this.s.questions[id]
       out.push({ t: 'wait', key: `${this.session}:q:${id}`, session: this.session, turn, reason: 'question', start: asked, end: at })
-      out.push(...this.act(m[1]!, 'answer', 'marked', at, turn))
-    } else if (approved) out.push(...this.act(m[1]!, 'approval', 'marked', at, turn))
+      // A failed or rejected question carries an error flag and a plain-text result; an answer carries the answers.
+      const failed = FAILED_RESULT.test(text ?? head) || FAILED_RESULT.test(tail) || STRING_RESULT.test(text ?? tail)
+      if (humanCapable && !failed) out.push(...this.act(m[1]!, 'answer', 'marked', at, turn))
+    } else if (approved && humanCapable) out.push(...this.act(m[1]!, 'approval', 'marked', at, turn))
     return out.concat(this.activity(at))
   }
 

@@ -77,16 +77,17 @@ export const claude = {
       ...tailFields(c),
     })
   },
-  toolResult(c: ClaudeCtx, at: number, toolUseId: string, output: string, opts: { approvedByUser?: boolean } = {}): string {
+  toolResult(c: ClaudeCtx, at: number, toolUseId: string, output: string, opts: { approvedByUser?: boolean; error?: boolean; answers?: boolean } = {}): string {
     return JSON.stringify({
       parentUuid: null,
       isSidechain: false,
       promptId: randomUUID(),
+      ...(c.agentId ? { agentId: c.agentId } : {}),
       type: 'user',
-      message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: output, is_error: false }] },
+      message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: output, ...(opts.error ? { is_error: true } : {}) }] },
       uuid: randomUUID(),
       timestamp: iso(at),
-      toolUseResult: { stdout: output, stderr: '' },
+      toolUseResult: opts.error ? `Error: ${output}` : opts.answers ? { questions: [], answers: {} } : { stdout: output, stderr: '' },
       sourceToolAssistantUUID: randomUUID(),
       ...(opts.approvedByUser ? { permissionDecision: { decision: 'accept', source: 'user_temporary' } } : { permissionDecision: { decision: 'accept', source: 'config', reasonType: 'mode' } }),
       ...tailFields(c),

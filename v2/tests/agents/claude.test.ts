@@ -167,7 +167,7 @@ test('waiting for the usage limit, an API retry, or the person to answer is not 
   const recs = run(parser(c), [
     claude.prompt(c, sec(0), 'go', { uuid: 'p1' }),
     claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 'q1', name: 'AskUserQuestion' }] }),
-    claude.toolResult(c, sec(65), 'q1', 'the answer'),
+    claude.toolResult(c, sec(65), 'q1', 'the answer', { answers: true }),
     claude.system(c, sec(70), 'informational', { content: 'Usage limit reached · continuing automatically when it resets', level: 'info' }),
     claude.system(c, sec(3670), 'informational', { content: 'Usage limit reset · continuing automatically', level: 'info' }),
     claude.system(c, sec(3680), 'api_error', { level: 'error', retryInMs: 1000 }),
@@ -235,4 +235,25 @@ test('unparseable lines and unknown record types are counted for health', () => 
   assert.equal(p.counts.bad, 1)
   assert.equal(p.counts.unknown, 1)
   assert.equal(p.counts.recognized, 1)
+})
+
+test('only a person-driven session answers questions, and only a successful result is an answer', () => {
+  const ask = (c: ReturnType<typeof claudeCtx>, p: ClaudeParser, error: boolean) =>
+    run(p, [
+      claude.prompt(c, sec(0), 'go', { uuid: `p-${error}` }),
+      claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: `q-${error}`, name: 'AskUserQuestion' }] }),
+      claude.toolResult(c, sec(9), `q-${error}`, error ? 'Answer questions?' : 'chosen', error ? { error: true } : { answers: true }),
+      claude.assistant(c, sec(12), 'end_turn'),
+    ])
+  const sdk = claudeCtx({ entrypoint: 'sdk-cli' })
+  assert.equal(of(ask(sdk, new ClaudeParser(sdk.session, null, null), false), 'user').length, 0, 'a headless run has no person to answer')
+  const parent = claudeCtx()
+  const sub = { ...parent, agentId: 'agent-q' }
+  assert.equal(of(ask(sub, new ClaudeParser('agent-q', parent.session, null), false), 'user').length, 0, 'a subagent is answered by its parent agent')
+  const c = claudeCtx()
+  const failed = ask(c, parser(c), true)
+  assert.deepEqual(of(failed, 'user').map((u) => u.act), ['prompt'], 'a failed question is not an answer')
+  assert.equal(of(failed, 'wait').length, 1, 'the agent still waited for it')
+  const answered = ask(c, parser(c), false)
+  assert.deepEqual(of(answered, 'user').map((u) => u.act), ['prompt', 'answer'])
 })
