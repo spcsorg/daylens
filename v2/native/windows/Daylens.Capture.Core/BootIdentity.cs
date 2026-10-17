@@ -7,4 +7,7 @@ public static class BootIdentity
 {
     public static string Compute(uint? kernelBootCounter, long wallMs, long monoUs) =>
         kernelBootCounter is uint c ? $"boot-{c}" : $"bootclock-{(wallMs - monoUs / 1000) / 60_000}";
+
+    /// Hello reports "clock" for the fallback, so capture health shows the boot identity as degraded.
+    public static bool IsFromKernel(string bootId) => !bootId.StartsWith("bootclock-", StringComparison.Ordinal);
 }

@@ -17,6 +17,7 @@
    "kind": "hello",
    "obs": {
     "helper": "daylens-capture-macos",
+    "boot_identity": "kernel",
     "version": "2.0.0-dev",
     "pid": 4242,
     "os": "macOS 27.0.1",
@@ -304,6 +305,7 @@
    "kind": "hello",
    "obs": {
     "helper": "daylens-capture-windows",
+    "boot_identity": "kernel",
     "version": "2.0.0-dev",
     "pid": 7000,
     "os": "Windows 10.0.26100",

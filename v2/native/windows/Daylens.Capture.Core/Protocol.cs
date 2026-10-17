@@ -93,9 +93,10 @@ public static class Obs
         w.WriteEndObject();
     }
 
-    public static Action<Utf8JsonWriter> Hello(string helper, string version, int pid, string os, int heartbeatS, int idleThresholdS, int reconcileS) => w =>
+    public static Action<Utf8JsonWriter> Hello(string helper, string version, int pid, string os, int heartbeatS, int idleThresholdS, int reconcileS, bool bootFromKernel = true) => w =>
     {
         w.WriteString("helper", helper);
+        w.WriteString("boot_identity", bootFromKernel ? "kernel" : "clock");
         w.WriteString("version", version);
         w.WriteNumber("pid", pid);
         w.WriteString("os", os);

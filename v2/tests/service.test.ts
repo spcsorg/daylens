@@ -158,29 +158,44 @@ test('downtime after a crash is measured even when the clock was set back an hou
   assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
 })
 
-async function rollbackOutage(boot: 'counter' | 'clock'): Promise<Gap> {
+async function rollbackOutage(boot: 'counter' | 'clock', extra: Record<string, string> = {}): Promise<{ down: Gap; runs: { boot_identity: string }[] }> {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work, { FAKE_BOOT: boot })
   await waitFor(() => svc.log().includes('helper hello'))
   await sleep(1600)
   svc.proc.kill('SIGKILL')
   await sleep(2000)
-  const svc2 = startService(dataDir, work, { FAKE_BOOT: boot, FAKE_WALL_OFFSET_MS: String(-3_600_000) })
+  const svc2 = startService(dataDir, work, { FAKE_BOOT: boot, FAKE_WALL_OFFSET_MS: String(-3_600_000), ...extra })
   await waitFor(() => svc2.log().includes('helper hello'))
   await sleep(300)
   await stopService(svc2.proc)
-  return gaps(dataDir).find((g) => g.reason === 'service_down')!
+  const db = new Database(path.join(dataDir, DB_FILE), { readonly: true })
+  const runs = db.prepare('SELECT boot_identity FROM capture_runs ORDER BY id').all() as { boot_identity: string }[]
+  db.close()
+  return { down: gaps(dataDir).find((g) => g.reason === 'service_down')!, runs }
 }
 
 test('Windows boot identity: with the kernel boot counter, a clock set back an hour still shows the outage', async () => {
-  const down = await rollbackOutage('counter')
+  const { down, runs } = await rollbackOutage('counter')
   const span = down.end_wall_ms! - down.start_wall_ms
   assert.ok(span >= 1900 && span < 6000, `outage ${span} ms`)
   assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
+  assert.ok(runs.every((r) => r.boot_identity === 'kernel'))
 })
 
-test('Windows boot identity: the old wall-minus-uptime formula loses that outage, which is why it is only a fallback', async () => {
-  const down = await rollbackOutage('clock')
-  assert.notEqual(JSON.parse(down.detail!).measured, 'monotonic')
-  assert.ok(down.end_wall_ms! - down.start_wall_ms < 500, 'the rollback collapses the gap when the boot looks new')
+test('Windows boot identity fallback: health says degraded and the outage is still measured from the checkpoint, not zero', async () => {
+  const { down, runs } = await rollbackOutage('clock')
+  const span = down.end_wall_ms! - down.start_wall_ms
+  assert.ok(span >= 1900 && span < 6000, `outage ${span} ms`)
+  assert.equal(JSON.parse(down.detail!).measured, 'monotonic_across_renamed_boot')
+  assert.ok(runs.every((r) => r.boot_identity === 'clock'), 'each run records that its boot identity was degraded')
+})
+
+test('a reboot during an outage with the clock set back records at least the new boot uptime, never zero', async () => {
+  const { down } = await rollbackOutage('counter', { FAKE_NEW_BOOT_UPTIME_MS: '90000' })
+  const span = down.end_wall_ms! - down.start_wall_ms
+  assert.ok(span >= 89_000 && span < 100_000, `outage ${span} ms`)
+  const d = JSON.parse(down.detail!)
+  assert.equal(d.measured, 'lower_bound_new_boot')
+  assert.equal(d.wall_clock_moved_back, true)
 })

@@ -30,4 +30,11 @@ public class BootIdentityTests
     [Fact]
     public void WithoutAClockChangeTheFallbackIsStableAcrossHelperRestarts() =>
         Assert.Equal(BootIdentity.Compute(null, Wall, Mono), BootIdentity.Compute(null, Wall + 30_000, Mono + 30_000_000));
+
+    [Fact]
+    public void TheFallbackIsReportedAsDegraded()
+    {
+        Assert.True(BootIdentity.IsFromKernel(BootIdentity.Compute(812, Wall, Mono)));
+        Assert.False(BootIdentity.IsFromKernel(BootIdentity.Compute(null, Wall, Mono)));
+    }
 }

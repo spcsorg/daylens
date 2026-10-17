@@ -19,8 +19,13 @@ export interface Permissions {
 }
 export type ChannelState = 'ok' | 'degraded' | 'stalled' | 'no_permission'
 
+// 'kernel': the OS names the boot (macOS boot session UUID, Windows boot counter), so it survives clock changes.
+// 'clock': the Windows fallback, boot time computed as wall time minus uptime; a clock change can rename the boot.
+export type BootIdentitySource = 'kernel' | 'clock'
+
 export interface HelloObs {
   helper: string
+  boot_identity: BootIdentitySource
   version: string
   pid: number
   os: string
@@ -256,6 +261,7 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
     const c = obj(o.config, 'config')
     return {
       helper: str(o, 'helper', 64),
+      boot_identity: oneOf(o, 'boot_identity', ['kernel', 'clock'] as const),
       version: str(o, 'version', 64),
       pid: int(o, 'pid'),
       os: str(o, 'os', 128),

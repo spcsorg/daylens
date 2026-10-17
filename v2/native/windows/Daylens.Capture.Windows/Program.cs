@@ -31,11 +31,12 @@ internal static unsafe class Program
         _idleThresholdS = IntArg(args, "--idle-threshold-s", 120, 86400);
         _reconcileS = IntArg(args, "--reconcile-s", 60, 86400);
         _stdout = Console.OpenStandardOutput();
-        _emitter = new Emitter(Guid.NewGuid().ToString(), Clock.BootId(), "windows", WriteStdout);
+        var bootId = Clock.BootId();
+        _emitter = new Emitter(Guid.NewGuid().ToString(), bootId, "windows", WriteStdout);
         _resolver = new Resolver(_emitter);
         _idle = new IdleScheduler(_idleThresholdS);
 
-        Emit("hello", "helper", Obs.Hello("daylens-capture-windows", Version, Environment.ProcessId, $"Windows {Environment.OSVersion.Version}", _heartbeatS, _idleThresholdS, _reconcileS));
+        Emit("hello", "helper", Obs.Hello("daylens-capture-windows", Version, Environment.ProcessId, $"Windows {Environment.OSVersion.Version}", _heartbeatS, _idleThresholdS, _reconcileS, BootIdentity.IsFromKernel(bootId)));
 
         _hwnd = CreateMessageWindow();
         if (_hwnd == 0) { Diag.Write("create_window_failed"); return 2; }

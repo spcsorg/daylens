@@ -13,11 +13,13 @@ const run = randomUUID()
 const started = Date.now()
 let seq = 0
 const wallOffset = Number(process.env.FAKE_WALL_OFFSET_MS ?? 0)
-const t = () => ({ wall_ms: Date.now() + wallOffset, mono_us: Math.round((performance.timeOrigin + performance.now()) * 1000), tz: 'UTC', tz_offset_min: 0 })
+// A new boot: the monotonic clock restarts near zero.
+const monoBase = process.env.FAKE_NEW_BOOT_UPTIME_MS ? performance.timeOrigin + performance.now() - Number(process.env.FAKE_NEW_BOOT_UPTIME_MS) : 0
+const t = () => ({ wall_ms: Date.now() + wallOffset, mono_us: Math.round((performance.timeOrigin + performance.now() - monoBase) * 1000), tz: 'UTC', tz_offset_min: 0 })
 
 // How the Windows helper names the boot: the kernel counter (stable), or the old wall-minus-uptime formula.
 function bootId(time: { wall_ms: number; mono_us: number }): string {
-  if (process.env.FAKE_BOOT === 'counter') return 'boot-812'
+  if (process.env.FAKE_BOOT === 'counter') return process.env.FAKE_NEW_BOOT_UPTIME_MS ? 'boot-813' : 'boot-812'
   if (process.env.FAKE_BOOT === 'clock') return `bootclock-${Math.floor((time.wall_ms - time.mono_us / 1000) / 60_000)}`
   return 'boot-fake'
 }
@@ -42,7 +44,7 @@ function snapshot(): void {
   if (process.env.FAKE_SNAPFILE) appendFileSync(process.env.FAKE_SNAPFILE, 'snapshot\n')
 }
 
-emit('hello', { helper: 'fake', version: '0', pid: process.pid, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 1, idle_threshold_s: 120, reconcile_s: 60 } })
+emit('hello', { helper: 'fake', boot_identity: process.env.FAKE_BOOT === 'clock' ? 'clock' : 'kernel', version: '0', pid: process.pid, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 1, idle_threshold_s: 120, reconcile_s: 60 } })
 if (mode === 'crash_always') process.exit(3)
 snapshot()
 

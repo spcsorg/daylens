@@ -32,7 +32,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--classify") {
   exit(0)
 }
 
-let emitter = Emitter(run: UUID().uuidString, boot: bootSessionId(), platform: "macos", write: writeStdout)
+let boot = bootIdentity()
+let emitter = Emitter(run: UUID().uuidString, boot: boot.id, platform: "macos", write: writeStdout)
 let titles = TitleWorker(emitter: emitter)
 
 func emit(_ kind: String, _ source: String, _ obs: JSON, time: EventTime = Clock.now()) {
@@ -127,7 +128,7 @@ final class DistributedObserver: NSObject {
 
 titles.start()
 
-emit("hello", "helper", Obs.hello(helper: "daylens-capture-macos", version: helperVersion, pid: Int(getpid()), os: osDescription(),
+emit("hello", "helper", Obs.hello(helper: "daylens-capture-macos", bootIdentity: boot.source, version: helperVersion, pid: Int(getpid()), os: osDescription(),
                                   permissions: permissions(), heartbeatS: heartbeatS, idleThresholdS: idleThresholdS, reconcileS: reconcileS))
 
 let ws = NSWorkspace.shared.notificationCenter

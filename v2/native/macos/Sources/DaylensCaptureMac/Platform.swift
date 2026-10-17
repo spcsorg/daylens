@@ -30,14 +30,18 @@ enum Clock {
 
 let faultBlockTitles = ProcessInfo.processInfo.environment["DAYLENS_CAPTURE_FAULT"] == "block_titles"
 
-func bootSessionId() -> String {
+/// The kernel's boot session UUID, which a clock change cannot alter. Without it, the boot time computed from
+/// wall time minus uptime, reported as the degraded "clock" source.
+func bootIdentity() -> (id: String, source: String) {
   var size = 0
   sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0)
-  guard size > 0 else { return "unknown-boot" }
-  var buf = [CChar](repeating: 0, count: size)
-  sysctlbyname("kern.bootsessionuuid", &buf, &size, nil, 0)
-  let s = String(cString: buf)
-  return s.isEmpty ? "unknown-boot" : s
+  if size > 0 {
+    var buf = [CChar](repeating: 0, count: size)
+    sysctlbyname("kern.bootsessionuuid", &buf, &size, nil, 0)
+    let s = String(cString: buf)
+    if !s.isEmpty { return (s, "kernel") }
+  }
+  return ("bootclock-\((Clock.wallMs() - Clock.monoUs() / 1000) / 60_000)", "clock")
 }
 
 func osDescription() -> String {

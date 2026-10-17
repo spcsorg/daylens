@@ -7,7 +7,7 @@ import type { GapDetail, GapPoint, GapReason, GapStart, ObservationRow, Sink } f
 import type { Line, LineOf } from './protocol.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const FLUSH_INTERVAL_MS = 1000
 const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS capture_runs (
   pid INTEGER NOT NULL,
   os TEXT NOT NULL,
   boot TEXT NOT NULL,
+  boot_identity TEXT,
   started_wall_ms INTEGER NOT NULL,
   ended_wall_ms INTEGER,
   end_reason TEXT,
@@ -229,15 +230,19 @@ export class Store implements Sink {
     this.db.exec(SCHEMA)
     const version = this.db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined
     if (!version) this.db.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION))
-    else if (Number(version.value) === 1) this.migrateV1()
-    else if (Number(version.value) !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
+    else {
+      let v = Number(version.value)
+      if (v === 1) v = this.migrateV1()
+      if (v === 2) v = this.migrateV2()
+      if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
+    }
     this.seedExclusions()
     this.nextObsId = ((this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0) + 1
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
   }
 
   // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
-  private migrateV1(): void {
+  private migrateV1(): number {
     this.db.transaction(() => {
       this.db.exec(`
         ALTER TABLE capture_gaps RENAME TO capture_gaps_v1;
@@ -246,8 +251,19 @@ export class Store implements Sink {
         DROP TABLE capture_gaps_v1;
         CREATE INDEX IF NOT EXISTS capture_gaps_start ON capture_gaps(start_wall_ms);
       `)
-      this.db.prepare(`UPDATE meta SET value = ? WHERE key = 'schema_version'`).run(String(SCHEMA_VERSION))
+      this.db.prepare(`UPDATE meta SET value = '2' WHERE key = 'schema_version'`).run()
     })()
+    return 2
+  }
+
+  // v3 records whether each run's boot identity can survive a clock change.
+  private migrateV2(): number {
+    this.db.transaction(() => {
+      const cols = this.db.prepare(`PRAGMA table_info(capture_runs)`).all() as { name: string }[]
+      if (!cols.some((c) => c.name === 'boot_identity')) this.db.exec('ALTER TABLE capture_runs ADD COLUMN boot_identity TEXT')
+      this.db.prepare(`UPDATE meta SET value = '3' WHERE key = 'schema_version'`).run()
+    })()
+    return 3
   }
 
   private seedExclusions(): void {
@@ -318,9 +334,9 @@ export class Store implements Sink {
   startRun(line: LineOf<'hello'>): void {
     const o = line.obs
     this.enqueue(
-      `INSERT INTO capture_runs (run, platform, helper, version, pid, os, boot, started_wall_ms, permissions, config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run) DO NOTHING`,
-      [line.run, line.platform, o.helper, o.version, o.pid, o.os, line.boot, line.t.wall_ms, JSON.stringify(o.permissions), JSON.stringify(o.config)],
+      `INSERT INTO capture_runs (run, platform, helper, version, pid, os, boot, boot_identity, started_wall_ms, permissions, config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run) DO NOTHING`,
+      [line.run, line.platform, o.helper, o.version, o.pid, o.os, line.boot, o.boot_identity, line.t.wall_ms, JSON.stringify(o.permissions), JSON.stringify(o.config)],
     )
   }
 

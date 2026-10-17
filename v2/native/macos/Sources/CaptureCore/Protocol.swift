@@ -88,9 +88,10 @@ public struct Permissions {
 }
 
 public enum Obs {
-  public static func hello(helper: String, version: String, pid: Int, os: String, permissions: Permissions, heartbeatS: Int, idleThresholdS: Int, reconcileS: Int) -> JSON {
+  public static func hello(helper: String, bootIdentity: String = "kernel", version: String, pid: Int, os: String, permissions: Permissions,
+                           heartbeatS: Int, idleThresholdS: Int, reconcileS: Int) -> JSON {
     .object([
-      ("helper", .string(helper)), ("version", .string(version)), ("pid", .int(pid)), ("os", .string(os)),
+      ("helper", .string(helper)), ("boot_identity", .string(bootIdentity)), ("version", .string(version)), ("pid", .int(pid)), ("os", .string(os)),
       ("permissions", permissions.json),
       ("config", .object([("heartbeat_s", .int(heartbeatS)), ("idle_threshold_s", .int(idleThresholdS)), ("reconcile_s", .int(reconcileS))])),
     ])
