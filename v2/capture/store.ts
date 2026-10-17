@@ -328,29 +328,31 @@ export class Store implements Sink {
   }
 
   retryScrub(): boolean {
-    this.flush()
+    // Until the marker itself is committed nothing is known to be safe; a failed write is still pending.
+    if (!this.flush()) return this.scrubPending()
     if (this.meta(SCRUB_KEY) !== '1') return this.scrubDone()
-    let done = false
     try {
       const first = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
       this.db.exec('VACUUM')
       const second = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
-      done = first[0]?.busy === 0 && second[0]?.busy === 0
+      if (first[0]?.busy !== 0 || second[0]?.busy !== 0) return this.scrubPending()
+      this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
+      this.db.pragma('wal_checkpoint(TRUNCATE)')
     } catch (err) {
       this.onError(errorCode(err))
+      return this.scrubPending()
     }
-    if (!done) {
-      this.health.scrubPending = true
-      this.onError('scrub_failed')
-      if (!this.scrubTimer) {
-        this.scrubTimer = setInterval(() => this.retryScrub(), SCRUB_RETRY_MS)
-        this.scrubTimer.unref?.()
-      }
-      return false
-    }
-    this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
-    this.db.pragma('wal_checkpoint(TRUNCATE)')
     return this.scrubDone()
+  }
+
+  private scrubPending(): boolean {
+    this.health.scrubPending = true
+    this.onError('scrub_failed')
+    if (!this.scrubTimer) {
+      this.scrubTimer = setInterval(() => this.retryScrub(), SCRUB_RETRY_MS)
+      this.scrubTimer.unref?.()
+    }
+    return false
   }
 
   private scrubDone(): boolean {
