@@ -11,7 +11,7 @@ Scope: the V2 public landing at /, with privacy, devlog and press inheriting its
 Audience: people whose work is spread across many apps, mostly on Windows, including non-technical owners. Job: understand Daylens in five seconds, believe it is safe, join the beta waitlist.
 Action: the email waitlist form, working, in the first viewport and again at the close.
 Proof: an example day hung as tickets, searchable on the page. Labelled as an example. No testimonials, counts or screenshots exist.
-Decided without the user (asleep, told not to be asked): the assigned direction was built without a decision round; code-led because no image generation is available.
+The assigned direction was built without a decision round; code-led because no image generation is available.
 
 ## Direction contract
 
