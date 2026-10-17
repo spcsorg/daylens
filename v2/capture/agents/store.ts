@@ -310,7 +310,7 @@ export class AgentStore {
   }
 
   hasSources(): boolean {
-    return this.stmt('SELECT 1 FROM agent_sources LIMIT 1').get() !== undefined
+    return this.db.prepare('SELECT 1 FROM agent_sources LIMIT 1').get() !== undefined
   }
 
   source(file: string): SourceRow | null {

@@ -41,7 +41,7 @@ const MAIN = fileURLToPath(new URL(`./backfillMain${path.extname(fileURLToPath(i
 
 // Bytes of log one child reads before it hands over to the next; a compressed archive counts at its decoded size.
 // It bounds how much a child decodes, and so its memory, not how much of the history is read.
-const SLICE_BYTES = 32 << 20
+const SLICE_BYTES = 4 << 20
 // A small young generation keeps the children's short-lived line strings from inflating their footprint.
 const CHILD_FLAGS = ['--max-semi-space-size=1']
 

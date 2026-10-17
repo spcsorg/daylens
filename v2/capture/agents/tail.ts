@@ -60,8 +60,11 @@ class Splitter {
       this.parts = []
       this.size = 0
     }
-    const joined = Buffer.concat([this.tail, b])
-    this.tail = Buffer.from(joined.subarray(Math.max(0, joined.length - EDGE)))
+    if (b.length >= EDGE) this.tail = Buffer.from(b.subarray(-EDGE))
+    else {
+      const joined = Buffer.concat([this.tail, b])
+      this.tail = Buffer.from(joined.subarray(Math.max(0, joined.length - EDGE)))
+    }
   }
 
   private emit(): void {
@@ -96,7 +99,7 @@ export interface ReadResult {
 
 // `checkpoint` runs between lines at chunk boundaries with the offset of the last complete line, so a caller can
 // store progress together with the parser state that belongs to exactly that offset.
-export async function readAppended(file: string, from: number, size: number, sink: LineSink, checkpoint: (offset: number) => void): Promise<ReadResult> {
+export async function readAppended(file: string, from: number, size: number, sink: LineSink, checkpoint: (offset: number) => void, budget = Infinity): Promise<ReadResult> {
   const fh = await open(file, 'r')
   try {
     const splitter = new Splitter(sink, true)
@@ -104,11 +107,14 @@ export async function readAppended(file: string, from: number, size: number, sin
     spare = null
     let pos = from
     while (pos < size) {
-      const { bytesRead } = await fh.read(buf, 0, Math.min(CHUNK, size - pos), pos)
+      const left = budget - (pos - from)
+      const { bytesRead } = await fh.read(buf, 0, Math.min(CHUNK, size - pos, left > 0 ? left : CHUNK), pos)
       if (bytesRead === 0) break
       splitter.push(buf.subarray(0, bytesRead))
       pos += bytesRead
       checkpoint(from + splitter.committed)
+      // An oversized first line must finish before a slice can save progress.
+      if (pos - from >= budget && splitter.committed > 0) break
     }
     spare = buf
     return { next: from + splitter.committed, bytes: pos - from }

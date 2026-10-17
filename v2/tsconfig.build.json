@@ -8,5 +8,5 @@
     "allowImportingTsExtensions": true,
     "sourceMap": false
   },
-  "include": ["capture/**/*.ts"]
+  "include": ["capture/**/*.ts", "tools/**/*.ts"]
 }

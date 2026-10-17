@@ -54,6 +54,7 @@ async function pass(label: string): Promise<void> {
       peak_rss_mb: Math.round(peakRss / 1e6),
       rss_after_mb: Math.round(process.memoryUsage().rss / 1e6),
       files_read: reader.stats.filesRead,
+      bytes_read: reader.stats.bytesRead,
       mb_read: Math.round(reader.stats.bytesRead / 1e6),
       lines: reader.stats.lines,
       records: reader.stats.records,

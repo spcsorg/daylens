@@ -428,6 +428,20 @@ test('an unfinished last line ends the first read, and is read once its writer f
   r.store.close()
 })
 
+test('a line longer than a slice does not read the rest of the history', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'long' }), claude.assistant(c, sec(1), 'tool_use')))
+  for (let i = 0; i < 8; i++) appendFileSync(file, lines(claude.toolResult(c, sec(i + 2), `t${i}`, 'x'.repeat(800_000))))
+  const reader = r.reader()
+  const remaining = await reader.readOnly([file], 64)
+  assert.equal(remaining, true)
+  assert.ok(reader.stats.bytesRead < 2 << 20, `slice read ${reader.stats.bytesRead} bytes`)
+  await reader.stop()
+  r.store.close()
+})
+
 test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {
   const [cl, cx, ar] = homeRoots('/h', {}) as [AgentRoot, AgentRoot, AgentRoot]
   assert.ok(classifyFile(cl, '/h/.claude/projects/-p/abc.jsonl'))
