@@ -14,12 +14,13 @@ export type EndReason =
   | 'no_address'
   | 'paused'
   | 'app_changed'
+  | 'window_changed'
   | 'disconnected'
   | 'lines_lost'
   | 'excluded'
 
 export interface BrowserLink {
-  send(msg: { op: 'snapshot' }): void
+  send(msg: { op: 'snapshot'; epoch: number | null }): void
 }
 
 interface Claim {
@@ -35,9 +36,14 @@ interface Conn {
   browser: AppIdentity | null
 }
 
+// One stretch of one app and window in front. A page needs evidence from inside its own epoch: a snapshot reply that
+// names it, or a line whose event time on the same boot's monotonic clock is not before the epoch began.
 interface Front {
   app: AppIdentity
-  sinceOrder: number
+  window: string | null
+  epoch: number
+  boot: string
+  mono_us: number
 }
 
 interface Effective {
@@ -72,6 +78,7 @@ export class BrowserPages {
   private readonly conns = new Map<number, Conn>()
   private nextConn = 1
   private order = 0
+  private epoch = 0
   private front: Front | null = null
   private effective: Effective | null = null
   // The last page that was stored; an unknown row is due when the page timeline stops showing it.
@@ -118,7 +125,7 @@ export class BrowserPages {
       this.log('browser lines lost')
       c.claim = null
       this.recompute(this.timeFrom(line), 'lines_lost', line)
-      c.link.send({ op: 'snapshot' })
+      c.link.send({ op: 'snapshot', epoch: this.front?.epoch ?? null })
       return
     }
     if (this.privacy.classify(line.obs.browser).excluded) {
@@ -129,14 +136,16 @@ export class BrowserPages {
     this.recompute(this.timeFrom(line), line.obs.reason ?? 'no_tab', line)
   }
 
-  // Every helper focus line. A different app in front withdraws every page until that browser speaks again.
+  // Every helper focus line. A different app or window in front withdraws every page until that window is confirmed.
   onFront(line: LineOf<'focus'>): void {
     const app = line.obs.app
-    if (this.front && appKey(this.front.app) === appKey(app)) return
-    this.front = { app, sinceOrder: ++this.order }
-    this.recompute(this.timeFrom(line), 'app_changed', line)
+    const win = line.obs.window.window
+    const sameApp = this.front !== null && appKey(this.front.app) === appKey(app)
+    if (sameApp && this.front!.window === win && line.obs.trigger !== 'window_changed') return
+    this.front = { app, window: win, epoch: ++this.epoch, boot: line.boot, mono_us: line.t.mono_us }
+    this.recompute(this.timeFrom(line), sameApp ? 'window_changed' : 'app_changed', line)
     for (const c of this.conns.values()) {
-      if (c.browser === null || sameBrowser(app, c.browser)) c.link.send({ op: 'snapshot' })
+      if (c.browser === null || sameBrowser(app, c.browser)) c.link.send({ op: 'snapshot', epoch: this.front.epoch })
     }
   }
 
@@ -150,7 +159,12 @@ export class BrowserPages {
   }
 
   requestSnapshots(): void {
-    for (const c of this.conns.values()) c.link.send({ op: 'snapshot' })
+    for (const c of this.conns.values()) c.link.send({ op: 'snapshot', epoch: this.front?.epoch ?? null })
+  }
+
+  private fresh(line: LineOf<'tab'>, front: Front): boolean {
+    if (line.obs.epoch !== undefined) return line.obs.epoch === front.epoch
+    return line.boot === front.boot && line.t.mono_us >= front.mono_us
   }
 
   private timeFrom(line: Line): GapPoint {
@@ -163,7 +177,7 @@ export class BrowserPages {
     let best: { id: number; claim: Claim } | null = null
     for (const [id, c] of this.conns) {
       const cl = c.claim
-      if (!cl || cl.line.obs.state !== 'page' || cl.order <= front.sinceOrder) continue
+      if (!cl || cl.line.obs.state !== 'page' || !this.fresh(cl.line, front)) continue
       if (!sameBrowser(front.app, cl.line.obs.browser)) continue
       if (!best || cl.order > best.claim.order) best = { id, claim: cl }
     }

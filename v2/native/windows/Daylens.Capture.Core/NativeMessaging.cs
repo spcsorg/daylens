@@ -93,7 +93,7 @@ public sealed class FrameReader
     }
 }
 
-public sealed record TabReport(string Trigger, bool Page, string? Reason, string? Window, string? Tab, string? Url, string? Title);
+public sealed record TabReport(string Trigger, bool Page, string? Reason, string? Window, string? Tab, string? Url, string? Title, long? Epoch = null);
 
 public abstract record ExtensionMessage
 {
@@ -127,20 +127,31 @@ public abstract record ExtensionMessage
                 case "tab":
                     var trigger = Str("trigger", 16);
                     if (trigger is null || !Triggers.Contains(trigger)) return null;
+                    if (!TryEpoch(o, out var epoch)) return null;
                     var state = Str("state", 16);
                     if (state == "unknown")
-                        return Str("reason", 32) is { } reason && Reasons.Contains(reason) ? new TabMsg(new TabReport(trigger, false, reason, null, null, null, null)) : null;
+                        return Str("reason", 32) is { } reason && Reasons.Contains(reason) ? new TabMsg(new TabReport(trigger, false, reason, null, null, null, null, epoch)) : null;
                     if (state != "page") return null;
                     var url = Str("url", 2048);
                     var window = Str("window", 64);
                     if (string.IsNullOrEmpty(url) || window is null) return null;
                     var title = o.TryGetProperty("title", out var tv) && tv.ValueKind == JsonValueKind.String ? Clip(tv.GetString(), 1024) : null;
-                    return new TabMsg(new TabReport(trigger, true, null, window, Str("tab", 64), url, string.IsNullOrEmpty(title) ? null : title));
+                    return new TabMsg(new TabReport(trigger, true, null, window, Str("tab", 64), url, string.IsNullOrEmpty(title) ? null : title, epoch));
                 default: return null;
             }
         }
         // GetString throws InvalidOperationException, not JsonException, on an escaped unpaired surrogate.
         catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
+    }
+
+    /// Absent is fine; present must be a non-negative integer.
+    internal static bool TryEpoch(JsonElement o, out long? epoch)
+    {
+        epoch = null;
+        if (!o.TryGetProperty("epoch", out var e) || e.ValueKind == JsonValueKind.Null) return true;
+        if (e.ValueKind != JsonValueKind.Number || !e.TryGetInt64(out var v) || v < 0) return false;
+        epoch = v;
+        return true;
     }
 
     internal static string? Clip(string? s, int max)
@@ -163,6 +174,7 @@ public static class TabObs
         Nullable(w, "tab", r.Tab);
         Nullable(w, "url", r.Url);
         Nullable(w, "title", r.Title);
+        if (r.Epoch is long e) w.WriteNumber("epoch", e);
     };
 
     public static void WriteApp(Utf8JsonWriter w, string name, AppInfo browser)
@@ -229,7 +241,11 @@ public static class HostReply
             using var doc = JsonDocument.ParseValue(ref r);
             var o = doc.RootElement;
             if (o.ValueKind != JsonValueKind.Object || !o.TryGetProperty("op", out var op) || op.ValueKind != JsonValueKind.String) return null;
-            if (op.GetString() == "snapshot") return Snapshot();
+            if (op.GetString() == "snapshot")
+            {
+                if (!ExtensionMessage.TryEpoch(o, out var epoch)) return null;
+                return epoch is long e ? Json(w => { w.WriteString("t", "snapshot"); w.WriteNumber("epoch", e); }) : Snapshot();
+            }
             if (op.GetString() != "status" || !o.TryGetProperty("capture", out var c) || c.ValueKind != JsonValueKind.String || c.GetString() is not ("running" or "paused")) return null;
             var capture = c.GetString()!;
             long? until = o.TryGetProperty("until_wall_ms", out var u) && u.ValueKind == JsonValueKind.Number && u.TryGetInt64(out var ms) ? ms : null;

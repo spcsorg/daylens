@@ -85,4 +85,15 @@ final class NativeMessagingTests: XCTestCase {
     XCTAssertNil(HostReply.fromService("garbage"))
     XCTAssertEqual(HostReply.control(.pause(.until_resumed)), #"{"op":"pause","for":"until_resumed"}"#)
   }
+
+  func testTheFocusEpochTravelsBothWays() {
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":12}"#), #"{"t":"snapshot","epoch":12}"#)
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":true}"#))
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":-1}"#))
+    guard case .tab(let r)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"page","trigger":"snapshot","window":"1","url":"https://x","epoch":12}"#.utf8)) else { return XCTFail() }
+    XCTAssertEqual(r.epoch, 12)
+    XCTAssertTrue(Obs.tab(r, browser: dia, extensionId: devId).serialized().hasSuffix(#""epoch":12}"#))
+    XCTAssertNil(ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":1.5}"#.utf8)))
+    XCTAssertNil(ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":false}"#.utf8)))
+  }
 }

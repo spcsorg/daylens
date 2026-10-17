@@ -26,6 +26,7 @@ const slack = app('com.tinyspeck.slackmacgap', { pid: 700 })
 class Host {
   seq = 0
   sent: string[] = []
+  epochs: (number | null)[] = []
   id: number
   readonly pages: BrowserPages
   readonly browser: AppIdentity
@@ -33,7 +34,12 @@ class Host {
   constructor(pages: BrowserPages, browser: AppIdentity) {
     this.pages = pages
     this.browser = browser
-    this.id = pages.connect({ send: (m) => this.sent.push(m.op) })
+    this.id = pages.connect({
+      send: (m) => {
+        this.sent.push(m.op)
+        this.epochs.push(m.epoch)
+      },
+    })
   }
   line(obs: Partial<TabObs>, wall: number): LineOf<'tab'> {
     const full: TabObs = {
@@ -114,7 +120,7 @@ test('unknown from the extension (a private or devtools window) is browser time 
   h.page('https://example.com/shared', 'Shared page', 1010)
   norm.handle(focus(chrome, 'Shared page - Google Chrome', 2000, 'window_changed', 'w2'))
   h.unknown('no_focused_window', 2005)
-  assert.deepEqual(pageRows().map((r) => [r.t, r.state]), [[1010, 'normal'], [2005, 'unknown']])
+  assert.deepEqual(pageRows().map((r) => [r.t, r.state]), [[1010, 'normal'], [2000, 'unknown']], 'the window change itself ends the page')
   const focusRows = sink.rows.filter((r) => r.kind === 'focus')
   assert.ok(focusRows.length > 0 && focusRows.every((r) => r.app_id === 'com.google.Chrome' && r.title === null && r.title_state === 'withheld_browser'))
 })
@@ -252,3 +258,41 @@ test('a title change in the same tab starts a new row; the same page repeated ex
   h.page('https://example.com/', 'Loaded', 1900)
   assert.deepEqual(pageRows().map((r) => [r.title, r.seen]), [['Loading', 1010], ['Loaded', 1900]])
 })
+
+test('a window change inside the same browser ends the page until that window is confirmed', async () => {
+  const { pages, norm, pageRows } = setup()
+  const h = new Host(pages, chrome)
+  norm.handle(focus(chrome, null, 1000, 'app_changed', 'w1'))
+  h.page('https://example.com/a', 'A', 1010)
+  norm.handle(focus(chrome, null, 2000, 'window_changed', 'w2'))
+  assert.deepEqual(pageRows().map((r) => [r.t, r.state]), [[1010, 'normal'], [2000, 'unknown']])
+  assert.match(pageRows()[1]!.detail!, /window_changed/)
+  assert.equal(h.sent.at(-1), 'snapshot', 'the extension is asked about the new window')
+})
+
+test('a claim stamped before the window change is stale even if it arrives after it', async () => {
+  const { pages, norm, pageRows } = setup()
+  const h = new Host(pages, chrome)
+  norm.handle(focus(chrome, null, 1000, 'app_changed', 'w1'))
+  norm.handle(focus(chrome, null, 2000, 'window_changed', 'w2'))
+  h.page('https://example.com/old', 'Old', 1500)
+  assert.deepEqual(pageRows(), [])
+  h.page('https://example.com/new', 'New', 2100)
+  assert.deepEqual(pageRows().map((r) => r.url), ['https://example.com/new'])
+})
+
+test('a snapshot reply counts only for the focus epoch that asked for it', async () => {
+  const { pages, norm, pageRows } = setup()
+  const h = new Host(pages, chrome)
+  norm.handle(focus(chrome, null, 1000, 'app_changed', 'w1'))
+  const first = h.epochs.at(-1)
+  norm.handle(focus(chrome, null, 2000, 'window_changed', 'w2'))
+  const second = h.epochs.at(-1)
+  assert.ok(typeof first === 'number' && typeof second === 'number' && second > first)
+  if (typeof first !== 'number' || typeof second !== 'number') return
+  h.pages.onTab(h.id, h.line({ trigger: 'snapshot', url: 'https://example.com/w1', title: 'W1', epoch: first }, 2050))
+  assert.deepEqual(pageRows(), [], 'an answer about the earlier window is dropped although it arrived late')
+  h.pages.onTab(h.id, h.line({ trigger: 'snapshot', url: 'https://example.com/w2', title: 'W2', epoch: second }, 2060))
+  assert.deepEqual(pageRows().map((r) => r.url), ['https://example.com/w2'])
+})
+

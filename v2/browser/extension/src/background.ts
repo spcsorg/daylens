@@ -232,7 +232,7 @@ function onDaylensMessage(msg: Record<string, unknown>): void {
     applyPause()
     wakeWaiters()
   } else if (msg.t === 'snapshot') {
-    void tracker.snapshot()
+    void tracker.snapshot(typeof msg.epoch === 'number' && Number.isSafeInteger(msg.epoch) && msg.epoch >= 0 ? msg.epoch : undefined)
   } else if (msg.t === 'opened') {
     openReply?.(msg.ok === true)
     openReply = null

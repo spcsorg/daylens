@@ -30,9 +30,10 @@ export interface TabsApi {
 export type Trigger = 'activated' | 'focus' | 'updated' | 'removed' | 'snapshot' | 'startup' | 'paused'
 export type UnknownReason = 'no_focused_window' | 'not_normal' | 'no_tab' | 'no_address' | 'paused'
 
+// epoch: set on a reply to Daylens's snapshot request, naming the focus epoch that request was for.
 export type TabMessage =
-  | { t: 'tab'; state: 'page'; trigger: Trigger; window: string; tab: string | null; url: string; title: string | null }
-  | { t: 'tab'; state: 'unknown'; trigger: Trigger; reason: UnknownReason }
+  | { t: 'tab'; state: 'page'; trigger: Trigger; window: string; tab: string | null; url: string; title: string | null; epoch?: number }
+  | { t: 'tab'; state: 'unknown'; trigger: Trigger; reason: UnknownReason; epoch?: number }
 
 function clip(s: string, max: number): string {
   if (s.length <= max) return s
@@ -76,8 +77,8 @@ export class Tracker {
   }
 
   // Daylens asked for the present state: always answered, even when nothing changed.
-  snapshot(): Promise<void> {
-    return this.refresh('snapshot', true)
+  snapshot(epoch?: number): Promise<void> {
+    return this.refresh('snapshot', true, epoch)
   }
 
   startup(): Promise<void> {
@@ -100,9 +101,10 @@ export class Tracker {
     return this.refresh('snapshot', true)
   }
 
-  private async refresh(trigger: Trigger, force = false): Promise<void> {
+  private async refresh(trigger: Trigger, force = false, epoch?: number): Promise<void> {
     const g = ++this.gen
-    const unknown = (reason: UnknownReason) => this.emit({ t: 'tab', state: 'unknown', trigger, reason }, force)
+    const tag = epoch === undefined ? {} : { epoch }
+    const unknown = (reason: UnknownReason) => this.emit({ t: 'tab', state: 'unknown', trigger, reason, ...tag }, force)
     if (this.paused) return unknown('paused')
     let wins: Win[]
     try {
@@ -128,11 +130,11 @@ export class Tracker {
     if (url === null) return unknown('no_address')
     // A page can set a title with an unpaired surrogate; send well-formed text so no parser on the way trips on it.
     const title = tab.title ? clip(tab.title.toWellFormed(), 1024) : null
-    this.emit({ t: 'tab', state: 'page', trigger, window: String(w.id), tab: tab.id === undefined ? null : String(tab.id), url, title }, force)
+    this.emit({ t: 'tab', state: 'page', trigger, window: String(w.id), tab: tab.id === undefined ? null : String(tab.id), url, title, ...tag }, force)
   }
 
   private emit(msg: TabMessage, force: boolean): void {
-    const { trigger: _trigger, ...rest } = msg
+    const { trigger: _trigger, epoch: _epoch, ...rest } = msg
     const key = JSON.stringify(rest)
     if (!force && key === this.lastKey) return
     this.lastKey = key

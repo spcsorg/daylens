@@ -198,3 +198,12 @@ test('a title with an unpaired surrogate is sent well-formed', async () => {
   const m = sent[0]!
   assert.ok(m.state === 'page' && m.title === 'a\uFFFDb')
 })
+
+test("a snapshot reply names the focus epoch Daylens asked about; other reports carry none", async () => {
+  const { tr, sent } = setup()
+  await tr.snapshot(7)
+  await tr.activated()
+  assert.equal(sent[0]!.epoch, 7)
+  await tr.snapshot()
+  assert.equal(sent.at(-1)!.epoch, undefined)
+})

@@ -119,4 +119,19 @@ public class NativeMessagingTests
         Assert.Null(LaunchChain.BrowserPid(61, Look));
         Assert.Null(LaunchChain.BrowserPid(99, Look));
     }
+
+    [Fact]
+    public void TheFocusEpochTravelsBothWays()
+    {
+        Assert.Equal("{\"t\":\"snapshot\",\"epoch\":12}", Encoding.UTF8.GetString(HostReply.FromService("{\"op\":\"snapshot\",\"epoch\":12}"u8)!));
+        Assert.Null(HostReply.FromService("{\"op\":\"snapshot\",\"epoch\":true}"u8));
+        Assert.Null(HostReply.FromService("{\"op\":\"snapshot\",\"epoch\":-1}"u8));
+        var m = Assert.IsType<ExtensionMessage.TabMsg>(ExtensionMessage.Parse("{\"t\":\"tab\",\"state\":\"page\",\"trigger\":\"snapshot\",\"window\":\"1\",\"url\":\"https://x\",\"epoch\":12}"u8));
+        Assert.Equal(12, m.Report.Epoch);
+        var line = Encoding.UTF8.GetString(Envelope.Line("r", 0, "b", TestSupport.Time, "windows", "browser_ext", "tab", TabObs.Tab(m.Report, Chrome, "abcdefghijklmnopabcdefghijklmnop")));
+        Assert.Contains("\"epoch\":12}", line);
+        Assert.Null(ExtensionMessage.Parse("{\"t\":\"tab\",\"state\":\"unknown\",\"trigger\":\"snapshot\",\"reason\":\"no_tab\",\"epoch\":1.5}"u8));
+        Assert.Null(ExtensionMessage.Parse("{\"t\":\"tab\",\"state\":\"unknown\",\"trigger\":\"snapshot\",\"reason\":\"no_tab\",\"epoch\":\"1\"}"u8));
+    }
 }
+

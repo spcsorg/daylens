@@ -104,8 +104,8 @@ export interface BrowserLocalOptions {
 }
 
 type ExtMessage =
-  | { t: 'tab'; trigger: string; state: 'page'; window: string; tab: string | null; url: string; title: string | null }
-  | { t: 'tab'; trigger: string; state: 'unknown'; reason: string }
+  | { t: 'tab'; trigger: string; state: 'page'; window: string; tab: string | null; url: string; title: string | null; epoch?: number }
+  | { t: 'tab'; trigger: string; state: 'unknown'; reason: string; epoch?: number }
   | { t: 'status' }
   | { t: 'ping' }
 
@@ -126,7 +126,9 @@ export function parseExtensionMessage(raw: string): ExtMessage | null {
   }
   if (o.t === 'status' || o.t === 'ping') return { t: o.t }
   if (o.t !== 'tab' || typeof o.trigger !== 'string' || !TRIGGERS.has(o.trigger)) return null
-  if (o.state === 'unknown') return typeof o.reason === 'string' && REASONS.has(o.reason) ? { t: 'tab', trigger: o.trigger, state: 'unknown', reason: o.reason } : null
+  if (o.epoch !== undefined && !(typeof o.epoch === 'number' && Number.isSafeInteger(o.epoch) && o.epoch >= 0)) return null
+  const tag = typeof o.epoch === 'number' ? { epoch: o.epoch } : {}
+  if (o.state === 'unknown') return typeof o.reason === 'string' && REASONS.has(o.reason) ? { t: 'tab', trigger: o.trigger, state: 'unknown', reason: o.reason, ...tag } : null
   if (o.state !== 'page' || typeof o.url !== 'string' || o.url.length === 0 || o.url.length > MAX_URL_CHARS) return null
   const window = idOrNull(o.window)
   const tab = idOrNull(o.tab)
@@ -136,7 +138,7 @@ export function parseExtensionMessage(raw: string): ExtMessage | null {
     const cut = title.charCodeAt(MAX_TITLE_CHARS - 1)
     title = title.slice(0, cut >= 0xd800 && cut <= 0xdbff ? MAX_TITLE_CHARS - 1 : MAX_TITLE_CHARS)
   }
-  return { t: 'tab', trigger: o.trigger, state: 'page', window, tab, url: o.url, title }
+  return { t: 'tab', trigger: o.trigger, state: 'page', window, tab, url: o.url, title, ...tag }
 }
 
 function platformName(): Platform {
@@ -442,7 +444,7 @@ export class BrowserLocal {
     if (c.timer) clearTimeout(c.timer)
     c.timer = null
     c.phase = 'ready'
-    c.pagesId = this.pages.connect({ send: (msg) => msg.op === 'snapshot' && c.send({ t: 'snapshot' }) })
+    c.pagesId = this.pages.connect({ send: (msg) => msg.op === 'snapshot' && c.send(msg.epoch === null ? { t: 'snapshot' } : { t: 'snapshot', epoch: msg.epoch }) })
     this.log(`browser connected transport=local count=${this.pages.connectionCount()}`)
     c.send(this.statusOf(this.pause.state()))
     c.send({ t: 'snapshot' })
@@ -475,6 +477,7 @@ export class BrowserLocal {
         tab: m.state === 'page' ? m.tab : null,
         url: m.state === 'page' ? m.url : null,
         title: m.state === 'page' ? m.title : null,
+        ...(m.epoch === undefined ? {} : { epoch: m.epoch }),
       },
     }
     const r = parseLine(JSON.stringify(line))

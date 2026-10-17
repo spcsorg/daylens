@@ -116,6 +116,8 @@ export interface TabObs {
   tab: string | null
   url: string | null
   title: string | null
+  // Set on a reply to the service's snapshot request: the focus epoch that request named.
+  epoch?: number
 }
 
 export interface ObsByKind {
@@ -318,6 +320,7 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
       url: strOrNull(o, 'url', MAX_URL_CHARS),
       title: strOrNull(o, 'title', MAX_TITLE_CHARS),
     }
+    if (o.epoch !== undefined && o.epoch !== null) obs.epoch = int(o, 'epoch')
     if (state === 'page' && (obs.url === null || obs.reason !== null)) fail('tab: a page has a url and no reason')
     if (state === 'unknown' && (obs.url !== null || obs.title !== null || obs.reason === null)) fail('tab: unknown has a reason and no url or title')
     return obs

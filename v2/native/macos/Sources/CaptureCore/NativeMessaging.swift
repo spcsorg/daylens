@@ -101,6 +101,7 @@ public struct TabReport: Equatable {
   public var tab: String?
   public var url: String?
   public var title: String?
+  public var epoch: Int64? = nil
 }
 
 public enum ExtensionMessage: Equatable {
@@ -113,6 +114,13 @@ public enum ExtensionMessage: Equatable {
   static let triggers: Set<String> = ["activated", "focus", "updated", "removed", "snapshot", "startup", "paused"]
   static let reasons: Set<String> = ["no_focused_window", "not_normal", "no_tab", "no_address", "paused"]
 
+  /// A non-negative JSON integer, never a boolean.
+  static func epoch(_ v: Any?) -> Int64?? {
+    guard let v else { return .some(nil) }
+    guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue >= 0, n.doubleValue == n.doubleValue.rounded(), n.doubleValue < 9e15 else { return nil }
+    return .some(n.int64Value)
+  }
+
   /// Anything not exactly one of our messages is nil and is dropped.
   public static func parse(_ bytes: [UInt8]) -> ExtensionMessage? {
     guard let o = (try? JSONSerialization.jsonObject(with: Data(bytes))) as? [String: Any], let t = o["t"] as? String else { return nil }
@@ -122,16 +130,16 @@ public enum ExtensionMessage: Equatable {
     case "open": return .open
     case "pause": return (o["for"] as? String).flatMap(PauseChoice.init(rawValue:)).map(ExtensionMessage.pause)
     case "tab":
-      guard let trigger = o["trigger"] as? String, triggers.contains(trigger), let state = o["state"] as? String else { return nil }
+      guard let trigger = o["trigger"] as? String, triggers.contains(trigger), let state = o["state"] as? String, let ep = epoch(o["epoch"]) else { return nil }
       if state == "unknown" {
         guard let reason = o["reason"] as? String, reasons.contains(reason) else { return nil }
-        return .tab(TabReport(trigger: trigger, page: false, reason: reason, window: nil, tab: nil, url: nil, title: nil))
+        return .tab(TabReport(trigger: trigger, page: false, reason: reason, window: nil, tab: nil, url: nil, title: nil, epoch: ep))
       }
       guard state == "page", let url = o["url"] as? String, !url.isEmpty, url.utf16.count <= 2048 else { return nil }
       func id(_ k: String) -> String? { (o[k] as? String).flatMap { $0.utf16.count <= 64 ? $0 : nil } }
       guard let window = id("window") else { return nil }
       let title = (o["title"] as? String).flatMap { $0.isEmpty ? nil : clip($0, maxTitleUTF16) }
-      return .tab(TabReport(trigger: trigger, page: true, reason: nil, window: window, tab: id("tab"), url: url, title: title))
+      return .tab(TabReport(trigger: trigger, page: true, reason: nil, window: window, tab: id("tab"), url: url, title: title, epoch: ep))
     default: return nil
     }
   }
@@ -139,11 +147,13 @@ public enum ExtensionMessage: Equatable {
 
 extension Obs {
   public static func tab(_ r: TabReport, browser: AppInfo, extensionId: String) -> JSON {
-    .object([
+    var pairs: [(String, JSON)] = [
       ("trigger", .string(r.trigger)), ("state", .string(r.page ? "page" : "unknown")), ("reason", .str(r.reason)),
       ("browser", browser.json), ("extension", .string(extensionId)),
       ("window", .str(r.window)), ("tab", .str(r.tab)), ("url", .str(r.url)), ("title", .str(r.title)),
-    ])
+    ]
+    if let e = r.epoch { pairs.append(("epoch", .int(e))) }
+    return .object(pairs)
   }
 }
 
@@ -162,7 +172,11 @@ public enum HostReply {
   /// Maps one line from the capture service; nil for anything unexpected.
   public static func fromService(_ line: String) -> String? {
     guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any], let op = o["op"] as? String else { return nil }
-    if op == "snapshot" { return snapshot() }
+    if op == "snapshot" {
+      guard let ep = ExtensionMessage.epoch(o["epoch"]) else { return nil }
+      guard let e = ep else { return snapshot() }
+      return JSON.object([("t", .string("snapshot")), ("epoch", .int(e))]).serialized()
+    }
     guard op == "status", let capture = o["capture"] as? String, capture == "running" || capture == "paused" else { return nil }
     let until: JSON = (o["until_wall_ms"] as? NSNumber).map { .int($0.int64Value) } ?? .null
     return JSON.object([("t", .string("status")), ("daylens", .string("connected")), ("capture", .string(capture)), ("until_wall_ms", until)]).serialized()

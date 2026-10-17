@@ -82,7 +82,7 @@ The Daylens browser extension talks to a native messaging host: the capture help
 - The capture service listens on a local endpoint. macOS and Linux: a Unix socket, `<per-user temp folder>/daylens-v2/browser.sock` (macOS: `confstr(_CS_DARWIN_USER_TEMP_DIR)`; Linux: `$XDG_RUNTIME_DIR`), in a folder only the user can open, socket mode 0600. Windows: the named pipe `\\.\pipe\daylens-v2-browser-<user name>`. `DAYLENS_V2_BROWSER_SOCKET` overrides the path for both sides.
 - The host checks that the listener runs as the same user (`getpeereid` on macOS, the pipe server's process token on Windows) before sending anything.
 - Host to service: one JSON line per message, UTF-8, at most 16 KiB. A line is either a protocol line of kind `tab` with the host's own `run` and `seq`, or a control op: `{"op":"pause","for":"hour"|"tomorrow"|"until_resumed"}`, `{"op":"resume"}`, `{"op":"status"}`.
-- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change and in answer to `status`; `{"op":"snapshot"}` when the service needs the present state (the browser came to the front, or lines were lost).
+- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change and in answer to `status`; `{"op":"snapshot","epoch":<n>|null}` when the service needs the present state (a new app or window came to the front, or lines were lost). The host passes `epoch` to the extension, and the extension's answer carries it back.
 - A host that cannot reach the service retries on every extension message, and on macOS when the socket folder changes; on Windows every 30 s.
 
 ### `tab`
@@ -97,8 +97,9 @@ The Daylens browser extension talks to a native messaging host: the capture help
 | `window`, `tab` | The browser's own IDs, as strings; only meaningful within one browser run. |
 | `url` | The page address after the shared address rule (`capture/address.ts`): no user name or password, no fragment, no query parameters that carry secrets, at most 2048 characters. Present exactly when `state` is `page`. |
 | `title` | The tab title, at most 1024 UTF-16 code units, or `null`. Only with `page`. |
+| `epoch` | Optional. Present only on an answer to a snapshot request: the focus epoch that request named. |
 
-`t` is when the host received the message. The service stores a page only while the helper's latest focus line shows that same browser in front (same `pid`, same `app_id`) and the extension spoke after the browser came to the front. Everything else is stored as browser time with no page.
+`t` is when the host received the message. Every helper focus line that changes the app or the window starts a new focus epoch, ends the current page, and sends a snapshot request naming the epoch. The service stores a page only while the helper's latest focus line shows that same browser in front (same `pid`, same `app_id`) and the evidence belongs to the current epoch: an answer naming it, or a line whose `t.mono_us` on the same `boot` is not before the epoch began. Arrival order never decides. Everything else is stored as browser time with no page.
 
 
 ## Local connection
