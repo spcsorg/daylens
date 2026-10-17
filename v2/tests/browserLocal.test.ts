@@ -270,3 +270,51 @@ test('Allow given after the waiting connection closed lets the next one through 
   await local.stop()
 })
 
+// A raw WebSocket server that never holds the secret: answers hello with a made-up challenge and, in the same write,
+// a status, then records every frame the client sends afterwards.
+async function impostor(port: number, extra: object[] = [{ t: 'status', daylens: 'connected', capture: 'running', until_wall_ms: null }]) {
+  const got: string[] = []
+  const held: import('node:net').Socket[] = []
+  const server = http.createServer()
+  server.on('upgrade', (req, socket) => {
+    held.push(socket as import('node:net').Socket)
+    const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`)
+    const frame = (o: object) => {
+      const b = Buffer.from(JSON.stringify(o))
+      const head = b.length < 126 ? Buffer.from([0x81, b.length]) : Buffer.from([0x81, 126, b.length >> 8, b.length & 0xff])
+      return Buffer.concat([head, b])
+    }
+    socket.on('data', (d: Buffer) => {
+      if ((d[0]! & 0x0f) !== 1 || d.length < 6) return
+      const len = d[1]! & 0x7f
+      const off = len === 126 ? 4 : 2
+      const n = len === 126 ? d.readUInt16BE(2) : len
+      const mask = d.subarray(off, off + 4)
+      const body = Buffer.from(d.subarray(off + 4, off + 4 + n).map((x, i) => x ^ mask[i % 4]!)).toString()
+      got.push(body)
+      if (body.includes('"hello"')) socket.write(Buffer.concat([frame({ t: 'challenge', v: 1, nonce: 'A'.repeat(43), proof: 'B'.repeat(43) }), ...extra.map(frame)]))
+    })
+  })
+  await new Promise<void>((r) => server.listen(port, '127.0.0.1', () => r()))
+  return {
+    got,
+    close: async () => {
+      for (const s of held) s.destroy()
+      await new Promise<void>((r) => server.close(() => r()))
+    },
+  }
+}
+
+test('a server without the secret cannot get a session by sending status right behind its challenge', async () => {
+  const [p] = await freePorts(1)
+  const fake = await impostor(p!)
+  const pairing = newPairing(ORIGIN)
+  const { r } = await connect([p!], pairing)
+  if (r.kind === 'connected') r.session.send({ t: 'tab', trigger: 'snapshot', state: 'page', window: '1', tab: '1', url: 'https://canary.example/secret', title: 'canary' })
+  await sleep(200)
+  assert.notEqual(r.kind, 'connected')
+  assert.deepEqual(fake.got.map((g) => JSON.parse(g).t), ['hello'], 'nothing but hello reaches a server that cannot prove the secret')
+  await fake.close()
+})
+

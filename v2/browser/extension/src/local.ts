@@ -55,74 +55,91 @@ function attempt(
       return resolve({ kind: 'failed' })
     }
     const extNonce = randomB64url(32)
-    let phase: 'open' | 'challenge' | 'status' | 'ready' | 'done' = 'open'
+    // Each message is handled to the end before the next one is looked at, and nothing but a status that follows our
+    // own proof (which we send only after the service proved itself) opens the session.
+    let phase: 'open' | 'challenge' | 'verifying' | 'status' | 'ready' | 'done' = 'open'
     let keepalive: ReturnType<typeof setInterval> | null = null
-    const finish = (o: Outcome) => {
-      if (phase === 'done' || phase === 'ready') return
+    let settled = false
+    const settle = (o: Outcome) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      if (o.kind !== 'connected') {
-        phase = 'done'
-        try {
-          ws.close()
-        } catch {}
-      }
       resolve(o)
     }
-    const timer = setTimeout(() => finish({ kind: 'failed' }), opts.attemptMs)
+    // Any failure closes the socket, in every phase, including after the session was handed out.
+    const fail = (o: Outcome = { kind: 'failed' }) => {
+      const wasReady = phase === 'ready'
+      phase = 'done'
+      if (keepalive) clearInterval(keepalive)
+      try {
+        ws.close()
+      } catch {}
+      if (wasReady) onClose()
+      settle(o)
+    }
+    const timer = setTimeout(() => fail(), opts.attemptMs)
     ws.onopen = () => {
+      if (phase !== 'open') return
       phase = 'challenge'
       ws.send(JSON.stringify({ t: 'hello', v: 1, pair: pairing.id, nonce: extNonce }))
     }
-    ws.onerror = () => finish({ kind: 'failed' })
+    ws.onerror = () => fail()
     ws.onclose = () => {
-      if (keepalive) clearInterval(keepalive)
-      if (phase === 'ready') {
-        phase = 'done'
-        onClose()
-      } else finish({ kind: 'failed' })
+      if (phase === 'done') return
+      fail()
     }
-    ws.onmessage = async (ev) => {
-      if (typeof ev.data !== 'string') return finish({ kind: 'failed' })
-      let msg: Record<string, unknown>
+    const handle = async (data: unknown): Promise<void> => {
+      if (phase === 'done') return
+      if (typeof data !== 'string') return fail()
+      let msg: unknown
       try {
-        msg = JSON.parse(ev.data)
+        msg = JSON.parse(data)
       } catch {
-        return finish({ kind: 'failed' })
+        return fail()
       }
-      if (phase === 'ready') return onMessage(msg)
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return fail()
+      const m = msg as Record<string, unknown>
+      if (phase === 'ready') return onMessage(m)
       if (phase === 'challenge') {
-        if (msg.t === 'unpaired') return finish({ kind: 'unpaired' })
-        if (msg.t !== 'challenge' || !isNonce(msg.nonce)) return finish({ kind: 'failed' })
-        phase = 'status'
-        const svcNonce = msg.nonce
+        if (m.t === 'unpaired') return fail({ kind: 'unpaired' })
+        if (m.t !== 'challenge' || !isNonce(m.nonce)) return fail()
+        phase = 'verifying'
+        const svcNonce = m.nonce
         const want = await proof(pairing.key, transcript('service', pairing.origin, port, pairing.id, extNonce, svcNonce))
-        if (!sameProof(msg.proof, want)) return finish({ kind: 'failed' })
+        if (phase !== 'verifying') return
+        if (!sameProof(m.proof, want)) return fail()
         const mine = await proof(pairing.key, transcript('extension', pairing.origin, port, pairing.id, extNonce, svcNonce))
-        if (phase !== 'status') return
+        if (phase !== 'verifying') return
         ws.send(JSON.stringify({ t: 'proof', proof: mine }))
+        phase = 'status'
         return
       }
-      if (phase === 'status') {
-        // The service answers a good proof with its status; only then is the connection used.
-        if (msg.t === 'awaiting') {
-          clearTimeout(timer)
-          opts.onAwaiting?.()
-          return
-        }
-        if (msg.t === 'denied') return finish({ kind: 'denied' })
-        if (msg.t !== 'status') return finish({ kind: 'failed' })
-        const session: Session = {
-          port,
-          send: (m) => {
-            if (ws.readyState === 1) ws.send(JSON.stringify(m))
-          },
-          close: () => ws.close(),
-        }
-        finish({ kind: 'connected', session })
-        phase = 'ready'
-        keepalive = setInterval(() => session.send({ t: 'ping' }), opts.keepaliveMs)
-        onMessage(msg)
+      if (phase !== 'status') return fail()
+      // The service answers our proof with its status; only then is the connection used.
+      if (m.t === 'awaiting') {
+        clearTimeout(timer)
+        opts.onAwaiting?.()
+        return
       }
+      if (m.t === 'denied') return fail({ kind: 'denied' })
+      if (m.t !== 'status') return fail()
+      const session: Session = {
+        port,
+        send: (x) => {
+          if (phase === 'ready' && ws.readyState === 1) ws.send(JSON.stringify(x))
+        },
+        close: () => {
+          if (phase === 'ready') fail()
+        },
+      }
+      phase = 'ready'
+      keepalive = setInterval(() => session.send({ t: 'ping' }), opts.keepaliveMs)
+      settle({ kind: 'connected', session })
+      onMessage(m)
+    }
+    let queue = Promise.resolve()
+    ws.onmessage = (ev) => {
+      queue = queue.then(() => handle(ev.data)).catch(() => fail())
     }
   })
 }
