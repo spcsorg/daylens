@@ -114,9 +114,9 @@ public enum ExtensionMessage: Equatable {
   static let triggers: Set<String> = ["activated", "focus", "updated", "removed", "snapshot", "startup", "paused"]
   static let reasons: Set<String> = ["no_focused_window", "not_normal", "no_tab", "no_address", "paused"]
 
-  /// A non-negative JSON integer, never a boolean.
+  /// Absent or null: none. Otherwise a non-negative JSON integer, never a boolean.
   static func epoch(_ v: Any?) -> Int64?? {
-    guard let v else { return .some(nil) }
+    guard let v, !(v is NSNull) else { return .some(nil) }
     guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue >= 0, n.doubleValue == n.doubleValue.rounded(), n.doubleValue < 9e15 else { return nil }
     return .some(n.int64Value)
   }

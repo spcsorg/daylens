@@ -88,6 +88,9 @@ final class NativeMessagingTests: XCTestCase {
 
   func testTheFocusEpochTravelsBothWays() {
     XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":12}"#), #"{"t":"snapshot","epoch":12}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":null}"#), #"{"t":"snapshot"}"#, "the service sends a null epoch at resume")
+    guard case .tab(let unnamed)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":null}"#.utf8)) else { return XCTFail() }
+    XCTAssertNil(unnamed.epoch)
     XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":true}"#))
     XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":-1}"#))
     guard case .tab(let r)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"page","trigger":"snapshot","window":"1","url":"https://x","epoch":12}"#.utf8)) else { return XCTFail() }
