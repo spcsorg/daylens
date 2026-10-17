@@ -1,7 +1,7 @@
 // Kill, hang and contract tests against the real macOS helper. Skipped when it is not built.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -154,12 +154,21 @@ test('the real helper tells installed browsers from Electron and CEF apps by the
   assert.ok(present.length >= 4, 'enough real bundles to mean something')
 })
 
-test('the real helper reports the OS-verified Team ID of a running signed app, and none for unsigned code', { skip }, () => {
-  const out = (args: string[]) => execFileSync(HELPER, ['--signer', ...args]).toString().trim().split('\n').map((l) => l.split('\t')[0])
-  assert.deepEqual(out([String(process.pid)]), ['-'], 'node from nvm carries no Team ID here')
-  let claude: string | null = null
+test('the real helper reports the OS-verified Team ID of a running signed app, and none for platform code', { skip }, async () => {
+  const out = (pid: number | string) => execFileSync(HELPER, ['--signer', String(pid)]).toString().trim().split('\t')[0]
+  const codesignTeam = /TeamIdentifier=(\S+)/.exec(spawnSync('codesign', ['-dv', process.execPath]).stderr.toString())?.[1]
+  const expected = codesignTeam && codesignTeam !== 'not' ? codesignTeam : '-'
+  assert.equal(out(process.pid), expected, 'the same Team ID codesign reports for this node binary')
+  const sleeper = spawn('/bin/sleep', ['5'])
+  await sleep(100)
   try {
-    claude = execFileSync('pgrep', ['-x', 'Claude']).toString().trim().split('\n')[0] ?? null
+    assert.equal(out(sleeper.pid!), '-', 'Apple platform binaries carry no Team ID')
+  } finally {
+    sleeper.kill()
+  }
+  let claude: string | undefined
+  try {
+    claude = execFileSync('pgrep', ['-x', 'Claude']).toString().trim().split('\n')[0]
   } catch {}
-  if (claude) assert.deepEqual(out([claude]), ['Q6L2SF6YDW'], 'Claude, signed by Anthropic')
+  if (claude) assert.equal(out(claude), 'Q6L2SF6YDW', 'Claude, signed by Anthropic')
 })
