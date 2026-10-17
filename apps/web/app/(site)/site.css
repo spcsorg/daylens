@@ -364,6 +364,13 @@ body.site {
   padding: 0;
 }
 
+@media (max-width: 520px) {
+  .waitlist-platform legend {
+    float: none;
+    width: 100%;
+  }
+}
+
 .waitlist-platform label {
   display: inline-flex;
   align-items: center;
@@ -456,10 +463,20 @@ body.site {
 @media (min-width: 1000px) {
   .rail-search {
     grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+    column-gap: 1.5rem;
   }
 
-  .rail-search-label {
+  .rail-search-label,
+  .rail-examples {
     grid-column: 1 / -1;
+  }
+
+  .rail-search .rail-result {
+    margin-top: 0;
+  }
+
+  .rail-block .rail {
+    margin-top: -2px;
   }
 }
 
@@ -470,7 +487,7 @@ body.site {
     margin-bottom: 0.5rem;
   }
 
-  .rail-examples {
+  .rail-search .rail-examples {
     flex-wrap: nowrap;
     overflow-x: auto;
     margin-inline: calc(var(--gutter) * -1);
@@ -729,6 +746,12 @@ body.site {
   }
 }
 
+@media (min-width: 720px) {
+  .rail-caption {
+    margin-top: -18px;
+  }
+}
+
 @media (max-width: 720px) {
   .ticket {
     flex: 0 0 min(78vw, 280px);
@@ -737,7 +760,7 @@ body.site {
 }
 
 .rail-caption {
-  margin-top: -18px;
+  margin-top: 1rem;
   font-size: 0.88rem;
   color: var(--ink-faint);
 }
@@ -1003,7 +1026,9 @@ body.site {
 }
 
 .join .waitlist-done {
-  background: var(--white);
+  padding: 0;
+  background: none;
+  box-shadow: none;
 }
 
 .channels {

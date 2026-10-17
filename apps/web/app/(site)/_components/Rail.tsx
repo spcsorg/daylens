@@ -42,6 +42,15 @@ export function Rail() {
         <label htmlFor="rail-query" className="rail-search-label">
           Search this example day the way you&rsquo;d remember it
         </label>
+        <ul className="rail-examples" aria-label="Example searches">
+          {EXAMPLE_SEARCHES.map((example) => (
+            <li key={example}>
+              <button type="button" onClick={() => run(example)} aria-pressed={query === example}>
+                {example}
+              </button>
+            </li>
+          ))}
+        </ul>
         <div className="rail-search-row">
           <input
             id="rail-query"
@@ -58,33 +67,23 @@ export function Rail() {
             Search
           </button>
         </div>
-        <ul className="rail-examples" aria-label="Example searches">
-          {EXAMPLE_SEARCHES.map((example) => (
-            <li key={example}>
-              <button type="button" onClick={() => run(example)} aria-pressed={query === example}>
-                {example}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <p className="rail-result" aria-live="polite">
+          {result === undefined ? null : result === null ? (
+            <>Nothing on this example day matches that. In Daylens, search covers every day you&rsquo;ve kept.</>
+          ) : (
+            <>
+              Found in <strong>{result.ticket.time}</strong>
+              {result.source ? (
+                <>
+                  : <strong>{result.source.label}</strong>. In Daylens, it opens right there.
+                </>
+              ) : (
+                "."
+              )}
+            </>
+          )}
+        </p>
       </form>
-
-      <p className="rail-result" aria-live="polite">
-        {result === undefined ? null : result === null ? (
-          <>Nothing on this example day matches that. In Daylens, search covers every day you&rsquo;ve kept.</>
-        ) : (
-          <>
-            Found in <strong>{result.ticket.time}</strong>
-            {result.source ? (
-              <>
-                : <strong>{result.source.label}</strong>. In Daylens, it opens right there.
-              </>
-            ) : (
-              "."
-            )}
-          </>
-        )}
-      </p>
 
       <div className="rail" data-searching={matched ? "true" : undefined}>
         <ol className="rail-tickets" ref={railRef} aria-label="An example morning, one ticket per hour">
