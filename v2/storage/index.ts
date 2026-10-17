@@ -5,7 +5,7 @@ import type { ExclusionRule } from '../capture/defaults.ts'
 import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
-import { Derived, HOUR_MS, hourStart, nfc, siteOf } from './derive.ts'
+import { Derived, HOUR_MS, hoursOf, nfc, siteOf } from './derive.ts'
 import { applyMigrations } from './migrations.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
@@ -303,9 +303,11 @@ export class Storage {
       // A row that began before the range keeps only its part before it; anything that began inside is removed.
       db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE event_wall_ms < ? AND last_seen_wall_ms > ?').run(from, from, from)
       r.observations = db.prepare('DELETE FROM observations WHERE event_wall_ms >= ? AND event_wall_ms < ?').run(from, to).changes
-      for (const row of db.prepare('SELECT start_wall_ms, tz_offset_min FROM intervals WHERE end_wall_ms > ? AND start_wall_ms < ?').all(from, to) as { start_wall_ms: number; tz_offset_min: number }[]) {
-        touchedHours.add(hourStart(row.start_wall_ms, row.tz_offset_min))
-      }
+      // By start-time membership or overlap: a zero-length row at the range start overlaps nothing but is inside it.
+      const affected = db
+        .prepare('SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE (start_wall_ms >= ? AND start_wall_ms < ?) OR (end_wall_ms > ? AND start_wall_ms < ?)')
+        .all(from, to, from, to) as { start_wall_ms: number; end_wall_ms: number; tz_offset_min: number }[]
+      for (const row of affected) for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
       db.prepare('UPDATE intervals SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
       r.intervals = db.prepare('DELETE FROM intervals WHERE start_wall_ms >= ? AND start_wall_ms < ?').run(from, to).changes
       db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
@@ -326,11 +328,12 @@ export class Storage {
         const del = db.prepare('DELETE FROM observations WHERE id = ?')
         for (const id of ids) r.observations += del.run(id).changes
       }
-      for (const row of db.prepare(`SELECT start_wall_ms, tz_offset_min FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).all(...matchArgs, from, to) as {
+      for (const row of db.prepare(`SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).all(...matchArgs, from, to) as {
         start_wall_ms: number
+        end_wall_ms: number
         tz_offset_min: number
       }[]) {
-        touchedHours.add(hourStart(row.start_wall_ms, row.tz_offset_min))
+        for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
       }
       r.intervals = db.prepare(`DELETE FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).run(...matchArgs, from, to).changes
       // Every activity document of the app or site goes; other documents in those hours are untouched.

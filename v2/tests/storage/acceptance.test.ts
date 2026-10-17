@@ -310,3 +310,16 @@ test('deletion leaves nothing on disk even when the search index is large and th
   assert.deepEqual(diskContains(r.dir, term), [])
   r.close()
 })
+
+test('a range deletion reaches a zero-length row that starts exactly at the range start', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'before.md - Editor', T0 - 10 * MIN))
+  r.feed(focus(chat, 'Okapi canary instant', T0 + 5 * MIN))
+  r.store.flush()
+  assert.deepEqual(r.q(`SELECT start_wall_ms - end_wall_ms AS d FROM intervals WHERE title LIKE 'Okapi%'`), [{ d: 0 }], 'the canary interval has no length')
+  r.clock.t = T0 + 20 * MIN
+  r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN)
+  assert.deepEqual(containsAnywhere(r, 'Okapi'), [])
+  r.close()
+})
