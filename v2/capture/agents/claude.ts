@@ -8,7 +8,13 @@ interface OpenTurn {
   key: string
   last: number
   stop: string | null
+  // The reply that set `stop`; one reply is written as several records that share its id.
+  msg?: string | null
+  replied?: boolean
 }
+
+// A reply that ends the turn: the agent stopped, or the request failed and the CLI wrote the error as its reply.
+const finished = (t: OpenTurn) => t.stop === 'end_turn' || t.stop === 'stop_sequence' || t.stop === 'error'
 
 interface ClaudeState {
   session: string | null
@@ -17,7 +23,9 @@ interface ClaudeState {
   branch: string | null
   automated: boolean
   turn: OpenTurn | null
-  pending: { opener: TurnOpener; at: number; key: string } | null
+  // An instruction not from the person (a command, a notice, another session) waiting for the agent's reply.
+  // `last` is the latest such record; a reply that points at it answers the instruction, not the turn before.
+  pending: { opener: TurnOpener; at: number; key: string; last?: string } | null
   // Typed messages waiting for delivery: when they were typed, and whether the agent was busy then.
   queued: Record<string, [number, boolean]>
   questions: Record<string, number>
@@ -95,7 +103,8 @@ function fromEdges(head: string, tail: string): Record<string, unknown> | null {
   } else if (type === 'assistant') {
     const stop = /"stop_reason":"([a-z_]+)"/.exec(tail)?.[1]
     const content = [...head.matchAll(ASK_IDS)].map((m) => ({ type: 'tool_use', name: 'AskUserQuestion', id: m[1] }))
-    o.message = { stop_reason: stop ?? null, content }
+    o.message = { id: /"message":\{[^{]*?"id":"([^"]+)"/.exec(head)?.[1] ?? null, stop_reason: stop ?? null, content }
+    o.parentUuid = /^\{"parentUuid":"([^"]+)"/.exec(head)?.[1] ?? null
     if (head.includes('"isSidechain":true')) o.isSidechain = true
   }
   return o
@@ -229,7 +238,8 @@ export class ClaudeParser implements LineParser {
     const text = firstText(msg?.content)
     // A sidechain is a subagent inside this file; its prompts come from the agent, and its work is the open turn's.
     if (o.isSidechain === true) return out.concat(this.activity(env.at))
-    if (o.isCompactSummary === true || text === null) return out.concat(this.activity(env.at))
+    // Text the CLI adds (a compaction summary, skill bodies, reminders, notices) is not the agent working.
+    if (o.isCompactSummary === true || text === null) return out
 
     if (text.trimStart().startsWith(INTERRUPT)) {
       out.push(...this.act(env.uuid, 'interrupt', 'marked', env.at, this.s.turn?.key ?? null))
@@ -248,21 +258,21 @@ export class ClaudeParser implements LineParser {
       }
       const opener = this.subagentFile ? 'agent' : this.s.automated ? 'automation' : (ORIGIN_OPENER[kind] ?? 'unknown')
       if (o.isMeta === true) {
-        this.s.pending = { opener, at: env.at, key: env.uuid }
-        return out.concat(this.activity(env.at))
+        this.instruct(opener, env.at, env.uuid, text, false)
+        return out
       }
       return out.concat(this.open(env.uuid, opener, env.at, null, 'marked', text))
     }
 
     // Older logs carry no origin: the shape of the message is all there is to go on.
     if (o.isMeta === true || isInjected(text)) {
-      this.s.pending ??= { opener: this.subagentFile ? 'agent' : 'unknown', at: env.at, key: env.uuid }
-      return out.concat(this.activity(env.at))
+      this.instruct(this.subagentFile ? 'agent' : 'unknown', env.at, env.uuid, text, true)
+      return out
     }
     if (!humanCapable) return out.concat(this.open(env.uuid, this.subagentFile ? 'agent' : 'automation', env.at, null, 'inferred', text))
     const t = text.trimStart()
     if (t.startsWith('<command-name>')) {
-      this.s.pending = { opener: 'user', at: env.at, key: env.uuid }
+      this.s.pending = { opener: 'user', at: env.at, key: env.uuid, last: env.uuid }
       return out.concat(this.act(env.uuid, 'command', 'inferred', env.at, this.s.turn?.key ?? null))
     }
     if (t.startsWith('<bash-input>')) {
@@ -303,9 +313,13 @@ export class ClaudeParser implements LineParser {
     if (!env) return []
     const out = this.meta(o, env.at)
     if (o.isSidechain === true && !this.subagentFile) return out.concat(this.activity(env.at))
-    // A reply after a finished turn and a new instruction (a command, a skill, an automatic continue) is a new turn.
-    const done = this.s.turn !== null && (this.s.turn.stop === 'end_turn' || this.s.turn.stop === 'stop_sequence')
-    if (done && this.s.pending !== null) out.push(...this.close('missing', null))
+    const message = o.message as { id?: unknown; stop_reason?: unknown; content?: unknown } | undefined
+    const msg = typeof message?.id === 'string' ? message.id : null
+    // A finished turn stays finished: only more of the reply that finished it belongs to it; any other reply is a new turn.
+    const t0 = this.s.turn
+    const parent = typeof o.parentUuid === 'string' ? o.parentUuid : null
+    const answersInstruction = t0 !== null && t0.replied === true && this.s.pending?.last !== undefined && parent === this.s.pending.last
+    if (t0 !== null && ((finished(t0) && (this.s.pending !== null || msg === null || msg !== t0.msg)) || answersInstruction)) out.push(...this.close('missing', null))
     if (!this.s.turn) {
       const p = this.s.pending
       out.push(...this.open(p?.key ?? env.uuid, p?.opener ?? (this.subagentFile ? 'agent' : 'unknown'), p?.at ?? env.at, null, 'marked', null))
@@ -314,14 +328,19 @@ export class ClaudeParser implements LineParser {
       out.push({ t: 'wait', key: `${this.session}:retry:${this.s.retrySince}`, session: this.session, turn: this.s.turn?.key ?? null, reason: 'api_error', start: this.s.retrySince, end: env.at })
       this.s.retrySince = null
     }
-    const message = o.message as { stop_reason?: unknown; content?: unknown } | undefined
-    if (this.s.turn) this.s.turn.stop = o.isApiErrorMessage === true ? 'error' : typeof message?.stop_reason === 'string' ? message.stop_reason : this.s.turn.stop
+    const t = this.s.turn
+    if (t) {
+      t.msg = msg
+      t.replied = true
+      out.push(...this.activity(env.at, true))
+      t.stop = o.isApiErrorMessage === true ? 'error' : typeof message?.stop_reason === 'string' ? message.stop_reason : t.stop
+    }
     if (Array.isArray(message?.content)) {
       for (const c of message.content as { type?: unknown; name?: unknown; id?: unknown }[]) {
         if (c?.type === 'tool_use' && c.name === 'AskUserQuestion' && typeof c.id === 'string') this.s.questions[c.id] = env.at
       }
     }
-    return out.concat(this.activity(env.at))
+    return out
   }
 
   private system(o: Record<string, unknown>): AgentRecord[] {
@@ -387,6 +406,16 @@ export class ClaudeParser implements LineParser {
 
   // --- turns ---------------------------------------------------------------
 
+  // Text a CLI adds before the first reply belongs to the prompt it follows; an image placeholder belongs to the tool
+  // output it follows. Anything else is an instruction that can start a turn of its own.
+  private instruct(opener: TurnOpener, at: number, uuid: string, text: string | null, keepFirst: boolean): void {
+    const t = this.s.turn
+    if (t !== null && !t.replied) return
+    if (text === null || text === '' || text.trimStart().startsWith('[Image')) return
+    if (keepFirst && this.s.pending) this.s.pending.last = uuid
+    else this.s.pending = { opener, at, key: uuid, last: uuid }
+  }
+
   private takeQueued(text: string): [number, boolean] | null {
     const d = digest(text)
     const q = this.s.queued[d]
@@ -417,13 +446,14 @@ export class ClaudeParser implements LineParser {
     this.s.turn = null
     this.s.questions = {}
     this.s.retrySince = null
-    if (state === 'missing' && (t.stop === 'end_turn' || t.stop === 'stop_sequence')) return [{ t: 'end', key: t.key, state: 'completed', at: t.last }]
+    if (state === 'missing' && finished(t)) return [{ t: 'end', key: t.key, state: t.stop === 'error' ? 'failed' : 'completed', at: t.last }]
     return [{ t: 'end', key: t.key, state, at: state === 'missing' ? null : at }]
   }
 
-  private activity(at: number): AgentRecord[] {
+  // `sameReply`: a further block of the reply that finished the turn, the only thing a finished turn still takes.
+  private activity(at: number, sameReply = false): AgentRecord[] {
     const t = this.s.turn
-    if (!t) return []
+    if (!t || (finished(t) && !sameReply)) return []
     if (at > t.last) t.last = at
     return [{ t: 'activity', key: t.key, session: this.session, at }]
   }

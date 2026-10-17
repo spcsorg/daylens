@@ -257,3 +257,48 @@ test('only a person-driven session answers questions, and only a successful resu
   const answered = ask(c, parser(c), false)
   assert.deepEqual(of(answered, 'user').map((u) => u.act), ['prompt', 'answer'])
 })
+
+test('a finished turn stays finished: injected context and later notices never extend it', () => {
+  const c = claudeCtx()
+  const recs = run(parser(c), [
+    claude.prompt(c, sec(0), 'go', { uuid: 'p1' }),
+    claude.assistant(c, sec(10), 'end_turn', { msg: 'm1', text: 'first block' }),
+    // The same reply's next block, written after the record that carries its stop.
+    claude.assistant(c, sec(11), 'end_turn', { msg: 'm1', text: 'second block' }),
+    // Days later: a skill body, a reminder, an API notice and a compaction summary, with no new reply.
+    claude.prompt(c, sec(330_000), [{ type: 'text', text: 'skill body' }], { isMeta: true, origin: null }),
+    claude.prompt(c, sec(330_001), '<system-reminder>context</system-reminder>', { origin: null }),
+    claude.prompt(c, sec(330_002), 'continue', { origin: { kind: 'auto-continuation' }, promptSource: 'system', isMeta: true }),
+    claude.system(c, sec(330_003), 'api_error', { level: 'error' }),
+    claude.prompt(c, sec(330_004), 'This session is being continued from a previous conversation', { compact: true, origin: null }),
+  ])
+  assert.equal(Math.max(...of(recs, 'activity').filter((a) => a.key === 'p1').map((a) => a.at)), sec(11))
+  assert.deepEqual(of(recs, 'turn').map((t) => t.key), ['p1'])
+  // A turn whose reply was an API error is finished too, as failed.
+  const recs3 = run(parser(c), [
+    claude.prompt(c, sec(0), 'go', { uuid: 'e1' }),
+    claude.assistant(c, sec(6), 'stop_sequence', { msg: 'err', apiError: true }),
+    claude.prompt(c, sec(330_000), [{ type: 'text', text: 'resumed' }], { isMeta: true, origin: null }),
+    claude.assistant(c, sec(330_001), 'stop_sequence', { msg: 'later' }),
+  ])
+  assert.equal(Math.max(...of(recs3, 'activity').filter((a) => a.key === 'e1').map((a) => a.at)), sec(6))
+  assert.deepEqual(of(recs3, 'end')[0], { t: 'end', key: 'e1', state: 'failed', at: sec(6) })
+  // A turn left mid-tool (the process died) is not continued by the reply to a later instruction; an image that a tool
+  // returned is part of that tool's output, not an instruction.
+  const recs4 = run(parser(c), [
+    claude.prompt(c, sec(0), 'go', { uuid: 'd1' }),
+    claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 'shot', name: 'Screenshot' }] }),
+    claude.toolResult(c, sec(7), 'shot', 'png'),
+    claude.prompt(c, sec(7), '[Image: original 2480x1520, displayed at 1240x760]', { isMeta: true, origin: null, uuid: 'img' }),
+    claude.assistant(c, sec(9), 'tool_use', { tools: [{ id: 't2', name: 'Bash' }], parent: 'img' }),
+    claude.toolResult(c, sec(12), 't2', 'ok'),
+    claude.prompt(c, sec(100_000), 'Overnight check-in: what is the status?', { isMeta: true, origin: null, uuid: 'later' }),
+    claude.assistant(c, sec(100_001), 'end_turn', { parent: 'later' }),
+  ])
+  assert.deepEqual(of(recs4, 'turn').map((t) => t.key), ['d1', 'later'])
+  assert.equal(Math.max(...of(recs4, 'activity').filter((a) => a.key === 'd1').map((a) => a.at)), sec(9))
+  // A reply with a new id after a finished turn is a new turn, even with no prompt before it.
+  const recs2 = run(parser(c), [claude.prompt(c, sec(0), 'go', { uuid: 'q1' }), claude.assistant(c, sec(5), 'end_turn', { msg: 'r1' }), claude.assistant(c, sec(9000), 'end_turn', { msg: 'r2' })])
+  assert.equal(of(recs2, 'turn').length, 2)
+  assert.equal(Math.max(...of(recs2, 'activity').filter((a) => a.key === 'q1').map((a) => a.at)), sec(5))
+})

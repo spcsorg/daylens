@@ -62,13 +62,13 @@ export const claude = {
     }
     return JSON.stringify({ ...o, ...tailFields(c) })
   },
-  assistant(c: ClaudeCtx, at: number, stop: string | null, opts: { tools?: { id: string; name: string }[]; text?: string; sidechain?: boolean; apiError?: boolean } = {}): string {
+  assistant(c: ClaudeCtx, at: number, stop: string | null, opts: { tools?: { id: string; name: string }[]; text?: string; sidechain?: boolean; apiError?: boolean; msg?: string; parent?: string } = {}): string {
     const content = [...(opts.text ? [{ type: 'text', text: opts.text }] : []), ...(opts.tools ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: {} }))]
     return JSON.stringify({
-      parentUuid: null,
+      parentUuid: opts.parent ?? null,
       isSidechain: opts.sidechain ?? false,
       ...(c.agentId ? { agentId: c.agentId } : {}),
-      message: { id: 'msg_x', type: 'message', role: 'assistant', model: 'm', content, stop_reason: stop, stop_sequence: null, usage: {} },
+      message: { id: opts.msg ?? `msg_${randomUUID()}`, type: 'message', role: 'assistant', model: 'm', content, stop_reason: stop, stop_sequence: null, usage: {} },
       requestId: 'req_x',
       type: 'assistant',
       uuid: randomUUID(),
