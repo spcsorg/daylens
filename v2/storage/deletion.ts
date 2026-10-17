@@ -136,6 +136,8 @@ export interface PruneResult {
   data: number
   batches: number
   maxTransactionMs: number
+  // Whether the removed rows' old pages also left the write-ahead log; if not, storage retries until they do.
+  purged: boolean
 }
 
 /**
@@ -215,7 +217,7 @@ export class Deleter {
 
   /** Retention, off the capture thread: batches until nothing is older than the cutoff, then the log is purged. */
   prune(cutoff: number | null, logKeepFrom: number): PruneResult {
-    const r: PruneResult = { removed: 0, data: 0, batches: 0, maxTransactionMs: 0 }
+    const r: PruneResult = { removed: 0, data: 0, batches: 0, maxTransactionMs: 0, purged: true }
     if (cutoff !== null) warmSearchIndex(this.db)
     for (;;) {
       const step = pruneStep(this.db, cutoff, logKeepFrom, ROWS_PER_STEP, (ms) => (r.maxTransactionMs = Math.max(r.maxTransactionMs, ms)))
@@ -224,8 +226,20 @@ export class Deleter {
       r.batches++
       if (step.removed === 0) break
     }
-    if (r.removed > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
+    if (r.removed > 0) r.purged = this.checkpoint()
     return r
+  }
+
+  /** Moves old pages out of the write-ahead log; false while a reader's snapshot still holds them. Waits only briefly. */
+  checkpoint(): boolean {
+    const wait = this.db.pragma('busy_timeout', { simple: true }) as number
+    this.db.pragma('busy_timeout = 100')
+    try {
+      const [res] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[]
+      return res !== undefined && res.busy === 0 && res.log === 0
+    } finally {
+      this.db.pragma(`busy_timeout = ${wait}`)
+    }
   }
 
   private work(tombstoneId: number, kind: 'doc_hour' | 'hour' | 'thread' | 'read', limit: number): number[] {
@@ -365,14 +379,7 @@ export class Deleter {
    * holds them (the caller retries). Waits only briefly, since a reader may hold its snapshot for a long time.
    */
   purge(tombstoneId: number): boolean {
-    const wait = this.db.pragma('busy_timeout', { simple: true }) as number
-    this.db.pragma('busy_timeout = 100')
-    try {
-      const [res] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[]
-      if (res === undefined || res.busy !== 0 || res.log !== 0) return false
-    } finally {
-      this.db.pragma(`busy_timeout = ${wait}`)
-    }
+    if (!this.checkpoint()) return false
     this.db.prepare(`UPDATE deletions SET state = 'purged' WHERE id = ? AND state = 'done'`).run(tombstoneId)
     return true
   }
@@ -404,6 +411,10 @@ export class DeletionWorker {
 
   prune(cutoff: number | null, logKeepFrom: number): Promise<PruneResult> {
     return this.send({ op: 'prune', cutoff, logKeepFrom }) as Promise<PruneResult>
+  }
+
+  checkpoint(): Promise<boolean> {
+    return this.send({ op: 'checkpoint' }) as Promise<boolean>
   }
 
   private send(job: Record<string, unknown>): Promise<unknown> {

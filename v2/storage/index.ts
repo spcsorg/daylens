@@ -169,6 +169,7 @@ export class Storage {
   start(): void {
     this.backfill = this.runBackfill()
     this.backfill.catch(() => {})
+    if (this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get()) this.retentionPurge = this.checkpointWhenFree()
     for (const t of this.rules.tombstones) {
       if (t.state === 'pending') {
         this.track(this.finishDeletion(t.id))
@@ -347,6 +348,34 @@ export class Storage {
   }
 
   private readonly purges = new Map<number, Promise<void>>()
+  private retentionPurge: Promise<void> | null = null
+
+  /** Resolves once text pruned by retention is gone from the files on disk. */
+  retentionPurged(): Promise<void> {
+    return this.retentionPurge ?? Promise.resolve()
+  }
+
+  private async checkpointWhenFree(): Promise<void> {
+    for (let wait = 250; ; wait = Math.min(wait * 2, 30_000)) {
+      if (this.stopped) return new Promise<void>(() => {})
+      let ok = false
+      try {
+        ok = await this.deletions.checkpoint()
+      } catch (err) {
+        if (this.stopped) return new Promise<void>(() => {})
+        this.onError(`checkpoint_${(err as Error).message}`)
+      }
+      if (ok) {
+        try {
+          immediate(this.db, () => this.db.prepare(`DELETE FROM meta WHERE key = 'retention_purge_pending'`).run())
+          return
+        } catch (err) {
+          if (!isBusy(err)) throw err
+        }
+      }
+      await new Promise<void>((r) => setTimeout(r, wait).unref())
+    }
+  }
 
   /** Retries moving deleted pages out of the log, with backoff, until no reader holds them. */
   private purgeWhenFree(tombstone: number): Promise<void> {
@@ -731,6 +760,11 @@ export class Storage {
     this.store.forgetOpenRows()
     const r = await this.deletions.prune(cutoff, this.now() - CHANGE_LOG_KEEP_MS)
     this.store.forgetOpenRows()
+    if (!r.purged) {
+      // Remembered across restarts, and retried until a checkpoint completes, even if the next prune removes nothing.
+      immediate(this.db, () => this.db.prepare(`INSERT INTO meta (key, value) VALUES ('retention_purge_pending', '1') ON CONFLICT (key) DO NOTHING`).run())
+      this.retentionPurge = this.checkpointWhenFree()
+    }
     // Readers holding pruned hours, intervals or search results must drop them.
     if (r.data > 0 && cutoff !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: cutoff }, () => {})
     return r

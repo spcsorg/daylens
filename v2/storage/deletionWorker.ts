@@ -11,8 +11,12 @@ db.pragma('secure_delete = ON')
 db.pragma('journal_size_limit = 16777216')
 const deleter = new Deleter(db)
 
-parentPort!.on('message', (job: { id: number; op: 'delete' | 'purge' | 'prune'; tombstone: number; now: number; cutoff: number | null; logKeepFrom: number }) => {
+parentPort!.on('message', (job: { id: number; op: 'delete' | 'purge' | 'prune' | 'checkpoint'; tombstone: number; now: number; cutoff: number | null; logKeepFrom: number }) => {
   try {
+    if (job.op === 'checkpoint') {
+      parentPort!.postMessage({ id: job.id, result: deleter.checkpoint() })
+      return
+    }
     if (job.op === 'prune') {
       parentPort!.postMessage({ id: job.id, result: deleter.prune(job.cutoff, job.logKeepFrom) })
       return

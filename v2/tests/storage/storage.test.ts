@@ -2,7 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DeletedMaterialError, StaleHourError } from '../../storage/index.ts'
 import { app, focus, resetSeq } from '../support/lines.ts'
-import { HOUR, MIN, rig, T0 } from './support.ts'
+import { diskContains, HOUR, MIN, rig, T0 } from './support.ts'
+import Database from 'better-sqlite3'
+import path from 'node:path'
+import { DB_FILE } from '../../capture/store.ts'
 
 const editor = app('com.example.editor', { name: 'Editor' })
 
@@ -208,4 +211,32 @@ test('retention trims a row that still covers kept time, and capture keeps exten
   assert.deepEqual(r.q(`SELECT last_seen_wall_ms FROM observations WHERE id = ?`, id), [{ last_seen_wall_ms: T0 + 10 * day + HOUR }])
   assert.deepEqual(r.q(`SELECT start_wall_ms FROM intervals WHERE obs_id = ?`, id), [{ start_wall_ms: cut }])
   r.close()
+})
+
+test('a retention purge blocked by a reader is retried until the pruned text is off disk, across a restart too', async () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'Tenrec canary old.md - Editor', T0))
+  r.feed(focus(editor, 'recent.md - Editor', T0 + 20 * 24 * HOUR))
+  r.store.flush()
+  r.store.database.pragma('wal_checkpoint(TRUNCATE)')
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) AS n FROM observations').get()
+  r.clock.t = T0 + 21 * 24 * HOUR
+  r.storage.setRetentionDays(7)
+  r.storage.stop()
+  const res = await r.storage.prune()
+  assert.equal(res.purged, false)
+  assert.ok(diskContains(r.dir, 'Tenrec').length > 0, 'still in the log while the reader holds it')
+  r.close()
+  reader.prepare('COMMIT').run()
+  reader.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 21 * 24 * HOUR
+  r2.storage.start()
+  await r2.storage.retentionPurged()
+  assert.deepEqual(diskContains(r2.dir, 'Tenrec'), [])
+  assert.deepEqual(r2.q(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`), [])
+  r2.close()
 })
