@@ -11,6 +11,16 @@ export function hourStart(wallMs: number, tzOffsetMin: number): number {
   return Math.floor((wallMs + off) / HOUR_MS) * HOUR_MS - off
 }
 
+// Locks, sleep and gaps end intervals long before this; it bounds the scan when an hour's documents are rebuilt.
+export const MAX_INTERVAL_MS = 7 * 86_400_000
+
+/** Every local hour that [start, end] touches; a zero-length interval belongs to the hour it starts in. */
+export function hoursOf(startWallMs: number, endWallMs: number, tzOffsetMin: number): number[] {
+  const out = [hourStart(startWallMs, tzOffsetMin)]
+  for (let h = out[0]! + HOUR_MS; h < endWallMs; h += HOUR_MS) out.push(h)
+  return out
+}
+
 export function siteOf(url: string | null): string | null {
   if (!url) return null
   try {
@@ -151,7 +161,22 @@ export class Derived {
 
   private write(i: IntervalRow): void {
     this.upsertInterval.run(i)
-    if (i.title !== null || i.url !== null) this.upsertDoc.run({ ...i, title: nfc(i.title), files: nfc(i.files), hour: hourStart(i.start_wall_ms, i.tz_offset_min) })
+    this.writeDocs(i)
+  }
+
+  private writeDocs(i: IntervalRow, onlyHour?: number): void {
+    if (i.title === null && i.url === null) return
+    for (const h of hoursOf(i.start_wall_ms, i.end_wall_ms, i.tz_offset_min)) {
+      if (onlyHour !== undefined && h !== onlyHour) continue
+      this.upsertDoc.run({
+        ...i,
+        title: nfc(i.title),
+        files: nfc(i.files),
+        hour: h,
+        start_wall_ms: Math.max(i.start_wall_ms, h),
+        end_wall_ms: Math.max(Math.min(i.end_wall_ms, h + HOUR_MS), Math.max(i.start_wall_ms, h)),
+      })
+    }
   }
 
   /** After a flush: re-derive from the focus row before the earliest touched observation to the end. */
@@ -173,12 +198,12 @@ export class Derived {
   /** Re-derives the activity documents of the given hours from the intervals that remain (after a deletion). */
   rebuildDocs(hourStarts: Iterable<number>): void {
     const del = this.db.prepare(`DELETE FROM search_docs WHERE kind = 'activity' AND hour_start_wall_ms = ?`)
-    const rows = this.db.prepare(`SELECT * FROM intervals WHERE start_wall_ms >= ? AND start_wall_ms < ? ORDER BY id`)
+    // Any interval that touches hour h, whatever its offset (an hour either side covers half-hour zones); filtered exactly.
+    const rows = this.db.prepare(`SELECT * FROM intervals WHERE start_wall_ms >= ? AND start_wall_ms < ? AND end_wall_ms >= ? ORDER BY id`)
     for (const h of hourStarts) {
       del.run(h)
-      // An interval belongs to hour h only if it starts within an hour of h, whatever its offset; filter exactly.
-      for (const i of rows.all(h - HOUR_MS, h + HOUR_MS) as IntervalRow[]) {
-        if (hourStart(i.start_wall_ms, i.tz_offset_min) === h && (i.title !== null || i.url !== null)) this.upsertDoc.run({ ...i, title: nfc(i.title), files: nfc(i.files), hour: h })
+      for (const i of rows.all(h - MAX_INTERVAL_MS, h + 2 * HOUR_MS, h - HOUR_MS) as IntervalRow[]) {
+        if (hoursOf(i.start_wall_ms, i.end_wall_ms, i.tz_offset_min).includes(h)) this.writeDocs(i, h)
       }
     }
   }

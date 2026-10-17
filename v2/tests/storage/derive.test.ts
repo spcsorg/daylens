@@ -75,3 +75,17 @@ test('an interval stops where a capture gap starts', () => {
   assert.deepEqual(r.q(`SELECT end_wall_ms FROM intervals WHERE title = 'a.md - Editor'`), [{ end_wall_ms: T0 + MIN + 10_000 }])
   r.close()
 })
+
+test('a long-running activity is searchable in every hour it covers, not only the hour it began', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'marathon-session.md - Editor', T0 + 30 * MIN))
+  for (let t = T0 + 31 * MIN; t <= T0 + 2 * HOUR + 10 * MIN; t += MIN) r.feed(focus(editor, 'marathon-session.md - Editor', t, 'reconcile'))
+  r.store.flush()
+  const hours = r.q<{ h: number }>(`SELECT hour_start_wall_ms AS h FROM search_docs WHERE title LIKE 'marathon%' ORDER BY h`).map((x) => x.h - T0)
+  assert.deepEqual(hours, [0, HOUR, 2 * HOUR])
+  assert.equal(r.storage.search('marathon', { fromWallMs: T0 + HOUR, toWallMs: T0 + 2 * HOUR }).length, 1, 'found when searching only the second hour')
+  r.storage.derived.rebuild()
+  assert.deepEqual(r.q<{ h: number }>(`SELECT hour_start_wall_ms AS h FROM search_docs WHERE title LIKE 'marathon%' ORDER BY h`).map((x) => x.h - T0), hours, 'a rebuild gives the same')
+  r.close()
+})
