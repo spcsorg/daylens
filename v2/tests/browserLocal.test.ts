@@ -9,6 +9,7 @@ import { BrowserLocal, type ConfirmRequest, type PeerCheck } from '../capture/br
 import { Privacy } from '../capture/normalize.ts'
 import { newPairing, pairLink, type Pairing } from '../capture/pairing.ts'
 import { Pause } from '../capture/pause.ts'
+import { memorySecrets, type SecretStore } from '../capture/secrets.ts'
 import { ServiceNormalizer } from '../capture/pipeline.ts'
 import { app, focus } from './support/lines.ts'
 import { MemorySink } from './support/memorySink.ts'
@@ -41,15 +42,14 @@ async function freePorts(n: number): Promise<number[]> {
   return ports
 }
 
-async function service(ports: number[], peer: PeerCheck = async () => ({ ok: true, browser: chrome }), asks: ConfirmRequest[] = [], front = chrome) {
-  const sink = new Sink()
+async function service(ports: number[], peer: PeerCheck = async () => ({ ok: true, browser: chrome }), asks: ConfirmRequest[] = [], front = chrome, secrets: SecretStore = memorySecrets(), sink = new Sink()) {
   const privacy = new Privacy([])
   const pages = new BrowserPages(sink, privacy)
   const pause = new Pause(sink)
   const norm = new ServiceNormalizer(sink, privacy, pause, pages)
   norm.handle(focus(front, null, Date.now() - 1000, 'app_changed'))
   const logs: string[] = []
-  const local = new BrowserLocal(pages, pause, sink, { ports, peerCheck: peer, clock: () => norm.clock(), log: (m) => logs.push(m), handshakeMs: 2000, confirm: (r) => asks.push(r) })
+  const local = new BrowserLocal(pages, pause, sink, { ports, peerCheck: peer, clock: () => norm.clock(), log: (m) => logs.push(m), handshakeMs: 2000, confirm: (r) => asks.push(r), secrets })
   assert.ok(await local.start())
   return { sink, local, logs, norm }
 }
@@ -355,3 +355,63 @@ test('malformed frames before and during authentication close that connection an
     process.off('unhandledRejection', onRejection)
   }
 })
+
+test('pairing keys live in the secret store; the database keeps only ids, origins and times', async () => {
+  const [p] = await freePorts(1)
+  const secrets = memorySecrets()
+  const { sink, local } = await service([p!], undefined, [], chrome, secrets)
+  const pairing = newPairing(ORIGIN)
+  local.addPairLink(pairLink(pairing))
+  const first = await connect([p!], pairing)
+  assert.equal(first.r.kind, 'connected')
+  if (first.r.kind === 'connected') first.r.session.close()
+  await local.stop()
+  const meta = sink.meta('browser_pairings') ?? ''
+  assert.ok(!meta.includes(pairing.key), 'no key material in the database')
+  assert.deepEqual(Object.keys(JSON.parse(meta)[0]).sort(), ['id', 'origin', 'paired_wall_ms'])
+  assert.equal(secrets.items.get(pairing.id), pairing.key)
+
+  // A restart reads the key back from the secret store.
+  const again = await service([p!], undefined, [], chrome, secrets, sink)
+  const second = await connect([p!], pairing)
+  assert.equal(second.r.kind, 'connected')
+  if (second.r.kind === 'connected') second.r.session.close()
+  // Unpairing removes the secret too.
+  assert.ok(again.local.unpair(pairing.id))
+  await sleep(20)
+  assert.equal(secrets.items.has(pairing.id), false)
+  await again.local.stop()
+})
+
+test('a key left in the database by an earlier version moves to the secret store at start', async () => {
+  const [p] = await freePorts(1)
+  const sink = new Sink()
+  const pairing = newPairing(ORIGIN)
+  sink.setMeta('browser_pairings', JSON.stringify([{ id: pairing.id, key: pairing.key, origin: ORIGIN, paired_wall_ms: 1 }]))
+  const secrets = memorySecrets()
+  const { local } = await service([p!], undefined, [], chrome, secrets, sink)
+  assert.ok(!(sink.meta('browser_pairings') ?? '').includes(pairing.key))
+  assert.equal(secrets.items.get(pairing.id), pairing.key)
+  const { r } = await connect([p!], pairing)
+  assert.equal(r.kind, 'connected')
+  if (r.kind === 'connected') r.session.close()
+  await local.stop()
+})
+
+test('a pairing whose secret is gone from secure storage is unpaired, never trusted', async () => {
+  const [p] = await freePorts(1)
+  const secrets = memorySecrets()
+  const { local, sink } = await service([p!], undefined, [], chrome, secrets)
+  const pairing = newPairing(ORIGIN)
+  local.addPairLink(pairLink(pairing))
+  const first = await connect([p!], pairing)
+  assert.equal(first.r.kind, 'connected')
+  if (first.r.kind === 'connected') first.r.session.close()
+  await local.stop()
+  secrets.items.clear()
+  const after = await service([p!], undefined, [], chrome, secrets, sink)
+  assert.equal((await connect([p!], pairing)).r.kind, 'unpaired')
+  assert.equal(after.local.pairings().length, 0, 'the record without a secret is removed')
+  await after.local.stop()
+})
+

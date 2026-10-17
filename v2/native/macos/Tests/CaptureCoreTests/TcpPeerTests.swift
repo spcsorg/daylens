@@ -35,4 +35,14 @@ final class TcpPeerTests: XCTestCase {
     XCTAssertNil(PeerWalk.ports(["x", "--tcp-peer", "70000", "1"]))
     XCTAssertEqual(PeerWalk.answer(.failure(.other_user)), #"{"ok":false,"reason":"other_user"}"#)
   }
+
+  func testSecretCommandsTakeOnlyAPairingId() {
+    XCTAssertEqual(SecretCommand.parse(["x", "--secret", "get", "AAAAAAAAAAAAAAAAAAAAAA"]), SecretCommand(op: .get, name: "AAAAAAAAAAAAAAAAAAAAAA"))
+    XCTAssertEqual(SecretCommand.parse(["x", "--secret", "set", "a-b_c0123456789ABCDEFG"])?.op, .set)
+    XCTAssertNil(SecretCommand.parse(["x", "--secret", "list", "AAAAAAAAAAAAAAAAAAAAAA"]))
+    XCTAssertNil(SecretCommand.parse(["x", "--secret", "get", "short"]))
+    XCTAssertNil(SecretCommand.parse(["x", "--secret", "get", "../../../../../etc/pass"]))
+    XCTAssertNil(SecretCommand.parse(["x", "--secret", "get"]))
+  }
 }
+

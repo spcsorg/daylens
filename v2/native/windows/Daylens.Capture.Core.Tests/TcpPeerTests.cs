@@ -65,4 +65,17 @@ public class TcpPeerTests
         var ok = Encoding.UTF8.GetString(TcpPeer.Answer(new AppInfo("C:\\c\\chrome.exe", "Google Chrome", "C:\\c\\chrome.exe", 900, false, IdentityState.Ok, null), null));
         Assert.StartsWith("{\"ok\":true,\"browser\":{\"app_id\":\"C:\\\\c\\\\chrome.exe\"", ok);
     }
+
+    [Fact]
+    public void SecretCommandsTakeOnlyAPairingId()
+    {
+        Assert.Equal(new SecretCommand("get", "AAAAAAAAAAAAAAAAAAAAAA"), SecretCommand.Parse(["--secret", "get", "AAAAAAAAAAAAAAAAAAAAAA"]));
+        Assert.Equal("set", SecretCommand.Parse(["--secret", "set", "a-b_c0123456789ABCDEFG"])!.Op);
+        Assert.Null(SecretCommand.Parse(["--secret", "list", "AAAAAAAAAAAAAAAAAAAAAA"]));
+        Assert.Null(SecretCommand.Parse(["--secret", "get", "short"]));
+        Assert.Null(SecretCommand.Parse(["--secret", "get", "..\\..\\..\\..\\..\\x\\y"]));
+        Assert.Null(SecretCommand.Parse(["--secret", "get"]));
+        Assert.Equal("Daylens/browser-pairing/AAAAAAAAAAAAAAAAAAAAAA", SecretCommand.Target("AAAAAAAAAAAAAAAAAAAAAA"));
+    }
 }
+

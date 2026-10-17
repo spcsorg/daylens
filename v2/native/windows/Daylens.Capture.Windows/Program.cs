@@ -28,6 +28,7 @@ internal static unsafe class Program
     {
         if (BrowserHost.TryRun(args) is int hostExit) return hostExit;
         if (TcpPeerHost.TryRun(args) is int peerExit) return peerExit;
+        if (SecretTool.TryRun(args) is int secretExit) return secretExit;
         _heartbeatS = IntArg(args, "--heartbeat-s", 15, 3600);
         _idleThresholdS = IntArg(args, "--idle-threshold-s", 120, 86400);
         _reconcileS = IntArg(args, "--reconcile-s", 60, 86400);

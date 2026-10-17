@@ -10,6 +10,7 @@ import IOKit.pwr_mgt
 
 BrowserHost.runIfLaunchedByBrowser()
 TcpPeer.runIfAsked()
+SecretTool.runIfAsked()
 
 let helperVersion = "2.0.0-dev"
 

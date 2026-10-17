@@ -127,9 +127,16 @@ Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
 - The extension makes a pairing (`id`: 16 random bytes, `key`: 32 random bytes, both base64url, and its own origin)
   and opens `daylens://pair?v=1&id=<id>&key=<key>&origin=<origin>`. The operating system hands the link to the Daylens
   app, which writes `{"op":"pair","link":"<link>"}` to the service's stdin. The key never crosses the socket.
-- A link only makes a pending pairing (at most 8, oldest dropped). It becomes stored (meta key `browser_pairings`)
-  only when a connection from that same origin proves it, and then replaces earlier pairings for that origin. The app
-  can remove one with `{"op":"unpair","id":"<id>"}`.
+- A link only makes a pending pairing (at most 8, oldest dropped), kept in memory. It becomes stored only when a
+  connection from that same origin proves it, and then replaces earlier pairings for that origin. The app can remove
+  one with `{"op":"unpair","id":"<id>"}`.
+- A stored pairing's key is kept in the platform's secure storage through the capture helper:
+  `<helper> --secret set|get|delete <id>`, with the key on stdin (`set`) or stdout (`get`), never on the command line;
+  exit 2 means no such item. macOS: a generic password in the login Keychain, service `app.daylens.browser.pairing`,
+  account `<id>`. Windows: a generic credential in Credential Manager, target `Daylens/browser-pairing/<id>`. The
+  database (meta key `browser_pairings`) keeps only `id`, `origin` and `paired_wall_ms`. A key found in the database by
+  an earlier version moves to secure storage at start. A pairing whose key is missing from secure storage is removed
+  and the browser shows Connect again; unpairing or replacing a pairing deletes its key.
 - A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own
   pairing. A new Firefox pairing therefore waits for the person: once proven, the service holds the connection in a
   confirm phase, sends the extension `{"t":"awaiting"}`, and writes `{"op":"confirm_pairing","id":"<id>","browser":"<app

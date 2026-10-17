@@ -26,6 +26,7 @@ import {
   transcript,
   type Pairing,
 } from './pairing.ts'
+import type { SecretStore } from './secrets.ts'
 import { MAX_TITLE_CHARS, MAX_URL_CHARS, parseLine, type AppIdentity, type Line, type Platform } from './protocol.ts'
 import { acceptKey, encodeClose, encodeText, FrameDecoder, OP_CLOSE, OP_PING, OP_PONG, OP_TEXT, encodeFrame } from './websocket.ts'
 
@@ -75,7 +76,10 @@ export interface PairingStore {
   setMeta(key: string, value: string | null): void
 }
 
-interface Stored extends Pairing {
+// What the database keeps about a pairing. The key is in the secret store under the pairing's id.
+interface Stored {
+  id: string
+  origin: string
   paired_wall_ms: number
 }
 
@@ -94,6 +98,7 @@ export interface ConfirmRequest {
 export interface BrowserLocalOptions {
   ports?: readonly number[]
   peerCheck: PeerCheck
+  secrets: SecretStore
   // Asks the app to show Allow / Don't allow; the answer comes back through decide().
   confirm?: (req: ConfirmRequest) => void
   // The capture helper's clock, so service-stamped tab lines sort with the helper's own lines.
@@ -191,6 +196,10 @@ export class BrowserLocal {
   private server: http.Server | null = null
   private readonly conns = new Set<Conn>()
   private paired: Stored[]
+  private readonly secrets: SecretStore
+  private readonly keys = new Map<string, string>()
+  // Keys found in the database by an earlier version, moved to the secret store at start.
+  private legacyKeys: { id: string; key: string }[] = []
   private readonly pending: (Pairing & { approved?: boolean })[] = []
   private readonly asked = new Set<string>()
   private readonly confirm: (req: ConfirmRequest) => void
@@ -207,13 +216,21 @@ export class BrowserLocal {
     this.log = opts.log ?? (() => {})
     this.now = opts.now ?? Date.now
     this.handshakeMs = opts.handshakeMs ?? HANDSHAKE_MS
+    this.secrets = opts.secrets
     this.paired = this.load()
   }
 
   private load(): Stored[] {
     try {
       const v = JSON.parse(this.store.meta(META_KEY) ?? '[]')
-      return Array.isArray(v) ? v.filter((p) => isPairId(p?.id) && typeof p.key === 'string' && typeof p.origin === 'string') : []
+      if (!Array.isArray(v)) return []
+      const out: Stored[] = []
+      for (const p of v) {
+        if (!p || !isPairId(p.id) || typeof p.origin !== 'string') continue
+        if (typeof p.key === 'string') this.legacyKeys.push({ id: p.id, key: p.key })
+        out.push({ id: p.id, origin: p.origin, paired_wall_ms: typeof p.paired_wall_ms === 'number' ? p.paired_wall_ms : 0 })
+      }
+      return out
     } catch {
       return []
     }
@@ -223,8 +240,24 @@ export class BrowserLocal {
     this.store.setMeta(META_KEY, this.paired.length ? JSON.stringify(this.paired) : null)
   }
 
+  private async migrateLegacyKeys(): Promise<void> {
+    const legacy = this.legacyKeys
+    this.legacyKeys = []
+    for (const { id, key } of legacy) {
+      try {
+        await this.secrets.set(id, key)
+      } catch {
+        // Without secure storage the pairing cannot be kept; the browser connects again with a new one.
+        this.paired = this.paired.filter((p) => p.id !== id)
+        this.log('browser pairing dropped reason=secret_store_failed')
+      }
+    }
+    if (legacy.length) this.save()
+  }
+
   // Listens on the first of the fixed ports that is free. Another process holding a port only moves Daylens along.
   async start(): Promise<boolean> {
+    await this.migrateLegacyKeys()
     for (const port of this.ports) {
       const server = http.createServer({ requestTimeout: 5000, headersTimeout: 5000, maxHeaderSize: 8192 }, (_req, res) => {
         res.writeHead(404, { connection: 'close' }).end()
@@ -283,9 +316,23 @@ export class BrowserLocal {
     this.paired = this.paired.filter((p) => p.id !== id)
     if (this.paired.length === before) return false
     this.save()
+    this.forget(id)
     for (const c of this.conns) if (c.pairing?.id === id) this.close(c, 1008)
     this.log('browser pairing removed')
     return true
+  }
+
+  private forget(id: string): void {
+    this.keys.delete(id)
+    this.secrets.delete(id).catch(() => this.log('browser pairing secret_delete_failed'))
+  }
+
+  private async keyOf(stored: Stored): Promise<string | null> {
+    const cached = this.keys.get(stored.id)
+    if (cached) return cached
+    const key = await this.secrets.get(stored.id)
+    if (key) this.keys.set(stored.id, key)
+    return key
   }
 
   status(s: PauseState): void {
@@ -382,12 +429,26 @@ export class BrowserLocal {
     const hello = c.hello
     const stored = this.paired.find((p) => p.id === hello.pair && p.origin === c.origin)
     const pend = stored ? null : this.pending.find((p) => p.id === hello.pair && p.origin === c.origin)
-    if (!stored && !pend) {
+    let key = pend?.key ?? null
+    if (stored) {
+      try {
+        key = await this.keyOf(stored)
+      } catch {
+        return this.refuse(c, 'secret_store_failed')
+      }
+      if ((c.phase as Phase) === 'closed') return
+      if (key === null) {
+        // The secret is gone from secure storage: the pairing cannot be proven any more.
+        this.paired = this.paired.filter((p) => p.id !== stored.id)
+        this.save()
+      }
+    }
+    if (key === null) {
       c.send({ t: 'unpaired' })
       this.log('browser local refused reason=unpaired')
       return this.close(c, 1008)
     }
-    c.pairing = { ...(stored ?? pend)!, pending: !stored }
+    c.pairing = stored ? { id: stored.id, key, origin: stored.origin, pending: false } : { ...pend!, pending: true }
     c.svcNonce = randomB64url(32)
     c.phase = 'proof'
     const mine = await proof(c.pairing.key, transcript('service', c.origin, port, hello.pair, hello.nonce, c.svcNonce))
@@ -414,7 +475,7 @@ export class BrowserLocal {
       }
       return
     }
-    this.ready(c, p)
+    await this.ready(c, p)
   }
 
   // The app's answer to a confirm_pairing request.
@@ -436,18 +497,26 @@ export class BrowserLocal {
     this.log('browser pairing allowed')
     const [first, ...rest] = waiting
     for (const c of rest) this.close(c, 1008)
-    if (first) this.ready(first, first.pairing!)
+    if (first) this.ready(first, first.pairing!).catch(() => this.refuse(first, 'handler_failed'))
     return true
   }
 
-  private ready(c: Conn, p: Pairing & { pending: boolean }): void {
+  private async ready(c: Conn, p: Pairing & { pending: boolean }): Promise<void> {
     if (p.pending) {
       // The first proven connection makes the pairing real and replaces any earlier one for the same extension.
+      try {
+        await this.secrets.set(p.id, p.key)
+      } catch {
+        return this.refuse(c, 'secret_store_failed')
+      }
+      if (c.phase === 'closed') return
+      this.keys.set(p.id, p.key)
       const i = this.pending.findIndex((x) => x.id === p.id)
       if (i !== -1) this.pending.splice(i, 1)
       const replaced = this.paired.filter((x) => x.origin === p.origin)
-      this.paired = [...this.paired.filter((x) => x.origin !== p.origin), { id: p.id, key: p.key, origin: p.origin, paired_wall_ms: this.now() }]
+      this.paired = [...this.paired.filter((x) => x.origin !== p.origin), { id: p.id, origin: p.origin, paired_wall_ms: this.now() }]
       this.save()
+      for (const r of replaced) this.forget(r.id)
       for (const o of this.conns) if (o !== c && replaced.some((r) => r.id === o.pairing?.id)) this.close(o, 1008)
       this.log(`browser pairing confirmed replaced=${replaced.length}`)
     }

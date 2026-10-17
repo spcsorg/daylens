@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { createInterface } from 'node:readline'
 import { BrowserPages } from './browser.ts'
 import { BrowserLocal, helperPeerCheck, localEnabled } from './browserLocal.ts'
+import { helperSecrets } from './secrets.ts'
 import { BrowserSocket, statusMsg } from './browserSocket.ts'
 import { Privacy } from './normalize.ts'
 import { Pause } from './pause.ts'
@@ -92,6 +93,7 @@ void browserSocket.start()
 if (localEnabled()) {
   browserLocal = new BrowserLocal(pages, pause, store, {
     peerCheck: helperPeerCheck(values.helper),
+    secrets: helperSecrets(values.helper),
     clock: () => normalizer.clock(),
     log,
     // The app shows Allow / Don't allow and answers with pair_decision on stdin.
