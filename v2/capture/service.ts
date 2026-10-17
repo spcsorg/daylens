@@ -50,7 +50,7 @@ storage.attachCapture({
     normalizer.interrupt(supervisor.currentPoint())
     supervisor.requestSnapshot()
   },
-  setExclusions: (rules) => normalizer.setPrivacy(new Privacy(rules)),
+  setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
 })
 
 let stopping = false

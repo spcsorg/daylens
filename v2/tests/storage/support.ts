@@ -23,7 +23,7 @@ export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean } = {}) {
   let normalizer = new Normalizer(store, new Privacy(store.exclusions()))
   storage.attachCapture({
     interrupt: () => normalizer.interrupt({ wall_ms: clock.t, mono_us: null, boot: null }),
-    setExclusions: (rules) => normalizer.setPrivacy(new Privacy(rules)),
+    setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
   })
   const feed = (l: Line) => {
     clock.t = Math.max(clock.t, l.t.wall_ms)
@@ -41,7 +41,10 @@ export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean } = {}) {
     get normalizer() {
       return normalizer
     },
-    reopenNormalizer: () => (normalizer = new Normalizer(store, new Privacy(store.exclusions()))),
+    reopenNormalizer: () => {
+      normalizer = new Normalizer(store, new Privacy(store.exclusions(), undefined, storage.keptTitleApps()))
+      return normalizer
+    },
     feed,
     q,
     close: () => {

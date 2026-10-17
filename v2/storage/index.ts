@@ -2,7 +2,8 @@
 // writer; every other reader opens the database read-only and follows the change log (changes.ts).
 import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
-import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
+import { keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type ObservationRow } from '../capture/normalize.ts'
+import type { AppIdentity } from '../capture/protocol.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
 import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
@@ -87,7 +88,7 @@ export interface SearchHit {
 export interface CaptureControl {
   // Forget open rows and ask the helper for current state, so no row is extended across the change.
   interrupt(): void
-  setExclusions(rules: ExclusionRule[]): void
+  setPrivacy(privacy: Privacy): void
 }
 
 /** A deletion is in force (capture and import refuse the material) when this returns; `done` settles once it is removed. */
@@ -97,6 +98,23 @@ export interface DeletionHandle {
   done: Promise<DeletionResult>
   // Also gone from the files on disk (the write-ahead log can hold old pages while a reader uses them).
   purged: Promise<void>
+}
+
+export class KeepTitlesRefused extends Error {
+  readonly reason: 'opens_web_links' | 'browser' | 'browser_engine' | 'engine_unknown' | 'unsigned' | 'already_kept'
+
+  constructor(reason: KeepTitlesRefused['reason']) {
+    const messages = {
+      opens_web_links: "Daylens can't keep titles for apps that open web links, since they can show private browsing.",
+      browser: "Daylens can't keep titles for browsers, since they can show private browsing.",
+      browser_engine: "Daylens can't keep titles for browser engines, since they can show private browsing.",
+      engine_unknown: "Daylens can't verify whether this app can show private browsing.",
+      unsigned: "Daylens can't verify this app's signed identity.",
+      already_kept: 'Daylens already keeps titles for this app.',
+    }
+    super(messages[reason])
+    this.reason = reason
+  }
 }
 
 export class DeletedMaterialError extends Error {}
@@ -165,6 +183,7 @@ export class Storage {
 
   attachCapture(control: CaptureControl): void {
     this.capture = control
+    this.installPrivacy()
   }
 
   /** Arms the pause and retention timers, and resumes work left unfinished: derivation, and deletions still pending. */
@@ -632,8 +651,47 @@ export class Storage {
 
   private installExclusions(): void {
     this.rules.loadExclusions()
-    this.capture?.setExclusions(this.store.exclusions())
+    this.installPrivacy()
     this.capture?.interrupt()
+  }
+
+  private installPrivacy(): void {
+    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, this.keptTitleApps()))
+  }
+
+  keptTitleApps(): KeptTitleApp[] {
+    return this.getSetting<KeptTitleApp[]>('kept_title_apps') ?? []
+  }
+
+  keepTitles(app: AppIdentity): string {
+    if (knownBrowser(app)) throw new KeepTitlesRefused('browser')
+    if (new Privacy([]).classify(app).title === 'allowed') throw new KeepTitlesRefused('already_kept')
+    if (app.registered_browser) throw new KeepTitlesRefused('opens_web_links')
+    if (app.engine === 'browser') throw new KeepTitlesRefused('browser_engine')
+    if (app.engine === 'unknown') throw new KeepTitlesRefused('engine_unknown')
+    const entry = keptTitleIdentity(app)
+    if (!entry) throw new KeepTitlesRefused('unsigned')
+    if (this.keptTitleApps().some((a) => a.id === entry.id)) return entry.id
+    this.flushOrThrow()
+    return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
+      const apps = this.keptTitleApps()
+      if (!apps.some((a) => a.id === entry.id)) this.putSetting('kept_title_apps', [...apps, entry])
+      return entry.id
+    }, () => {
+      this.installPrivacy()
+      this.capture?.interrupt()
+    })
+  }
+
+  stopKeepingTitles(id: string): void {
+    if (!this.keptTitleApps().some((a) => a.id === id)) return
+    this.flushOrThrow()
+    this.bus.commit('kept_titles', { id, removed: true }, () => {
+      this.putSetting('kept_title_apps', this.keptTitleApps().filter((a) => a.id !== id))
+    }, () => {
+      this.installPrivacy()
+      this.capture?.interrupt()
+    })
   }
 
   getSetting<T>(key: string): T | null {

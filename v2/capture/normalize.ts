@@ -164,13 +164,49 @@ function basename(p: string): string {
   return (i >= 0 ? p.slice(i + 1) : p).toLowerCase()
 }
 
+export interface KeptTitleApp {
+  id: string
+  app_id: string
+  signer: string | null
+}
+
+export function keptTitleIdentity(app: AppIdentity): KeptTitleApp | null {
+  if (app.identity_state !== 'ok' || !app.app_id) return null
+  const appId = app.app_id.toLowerCase()
+  if (app.store) {
+    // The OS-verified package family binds its publisher without a separate signer.
+    if (app.store.aumid.toLowerCase() !== appId) return null
+    return { id: JSON.stringify(['package', appId]), app_id: app.app_id, signer: null }
+  }
+  if (!app.signer) return null
+  const signer = app.signer.toLowerCase()
+  const exe = app.path ? basename(app.path) : null
+  if (exe?.endsWith('.exe') || appId.endsWith('.exe')) {
+    const vi = app.version_info
+    if (!exe || (!vi?.original_filename && !vi?.product_name)) return null
+    return {
+      id: JSON.stringify(['exe', appId, exe, signer, vi?.original_filename?.toLowerCase() ?? null, vi?.product_name?.toLowerCase() ?? null]),
+      app_id: app.app_id,
+      signer: app.signer,
+    }
+  }
+  return { id: JSON.stringify(['app', appId, signer]), app_id: app.app_id, signer: app.signer }
+}
+
+export function knownBrowser(app: AppIdentity): boolean {
+  return (app.app_id !== null && KNOWN_BROWSER_APP_IDS.has(app.app_id.toLowerCase())) ||
+    (app.path !== null && KNOWN_BROWSER_EXES.has(basename(app.path)))
+}
+
 export class Privacy {
   private readonly byAppId = new Set<string>()
   private readonly byExe = new Set<string>()
 
   private readonly trustedApps: readonly TrustedApp[]
+  private readonly keptApps: ReadonlySet<string>
 
-  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS) {
+  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS, keptApps: readonly KeptTitleApp[] = []) {
+    this.keptApps = new Set(keptApps.map((a) => a.id))
     this.trustedApps = trustedApps
     for (const r of rules) (r.match === 'app_id' ? this.byAppId : this.byExe).add(r.value.toLowerCase())
   }
@@ -191,9 +227,8 @@ export class Privacy {
     if (app.identity_state !== 'ok' || (appId === null && exe === null)) {
       return { excluded: false, title: 'withheld_unknown_app' }
     }
-    // A known or registered browser is always withheld. Anything that ships a browser engine keeps its titles
-    // only when it is on the trusted list with a matching signer; no way to tell is never treated as normal.
-    if ((appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) || (exe !== null && KNOWN_BROWSER_EXES.has(exe))) {
+    // Browser rules win over both built-in and user-kept identities.
+    if (knownBrowser(app)) {
       return { excluded: false, title: 'withheld_browser' }
     }
     // A browser engine is never exempted by any list, and a registered http/https handler only where decided.
@@ -201,7 +236,7 @@ export class Privacy {
     if (app.registered_browser && !entry?.registers_links) return { excluded: false, title: 'withheld_browser' }
     if (app.engine === 'unknown') return { excluded: false, title: 'unknown', reason: 'engine_uncertain' }
     if (app.engine === 'browser') return { excluded: false, title: 'unknown', reason: 'browser_engine' }
-    if (app.engine === 'app_runtime' && !entry) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
+    if (app.engine === 'app_runtime' && !entry && !this.keptApps.has(keptTitleIdentity(app)?.id ?? '')) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
     return { excluded: false, title: 'allowed' }
   }
 }
@@ -359,7 +394,7 @@ export class Normalizer {
     }
 
     const known = app.identity_state === 'ok'
-    const key = JSON.stringify([known ? app.app_id : null, app.pid, app.identity_state, win.window, title, titleState, line.t.tz, line.t.tz_offset_min])
+    const key = JSON.stringify([known ? app.app_id : null, app.signer, app.store?.aumid, app.version_info, app.pid, app.identity_state, win.window, title, titleState, line.t.tz, line.t.tz_offset_min])
     // A fresh read after the title channel recovers starts a new row, even with the same title.
     const freshAfterStale = this.focus?.stale === true && this.titleChannel === 'ok'
     if (this.focus && this.focus.key === key && !freshAfterStale) {
