@@ -311,7 +311,8 @@ export class Store implements Sink {
 
   // Gaps left open by a service that died are closed where its coverage ended.
   closeDanglingGaps(end: GapPoint): void {
-    this.db.prepare('UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE end_wall_ms IS NULL').run(end.wall_ms, end.mono_us, end.boot)
+    // A pause outlives the service that started it; storage owns its gap and ends it on resume.
+    this.db.prepare(`UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE end_wall_ms IS NULL AND reason != 'paused'`).run(end.wall_ms, end.mono_us, end.boot)
     this.db.prepare(`UPDATE capture_runs SET ended_wall_ms = coalesce(last_heartbeat_wall_ms, started_wall_ms), end_reason = 'service_died' WHERE ended_wall_ms IS NULL`).run()
   }
 
@@ -404,6 +405,20 @@ export class Store implements Sink {
       [id, gap.reason, gap.scope, gap.run, gap.start.wall_ms, gap.start.mono_us, gap.start.boot, gap.detail ? JSON.stringify(gap.detail) : null],
     )
     return id
+  }
+
+  /** Writes a gap at once, inside the caller's transaction, for state that must commit together with it (a pause). */
+  writeGapNow(gap: GapStart, end: GapPoint | null): number {
+    const id = this.nextGapId++
+    this.db
+      .prepare('INSERT INTO capture_gaps (id, reason, scope, run, start_wall_ms, start_mono_us, start_boot, end_wall_ms, end_mono_us, end_boot, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, gap.reason, gap.scope, gap.run, gap.start.wall_ms, gap.start.mono_us, gap.start.boot, end?.wall_ms ?? null, end?.mono_us ?? null, end?.boot ?? null, gap.detail ? JSON.stringify(gap.detail) : null)
+    return id
+  }
+
+  /** Sets a gap's end at once (earlier or later than before), inside the caller's transaction. */
+  setGapEndNow(id: number, end: GapPoint): void {
+    this.db.prepare('UPDATE capture_gaps SET end_wall_ms = max(?, start_wall_ms), end_mono_us = ?, end_boot = ? WHERE id = ?').run(end.wall_ms, end.mono_us, end.boot, id)
   }
 
   updateGap(id: number, patch: { reason?: GapReason; detail?: GapDetail }): void {

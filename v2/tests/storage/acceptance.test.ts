@@ -400,3 +400,37 @@ test('a finished pause keeps refusing material stamped inside it: after resume, 
   assert.equal(r2.q(`SELECT 1 FROM observations WHERE title = 'between.md - Editor'`).length, 1, 'time between pauses is still captured')
   r2.close()
 })
+
+test('an active pause keeps one open gap through a restart, and resuming early ends it at the moment of resume', () => {
+  resetSeq()
+  const r = rig()
+  r.clock.t = T0
+  r.storage.pause('until_resumed')
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 3 * MIN
+  // What the supervisor does at startup: gaps left open by the last run end where its coverage ended.
+  r2.store.closeDanglingGaps({ wall_ms: T0 + MIN, mono_us: null, boot: null })
+  r2.storage.start()
+  assert.deepEqual(r2.q(`SELECT start_wall_ms, end_wall_ms FROM capture_gaps WHERE reason = 'paused'`), [{ start_wall_ms: T0, end_wall_ms: null }], 'still open while still paused')
+  r2.clock.t = T0 + 5 * MIN
+  r2.storage.resume()
+  assert.deepEqual(r2.q(`SELECT start_wall_ms, end_wall_ms FROM capture_gaps WHERE reason = 'paused'`), [{ start_wall_ms: T0, end_wall_ms: T0 + 5 * MIN }])
+  r2.clock.t = T0 + 10 * MIN
+  r2.storage.pause('hour')
+  r2.clock.t = T0 + 20 * MIN
+  r2.storage.resume()
+  assert.deepEqual(r2.q(`SELECT start_wall_ms, end_wall_ms FROM capture_gaps WHERE reason = 'paused' ORDER BY start_wall_ms`)[1], { start_wall_ms: T0 + 10 * MIN, end_wall_ms: T0 + 20 * MIN }, 'early resume ends the gap at resume, not at the planned hour')
+  r2.close()
+})
+
+test('a pause and its gap are written in one transaction', () => {
+  const r = rig()
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  // Nothing queued in the capture store is written after the pause commits.
+  r.store.flush = () => true
+  r.storage.pause('hour')
+  const rows = reader.prepare(`SELECT p.gap_id, g.reason FROM pauses p LEFT JOIN capture_gaps g ON g.id = p.gap_id`).all()
+  assert.deepEqual(rows, [{ gap_id: rows[0] && (rows[0] as { gap_id: number }).gap_id, reason: 'paused' }])
+  reader.close()
+})

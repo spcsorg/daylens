@@ -580,8 +580,7 @@ export class Storage {
       'pause',
       { since_wall_ms: since, until_wall_ms: untilWallMs },
       () => {
-        const gap = this.store.openGap({ reason: 'paused', scope: 'all', run: null, start: this.point(since), detail: null })
-        if (untilWallMs !== null) this.store.closeGap(gap, this.point(untilWallMs))
+        const gap = this.store.writeGapNow({ reason: 'paused', scope: 'all', run: null, start: this.point(since), detail: null }, untilWallMs === null ? null : this.point(untilWallMs))
         const id = Number(this.db.prepare('INSERT INTO pauses (since_wall_ms, until_wall_ms, gap_id) VALUES (?, ?, ?)').run(since, untilWallMs, gap).lastInsertRowid)
         return { id, since_wall_ms: since, until_wall_ms: untilWallMs, ended_wall_ms: null, gap_id: gap }
       },
@@ -618,7 +617,7 @@ export class Storage {
       'pause',
       { ended: reason, at_wall_ms: end },
       () => {
-        if (p.gap_id !== null) this.store.closeGap(p.gap_id, this.point(end))
+        if (p.gap_id !== null) this.store.setGapEndNow(p.gap_id, this.point(end))
         this.db.prepare('UPDATE pauses SET ended_wall_ms = ? WHERE id = ?').run(end, p.id)
       },
       () => {
