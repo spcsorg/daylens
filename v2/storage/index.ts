@@ -365,14 +365,7 @@ export class Storage {
         if (this.stopped) return new Promise<void>(() => {})
         this.onError(`checkpoint_${(err as Error).message}`)
       }
-      if (ok) {
-        try {
-          immediate(this.db, () => this.db.prepare(`DELETE FROM meta WHERE key = 'retention_purge_pending'`).run())
-          return
-        } catch (err) {
-          if (!isBusy(err)) throw err
-        }
-      }
+      if (ok) return
       await new Promise<void>((r) => setTimeout(r, wait).unref())
     }
   }
@@ -760,11 +753,8 @@ export class Storage {
     this.store.forgetOpenRows()
     const r = await this.deletions.prune(cutoff, this.now() - CHANGE_LOG_KEEP_MS)
     this.store.forgetOpenRows()
-    if (!r.purged) {
-      // Remembered across restarts, and retried until a checkpoint completes, even if the next prune removes nothing.
-      immediate(this.db, () => this.db.prepare(`INSERT INTO meta (key, value) VALUES ('retention_purge_pending', '1') ON CONFLICT (key) DO NOTHING`).run())
-      this.retentionPurge = this.checkpointWhenFree()
-    }
+    // The marker was written with the pruned rows; retried until a checkpoint completes, even across restarts.
+    if (!r.purged) this.retentionPurge = this.checkpointWhenFree()
     // Readers holding pruned hours, intervals or search results must drop them.
     if (r.data > 0 && cutoff !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: cutoff }, () => {})
     return r

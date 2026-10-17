@@ -144,10 +144,19 @@ export interface PruneResult {
  * One retention batch, each part its own short transaction: announcements older than `logKeepFrom`, and, when a
  * cutoff is set, observations, intervals, gaps and reads before it, then search entries and hours, time-boxed.
  */
+export const RETENTION_PURGE_PENDING = `INSERT INTO meta (key, value) VALUES ('retention_purge_pending', '1') ON CONFLICT (key) DO NOTHING`
+
 export function pruneStep(db: Database.Database, cutoff: number | null, logKeepFrom: number, batch = ROWS_PER_STEP, onTransaction: (ms: number) => void = () => {}): { removed: number; data: number } {
+  // Each transaction that removes content also records that the log must still be purged, so a crash before the
+  // checkpoint cannot lose that obligation.
   const timed = <T>(fn: () => T): T => {
     const t = performance.now()
-    const out = immediateRetrying(db, fn)
+    const out = immediateRetrying(db, () => {
+      const before = db.prepare('SELECT total_changes() AS n').get() as { n: number }
+      const result = fn()
+      if ((db.prepare('SELECT total_changes() AS n').get() as { n: number }).n > before.n) db.prepare(RETENTION_PURGE_PENDING).run()
+      return result
+    })
     onTransaction(performance.now() - t)
     return out
   }
@@ -226,8 +235,15 @@ export class Deleter {
       r.batches++
       if (step.removed === 0) break
     }
-    if (r.removed > 0) r.purged = this.checkpoint()
+    r.purged = this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get() === undefined || this.checkpointRetention()
     return r
+  }
+
+  /** Checkpoints and, if it completed, clears the retention purge marker; false while a reader still holds old pages. */
+  checkpointRetention(): boolean {
+    if (!this.checkpoint()) return false
+    immediateRetrying(this.db, () => this.db.prepare(`DELETE FROM meta WHERE key = 'retention_purge_pending'`).run())
+    return true
   }
 
   /** Moves old pages out of the write-ahead log; false while a reader's snapshot still holds them. Waits only briefly. */

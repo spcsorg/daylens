@@ -4,6 +4,7 @@ import { DeletedMaterialError, StaleHourError } from '../../storage/index.ts'
 import { app, focus, resetSeq } from '../support/lines.ts'
 import { diskContains, HOUR, MIN, rig, T0 } from './support.ts'
 import Database from 'better-sqlite3'
+import { Deleter } from '../../storage/deletion.ts'
 import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 
@@ -254,4 +255,33 @@ test('extending a row that no longer exists reports it, so capture starts a new 
   r.store.flush()
   assert.deepEqual(r.q(`SELECT event_wall_ms FROM observations`), [{ event_wall_ms: T0 + 2 * MIN }], 'the next sighting starts a new row')
   r.close()
+})
+
+test('a crash right after a prune still leaves the obligation to purge, written with the pruned rows', async () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'Saola canary old.md - Editor', T0))
+  r.feed(focus(editor, 'recent.md - Editor', T0 + 20 * 24 * HOUR))
+  r.store.flush()
+  r.store.database.pragma('wal_checkpoint(TRUNCATE)')
+  r.clock.t = T0 + 21 * 24 * HOUR
+  r.storage.setRetentionDays(7)
+  r.storage.stop()
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) AS n FROM observations').get()
+  // The worker's prune, on its own connection; the service dies before it hears back.
+  const conn = new Database(path.join(r.dir, DB_FILE))
+  conn.pragma('secure_delete = ON')
+  assert.equal(new Deleter(conn).prune(r.clock.t - 7 * 24 * HOUR, 0).purged, false)
+  conn.close()
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 21 * 24 * HOUR
+  r2.storage.start()
+  reader.prepare('COMMIT').run()
+  reader.close()
+  await r2.storage.retentionPurged()
+  assert.deepEqual(diskContains(r2.dir, 'Saola'), [])
+  r2.close()
 })

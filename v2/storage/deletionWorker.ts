@@ -14,7 +14,7 @@ const deleter = new Deleter(db)
 parentPort!.on('message', (job: { id: number; op: 'delete' | 'purge' | 'prune' | 'checkpoint'; tombstone: number; now: number; cutoff: number | null; logKeepFrom: number }) => {
   try {
     if (job.op === 'checkpoint') {
-      parentPort!.postMessage({ id: job.id, result: deleter.checkpoint() })
+      parentPort!.postMessage({ id: job.id, result: deleter.checkpointRetention() })
       return
     }
     if (job.op === 'prune') {
