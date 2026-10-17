@@ -270,9 +270,13 @@ export class Deleter {
     const matches = (o: { app_id: string | null; url?: string | null }) => tombstoneMatches(t, o.app_id, o.url ?? null)
 
     if (t.kind === 'site') {
-      const page = db.prepare(`SELECT id, app_id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to AND id > @after ORDER BY id LIMIT 2000`)
+      // Before the browser step there are no page addresses, so no observation can belong to a site.
+      const withUrl = hasUrl(db)
+      const page = withUrl
+        ? db.prepare(`SELECT id, app_id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to AND id > @after ORDER BY id LIMIT 2000`)
+        : null
       const del = db.prepare('DELETE FROM observations WHERE id = ?')
-      for (let after = 0; hasUrl(db); ) {
+      for (let after = 0; page !== null; ) {
         const rows = page.all({ ...args, after }) as Obs[]
         if (rows.length === 0) break
         immediateRetrying(db, () => {

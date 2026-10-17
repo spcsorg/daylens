@@ -752,3 +752,15 @@ test('a restart never reuses a deleted observation id, so no interval can carry 
   assert.deepEqual(r3.q(`SELECT title FROM intervals ORDER BY start_wall_ms`), [{ title: 'early.md - Editor' }, { title: 'later.md - Editor' }])
   r3.close()
 })
+
+test('a site deletion completes on the capture-only schema, which has no page addresses yet', async () => {
+  resetSeq()
+  const r = rig()
+  day(r, T0, [[editor, 'a.md - Editor'], [chat, 'b']])
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  const result = await r.storage.deleteSite('example.com').done
+  assert.equal(result.observations, 0)
+  assert.notEqual(r.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state, 'pending')
+  r.close()
+})
