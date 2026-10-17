@@ -32,9 +32,10 @@ What it never does:
   address and a short list of search and page-identity parameters; everything else is removed. That means it removes
   any user name and password, the part after `#`, and every query parameter except searches (such as `q`), names of
   the item on the page (such as `id`, `v`, `list`, `file` or `doc`) and display settings (such as `lang`, `sort` or
-  `tab`). A kept parameter is removed too when its value is a login token (`Bearer …`, a `Basic …` user name and
-  password, or a JSON web token), when a display setting is shaped like a generated key, or when it holds an address
-  this rule would change. Secrets written into the address path itself are not removed.
+  `tab`). Click and campaign tracking IDs (such as `fbclid` or `utm_source`) are removed too. A kept parameter is
+  removed when its value is a login token (`Bearer …`, a `Basic …` user name and password, or a JSON web token), when
+  a display setting is shaped like a generated key, or when it holds an address this rule would change. Secrets
+  written into the address path itself are not detected.
 
 You need the Daylens app installed on this computer. Without it, the extension does nothing.
 
