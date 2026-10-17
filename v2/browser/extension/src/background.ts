@@ -70,7 +70,6 @@ type Link = { kind: 'native'; port: Port } | { kind: 'local'; session: Session }
 let ready = false
 let link: Link | null = null
 let attempting = false
-let nativeMissing = false
 let localAllowed = LOCAL_EVERYWHERE
 let pairing: Pairing | null = null
 let pairPending = false
@@ -149,9 +148,8 @@ function post(msg: object): void {
 
 function ensureLink(): void {
   if (!ready || link || attempting || Date.now() < nextAttemptAt) return
-  if (!nativeMissing) return connectNative()
-  if (localAllowed) return void connectLocalNow()
-  state.daylens = 'not_installed'
+  // Native messaging first on every attempt: a host that was missing may have been installed since.
+  connectNative()
 }
 
 function connectNative(): void {
@@ -179,7 +177,6 @@ function connectNative(): void {
 }
 
 function onNativeMissing(): void {
-  nativeMissing = true
   if (localAllowed) return void connectLocalNow()
   state.daylens = 'not_installed'
   backOff()
