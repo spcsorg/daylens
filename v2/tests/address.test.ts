@@ -202,3 +202,10 @@ test('generic names keep only their own shape of value, and the ends-in-id catch
     assert.equal(keptParam(name), null, name)
 })
 
+test('a display setting that is a UUID or long hex goes', () => {
+  assert.equal(cleanAddress('https://x.example.com/?view=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f&id=1'), 'https://x.example.com/?id=1')
+  assert.equal(cleanAddress('https://x.example.com/?tab={3F2C1D4E-5B6A-4C7D-8E9F-0A1B2C3D4E5F}&id=1'), 'https://x.example.com/?id=1')
+  assert.equal(cleanAddress('https://x.example.com/?filter=abcdefabcdefabcdefabcdefabcdefab&id=1'), 'https://x.example.com/?id=1')
+  same('https://x.example.com/?sort=price&tab=files&view=grid&id=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f')
+})
+

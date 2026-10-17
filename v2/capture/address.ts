@@ -17,6 +17,8 @@ const VIEW_NAMES = new Set(['hl', 'lang', 'm', 'tab', 'view', 'usp', 'dl', 'sort
 
 const NUMBER_VALUE = /^\d+$/
 const TIME_VALUE = /^(\d+|(?=\d)(\d+h)?(\d+m)?(\d+s)?)$/
+const UUID_VALUE = /^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i
+const LONG_HEX = /^[0-9a-f]{32,}$/i
 
 // Click and campaign tracking IDs name the visit, not the page.
 const TRACKING_NAME = /^(utm|mc|hs)|clk?id$|^(igshid|lifatid|srsltid|mkteid)$/
@@ -121,7 +123,7 @@ function looksGenerated(value: string): boolean {
 function fitsKind(form: string, kind: Kind): boolean {
   if (kind === 'number') return NUMBER_VALUE.test(form)
   if (kind === 'time') return TIME_VALUE.test(form)
-  if (kind === 'view') return !looksGenerated(form)
+  if (kind === 'view') return !UUID_VALUE.test(form) && !LONG_HEX.test(form) && !looksGenerated(form)
   return true
 }
 
