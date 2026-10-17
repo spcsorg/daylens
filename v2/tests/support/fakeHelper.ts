@@ -84,15 +84,17 @@ setTimeout(() => {
       emit('power', { state: 'sleep' })
       heartbeats = false
       break
-    case 'loss':
+    case 'loss': {
       // A switch to B was dropped 8 s ago; the next focus line (C) is the first trustworthy one.
       focusPaused = true
-      emit('loss', { channel: 'focus', count: 1, from_wall_ms: Date.now() - 8000, to_wall_ms: Date.now() - 8000 })
+      const now = Date.now()
+      emit('loss', { channel: 'focus', count: 1, from_wall_ms: now - 8000, to_wall_ms: now - 8000 })
       setTimeout(() => {
         focusPaused = false
         focus('app_changed')
       }, 400)
       break
+    }
     case 'session_unregistered':
       emit('session', { state: 'locked', snapshot: false })
       emit('session', { state: 'unlocked', snapshot: false })
