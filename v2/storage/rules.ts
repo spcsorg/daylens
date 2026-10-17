@@ -43,6 +43,38 @@ export function tombstoneMatches(t: Pick<Tombstone, 'kind' | 'app_id' | 'site'>,
   return matchesSite(siteOf(url), t.site!)
 }
 
+export function pendingTombstones(db: Database.Database): Tombstone[] {
+  return db.prepare(`SELECT id, kind, from_wall_ms, to_wall_ms, lower(app_id) AS app_id, lower(site) AS site, state FROM deletions WHERE state = 'pending'`).all() as Tombstone[]
+}
+
+/**
+ * SQL that keeps a search entry (alias `d`) only if no pending deletion covers it: while a deletion is still being
+ * carried out, what it covers is already hidden. Applied inside the query, so LIMIT counts only visible entries.
+ */
+export function searchFence(pending: readonly Tombstone[]): { sql: string; params: unknown[] } {
+  const parts: string[] = []
+  const params: unknown[] = []
+  const hourSource = (cond: string) => `EXISTS (SELECT 1 FROM hours h, json_each(h.sources) j WHERE h.id = d.hour_id AND ${cond})`
+  for (const t of pending) {
+    const overlap = 'd.last_wall_ms >= ? AND d.first_wall_ms < ?'
+    const span = [t.from_wall_ms ?? Number.MIN_SAFE_INTEGER, t.to_wall_ms ?? Number.MAX_SAFE_INTEGER]
+    if (t.kind === 'range') {
+      parts.push(`NOT (${overlap})`)
+      params.push(...span)
+    } else if (t.kind === 'source') {
+      parts.push(`NOT (${overlap} AND ((d.kind = 'activity' AND lower(d.app_id) = ?) OR (d.kind = 'hour' AND ${hourSource(`lower(json_extract(j.value, '$.app_id')) = ?`)})))`)
+      params.push(...span, t.app_id, t.app_id)
+    } else {
+      const site = `lower(json_extract(j.value, '$.site'))`
+      parts.push(
+        `NOT (${overlap} AND ((d.kind = 'activity' AND (d.site = ? OR d.site LIKE '%.' || ?)) OR (d.kind = 'hour' AND ${hourSource(`(${site} = ? OR ${site} LIKE '%.' || ?)`)})))`,
+      )
+      params.push(...span, t.site, t.site, t.site, t.site)
+    }
+  }
+  return { sql: parts.length ? parts.join(' AND ') : '1', params }
+}
+
 export class Rules {
   tombstones: Tombstone[] = []
   pauses: PauseState[] = []

@@ -9,7 +9,7 @@ import { DeletionWorker, fenceEdges, type DeletionResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
-import { DAY_MS, matchesSite, Rules, tombstoneMatches, type PauseState, type Tombstone } from './rules.ts'
+import { DAY_MS, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
 export type { DeletionResult } from './deletion.ts'
@@ -644,28 +644,15 @@ export class Storage {
     const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []
     if (words.length === 0) return []
     const q = words.map((w, i) => `"${w}"${i === words.length - 1 ? '*' : ''}`).join(' ')
-    const limit = opts.limit ?? 50
-    const pending = this.rules.tombstones.filter((t) => t.state === 'pending')
-    // While a deletion is still being carried out, what it covers is already hidden.
-    const hidden = (h: SearchHit) =>
-      pending.some((t) => {
-        if ((t.from_wall_ms !== null && h.last_wall_ms < t.from_wall_ms) || (t.to_wall_ms !== null && h.first_wall_ms >= t.to_wall_ms)) return false
-        if (h.kind === 'hour') {
-          if (t.kind === 'range') return true
-          const row = this.db.prepare('SELECT sources FROM hours WHERE id = ?').get(h.hour_id) as { sources: string } | undefined
-          return (JSON.parse(row?.sources ?? '[]') as HourSource[]).some((s) => sourceMatches(t, s))
-        }
-        return tombstoneMatches(t, h.app_id || null, h.url || null)
-      })
-    const rows = this.db
+    const fence = searchFence(this.rules.tombstones.filter((t) => t.state === 'pending'))
+    return this.db
       .prepare(
         `SELECT d.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.hour_id, d.first_wall_ms, d.last_wall_ms
          FROM search JOIN search_docs d ON d.id = search.rowid
-         WHERE search MATCH ? AND d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ?
+         WHERE search MATCH ? AND d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ? AND ${fence.sql}
          ORDER BY search.rank LIMIT ?`,
       )
-      .all(q, opts.fromWallMs ?? Number.MIN_SAFE_INTEGER, opts.toWallMs ?? Number.MAX_SAFE_INTEGER, pending.length ? limit * 4 : limit) as SearchHit[]
-    return pending.length ? rows.filter((h) => !hidden(h)).slice(0, limit) : rows
+      .all(q, opts.fromWallMs ?? Number.MIN_SAFE_INTEGER, opts.toWallMs ?? Number.MAX_SAFE_INTEGER, ...fence.params, opts.limit ?? 50) as SearchHit[]
   }
 
   // --- retention ---------------------------------------------------------------

@@ -167,3 +167,18 @@ test('a retention change is in force by the time it is announced', () => {
   assert.deepEqual(seen, [false], 'material older than the new window is already refused')
   r.close()
 })
+
+test('results hidden by a pending deletion do not crowd out the visible ones', () => {
+  resetSeq()
+  const r = rig()
+  for (let i = 0; i < 200; i++) r.feed(focus(app('com.example.chat', { name: 'Chat' }), `canary canary canary ${i}`, T0 + i * 30_000))
+  for (let i = 0; i < 5; i++) r.feed(focus(editor, `canary editor ${i}.md`, T0 + (200 + i) * 30_000))
+  r.store.flush()
+  // A deletion whose fence is in force but whose removal has not run yet.
+  r.storage.db.prepare(`INSERT INTO deletions (kind, app_id, created_wall_ms, state) VALUES ('source', 'com.example.chat', ?, 'pending')`).run(T0)
+  r.storage.rules.loadTombstones()
+  const hits = r.storage.search('canary', { limit: 10 })
+  assert.equal(hits.length, 5)
+  assert.ok(hits.every((h) => h.app_id === 'com.example.editor'))
+  r.close()
+})
