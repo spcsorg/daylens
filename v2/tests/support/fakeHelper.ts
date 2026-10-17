@@ -21,6 +21,8 @@ const t = () => ({ wall_ms: Date.now() + wallOffset, mono_us: Math.round((perfor
 function bootId(time: { wall_ms: number; mono_us: number }): string {
   if (process.env.FAKE_BOOT === 'counter') return process.env.FAKE_NEW_BOOT_UPTIME_MS ? 'boot-813' : 'boot-812'
   if (process.env.FAKE_BOOT === 'clock') return `bootclock-${Math.floor((time.wall_ms - time.mono_us / 1000) / 60_000)}`
+  // A clock-derived name that happens to match across runs, as after a reboot plus a clock correction.
+  if (process.env.FAKE_BOOT === 'clockfixed') return 'bootclock-29868833'
   return 'boot-fake'
 }
 
@@ -44,7 +46,7 @@ function snapshot(): void {
   if (process.env.FAKE_SNAPFILE) appendFileSync(process.env.FAKE_SNAPFILE, 'snapshot\n')
 }
 
-emit('hello', { helper: 'fake', boot_identity: process.env.FAKE_BOOT === 'clock' ? 'clock' : 'kernel', version: '0', pid: process.pid, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 1, idle_threshold_s: 120, reconcile_s: 60 } })
+emit('hello', { helper: 'fake', boot_identity: process.env.FAKE_BOOT?.startsWith('clock') ? 'clock' : 'kernel', version: '0', pid: process.pid, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 1, idle_threshold_s: 120, reconcile_s: 60 } })
 if (mode === 'crash_always') process.exit(3)
 snapshot()
 

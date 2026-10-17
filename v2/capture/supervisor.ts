@@ -93,7 +93,9 @@ export function measureDowntime(
     // so the restart interval by wall time is all that is known.
     return bounded(wallDelta, 'wall_restart_interval')
   }
-  if (prev.boot === hello.boot && hello.monoUs >= prev.monoUs) {
+  // Exact only when the OS named both boots: a clock-derived name can match across a reboot plus a clock correction.
+  const bothKernel = prev.bootIdentity === 'kernel' && hello.bootIdentity === 'kernel'
+  if (bothKernel && prev.boot === hello.boot && hello.monoUs >= prev.monoUs) {
     return {
       startWallMs: hello.wallMs - Math.round((hello.monoUs - prev.monoUs) / 1000),
       startMonoUs: prev.monoUs,
@@ -101,7 +103,7 @@ export function measureDowntime(
       detail: { measured: 'monotonic' },
     }
   }
-  if (prev.monoUs !== null && hello.bootIdentity === 'clock') {
+  if (!bothKernel) {
     // A clock-derived boot name cannot say whether a reboot happened. Bounds: the wall time that passed, and, if the
     // uptime went down, the new boot's uptime. A larger uptime proves nothing.
     const uptimeFell = newUptimeMs < prev.monoUs / 1000
@@ -129,6 +131,7 @@ export class Supervisor {
   private stderrBuf = ''
   private lastAliveTouch = 0
   private heartbeatHr = 0
+  private bootIdentity: 'kernel' | 'clock' | null = null
   private downGap: { id: number; prev: PreviousCoverage } | null = null
   private allGap: { id: number; reason: GapReason } | null = null
   // Closed at hello but not yet confirmed by a heartbeat; a crash before then continues the same gap.
@@ -490,6 +493,7 @@ export class Supervisor {
     const point: GapPoint = { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
     const down = this.downGap
     this.downGap = null
+    this.bootIdentity = line.obs.boot_identity
     if (line.obs.boot_identity === 'clock') this.o.log('boot identity degraded source=clock')
     if (down) this.refineDowntime(down, line)
     if (this.allGap) {
@@ -524,7 +528,7 @@ export class Supervisor {
     this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: line.obs.awake_us, boot: line.boot }
     this.store.recordHeartbeat(line)
     this.heartbeatHr = this.o.hrtimeMs()
-    this.store.writeCheckpoint({ wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot, clean: false })
+    this.store.writeCheckpoint({ wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot, boot_identity: this.bootIdentity, clean: false })
     this.onRegistrations(line, point)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
     // The main loop is alive but the title worker is stuck in one call: only a restart frees it.
@@ -558,8 +562,8 @@ export class Supervisor {
   // The helper's monotonic clock, carried forward by this process's own elapsed time since the last heartbeat.
   private checkpointNow(wallMs: number): Omit<import('./store.ts').Checkpoint, 'clean'> {
     const hb = this.lastHeartbeat
-    if (!hb) return { wall_ms: wallMs, mono_us: null, boot: null }
-    return { wall_ms: wallMs, mono_us: hb.mono_us + Math.round((this.o.hrtimeMs() - this.heartbeatHr) * 1000), boot: hb.boot }
+    if (!hb) return { wall_ms: wallMs, mono_us: null, boot: null, boot_identity: null }
+    return { wall_ms: wallMs, mono_us: hb.mono_us + Math.round((this.o.hrtimeMs() - this.heartbeatHr) * 1000), boot: hb.boot, boot_identity: this.bootIdentity }
   }
 
   // An event source the helper could not subscribe to is a gap in that source until it is in place.

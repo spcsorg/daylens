@@ -158,7 +158,7 @@ test('downtime after a crash is measured even when the clock was set back an hou
   assert.equal(JSON.parse(down.detail!).measured, 'monotonic')
 })
 
-async function rollbackOutage(boot: 'counter' | 'clock', extra: Record<string, string> = {}): Promise<{ down: Gap; runs: { boot_identity: string }[] }> {
+async function rollbackOutage(boot: 'counter' | 'clock' | 'clockfixed', extra: Record<string, string> = {}): Promise<{ down: Gap; runs: { boot_identity: string }[] }> {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work, { FAKE_BOOT: boot })
   await waitFor(() => svc.log().includes('helper hello'))
@@ -199,4 +199,23 @@ test('a reboot during an outage with the clock set back records at least the new
   const d = JSON.parse(down.detail!)
   assert.equal(d.measured, 'lower_bound_new_boot')
   assert.equal(d.wall_clock_moved_back, true)
+})
+
+test('matching clock-derived boot names through the supervisor: the SQLite row is uncertain and never zero-length', async () => {
+  const { work, dataDir } = setup()
+  const svc = startService(dataDir, work, { FAKE_BOOT: 'clockfixed' })
+  await waitFor(() => svc.log().includes('helper hello'))
+  await sleep(1600)
+  svc.proc.kill('SIGKILL')
+  await sleep(500)
+  // Same clock-derived name and a larger uptime: from the helper's side this cannot be told from a reboot.
+  const svc2 = startService(dataDir, work, { FAKE_BOOT: 'clockfixed' })
+  await waitFor(() => svc2.log().includes('helper hello'))
+  await sleep(300)
+  await stopService(svc2.proc)
+  const down = gaps(dataDir).find((g) => g.reason === 'service_down')!
+  assert.ok(down.end_wall_ms! - down.start_wall_ms >= 1, 'never a zero-length row')
+  const d = JSON.parse(down.detail!)
+  assert.equal(d.uncertain, true)
+  assert.notEqual(d.measured, 'monotonic')
 })

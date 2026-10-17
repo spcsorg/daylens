@@ -163,6 +163,8 @@ export interface Checkpoint {
   wall_ms: number
   mono_us: number | null
   boot: string | null
+  // How the helper named that boot; only 'kernel' names can prove two readings share a boot.
+  boot_identity?: 'kernel' | 'clock' | null
   clean: boolean
 }
 
@@ -171,6 +173,7 @@ export interface PreviousCoverage {
   clean: boolean
   monoUs: number | null
   boot: string | null
+  bootIdentity: 'kernel' | 'clock' | null
 }
 
 export interface StoreOptions {
@@ -287,7 +290,7 @@ export class Store implements Sink {
     const cp = this.db.prepare(`SELECT value FROM meta WHERE key = 'checkpoint'`).get() as { value: string } | undefined
     if (cp) {
       const c = JSON.parse(cp.value) as Checkpoint
-      return { endWallMs: c.wall_ms, clean: c.clean, monoUs: c.mono_us, boot: c.boot }
+      return { endWallMs: c.wall_ms, clean: c.clean, monoUs: c.mono_us, boot: c.boot, bootIdentity: c.boot_identity ?? null }
     }
     const run = this.db
       .prepare('SELECT max(coalesce(ended_wall_ms, 0), coalesce(last_heartbeat_wall_ms, 0), started_wall_ms) AS t FROM capture_runs ORDER BY id DESC LIMIT 1')
@@ -298,7 +301,7 @@ export class Store implements Sink {
     const candidates = [run?.t ?? null, obs?.t ?? null, stopped ? Number(stopped.value) : null, alive ? Number(alive.value) : null].filter((v): v is number => v !== null)
     if (candidates.length === 0) return null
     const endWallMs = Math.max(...candidates)
-    return { endWallMs, clean: stopped !== undefined && Number(stopped.value) >= endWallMs, monoUs: null, boot: null }
+    return { endWallMs, clean: stopped !== undefined && Number(stopped.value) >= endWallMs, monoUs: null, boot: null, bootIdentity: null }
   }
 
   // Gaps left open by a service that died are closed where its coverage ended.
@@ -311,7 +314,7 @@ export class Store implements Sink {
     this.db.prepare(`DELETE FROM meta WHERE key = 'service_stopped_wall_ms'`).run()
     this.db
       .prepare(`INSERT INTO meta (key, value) VALUES ('checkpoint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run(JSON.stringify({ wall_ms: wallMs, mono_us: null, boot: null, clean: false } satisfies Checkpoint))
+      .run(JSON.stringify({ wall_ms: wallMs, mono_us: null, boot: null, boot_identity: null, clean: false } satisfies Checkpoint))
   }
 
   writeCheckpoint(cp: Checkpoint): void {
