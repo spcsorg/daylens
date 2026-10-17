@@ -147,7 +147,7 @@ for (let d = 0; d < DAYS; d++) {
       start_wall_ms: dayStart + (9 + h) * HOUR_MS, tz: 'Africa/Kigali', status: 'written', writer: 'bench',
       title: sentence(5), summary: sentence(30), detail: sentence(60), outcome: sentence(10), suggestion: rand() < 0.3 ? sentence(12) : null,
       sources: [{ app_id: pick(APPS).id }, { app_id: pick(APPS).id }, { site: skewed(SITES) }],
-    })
+    }, storage.hourBasis(dayStart + (9 + h) * HOUR_MS))
     storage.recordUsage({ kind: 'hour', provider: 'anthropic', model: 'bench', input_tokens: 3000, output_tokens: 400, cost_micro_usd: 900 })
   }
   for (let k = 0; k < 4; k++) storage.recordUsage({ kind: 'answer', provider: 'anthropic', model: 'bench', input_tokens: 8000, output_tokens: 600, cost_micro_usd: 2600 })

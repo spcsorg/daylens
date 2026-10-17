@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DeletedMaterialError } from '../../storage/index.ts'
+import { DeletedMaterialError, StaleHourError } from '../../storage/index.ts'
 import { app, focus, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from './support.ts'
 
@@ -8,7 +8,7 @@ const editor = app('com.example.editor', { name: 'Editor' })
 
 test('thread ids belong to the database and are never handed out again', () => {
   const r = rig()
-  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' })
+  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0))
   const a = r.storage.createThread('Billing', [h.id])
   const b = r.storage.createThread('Hiring')
   r.storage.deleteThread(b)
@@ -20,11 +20,11 @@ test('thread ids belong to the database and are never handed out again', () => {
 
 test('an hour keeps one row and counts its versions; facts and written are the only statuses', () => {
   const r = rig()
-  const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' })
-  const h2 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Shipped', writer: 'm' })
+  const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0))
+  const h2 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Shipped', writer: 'm' }, r.storage.hourBasis(T0))
   assert.equal(h1.id, h2.id)
   assert.deepEqual([h1.version, h2.version, h2.status], [1, 2, 'written'])
-  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'x', status: 'draft' as 'facts' }))
+  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'x', status: 'draft' as 'facts' }, r.storage.hourBasis(T0 + HOUR)))
   r.close()
 })
 
@@ -33,9 +33,9 @@ test('an hour that would draw on deleted material is refused', () => {
   r.clock.t = T0 + 3 * HOUR
   r.storage.deleteRange(T0, T0 + HOUR)
   r.storage.deleteSource('com.example.chat')
-  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0, tz: 'z', status: 'facts' }), DeletedMaterialError)
-  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.chat' }] }), DeletedMaterialError)
-  assert.ok(r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.editor' }] }))
+  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0, tz: 'z', status: 'facts' }, r.storage.hourBasis(T0)), DeletedMaterialError)
+  assert.throws(() => r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.chat' }] }, r.storage.hourBasis(T0 + HOUR)), DeletedMaterialError)
+  assert.ok(r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0 + HOUR)))
   r.close()
 })
 
@@ -65,7 +65,7 @@ test('search matches words and prefixes in titles, file names and hour text, new
   r.feed(focus(editor, 'quarterly-report.docx - Editor', T0))
   r.feed(focus(editor, 'Résumé draft - Editor', T0 + MIN))
   r.store.flush()
-  r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Reviewed the onboarding funnel' })
+  r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Reviewed the onboarding funnel' }, r.storage.hourBasis(T0))
   assert.equal(r.storage.search('quarterly').length, 1)
   assert.equal(r.storage.search('quarterly-report.docx').length, 1)
   assert.equal(r.storage.search('resume').length, 1, 'diacritics fold')
@@ -138,5 +138,21 @@ test('composed and decomposed accents match each other in search, whichever form
   r.store.flush()
   for (const q of ['résumé', 'résumé', 'resume']) assert.equal(r.storage.search(q).length, 1, `query ${JSON.stringify(q)} finds the decomposed title`)
   for (const q of ['café', 'café', 'cafe']) assert.equal(r.storage.search(q).length, 1, `query ${JSON.stringify(q)} finds the composed title`)
+  r.close()
+})
+
+test('an hour computed before a deletion inside it cannot be written back', () => {
+  const r = rig()
+  const basis = r.storage.hourBasis(T0)
+  const original = { start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written' as const, title: 'Planned the Narwhal canary launch' }
+  const h = r.storage.writeHour(original, basis)
+  r.clock.t = T0 + 2 * HOUR
+  r.storage.deleteRange(T0 + 10 * MIN, T0 + 20 * MIN)
+  assert.throws(() => r.storage.writeHour(original, basis), StaleHourError)
+  assert.deepEqual(r.storage.search('narwhal'), [])
+  assert.equal(r.storage.hour(h.id)!.needs_rewrite, true)
+  assert.throws(() => r.storage.writeHour(original, { version: 1, deletion: r.storage.hourBasis(T0).deletion }), StaleHourError, 'an old version is refused too')
+  const fresh = r.storage.writeHour({ ...original, title: 'Planned the launch' }, r.storage.hourBasis(T0))
+  assert.equal(fresh.needs_rewrite, false)
   r.close()
 })

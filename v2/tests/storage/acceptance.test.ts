@@ -55,7 +55,7 @@ test('deletion reaches everything: a range is gone from observations, intervals,
   ])
   r.store.flush()
   const inRange = { from: T0 + 5 * MIN, to: T0 + 15 * MIN }
-  const hour = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Planned the Zanzibar canary', sources: [{ app_id: 'com.example.chat' }] })
+  const hour = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Planned the Zanzibar canary', sources: [{ app_id: 'com.example.chat' }] }, r.storage.hourBasis(T0))
   r.storage.correct(hour.id, 'summary', 'Zanzibar canary, corrected by me')
   r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getDay', from_wall_ms: inRange.from, to_wall_ms: inRange.to, query: 'what about Zanzibar canary?' })
   assert.ok(containsAnywhere(r, 'Zanzibar').length > 3, 'the canary is present before deletion')
@@ -79,8 +79,8 @@ test('deletion reaches everything: one app, across days, and the hours that drew
   day(r, T0, [[chat, 'Quokka canary thread'], [editor, 'notes.md - Editor']])
   day(r, T0 + 24 * HOUR, [[chat, 'Quokka canary again'], [editor, 'todo.md - Editor']])
   r.store.flush()
-  const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Quokka chat', sources: [{ app_id: 'com.example.chat' }, { app_id: 'com.example.editor' }] })
-  const h2 = r.storage.writeHour({ start_wall_ms: T0 + 2 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Editing only', sources: [{ app_id: 'com.example.editor' }] })
+  const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Quokka chat', sources: [{ app_id: 'com.example.chat' }, { app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0))
+  const h2 = r.storage.writeHour({ start_wall_ms: T0 + 2 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Editing only', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0 + 2 * HOUR))
   r.storage.recordAssistantRead({ assistant: 'claude', tool: 'search', from_wall_ms: T0, to_wall_ms: T0 + 48 * HOUR, query: 'time in Chat this week' })
 
   r.storage.deleteSource('com.example.chat')
@@ -166,14 +166,14 @@ test('a re-import after deletion brings nothing back, and a late capture line in
 test('a correction wins everywhere, survives a rewrite, and undo restores what was shown before', async () => {
   resetSeq()
   const r = rig()
-  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Wrote the pitch', writer: 'model-a' })
+  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Wrote the pitch', writer: 'model-a' }, r.storage.hourBasis(T0))
   const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
   const seen: string[] = []
   const watcher = new ChangeWatcher(reader, r.dir, (c) => seen.push(c.kind))
   watcher.start()
 
   const c1 = r.storage.correct(h.id, 'title', 'Fixed the billing bug')
-  r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Rewritten: wrote the pitch', writer: 'model-b' })
+  r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Rewritten: wrote the pitch', writer: 'model-b' }, r.storage.hourBasis(T0))
   for (const view of [r.storage.hour(h.id)!, readHour(reader, h.id)!]) {
     assert.equal(view.title, 'Fixed the billing bug')
     assert.deepEqual(view.corrected, ['title'])

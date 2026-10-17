@@ -93,7 +93,7 @@ test('retention announces what it removed, and a reader behind the pruned log is
   let resets = 0
   const w = new ChangeWatcher(reader, s.dir, (c) => seen.push(c), 0, { onReset: () => resets++ })
   s.storage.setSetting('a', 1)
-  s.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' })
+  s.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' }, s.storage.hourBasis(T0))
   s.clock.t = T0 + 30 * 86_400_000
   s.storage.setRetentionDays(7)
   s.storage.stop()

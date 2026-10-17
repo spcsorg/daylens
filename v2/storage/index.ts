@@ -142,6 +142,14 @@ export interface CaptureControl {
 }
 
 export class DeletedMaterialError extends Error {}
+// The hour changed (rewritten, cleared by a deletion) or material in it was deleted after the result was computed.
+export class StaleHourError extends Error {}
+
+/** What an hour's text is computed from: read it before computing, pass it back when writing. */
+export interface HourBasis {
+  version: number | null
+  deletion: number
+}
 
 function matchesSite(site: string | null, tombSite: string): boolean {
   return site !== null && (site === tombSite || site.endsWith(`.${tombSite}`))
@@ -509,11 +517,23 @@ export class Storage {
 
   // --- hours, corrections, threads ----------------------------------------
 
-  writeHour(h: HourInput): Hour {
+  hourBasis(startWallMs: number): HourBasis {
+    const h = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(startWallMs) as { version: number } | undefined
+    const d = this.db.prepare('SELECT max(id) AS id FROM deletions').get() as { id: number | null }
+    return { version: h?.version ?? null, deletion: d.id ?? 0 }
+  }
+
+  writeHour(h: HourInput, basis: HourBasis): Hour {
     this.flushOrThrow()
     const start = h.start_wall_ms
     const end = start + HOUR_MS
     const sources = h.sources ?? []
+    const current = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(start) as { version: number } | undefined
+    if ((current?.version ?? null) !== basis.version) throw new StaleHourError('the hour changed after this text was computed')
+    for (const t of this.tombstones) {
+      const overlaps = (t.from_wall_ms === null || end > t.from_wall_ms) && (t.to_wall_ms === null || start < t.to_wall_ms)
+      if (overlaps && t.id > basis.deletion) throw new StaleHourError('material in this hour was deleted after this text was computed')
+    }
     for (const t of this.tombstones) {
       const overlaps = (t.from_wall_ms === null || end > t.from_wall_ms) && (t.to_wall_ms === null || start < t.to_wall_ms)
       if (!overlaps) continue
