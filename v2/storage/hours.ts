@@ -52,6 +52,12 @@ export function pendingVerdict(h: { start_wall_ms: number; end_wall_ms: number; 
  * and a deletion still being carried out already applies.
  */
 export function readHour(db: Database.Database, id: number): Hour | null {
+  // One read transaction: the hour, its corrections and the fence all come from the same snapshot, so a deletion
+  // completing in between cannot leave the old text with no fence to hide it.
+  return db.transaction(() => readHourNow(db, id))()
+}
+
+function readHourNow(db: Database.Database, id: number): Hour | null {
   const h = db.prepare('SELECT * FROM hours WHERE id = ?').get(id) as (Omit<Hour, 'sources' | 'needs_rewrite' | 'corrected'> & { sources: string; needs_rewrite: number }) | undefined
   if (!h) return null
   const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }

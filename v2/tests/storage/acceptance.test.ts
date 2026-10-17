@@ -663,3 +663,38 @@ test('a deletion interrupted after its rows and intervals are gone still finishe
 test('a deletion interrupted after its hours still reaches their threads and assistant reads at the next start', async () => {
   await crashedDeletion('hours')
 })
+
+test('the hour reader takes the hour, its corrections and the pending fence from one snapshot', () => {
+  const r = rig()
+  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Ocelot canary' }, r.storage.hourBasis(T0))
+  r.storage.db.prepare(`INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, created_wall_ms, state) VALUES ('range', ?, ?, ?, 'pending')`).run(T0 + MIN, T0 + 2 * MIN, T0)
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  // Right after the reader has the hour row, the deletion completes on another connection: text cleared, marked done.
+  const finishDeletion = () => {
+    r.storage.db.prepare(`UPDATE hours SET title = NULL, needs_rewrite = 1 WHERE id = ?`).run(h.id)
+    r.storage.db.prepare(`UPDATE deletions SET state = 'done'`).run()
+  }
+  const interleaved = new Proxy(reader, {
+    get(target, prop) {
+      if (prop !== 'prepare') return Reflect.get(target, prop)
+      return (sql: string) => {
+        const st = target.prepare(sql)
+        if (!sql.startsWith('SELECT * FROM hours')) return st
+        return new Proxy(st, {
+          get(s, p) {
+            if (p !== 'get') return Reflect.get(s, p).bind?.(s) ?? Reflect.get(s, p)
+            return (...args: unknown[]) => {
+              const row = s.get(...args)
+              finishDeletion()
+              return row
+            }
+          },
+        })
+      }
+    },
+  }) as Database.Database
+  const seen = readHour(interleaved, h.id)
+  assert.equal(seen?.title ?? null, null, `read ${JSON.stringify(seen?.title)}`)
+  reader.close()
+  r.close()
+})
