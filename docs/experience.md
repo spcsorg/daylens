@@ -68,7 +68,7 @@ Ask answers questions about any day from the same record.
 ## Settings
 
 - **General:** start and end of the day, notification times, launch at login, appearance.
-- **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), usage analytics (on, with an off switch), and delete history.
+- **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), apps whose window titles are kept (for apps with a built-in browser engine that Daylens does not already trust; adding one says in one line that its private windows could then be recorded), usage analytics (on, with an off switch), and delete history.
 - **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read, and setup for any other MCP app.
 - **AI:** the current choice (Daylens AI, your own key, a CLI on the machine, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.
@@ -96,7 +96,7 @@ Onboarding is where Daylens wins or loses a user. It must feel effortless and po
 - The first thing people see is Daylens doing something useful, such as a search that finds something real, not a form.
 - Permissions are one step with one button. On macOS, the step opens System Settings with a small floating window to drag the Daylens icon into, and turns green on its own when access is granted. Browser access is part of the same step.
 - Privacy is one calm line with a link to the Terms and Privacy page.
-- Assistants on the machine are found automatically and connected with one button, plus setup for any other MCP app.
+- Assistants on the machine are found automatically and connected with one button, plus setup for any other MCP app. When Claude Code or Codex is found, the same step has one toggle to read their session logs, on by default, with one line saying only times and project folders are read, never what was said.
 - AI defaults to Daylens AI. Other choices are one click away.
 - Onboarding ends on the user's own morning, already filled in and named, then opens Today.
 - No pricing, no "what happens next" lists, no questions Daylens can answer by observing.

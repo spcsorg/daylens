@@ -81,6 +81,7 @@ On X11, capture works like the other platforms. On Wayland, apps cannot read the
 
 Every browser window is in one of three states: **normal**, **private** or **unknown**. Unknown is never treated as normal.
 
+- **Window titles in apps with a browser engine.** An app that ships a browser engine (Chromium, Electron, CEF, Gecko) keeps its window titles only if it is on a built-in list of known non-browser apps with a matching OS-verified signer, or if the user chose to keep titles for it in Settings. Every other such app is recorded with no title.
 - **Threat model.** In scope is everything an honest user's own machine does: installed, portable and packaged apps, app updates, odd install layouts, filesystem and permission errors, and PID reuse. Out of scope is a local attacker who tampers with or re-signs binaries, or renames a browser to impersonate a trusted app, since same-user code can already read the database directly. Also out of scope: macOS accepting a running bundle whose sealed resources changed after launch, and a process re-signed while it runs keeping its cached signer.
 
 - **Pages come from browser history files.** Browsers do not write private browsing to history. Readers take only real visits from verified profiles, skip Guest profiles, and ignore bookmarks, downloads and other history sources. Visits synced from other devices or added by extensions are kept apart where the browser marks them. A page from history is searchable, but it gets no time on its own: a visit shows that a page was opened, not that it was read.
@@ -178,7 +179,7 @@ A read-only MCP server lets any MCP app read days, hours, search results and sou
 
 | Choice | How it works |
 |---|---|
-| Daylens AI | The billing service checks the plan, meters usage and forwards to the model provider. Default. |
+| Daylens AI | The billing service checks the plan and issues a short-lived token scoped to one request and its cost; the app calls the model provider directly with it, so the hour's content never passes through Daylens servers. Usage is metered from the token's spend. Default. |
 | Your own key | The app calls the provider directly. The key is stored in the platform's secure storage: Keychain on macOS, Credential Manager on Windows (user-scoped DPAPI for larger records), the Secret Service on Linux. The interface never receives a stored secret. |
 | A CLI on the machine | The app runs Claude Code or Codex headlessly, billed to the user's own subscription. |
 | None | Hours stay as facts. Ask searches instead of answering. |
