@@ -114,3 +114,44 @@ test('a replacement rolls back and retries atomically, and its id is never reuse
     again.close()
   }
 })
+
+
+for (const retry of [false, true]) {
+  test(`one pruned source gets one replacement for all queued extensions, including equal timestamps${retry ? ' after rollback' : ''}`, () => {
+    resetSeq()
+    const r = rig()
+    const conn = new Database(path.join(r.dir, DB_FILE))
+    try {
+      r.storage.setRetentionDays(7)
+      r.feed(focus(editor, 'Merged replacement', T0))
+      r.store.flush()
+      r.feed(focus(editor, 'Merged replacement', sighting, 'reconcile'))
+      r.feed(focus(editor, 'Merged replacement', sighting + MIN, 'reconcile'))
+      r.feed(focus(editor, 'Merged replacement', sighting + MIN, 'reconcile'))
+      r.clock.t = T0 + 7 * DAY_MS + MIN
+      pruneStep(conn, T0 + MIN, 0)
+      assert.deepEqual(r.store.query('SELECT id FROM observations'), [])
+      if (retry) {
+        let fail = true
+        r.storage.db.function('fail_merged_id_mark_once', () => {
+          if (fail) {
+            fail = false
+            throw Object.assign(new Error('injected id mark failure'), { code: 'SQLITE_BUSY' })
+          }
+          return 1
+        })
+        r.storage.db.exec("CREATE TEMP TRIGGER fail_merged_id_mark BEFORE INSERT ON meta WHEN NEW.key = 'next_observation_id' BEGIN SELECT fail_merged_id_mark_once(); END")
+        assert.equal(r.store.flush(), false)
+        assert.deepEqual(r.store.query('SELECT id FROM observations'), [])
+      }
+      assert.equal(r.store.flush(), true)
+      assert.deepEqual(r.store.query('SELECT event_wall_ms, last_seen_wall_ms, repeat_count FROM observations'), [
+        { event_wall_ms: sighting, last_seen_wall_ms: sighting + MIN, repeat_count: 2 },
+      ])
+      assert.equal(r.store.query<{ n: number }>('SELECT count(*) AS n FROM intervals')[0]!.n, 1)
+    } finally {
+      conn.close()
+      r.close()
+    }
+  })
+}

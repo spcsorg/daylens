@@ -551,9 +551,15 @@ export class Store implements Sink {
     return s
   }
 
-  private runOp(op: Op): void {
-    const result = this.stmt(op.sql).run(...op.params)
+  private runOp(op: Op, replacements: Map<number, number>): void {
     const extension = op.extension
+    const replacement = extension && replacements.get(extension.sourceId)
+    if (extension && replacement !== undefined) {
+      extension.missing = true
+      if (this.acceptObservation(extension.sighting)) this.stmt(op.sql).run(extension.sighting.event_wall_ms, replacement)
+      return
+    }
+    const result = this.stmt(op.sql).run(...op.params)
     if (!extension || result.changes !== 0) return
     extension.missing = true
     // Retention may remove the row after enqueue; preserve only this sighting under the current admission rules.
@@ -561,6 +567,7 @@ export class Store implements Sink {
     const id = extension.replacementId ??= this.nextObsId++
     const insert = this.observationInsert(id, extension.sighting)
     this.stmt(insert.sql).run(...insert.params)
+    replacements.set(extension.sourceId, id)
     this.touched.add(id)
   }
 
@@ -601,7 +608,8 @@ export class Store implements Sink {
       // Immediate: storage's deletion worker writes on its own connection, and a deferred transaction that read
       // first could not commit after it.
       this.db.transaction(() => {
-        for (const op of ops) this.runOp(op)
+        const replacements = new Map<number, number>()
+        for (const op of ops) this.runOp(op, replacements)
         this.writeIdMark()
       }).immediate()
     } catch (err) {
@@ -662,9 +670,10 @@ export class Store implements Sink {
 
   private runSkippingBadOps(ops: Op[]): void {
     this.db.transaction(() => {
+      const replacements = new Map<number, number>()
       for (const op of ops) {
         try {
-          this.runOp(op)
+          this.runOp(op, replacements)
         } catch (err) {
           const code = errorCode(err)
           // Only a statement that can never succeed is dropped; anything else fails the batch for a retry.
