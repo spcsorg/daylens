@@ -161,10 +161,22 @@ function looksLikeAddress(f: string): boolean {
   return f.includes('://') || /^(\/\/|\\)/.test(f) || /[?#]/.test(f) || (f.includes('@') && f.includes(':'))
 }
 
+// A search is text unless it starts the way an address does: a scheme and //, // or \, or an absolute URL with a
+// host (https:example.com). "why? because", "F# tutorial" and "site:example.com" are text.
+function startsLikeAddress(f: string): boolean {
+  if (/^([a-z][a-z0-9+.-]*:)?(\/\/|\\)/i.test(f)) return true
+  try {
+    return new URL(f).host !== ''
+  } catch {
+    return false
+  }
+}
+
 // A kept value is never rewritten: it stays as written, or null drops it. Every control-stripped, percent-decoded form
 // is judged, and any credential, token, generated-looking view value, or address the rule would change drops it.
 function cleanValue(value: string, depth: number, kind: Kind): string | null {
-  const isAddress = looksLikeAddress
+  const text = kind === 'search' || kind === 'alias'
+  const isAddress = text ? startsLikeAddress : looksLikeAddress
   let f = value.replace(CONTROLS, '').trim()
   const forms = [f]
   for (let i = 0; i < MAX_DECODES && /%[0-9a-f]{2}/i.test(f); i++) {
@@ -183,7 +195,7 @@ function cleanValue(value: string, depth: number, kind: Kind): string | null {
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
     if (isCredential(form) || isJwt(form) || !fitsKind(form, kind)) return null
-    if (DROPPED_ADDRESS.test(form) || (isAddress(form) && wouldRemove(form, depth))) return null
+    if (text ? isAddress(form) && wouldRemove(form, depth) : DROPPED_ADDRESS.test(form) || (isAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
 }
