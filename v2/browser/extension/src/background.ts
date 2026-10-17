@@ -125,7 +125,16 @@ function post(msg: object): void {
     if (l.kind === 'native') l.port.postMessage(msg)
     else l.session.send(msg)
   } catch {
-    if (link === l) link = null
+    // A send that fails means the connection is gone; it is retried like any other loss.
+    if (link !== l) return
+    link = null
+    try {
+      if (l.kind === 'native') l.port.disconnect()
+      else l.session.close()
+    } catch {}
+    state.daylens = 'not_running'
+    backOff()
+    wakeWaiters()
   }
 }
 
