@@ -907,8 +907,9 @@ async function canary(): Promise<void> {
       pauseGap = { paused_text: pausedText, resumed_text: resumedText }
     }
     const hostCount = hostPids().length
-    await d.quit()
+    // Marked before quitting: the windows close, and the page ends, as soon as the quit starts.
     mark('browser quit', null, false)
+    await d.quit()
     await sleep(2000)
     await svc.stop()
     const closedHits = grep([...filesUnder(dataDir), svcLog, d.logFile], [PRIVATE, PRIVATE_TICK])
