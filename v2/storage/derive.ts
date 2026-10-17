@@ -199,6 +199,39 @@ export class Derived {
     this.db.transaction(() => this.derive(start, null))()
   }
 
+  /** Brings derived state up to date from the mark capture commits with its rows, and clears the mark with it. */
+  refreshFromMark(): void {
+    this.db.transaction(() => {
+      const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'derive_from'`).get() as { value: string } | undefined
+      if (!mark) return
+      this.derive(this.startKey(Number(mark.value)), null)
+      this.db.prepare(`DELETE FROM meta WHERE key = 'derive_from'`).run()
+    })()
+  }
+
+  /**
+   * One resumable step of a backfill from `meta.derive_backfill_from`: about `rows` observations, then the mark moves
+   * on in the same transaction. Returns false once the backfill is complete.
+   */
+  backfillStep(rows = 2000): boolean {
+    return this.db.transaction(() => {
+      const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'derive_backfill_from'`).get() as { value: string } | undefined
+      if (!mark) return false
+      const from = Number(mark.value)
+      const edge = this.db
+        .prepare(`SELECT event_wall_ms AS e FROM observations WHERE event_wall_ms >= ? AND (kind = 'focus' OR ${STOPS}) ORDER BY event_wall_ms LIMIT 1 OFFSET ?`)
+        .get(from, rows) as { e: number } | undefined
+      if (!edge || edge.e === from) {
+        this.derive(this.startKey(from), null)
+        this.db.prepare(`DELETE FROM meta WHERE key = 'derive_backfill_from'`).run()
+        return false
+      }
+      this.derive(this.startKey(from), edge.e)
+      this.db.prepare(`UPDATE meta SET value = ? WHERE key = 'derive_backfill_from'`).run(String(edge.e))
+      return true
+    })()
+  }
+
   /** Re-derives intervals for observations changed between two times (a deletion trimmed or split them). */
   rederive(fromWallMs: number, toWallMs: number): void {
     this.derive(this.startKey(fromWallMs), toWallMs)

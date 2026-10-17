@@ -263,6 +263,14 @@ const assistantReadItems: Migration = {
     `),
 }
 
+const deriveBackfill: Migration = {
+  name: 'derive_backfill',
+  // History captured before storage existed is derived in resumable steps from its first observation.
+  up: (db) =>
+    db.exec(`INSERT INTO meta (key, value) SELECT 'derive_backfill_from', CAST(min(event_wall_ms) AS TEXT) FROM observations HAVING count(*) > 0
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value`),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -280,4 +288,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   pauses,
   threadsNeedRewrite,
   assistantReadItems,
+  deriveBackfill,
 ]

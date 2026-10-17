@@ -185,6 +185,8 @@ export class Storage {
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onError: (code: string) => void
   private prunedData = 0
+  private backfill: Promise<void> = Promise.resolve()
+  private stopped = false
   private privacy: Privacy
 
   constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void } = {}) {
@@ -217,9 +219,9 @@ export class Storage {
     this.retentionDays = this.getSetting<number>('retention_days')
     store.acceptObservation = (row) => this.admit(row)
     store.acceptExtension = (row, from, to) => this.mayCover(row, from, to)
-    store.onFlushed = (ids) => {
+    store.onFlushed = () => {
       try {
-        this.derived.refresh(ids)
+        this.derived.refreshFromMark()
       } catch (err) {
         // Derived state is rebuildable; a failure here never blocks capture.
         this.onError(`derive_${(err as { code?: string }).code ?? 'failed'}`)
@@ -231,8 +233,13 @@ export class Storage {
     this.capture = control
   }
 
-  /** Arms the pause and retention timers. */
+  /** Arms the pause and retention timers, and resumes any derivation left unfinished (a crash, existing history). */
   start(): void {
+    // A mark left by a capture flush whose derivation never ran becomes part of the backfill.
+    this.db.exec(`INSERT INTO meta (key, value) SELECT 'derive_backfill_from', value FROM meta WHERE key = 'derive_from'
+                  ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`)
+    this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
+    this.backfill = this.runBackfill()
     const p = this.paused()
     if (p) {
       if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.endPause('expired')
@@ -241,7 +248,22 @@ export class Storage {
     this.scheduleRetention(60_000)
   }
 
+  /** Resolves once derivation has caught up with everything captured before start(). */
+  derivationSettled(): Promise<void> {
+    return this.backfill
+  }
+
+  private async runBackfill(): Promise<void> {
+    try {
+      // Steps are short transactions with a yield between them, so capture keeps flushing.
+      while (!this.stopped && this.derived.backfillStep()) await new Promise((r) => setImmediate(r))
+    } catch (err) {
+      this.onError(`backfill_${(err as { code?: string }).code ?? 'failed'}`)
+    }
+  }
+
   stop(): void {
+    this.stopped = true
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     if (this.retentionTimer) clearTimeout(this.retentionTimer)
     this.pauseTimer = this.retentionTimer = null

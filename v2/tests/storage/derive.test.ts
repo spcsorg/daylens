@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { CONTINUITY_MS, filesOf, hourStart, IntervalBuilder, siteOf, type IntervalRow } from '../../storage/derive.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
-import { HOUR, MIN, rig, T0 } from './support.ts'
+import { HOUR, MIN, rig, T0, tmpDir } from './support.ts'
+import { Store } from '../../capture/store.ts'
+import { Normalizer, Privacy } from '../../capture/normalize.ts'
 
 const editor = app('com.example.editor', { name: 'Editor' })
 const chat = app('com.example.chat', { name: 'Chat' })
@@ -88,4 +90,43 @@ test('a long-running activity is searchable in every hour it covers, not only th
   r.storage.derived.rebuild()
   assert.deepEqual(r.q<{ h: number }>(`SELECT hour_start_wall_ms AS h FROM search_docs WHERE title LIKE 'marathon%' ORDER BY h`).map((x) => x.h - T0), hours, 'a rebuild gives the same')
   r.close()
+})
+
+test('existing capture history is backfilled into intervals and search when storage first opens it', async () => {
+  resetSeq()
+  const dir = tmpDir()
+  const store = new Store(dir, { now: () => T0 })
+  const n = new Normalizer(store, new Privacy(store.exclusions()))
+  for (let i = 0; i < 120; i++) n.handle(focus(i % 2 ? editor : chat, `history ${i}.md - x`, T0 + i * 30_000))
+  store.close()
+  const r = rig(dir)
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const got = r.q(`SELECT obs_id, start_wall_ms, end_wall_ms FROM intervals ORDER BY obs_id`)
+  assert.equal(got.length, 120)
+  assert.equal(r.storage.search('history').length, 50)
+  r.storage.derived.rebuild()
+  assert.deepEqual(r.q(`SELECT obs_id, start_wall_ms, end_wall_ms FROM intervals ORDER BY obs_id`), got)
+  r.close()
+})
+
+test('rows committed by capture but not yet derived when the service died are derived at the next start', async () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'derived.md - Editor', T0))
+  r.store.flush()
+  // The service dies after capture commits and before derivation runs.
+  r.store.onFlushed = () => {}
+  r.feed(focus(chat, 'Crashed before derive', T0 + MIN))
+  r.feed(focus(editor, 'derived.md - Editor', T0 + 2 * MIN))
+  r.store.flush()
+  r.close()
+  const r2 = rig(r.dir)
+  r2.storage.start()
+  await r2.storage.derivationSettled()
+  assert.equal(r2.storage.search('crashed').length, 1)
+  const got = r2.q(`SELECT obs_id, start_wall_ms, end_wall_ms FROM intervals ORDER BY obs_id`)
+  r2.storage.derived.rebuild()
+  assert.deepEqual(r2.q(`SELECT obs_id, start_wall_ms, end_wall_ms FROM intervals ORDER BY obs_id`), got)
+  r2.close()
 })

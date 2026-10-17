@@ -221,6 +221,7 @@ export class Store implements Sink {
   // Observation ids written by each committed flush, for state derived from observations (intervals, search).
   onFlushed: (observationIds: number[]) => void = () => {}
   private touched = new Set<number>()
+  private touchedFromWallMs = Number.POSITIVE_INFINITY
   private readonly maxPendingOps: number
 
   constructor(dir: string, opts: StoreOptions = {}) {
@@ -390,6 +391,7 @@ export class Store implements Sink {
     if (!this.acceptObservation(row)) return Store.REFUSED
     const id = this.nextObsId++
     this.touched.add(id)
+    this.touchedFromWallMs = Math.min(this.touchedFromWallMs, row.event_wall_ms)
     this.openRows.set(id, { row, lastSeen: row.event_wall_ms })
     if (this.openRows.size > 64) this.openRows.delete(this.openRows.keys().next().value!)
     this.enqueue(
@@ -418,6 +420,7 @@ export class Store implements Sink {
     if (open) {
       this.openRows.delete(id)
       this.openRows.set(id, open)
+      this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
     }
     this.touched.add(id)
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
@@ -512,6 +515,14 @@ export class Store implements Sink {
       this.timer = null
     }
     const ops = this.pending.concat([...this.heartbeatOps.values()])
+    // Committed with the rows: where derived state (intervals, search) must be brought up to date from. Whoever
+    // derives clears it in the same transaction as the derivation, so a crash in between loses nothing.
+    if (this.touched.size > 0 && Number.isFinite(this.touchedFromWallMs)) {
+      ops.push({
+        sql: `INSERT INTO meta (key, value) VALUES ('derive_from', ?) ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`,
+        params: [String(this.touchedFromWallMs)],
+      })
+    }
     if (ops.length === 0) return true
     try {
       this.db.transaction(() => {
@@ -565,6 +576,7 @@ export class Store implements Sink {
     if (this.touched.size > 0) {
       const ids = [...this.touched]
       this.touched.clear()
+      this.touchedFromWallMs = Number.POSITIVE_INFINITY
       this.onFlushed(ids)
     }
     return true
