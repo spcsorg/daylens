@@ -31,7 +31,7 @@ interface CodexState {
   // one message: lines since the last user message record, and which kind it was.
   since?: number
   prevUser?: 'item' | 'event' | null
-  // Only the latest accepted message fingerprint crosses reads.
+  recentUsers?: string[]
   lastUser?: string | null
 }
 
@@ -47,6 +47,7 @@ const BULK_TYPES = new Set(['token_usage_record', 'world_state', 'compacted', 'i
 // Bookkeeping Codex writes even while a request is stuck or failing (a usage count arrives with the error), so it
 // is not evidence the agent was doing anything.
 const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state', 'thread_settings_applied'])
+const RECENT_USERS = 64
 const FAR = 1_000_000
 const EXTERNAL_IMPORT = /^external-import-turn-\d+$/
 const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
@@ -108,11 +109,12 @@ export class CodexParser implements LineParser {
   private s: CodexState
   private readonly fileSession: string
   // Copies written out of order within this read count once per turn.
-  private seen = new Set<string>()
 
   constructor(fileSession: string, saved: string | null) {
     this.fileSession = fileSession
     this.s = saved ? (JSON.parse(saved) as CodexState) : { session: null, origin: 'interactive', dir: null, branch: null, turn: null }
+    this.s.recentUsers = (this.s.recentUsers ?? (this.s.lastUser ? [this.s.lastUser] : [])).slice(-RECENT_USERS)
+    delete this.s.lastUser
   }
 
   state(): string {
@@ -289,8 +291,7 @@ export class CodexParser implements LineParser {
         // their turns from 1 in every session) only names a turn within the session it came from.
         const key = UUID.test(p.turn_id) ? p.turn_id : `${(live ? null : this.s.source) ?? this.session}:${p.turn_id}`
         this.s.turn = { key, live, start, last: start, opener, users: 0, ...(!live && EXTERNAL_IMPORT.test(p.turn_id) ? { external: true } : {}) }
-        this.seen.clear()
-        this.s.lastUser = null
+        this.s.recentUsers = []
         out.push({ t: 'turn', key, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
         if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${key}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
         return out
@@ -331,10 +332,10 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     if (!t || this.s.origin !== 'interactive' || t.external) return []
     const d = digest(text)
-    if (this.seen.has(d) || this.s.lastUser === d) return []
+    if (this.s.recentUsers!.includes(d)) return []
     if (basis === null && looksInjected(text)) return []
-    this.seen.add(d)
-    this.s.lastUser = d
+    this.s.recentUsers!.push(d)
+    if (this.s.recentUsers!.length > RECENT_USERS) this.s.recentUsers!.shift()
     const answer = text.trimStart().startsWith(ANSWER)
     const first = t.users === 0
     t.users++
@@ -361,7 +362,7 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     if (!t) return []
     this.s.turn = null
-    this.s.lastUser = null
+    this.s.recentUsers = []
     return [{ t: 'end', key: t.key, state, at: state === 'missing' ? null : at }]
   }
 

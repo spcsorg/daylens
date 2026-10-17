@@ -297,7 +297,7 @@ test('the persisted message fingerprint is bounded and cleared between turns', (
     const words = `private message ${i}`
     run(p, [codex.userItem(sec(i + 2), words, TYPED)])
     assert.ok(!p.state().includes(words))
-    assert.ok(p.state().length < baseline + 100)
+    assert.ok(p.state().length < baseline + 1500)
     p = new CodexParser(c.id, p.state())
   }
   run(p, [codex.tokens(sec(204)), codex.tokens(sec(205))])
@@ -320,4 +320,34 @@ test('a Claude Code session imported into Codex adds no acts: they are recorded 
   assert.equal(of(recs, 'turn').length, 1)
   assert.equal(of(recs, 'user').length, 0)
   assert.equal(of(recs, 'activity').length, 0)
+})
+
+test('a delayed copy of the first of two messages stays deduplicated across reads', () => {
+  const c = codexCtx()
+  const turn = U('delayed')
+  const first = parser(c)
+  const a = run(first, [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer'), codex.userItem(sec(1), 'first', TYPED), codex.userItem(sec(2), 'second', TYPED), codex.tokens(sec(3)), codex.tokens(sec(4))])
+  const second = new CodexParser(c.id, first.state())
+  const b = run(second, [codex.userCompleted(sec(5), turn, 'first', 'client-1')])
+  assert.equal([...of(a, 'user'), ...of(b, 'user')].length, 2)
+})
+
+test('recent message fingerprints retain several copies but remain bounded over a long turn', () => {
+  const c = codexCtx()
+  const turn = U('cache')
+  let p = parser(c)
+  run(p, [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer'), codex.userItem(sec(1), 'message 0', TYPED), codex.userItem(sec(2), 'message 1', TYPED)])
+  assert.equal(JSON.parse(p.state()).recentUsers?.length, 2)
+  const baseline = p.state().length
+  for (let i = 2; i < 500; i++) {
+    run(p, [codex.userItem(sec(i + 1), `message ${i}`, TYPED)])
+    assert.ok(p.state().length < baseline + 1500, 'serialized fingerprints have a fixed memory bound')
+    p = new CodexParser(c.id, p.state())
+  }
+  const state = JSON.parse(p.state())
+  assert.equal(state.recentUsers.length, 64)
+  assert.ok(state.recentUsers.every((s: string) => /^[0-9a-f]{1,16}$/.test(s)))
+  assert.equal(of(run(p, [codex.tokens(sec(600)), codex.tokens(sec(601)), codex.userCompleted(sec(602), turn, 'message 498', 'client')]), 'user').length, 0)
+  run(p, [codex.complete(sec(700), turn, sec(1), sec(700))])
+  assert.deepEqual(JSON.parse(p.state()).recentUsers, [])
 })
