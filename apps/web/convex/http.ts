@@ -810,8 +810,10 @@ http.route({
 
 function waitlistCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
+  const allowLocal = process.env.WAITLIST_ALLOW_LOCAL_ORIGINS === "1";
   const allowed =
-    WAITLIST_ORIGINS.has(origin) || /^http:\/\/localhost:\d+$/.test(origin);
+    WAITLIST_ORIGINS.has(origin) ||
+    (allowLocal && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin));
   return allowed
     ? {
         "Access-Control-Allow-Origin": origin,
