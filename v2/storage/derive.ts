@@ -44,7 +44,7 @@ export function filesOf(title: string | null): string {
   return [...new Set(title.match(FILE_NAME) ?? [])].join(' ')
 }
 
-interface ObsRow {
+export interface ObsRow {
   id: number
   kind: string
   state: string | null
@@ -82,23 +82,27 @@ function isStop(r: ObsRow): boolean {
 }
 
 /** Turns observations (focus rows and the events that end them), in id order, into intervals. */
-// The earliest point in (start, end) where coverage stopped (a capture gap, a pause, a deleted range), else end.
-export type Cut = (startWallMs: number, endWallMs: number) => number
+// The earliest point in (start, end) where this row's coverage must stop (a capture gap, a pause, a deletion), else end.
+export type Cut = (startWallMs: number, endWallMs: number, row: ObsRow) => number
+// Whether a row may appear at all; a refused row (deleted, paused) still ends the row before it.
+export type Admit = (row: ObsRow) => boolean
 
 export class IntervalBuilder {
   private open: ObsRow | null = null
   private readonly emit: (i: IntervalRow) => void
   private readonly cut: Cut
+  private readonly admit: Admit
 
-  constructor(emit: (i: IntervalRow) => void, cut: Cut = (_s, e) => e) {
+  constructor(emit: (i: IntervalRow) => void, cut: Cut = (_s, e) => e, admit: Admit = () => true) {
     this.emit = emit
     this.cut = cut
+    this.admit = admit
   }
 
   push(r: ObsRow): void {
     if (r.kind === 'focus') {
       this.close(r.event_wall_ms)
-      this.open = r
+      this.open = this.admit(r) ? r : null
     } else if (isStop(r)) this.close(r.event_wall_ms)
   }
 
@@ -113,7 +117,7 @@ export class IntervalBuilder {
     let end = o.last_seen_wall_ms
     // Up to the next row, but never more than CONTINUITY_MS past the last sighting.
     if (nextWallMs !== null) end = Math.min(Math.max(end, Math.min(nextWallMs, end + CONTINUITY_MS)), nextWallMs)
-    end = Math.max(this.cut(o.event_wall_ms, end), o.event_wall_ms)
+    end = Math.max(this.cut(o.event_wall_ms, end, o), o.event_wall_ms)
     this.emit({
       obs_id: o.id,
       start_wall_ms: o.event_wall_ms,
@@ -136,15 +140,17 @@ export class Derived {
   private readonly upsertInterval: Database.Statement
   private readonly upsertDoc: Database.Statement
   private readonly cut: Cut
+  private readonly admit: Admit
 
-  constructor(db: Database.Database, cut?: Cut) {
+  constructor(db: Database.Database, opts: { cut?: Cut; admit?: Admit } = {}) {
     this.db = db
     const firstGap = db.prepare(`SELECT min(start_wall_ms) AS t FROM capture_gaps WHERE scope = 'all' AND start_wall_ms > ? AND start_wall_ms < ?`)
-    this.cut = (s, e) => {
+    this.cut = (s, e, row) => {
       const g = (firstGap.get(s, e) as { t: number | null }).t
-      const c = cut ? cut(s, e) : e
+      const c = opts.cut ? opts.cut(s, e, row) : e
       return Math.min(c, g ?? e)
     }
+    this.admit = opts.admit ?? (() => true)
     // Page addresses arrive with the browser step; until then observations have no url column.
     const url = hasColumn(db, 'observations', 'url') ? 'url' : 'NULL AS url'
     this.obsColumns = `id, kind, state, event_wall_ms, last_seen_wall_ms, tz_offset_min, app_id, app_name, title, title_state, ${url}`
@@ -179,20 +185,39 @@ export class Derived {
     }
   }
 
-  /** After a flush: re-derive from the focus row before the earliest touched observation to the end. */
+  /** After a flush: re-derive, in event-time order, from the focus row before the earliest touched observation to the end. */
   refresh(touchedIds: readonly number[]): void {
     if (touchedIds.length === 0) return
-    const min = Math.min(...touchedIds)
-    const from = (this.db.prepare(`SELECT max(id) AS id FROM observations WHERE kind = 'focus' AND id < ?`).get(min) as { id: number | null }).id ?? min
-    this.db.transaction(() => this.derive(from))()
+    let minEvent: number | null = null
+    for (let i = 0; i < touchedIds.length; i += 500) {
+      const chunk = touchedIds.slice(i, i + 500)
+      const m = (this.db.prepare(`SELECT min(event_wall_ms) AS t FROM observations WHERE id IN (${chunk.map(() => '?').join(',')})`).get(...chunk) as { t: number | null }).t
+      if (m !== null && (minEvent === null || m < minEvent)) minEvent = m
+    }
+    if (minEvent === null) return
+    const start = this.startKey(minEvent)
+    this.db.transaction(() => this.derive(start, null))()
+  }
+
+  /** Re-derives intervals for observations changed between two times (a deletion trimmed or split them). */
+  rederive(fromWallMs: number, toWallMs: number): void {
+    this.derive(this.startKey(fromWallMs), toWallMs)
   }
 
   /** Drops every interval and activity document and derives them again from observations. */
   rebuild(): void {
     this.db.transaction(() => {
       this.db.exec(`DELETE FROM intervals; DELETE FROM search_docs WHERE kind = 'activity'`)
-      this.derive(0)
+      this.derive({ e: Number.MIN_SAFE_INTEGER, id: 0 }, null)
     })()
+  }
+
+  // The focus row before a time: its end depends on what follows it.
+  private startKey(wallMs: number): { e: number; id: number } {
+    const r = this.db.prepare(`SELECT event_wall_ms AS e, id FROM observations WHERE kind = 'focus' AND event_wall_ms < ? ORDER BY event_wall_ms DESC, id DESC LIMIT 1`).get(wallMs) as
+      | { e: number; id: number }
+      | undefined
+    return r ?? { e: wallMs, id: 0 }
   }
 
   /** Re-derives the activity documents of the given hours from the intervals that remain (after a deletion). */
@@ -208,15 +233,25 @@ export class Derived {
     }
   }
 
-  private derive(fromId: number): void {
-    const b = new IntervalBuilder((i) => this.write(i), this.cut)
+  // In event-time order (late lines and split rows have newer ids than their neighbours). With `until`, stops after the
+  // first row past it, which only closes the row before; without, every open row is closed at the end.
+  private derive(start: { e: number; id: number }, until: number | null): void {
+    const b = new IntervalBuilder((i) => this.write(i), this.cut, this.admit)
     // Pages, not an open iterator: better-sqlite3 cannot write on a connection while a read is still iterating.
-    const page = this.db.prepare(`SELECT ${this.obsColumns} FROM observations WHERE id >= ? AND (kind = 'focus' OR ${STOPS}) ORDER BY id LIMIT 5000`)
-    for (let from = fromId; ; ) {
-      const rows = page.all(from) as ObsRow[]
-      for (const r of rows) b.push(r)
-      if (rows.length < 5000) break
-      from = rows[rows.length - 1]!.id + 1
+    const page = this.db.prepare(
+      `SELECT ${this.obsColumns} FROM observations WHERE (event_wall_ms > ? OR (event_wall_ms = ? AND id >= ?)) AND (kind = 'focus' OR ${STOPS})
+       ORDER BY event_wall_ms, id LIMIT 1000`,
+    )
+    let key = start
+    for (;;) {
+      const rows = page.all(key.e, key.e, key.id) as ObsRow[]
+      for (const r of rows) {
+        b.push(r)
+        if (until !== null && r.event_wall_ms > until) return
+      }
+      if (rows.length < 1000) break
+      const last = rows[rows.length - 1]!
+      key = { e: last.event_wall_ms, id: last.id + 1 }
     }
     b.finish()
   }

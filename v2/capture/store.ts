@@ -372,6 +372,11 @@ export class Store implements Sink {
     return this.db
   }
 
+  /** An id for a row written directly by storage (a row split by a deletion); queued writes are flushed first. */
+  allocateObservationId(): number {
+    return this.nextObsId++
+  }
+
   // A row that fell out of the in-memory window is read back; one still queued is in the window by construction.
   private storedOpenRow(id: number): { row: ObservationRow; lastSeen: number } | undefined {
     const r = this.db.prepare('SELECT * FROM observations WHERE id = ?').get(id) as (ObservationRow & { last_seen_wall_ms: number }) | undefined

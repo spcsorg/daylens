@@ -458,3 +458,23 @@ test('a row cannot be extended across a deleted range or a pause; the next sight
   assert.deepEqual(r.q(`SELECT 1 FROM intervals WHERE end_wall_ms > ? AND start_wall_ms < ?`, at(10), at(20)), [])
   r.close()
 })
+
+test('a bounded app deletion trims and splits rows that cross its edges, and a rebuild does not bring the middle back', () => {
+  resetSeq()
+  const r = rig()
+  const at = (m: number) => T0 + m * MIN
+  r.feed(focus(chat, 'Crossing chat', at(0)))
+  for (let m = 1; m <= 20; m++) r.feed(focus(chat, 'Crossing chat', at(m), 'reconcile'))
+  r.feed(focus(editor, 'next.md - Editor', at(20) + 1000))
+  r.clock.t = at(30)
+  r.storage.deleteSource('com.example.chat', { from_wall_ms: at(10), to_wall_ms: at(15) })
+  const cover = () =>
+    r.q<{ s: number; e: number }>(`SELECT (event_wall_ms - ?) / 60000.0 AS s, (last_seen_wall_ms - ?) / 60000.0 AS e FROM observations WHERE app_id = 'com.example.chat' ORDER BY event_wall_ms`, T0, T0)
+  assert.deepEqual(cover(), [{ s: 0, e: 10 }, { s: 15, e: 20 }], 'the row before and after the range survive; the middle is gone')
+  const middle = () => r.q(`SELECT 1 FROM intervals WHERE app_id = 'com.example.chat' AND end_wall_ms > ? AND start_wall_ms < ?`, at(10), at(15))
+  assert.deepEqual(middle(), [])
+  r.storage.derived.rebuild()
+  assert.deepEqual(middle(), [], 'still gone after a rebuild')
+  assert.equal(r.q(`SELECT 1 FROM intervals WHERE app_id = 'com.example.chat'`).length, 2)
+  r.close()
+})

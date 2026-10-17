@@ -5,7 +5,7 @@ import type { ExclusionRule } from '../capture/defaults.ts'
 import { Privacy, type GapPoint, type ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
-import { Derived, HOUR_MS, hoursOf, nfc, siteOf } from './derive.ts'
+import { Derived, HOUR_MS, hoursOf, MAX_INTERVAL_MS, nfc, siteOf, type ObsRow } from './derive.ts'
 import { applyMigrations } from './migrations.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
@@ -188,9 +188,17 @@ export class Storage {
     this.db.pragma('journal_size_limit = 16777216')
     applyMigrations(this.db, STORAGE_MIGRATIONS, this.now)
     this.bus = new ChangeBus(this.db, dir, this.now)
-    this.derived = new Derived(this.db, (s, e) => {
-      for (const t of this.tombstones) if (t.kind === 'range' && t.from_wall_ms !== null && t.from_wall_ms > s && t.from_wall_ms < e) e = t.from_wall_ms
-      return e
+    // Derivation follows the same rules as admission, so a rebuild never brings back deleted or paused time.
+    this.derived = new Derived(this.db, {
+      cut: (s, e, row) => {
+        for (const p of this.pauses) if (p.since_wall_ms > s && p.since_wall_ms < e) e = p.since_wall_ms
+        for (const t of this.tombstones) {
+          if (t.from_wall_ms === null || t.from_wall_ms <= s || t.from_wall_ms >= e) continue
+          if (this.tombstoneMatches(t, row.app_id, row.url)) e = t.from_wall_ms
+        }
+        return e
+      },
+      admit: (row) => this.accepts(row.event_wall_ms, row.app_id, row.url),
     })
     this.loadTombstones()
     this.privacy = new Privacy(store.exclusions())
@@ -270,6 +278,12 @@ export class Storage {
     return this.accepts(row.event_wall_ms, row.app_id, row.url ?? null)
   }
 
+  private tombstoneMatches(t: Tombstone, appId: string | null, url: string | null): boolean {
+    if (t.kind === 'range') return true
+    if (t.kind === 'source') return appId !== null && appId.toLowerCase() === t.app_id
+    return matchesSite(siteOf(url), t.site!)
+  }
+
   /** Whether a row seen at fromWallMs may be taken to cover (from, to]: no pause or deletion for it falls in between. */
   private mayCover(row: ObservationRow & { url?: string | null }, fromWallMs: number, toWallMs: number): boolean {
     const overlaps = (s: number, e: number) => s <= toWallMs && e > fromWallMs
@@ -339,15 +353,21 @@ export class Storage {
 
   private delete(t: Omit<Tombstone, 'id'>): DeletionResult {
     this.flushOrThrow()
-    const result = this.bus.commit(
-      'deletion',
-      { kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
-      () => this.applyDeletion(t),
-      () => {
-        this.loadTombstones()
-        this.capture?.interrupt()
-      },
-    )
+    let result: DeletionResult
+    try {
+      result = this.bus.commit(
+        'deletion',
+        { kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
+        () => this.applyDeletion(t),
+        () => {
+          this.loadTombstones()
+          this.capture?.interrupt()
+        },
+      )
+    } catch (err) {
+      this.loadTombstones()
+      throw err
+    }
     this.compactAfterDeletion()
     return result
   }
@@ -358,58 +378,74 @@ export class Storage {
       db.prepare('INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, app_id, site, created_wall_ms) VALUES (?, ?, ?, ?, ?, ?)').run(t.kind, t.from_wall_ms, t.to_wall_ms, t.app_id, t.site, this.now())
         .lastInsertRowid,
     )
+    // Re-derivation below must already follow the new tombstone; if the transaction fails, delete() reloads.
+    this.loadTombstones()
     const from = t.from_wall_ms ?? Number.MIN_SAFE_INTEGER
     const to = t.to_wall_ms ?? Number.MAX_SAFE_INTEGER
     const r: DeletionResult = { tombstone, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0 }
     const touchedHours = new Set<number>()
     const appNames: string[] = []
     const hasUrl = (db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'url'`).get() as unknown) !== undefined
+    const bounded = t.from_wall_ms !== null && t.to_wall_ms !== null
+    const tomb = { ...t, id: tombstone } as Tombstone
+    const matches = (o: { app_id: string | null; url?: string | null }) => this.tombstoneMatches(tomb, o.app_id, o.url ?? null)
+    // SQL narrows the candidates; `matches` decides (sites are matched on the parsed address).
+    const pre = t.kind === 'range' ? '1' : t.kind === 'source' ? 'lower(app_id) = @app' : hasUrl ? 'url IS NOT NULL' : '0'
+    const ivMatch = t.kind === 'range' ? '1' : t.kind === 'source' ? 'lower(app_id) = @app' : `(site = @site OR site LIKE '%.' || @site)`
+    const args = { from, to, app: t.app_id, site: t.site, lo: from - MAX_INTERVAL_MS }
 
-    if (t.kind === 'range') {
-      // A row that began before the range keeps only its part before it; anything that began inside is removed.
-      db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE event_wall_ms < ? AND last_seen_wall_ms > ?').run(from, from, from)
-      r.observations = db.prepare('DELETE FROM observations WHERE event_wall_ms >= ? AND event_wall_ms < ?').run(from, to).changes
-      // By start-time membership or overlap: a zero-length row at the range start overlaps nothing but is inside it.
-      const affected = db
-        .prepare('SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE (start_wall_ms >= ? AND start_wall_ms < ?) OR (end_wall_ms > ? AND start_wall_ms < ?)')
-        .all(from, to, from, to) as { start_wall_ms: number; end_wall_ms: number; tz_offset_min: number }[]
-      for (const row of affected) for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
-      db.prepare('UPDATE intervals SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
-      r.intervals = db.prepare('DELETE FROM intervals WHERE start_wall_ms >= ? AND start_wall_ms < ?').run(from, to).changes
-      db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
-      db.prepare('DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ?').run(from, to)
-    } else {
-      const matchSql = t.kind === 'source' ? 'lower(app_id) = ?' : `(site = ? OR site LIKE '%.' || ?)`
-      const matchArgs = t.kind === 'source' ? [t.app_id] : [t.site, t.site]
-      if (t.kind === 'source') {
-        const names = db.prepare('SELECT DISTINCT lower(app_name) AS n FROM intervals WHERE lower(app_id) = ? AND app_name IS NOT NULL').all(t.app_id) as { n: string }[]
-        for (const { n } of names) if (n.length >= 3) appNames.push(n)
+    if (t.kind === 'source') {
+      for (const { n } of db.prepare('SELECT DISTINCT lower(app_name) AS n FROM intervals WHERE lower(app_id) = ? AND app_name IS NOT NULL').all(t.app_id) as { n: string }[]) {
+        if (n.length >= 3) appNames.push(n)
       }
-      if (t.kind === 'source') {
-        r.observations = db.prepare('DELETE FROM observations WHERE lower(app_id) = ? AND event_wall_ms >= ? AND event_wall_ms < ?').run(t.app_id, from, to).changes
-      } else if (hasUrl) {
-        const ids = (db.prepare(`SELECT id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= ? AND event_wall_ms < ?`).all(from, to) as { id: number; url: string }[])
-          .filter((o) => matchesSite(siteOf(o.url), t.site!))
-          .map((o) => o.id)
-        const del = db.prepare('DELETE FROM observations WHERE id = ?')
-        for (const id of ids) r.observations += del.run(id).changes
-      }
-      for (const row of db.prepare(`SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).all(...matchArgs, from, to) as {
-        start_wall_ms: number
-        end_wall_ms: number
-        tz_offset_min: number
-      }[]) {
-        for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
-      }
-      r.intervals = db.prepare(`DELETE FROM intervals WHERE ${matchSql} AND start_wall_ms >= ? AND start_wall_ms < ?`).run(...matchArgs, from, to).changes
-      // Every activity document of the app or site goes; other documents in those hours are untouched.
-      r.searchDocs += db.prepare(`DELETE FROM search_docs WHERE kind = 'activity' AND ${matchSql} AND last_wall_ms > ? AND first_wall_ms < ?`).run(...matchArgs, from, to).changes
+    }
+    // Hours whose search entries may change: every hour an affected interval touched, by start or by overlap.
+    for (const row of db
+      .prepare(`SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE ${ivMatch} AND ((start_wall_ms >= @from AND start_wall_ms < @to) OR (end_wall_ms > @from AND start_wall_ms < @to))`)
+      .all(args) as { start_wall_ms: number; end_wall_ms: number; tz_offset_min: number }[]) {
+      for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
     }
 
-    if (t.kind === 'range') {
+    // Rows crossing an edge keep only their parts outside the range: one that spans it is split in two.
+    type Obs = ObservationRow & { id: number; last_seen_wall_ms: number; url?: string | null }
+    const cols = (db.prepare('PRAGMA table_info(observations)').all() as { name: string }[]).map((c) => c.name)
+    const insertCopy = db.prepare(`INSERT INTO observations (${cols.join(', ')}) VALUES (${cols.map((c) => '@' + c).join(', ')})`)
+    if (bounded) {
+      const before = (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @lo AND event_wall_ms < @from AND last_seen_wall_ms > @from AND ${pre}`).all(args) as Obs[]).filter(matches)
+      for (const o of before) {
+        if (o.last_seen_wall_ms > to) {
+          insertCopy.run({ ...o, id: this.store.allocateObservationId(), event_wall_ms: to, event_mono_us: o.event_mono_us + (to - o.event_wall_ms) * 1000 })
+        }
+        db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE id = ?').run(from, o.id)
+      }
+      const across = (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND last_seen_wall_ms > @to AND ${pre}`).all(args) as Obs[]).filter(matches)
+      for (const o of across) {
+        db.prepare('UPDATE observations SET event_wall_ms = ?, event_mono_us = ? WHERE id = ?').run(to, o.event_mono_us + (to - o.event_wall_ms) * 1000, o.id)
+      }
+    }
+    if (t.kind === 'site') {
+      const del = db.prepare('DELETE FROM observations WHERE id = ?')
+      for (const o of (hasUrl ? (db.prepare(`SELECT id, app_id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to`).all(args) as Obs[]) : []).filter(matches)) {
+        r.observations += del.run(o.id).changes
+      }
+    } else {
+      r.observations = db.prepare(`DELETE FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre}`).run(args).changes
+    }
+    r.intervals = db.prepare(`DELETE FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to`).run(args).changes
+
+    if (bounded) {
+      // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
+      this.derived.rederive(from, to)
       const before = (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n
       this.derived.rebuildDocs(touchedHours)
       r.searchDocs += Math.max(0, before - (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n)
+    } else {
+      // Across all time no row crosses an edge; every search entry of the app or site goes.
+      r.searchDocs += db.prepare(`DELETE FROM search_docs WHERE kind = 'activity' AND ${ivMatch}`).run(args).changes
+    }
+    if (t.kind === 'range') {
+      db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
+      db.prepare(`DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ? AND reason != 'paused'`).run(from, to)
     }
 
     // Hours: wholly inside a deleted range they go; otherwise any hour that drew on the material loses its text.
