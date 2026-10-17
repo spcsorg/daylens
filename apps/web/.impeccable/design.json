@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T10:00:00Z",
+  "title": "Design System: Daylens public site",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Counter White"
+      },
+      "ground-deep": {
+        "role": "neutral",
+        "displayName": "Counter Shadow"
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Guest-Check Green"
+      },
+      "paper-rule": {
+        "role": "neutral",
+        "displayName": "Ruling Green"
+      },
+      "paper-edge": {
+        "role": "neutral",
+        "displayName": "Paper Edge"
+      },
+      "steel": {
+        "role": "neutral",
+        "displayName": "Rail Steel"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ballpoint Ink"
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Faded Ink"
+      },
+      "check-red": {
+        "role": "primary",
+        "displayName": "Check Red"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The landing headline only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section, page and check headings."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Ticket, step and check-line titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Everything read; prose stops at 34em."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Check numbers and ticket times, tabular."
+      }
+    },
+    "shadows": [
+      {
+        "name": "hanging-slip",
+        "value": "0 1px 0 #c9dabd, 0 12px 22px -16px rgba(23, 35, 58, 0.55)",
+        "purpose": "Tickets on the rail."
+      },
+      {
+        "name": "pulled-slip",
+        "value": "0 1px 0 #c9dabd, 0 22px 30px -18px rgba(23, 35, 58, 0.6)",
+        "purpose": "The ticket a search found."
+      },
+      {
+        "name": "sheet",
+        "value": "0 1px 0 #c9dabd, 0 30px 50px -36px rgba(23, 35, 58, 0.55)",
+        "purpose": "The trust and closing checks."
+      },
+      {
+        "name": "steel",
+        "value": "inset 0 1px 0 #dfe4e6, 0 1px 0 #6b757b",
+        "purpose": "Rail and clips."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "All transitions; the one-time ticket hang (900ms, staggered 60ms)."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "520px"
+      },
+      {
+        "name": "tablet",
+        "value": "720px"
+      },
+      {
+        "name": "lines",
+        "value": "760px"
+      },
+      {
+        "name": "wide",
+        "value": "1000px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action: Join the beta.",
+      "html": "<button class=\"ds-btn-primary\">Join the beta</button>",
+      "css": ".ds-btn-primary{background:#17233a;color:#eef5e8;min-height:52px;padding:0 20px;border:0;border-radius:10px;font-weight:650;font-variation-settings:'wdth' 92;cursor:pointer;transition:background-color 160ms cubic-bezier(0.16,1,0.3,1)}.ds-btn-primary:hover{background:#24365a}.ds-btn-primary:focus-visible{outline:2px solid #17233a;outline-offset:3px}.ds-btn-primary:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Quiet Button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Secondary actions next to what they change.",
+      "html": "<button class=\"ds-btn-quiet\">Search</button>",
+      "css": ".ds-btn-quiet{background:transparent;color:#17233a;min-height:48px;padding:0 20px;border:1.5px solid #17233a;border-radius:10px;font-weight:650;cursor:pointer}.ds-btn-quiet:hover{background:#17233a;color:#eef5e8}.ds-btn-quiet:focus-visible{outline:2px solid #17233a;outline-offset:3px}"
+    },
+    {
+      "name": "Email Field",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "The waitlist email field.",
+      "html": "<input class=\"ds-input\" type=\"email\" placeholder=\"you@example.com\">",
+      "css": ".ds-input{min-height:52px;padding:0 16px;border:1.5px solid #6b757b;border-radius:10px;background:#fff;color:#17233a;font-size:1.05rem}.ds-input:hover{border-color:#17233a}.ds-input:focus-visible{outline:2px solid #17233a;outline-offset:3px}.ds-input[aria-invalid=true]{border-color:#b8302a}"
+    },
+    {
+      "name": "Example Chip",
+      "kind": "chip",
+      "refersTo": "chip-example",
+      "description": "A half-remembered example search.",
+      "html": "<button class=\"ds-chip\">the flour invoice</button>",
+      "css": ".ds-chip{min-height:40px;padding:0 14px;border:1px dashed #6b757b;border-radius:999px;background:transparent;color:#46526a;cursor:pointer}.ds-chip:hover,.ds-chip[aria-pressed=true]{border-style:solid;border-color:#17233a;color:#17233a;background:#fff}"
+    },
+    {
+      "name": "Hour Ticket",
+      "kind": "custom",
+      "refersTo": "ticket",
+      "description": "One hour of the day, clipped to the rail.",
+      "html": "<div class=\"ds-ticket\"><div class=\"ds-ticket-head\"><span class=\"ds-no\">No. 3</span><span>9:00–10:00</span></div><h3 class=\"ds-ticket-title\">Watched a video on pricing bread</h3><p class=\"ds-ruled\">A video about pricing for small bakeries, then two numbers copied into the price list.</p></div>",
+      "css": ".ds-ticket{width:230px;padding:26px 16px 16px;border-radius:2px 2px 6px 6px;background:#eef5e8;color:#17233a;box-shadow:0 1px 0 #c9dabd,0 12px 22px -16px rgba(23,35,58,.55)}.ds-ticket-head{display:flex;justify-content:space-between;padding-bottom:8px;border-bottom:1.5px solid #b8302a;font-size:.88rem;font-variant-numeric:tabular-nums;color:#46526a}.ds-no{color:#b8302a;font-weight:700}.ds-ticket-title{margin:12px 0 6px;font-size:1.12rem;line-height:1.15;font-variation-settings:'wdth' 84}.ds-ruled{margin:0;font-size:.93rem;color:#46526a;line-height:21px;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 20px,#d3e3c8 20px,#d3e3c8 21px)}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "Sticky header on solid ground.",
+      "html": "<nav class=\"ds-nav\"><a>How it works</a><a aria-current=\"page\">Privacy</a><a>Devlog</a></nav>",
+      "css": ".ds-nav{display:flex;gap:24px;font-size:.98rem}.ds-nav a{color:#46526a;text-decoration:none;padding:10px 0}.ds-nav a:hover{color:#17233a}.ds-nav a[aria-current=page]{color:#17233a;text-decoration:underline;text-decoration-color:#b8302a;text-decoration-thickness:2px;text-underline-offset:.2em}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Order Rail",
+    "overview": "Your day hangs in order like tickets on a kitchen order rail: each hour is a guest-check slip, numbered in red, written in plain blue-black ink and clipped to one steel bar. The page is the counter the rail hangs over: cool, clean, lit for working, never cream.",
+    "keyCharacteristics": [
+      "One steel rail, flat, with a single highlight edge.",
+      "Guest-check paper for every meaningful container, ruled where text is written.",
+      "Check numbers and header rules in red; all text in ink.",
+      "One variable face, Archivo, whose width axis carries the hierarchy."
+    ],
+    "rules": [
+      {
+        "name": "The Red Ink Rule",
+        "body": "Red marks numbers, header rules and \"now\"; it never fills a surface or a button.",
+        "section": "colors"
+      },
+      {
+        "name": "The Cool Counter Rule",
+        "body": "The ground stays cool off-white. Never cream, never beige.",
+        "section": "colors"
+      },
+      {
+        "name": "The Width Axis Rule",
+        "body": "Hierarchy comes from width and weight in one family. No second display face.",
+        "section": "typography"
+      },
+      {
+        "name": "The Measure Rule",
+        "body": "Prose stops at 34em, because Archivo is narrow and rem-based widths hold too many characters.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Sheet Rule",
+        "body": "Paper never sits inside paper. Content inside a check is written on it, not carded.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do put anything that holds Daylens content on guest-check paper, numbered in red, when it is a primary block.",
+      "Do rule the paper only where text is written on it, with the rule period equal to the line height.",
+      "Do keep tilt at ±0.3° or less, so ticket text stays crisp.",
+      "Do label example content as an example."
+    ],
+    "donts": [
+      "Don't draw steel or paper with gradients that imitate material; flat values with a 1px edge only.",
+      "Don't nest a white card or a second sheet inside a check.",
+      "Don't put a kicker or eyebrow above a heading; a check number belongs to the check's own header row.",
+      "Don't use a dark slab for a call to action; the close is a blank check.",
+      "Don't add a second typeface or a cream ground."
+    ]
+  }
+}

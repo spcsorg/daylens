@@ -52,3 +52,7 @@ REDESIGN.md
 
 # Local Codex runtime files — not for public repo
 .codex/
+
+# impeccable review captures and roll scratch
+/.impeccable/review/
+/.impeccable/questions/
