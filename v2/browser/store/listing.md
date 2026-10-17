@@ -34,8 +34,9 @@ What it never does:
   the item on the page (such as `id`, `v`, `list`, `file` or `doc`), page numbers, video times, and display settings
   (such as `lang`, `sort` or `tab`). Click and campaign tracking IDs (such as `fbclid` or `utm_source`) are removed
   too. A kept parameter is removed when its value is a login token it recognizes (`Bearer …`, a `Basic …` user name
-  and password, or a JSON web token), when a page number or time is anything but a number or time, when a display
-  setting looks like a generated key or ID, or when it holds an address this rule would change. Secrets written into
+  and password, or a JSON web token), when a search holds structured data (JSON) or a short search parameter looks
+  like a generated key, when a page number or time is anything but a number or time, when a display setting looks
+  like a generated key or ID, or when it holds an address this rule would change. Secrets written into
   the address path itself are not detected.
 
 You need the Daylens app installed on this computer. Without it, the extension does nothing.

@@ -110,21 +110,25 @@ search and page-identity parameters; everything else is removed.
 - Only `http`, `https` and `file` addresses are kept. The user name, password and fragment are removed. The path is
   kept as written, so a secret in the path is not detected.
 - A query parameter is kept only by its name, compared lowercased with separators removed:
-  - searches, any value: `q`, `query`, `search`, `s`, `k`, `search_query`, `term`, `_nkw`;
+  - searches, any text that is not a JSON object or array: `q`, `query`, `search`, `search_query`, `term`, `_nkw`;
+  - the short search aliases `s` and `k`, the same, and not key-shaped (below);
   - identities, any value: `id`, `ids`, `v`, `list`, `resid`, `cid`, `eid`, `file`, `doc`, `item`, `video`, `post`,
     `node`, `node-id`, `sha`, `commit`, `rev`, `sourcedoc`, `th`;
   - `p` and `page`, digits only; `t`, a time only (digits, or `1h2m30s` and its parts);
   - display settings: `hl`, `lang`, `m`, `tab`, `view`, `usp`, `dl`, `sort`, `filter`, `category`, `cat`, unless the
-    value is a UUID, 32 or more hex digits, or 20 or more base64 or base64url characters with at most 10%
-    separators, two of lower case, upper case and digits, and at least 3.5 bits of entropy per character.
+    value is a UUID, 32 or more hex digits, or key-shaped.
+- Key-shaped means 20 or more characters that are either hex mixing digits and letters, or base64 or base64url with
+  at most 10% separators, two of lower case, upper case and digits, at least 3.5 bits of entropy per character, and a
+  digit or at least four capitals after the first character.
 - A name that contains a secret word (token, key, session, sid, password, signature, auth and the like) or is a click
   or campaign tracking ID (`utm_*`, `mc_*`, `hs*`, names ending in `clid` or `clkid`, `igshid`, `srsltid`, `gbraid`,
   `wbraid` and the like) is never kept.
 - A kept parameter is also removed when its value, with C0 controls stripped and percent-decoded up to three times,
   is at any step a `Bearer` token, a `Basic` token whose base64 contains a colon byte, a JWT (three parts) or JWE
   (five parts) whose first part decodes to a JSON object with `alg`, a `javascript:`, `data:`, `vbscript:` or `blob:`
-  address, or an address from which this rule would remove anything; or when the decoding is ambiguous. A kept value
-  is never rewritten.
+  address, or an address from which this rule would remove anything; or when the decoding is ambiguous. In a search
+  or alias, only a form that starts with a scheme and `//`, with `//` or `\`, or is an absolute URL with a host counts
+  as an address; anything else is text, so `F# tutorial` and `site:example.com` stay. A kept value is never rewritten.
 - Over 2048 characters, the query is removed, then the path.
 
 ## Local connection
