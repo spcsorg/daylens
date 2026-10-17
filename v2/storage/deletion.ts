@@ -231,10 +231,14 @@ export class DeletionWorker {
   private next = 1
   private readonly pending = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>()
   private readonly file: string
+  private idle: ReturnType<typeof setTimeout> | null = null
 
   constructor(file: string) {
     this.file = file
   }
+
+  // An idle worker holds about 22 MB, so it exits a while after its last job and starts again on the next.
+  private static readonly IDLE_EXIT_MS = 30_000
 
   run(tombstone: number, nowWallMs: number): Promise<DeletionResult> {
     return this.send({ op: 'delete', tombstone, now: nowWallMs }) as Promise<DeletionResult>
@@ -245,6 +249,8 @@ export class DeletionWorker {
   }
 
   private send(job: Record<string, unknown>): Promise<unknown> {
+    if (this.idle) clearTimeout(this.idle)
+    this.idle = null
     const w = this.ensure()
     const id = this.next++
     w.ref()
@@ -262,14 +268,18 @@ export class DeletionWorker {
     w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)
-      if (this.pending.size === 0) w.unref()
+      if (this.pending.size === 0) {
+        w.unref()
+        this.idle = setTimeout(() => void this.close(), DeletionWorker.IDLE_EXIT_MS)
+        this.idle.unref()
+      }
       if (!p) return
       if (m.error === undefined) p.resolve(m.result)
       else p.reject(new Error(m.error))
     })
     w.on('error', (err) => this.failAll(err as Error))
     w.on('exit', () => {
-      this.worker = null
+      if (this.worker === w) this.worker = null
       this.failAll(new Error('deletion worker stopped'))
     })
     this.worker = w
@@ -282,6 +292,8 @@ export class DeletionWorker {
   }
 
   async close(): Promise<void> {
+    if (this.idle) clearTimeout(this.idle)
+    this.idle = null
     const w = this.worker
     this.worker = null
     if (w) await w.terminate()
