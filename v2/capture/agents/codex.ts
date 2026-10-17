@@ -50,7 +50,7 @@ const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state'
 const FAR = 1_000_000
 const EXTERNAL_IMPORT = /^external-import-turn-\d+$/
 const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
-const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message'])
+const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message', 'task_complete', 'turn_aborted'])
 
 const TRIGGER_OPENER: Record<string, TurnOpener> = {
   composer: 'user',

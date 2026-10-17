@@ -309,6 +309,12 @@ export class AgentStore {
     })()
   }
 
+  hasTurnlessSource(root: string): boolean {
+    return this.stmt(`SELECT 1 FROM agent_sources WHERE root = ?
+      AND json_extract(state, '$._readCounts.orphan') > 0
+      AND json_extract(state, '$._readCounts.turns') = 0 LIMIT 1`).get(root) !== undefined
+  }
+
   hasSources(): boolean {
     return this.db.prepare('SELECT 1 FROM agent_sources LIMIT 1').get() !== undefined
   }

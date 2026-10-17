@@ -157,7 +157,7 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
     for (const r of counts.values()) {
       if (r.unreadable) store.setHealth(r.agent, r.dir, 'unreadable', 'file_unreadable', null)
       else if (r.counts.lines > 0) {
-        const h = healthFromCounts(r.counts)
+        const h = healthFromCounts(r.counts, store.hasTurnlessSource(r.dir))
         store.setHealth(r.agent, r.dir, h.state, h.reason, h.detail)
       }
     }

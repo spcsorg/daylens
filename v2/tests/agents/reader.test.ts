@@ -561,3 +561,37 @@ test('a slice with no committed progress stops backfill and logs the live-reader
   assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'handoff'"), 1)
   r.store.close()
 })
+
+for (const child of [false, true]) {
+  test(`format drift in one session is not masked by a healthy session (backfill=${child})`, async () => {
+    const r = rig()
+    const good = codexCtx()
+    const drift = codexCtx()
+    writeFileSync(codexFile(r.home, good), lines(codex.meta(good, sec(0)), codex.started(sec(1), 'good', 'composer'), codex.complete(sec(5), 'good', sec(1), sec(5))))
+    writeFileSync(codexFile(r.home, drift), lines(codex.meta(drift, sec(10)), codex.started(sec(11), 'drift', 'composer').replace('task_started', 'renamed_start'), codex.assistant(sec(15))))
+    const reader = r.reader(child ? { backfill: async (roots) => (await backfill(r.store.database, r.data, roots, () => {})).merged } : {})
+    await reader.start()
+    await reader.stop()
+    const health = () => r.agents.healthFor('codex', r.roots[1]!.dir)!
+    assert.deepEqual([health().state, health().reason], ['degraded', 'turns_unrecognized'])
+    appendFileSync(codexFile(r.home, good), lines(codex.started(sec(20), 'good2', 'composer'), codex.complete(sec(25), 'good2', sec(20), sec(25))))
+    const again = r.reader()
+    await again.start()
+    await again.stop()
+    assert.equal(health().state, 'degraded', 'a later read of the healthy file cannot hide drift elsewhere')
+    r.store.close()
+  })
+
+  test(`a renamed-start session with only a recognized completion is degraded (backfill=${child})`, async () => {
+    const r = rig()
+    const c = codexCtx()
+    writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), codex.started(sec(1), 'drift', 'composer').replace('task_started', 'renamed_start'), codex.complete(sec(5), 'drift', sec(1), sec(5))))
+    const reader = r.reader(child ? { backfill: async (roots) => (await backfill(r.store.database, r.data, roots, () => {})).merged } : {})
+    await reader.start()
+    await reader.stop()
+    const h = r.agents.healthFor('codex', r.roots[1]!.dir)!
+    assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 0)
+    assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
+    r.store.close()
+  })
+}

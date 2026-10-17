@@ -86,8 +86,8 @@ export interface RootCounts {
 }
 
 // What a batch of reads says about a folder: degraded when lines could not be read, or when none of them were understood.
-export function healthFromCounts(c: ParseCounts): { state: HealthState; reason: string | null; detail: Record<string, number> | null } {
-  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : c.orphan > 0 && c.turns === 0 ? 'turns_unrecognized' : null
+export function healthFromCounts(c: ParseCounts, turnlessFile = false): { state: HealthState; reason: string | null; detail: Record<string, number> | null } {
+  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : turnlessFile || (c.orphan > 0 && c.turns === 0) ? 'turns_unrecognized' : null
   return reason === null ? { state: 'ok', reason, detail: null } : { state: 'degraded', reason, detail: { ...c } }
 }
 
@@ -373,7 +373,7 @@ export class AgentReader {
     }
     if (c.lines === 0) return
     r.counts = emptyCounts()
-    const h = healthFromCounts(c)
+    const h = healthFromCounts(c, this.store.hasTurnlessSource(r.root.dir))
     this.store.setHealth(r.root.agent, r.root.dir, h.state, h.reason, h.detail)
   }
 
@@ -419,13 +419,14 @@ export class AgentReader {
     }
     // A compressed archive is always read from its start, so it never resumes from a saved mid-file state.
     const parser = makeParser(root, info, info.compressed ? null : (row?.state ?? null))
+    const priorCounts: ParseCounts = row?.state ? (JSON.parse(row.state)._readCounts ?? emptyCounts()) : emptyCounts()
     let records: AgentRecord[] = []
     let flushed = emptyCounts()
     const flush = (offset: number) => {
       const c = parser.counts
       const delta = subCounts(c, flushed)
       flushed = { ...c }
-      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: parser.state(), counts: delta })
+      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c) }), counts: delta })
       this.stats.records += records.length
       records = []
       r.counts = addCounts(r.counts, delta)
