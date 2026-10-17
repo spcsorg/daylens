@@ -142,6 +142,27 @@ export interface HealthRow {
   detail: string | null
 }
 
+export interface AgentHealth {
+  agent: Agent
+  state: HealthState
+  reason: string | null
+  since_wall_ms: number
+}
+
+// What Settings shows per agent: any folder it cannot read or understand is the answer; a folder that does not exist
+// (Codex has no archive until a session is archived) only matters when no folder for that agent exists at all.
+export function summarizeHealth(rows: readonly HealthRow[]): AgentHealth[] {
+  const rank: Record<HealthState, number> = { unreadable: 3, degraded: 2, ok: 1, not_found: 0 }
+  const out = new Map<Agent, AgentHealth>()
+  for (const r of rows) {
+    const prev = out.get(r.agent)
+    if (!prev || rank[r.state] > rank[prev.state] || (rank[r.state] === rank[prev.state] && r.since_wall_ms < prev.since_wall_ms)) {
+      out.set(r.agent, { agent: r.agent, state: r.state, reason: r.reason, since_wall_ms: r.since_wall_ms })
+    }
+  }
+  return [...out.values()]
+}
+
 export interface TurnRow {
   agent: Agent
   turn_key: string

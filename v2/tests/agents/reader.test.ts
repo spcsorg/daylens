@@ -5,7 +5,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { backfill } from '../../capture/agents/backfill.ts'
 import { AgentReader, classifyFile, homeRoots, type AgentRoot } from '../../capture/agents/reader.ts'
-import { AgentStore } from '../../capture/agents/store.ts'
+import { AgentStore, summarizeHealth } from '../../capture/agents/store.ts'
 import { Store } from '../../capture/store.ts'
 import { claude, claudeCtx, codex, codexCtx, sec, tmp } from './fixtures.ts'
 
@@ -212,10 +212,17 @@ test('health says when logs are missing, unreadable, or no longer understood, an
   appendFileSync(file, lines(claude.assistant(c, sec(3), 'end_turn')))
   await waitFor(() => health().state === 'ok')
 
+  // Codex has no logs at all here, Claude Code is fine: Settings shows each agent on its own.
+  assert.deepEqual(summarizeHealth(r.agents.health()).map((h) => [h.agent, h.state]), [
+    ['claude_code', 'ok'],
+    ['codex', 'not_found'],
+  ])
+
   // A format that changed completely: valid lines, none of them recognized.
   appendFileSync(file, lines(JSON.stringify({ type: 'v99-record', at: 1 }), JSON.stringify({ type: 'v99-turn', at: 2 })))
   await waitFor(() => health().state === 'degraded')
   assert.equal(health().reason, 'unrecognized_format')
+  assert.equal(summarizeHealth(r.agents.health()).find((h) => h.agent === 'claude_code')!.state, 'degraded')
   await second.stop()
 
   if (process.platform !== 'win32' && process.getuid?.() !== 0) {
@@ -258,6 +265,18 @@ test('the first read of a history runs in a child process and lands exactly as a
   assert.equal(a.count('SELECT count(*) AS n FROM agent_sources'), 2)
   a.store.close()
   b.store.close()
+})
+
+test('settling with nothing to read returns at once, with empty session folders present', async () => {
+  const r = rig()
+  mkdirSync(path.join(r.home, '.claude', 'projects', '-empty-project'), { recursive: true })
+  mkdirSync(path.join(r.home, '.codex', 'sessions', '2026', '10', '17'), { recursive: true })
+  const reader = r.reader()
+  await reader.start()
+  const settled = await Promise.race([reader.settle().then(() => true), new Promise((res) => setTimeout(() => res(false), 2000))])
+  assert.equal(settled, true)
+  await reader.stop()
+  r.store.close()
 })
 
 test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {

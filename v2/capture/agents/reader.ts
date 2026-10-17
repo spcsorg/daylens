@@ -1,5 +1,5 @@
 // Watches the Claude Code and Codex log folders and reads only what was appended since the last read.
-// Folders are listed once at start (and when one appears); after that, file events drive every read.
+// File events drive reading; a slow check compares file sizes with the stored read positions for events a watcher missed.
 
 import { existsSync, watch, type FSWatcher } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
@@ -243,22 +243,24 @@ export class AgentReader {
 
   private drain(): Promise<void> {
     if (this.draining) return this.draining
-    this.draining = (async () => {
-      try {
-        while (this.dirty.size > 0 && !this.stopped) {
-          const batch = [...this.dirty]
-          this.dirty.clear()
-          for (const [file, r] of batch) {
-            if (this.stopped) break
-            await this.readFile(r, file)
-          }
-        }
-        for (const r of this.roots) this.recordHealth(r)
-      } finally {
-        this.draining = null
+    // Cleared after the promise is stored: with nothing to read, the loop finishes before this method returns.
+    const p = this.drainLoop().finally(() => {
+      if (this.draining === p) this.draining = null
+    })
+    this.draining = p
+    return p
+  }
+
+  private async drainLoop(): Promise<void> {
+    while (this.dirty.size > 0 && !this.stopped) {
+      const batch = [...this.dirty]
+      this.dirty.clear()
+      for (const [file, r] of batch) {
+        if (this.stopped) break
+        await this.readFile(r, file)
       }
-    })()
-    return this.draining
+    }
+    for (const r of this.roots) this.recordHealth(r)
   }
 
   private recordHealth(r: RootState): void {
