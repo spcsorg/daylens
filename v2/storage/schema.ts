@@ -292,6 +292,22 @@ const deletionWork: Migration = {
     `),
 }
 
+const deletionFence: Migration = {
+  name: 'deletion_fence',
+  // What a pending deletion covers, as planned: readers and writers check this, not the hours' current contents,
+  // which the deletion itself clears. Kept until the deletion is done, apart from the work list it ticks off.
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE deletion_fence (
+        tombstone_id INTEGER NOT NULL REFERENCES deletions(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('hour', 'thread', 'read')),
+        ref INTEGER NOT NULL,
+        PRIMARY KEY (tombstone_id, kind, ref)
+      ) WITHOUT ROWID;
+      CREATE INDEX deletion_fence_ref ON deletion_fence(kind, ref);
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -312,4 +328,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   deriveBackfill,
   deletionState,
   deletionWork,
+  deletionFence,
 ]

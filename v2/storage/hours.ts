@@ -1,7 +1,7 @@
 // Hours as every reader sees them, and the writes both the main thread and the deletion worker make to them.
 import type Database from 'better-sqlite3'
 import { nfc } from './derive.ts'
-import { matchesSite, pendingTombstones, type Tombstone } from './rules.ts'
+import { fencedBy, matchesSite, pendingTombstones, type Tombstone } from './rules.ts'
 
 export type HourField = 'title' | 'summary' | 'detail' | 'outcome' | 'suggestion'
 export const HOUR_FIELDS: readonly HourField[] = ['title', 'summary', 'detail', 'outcome', 'suggestion']
@@ -62,6 +62,14 @@ function readHourNow(db: Database.Database, id: number): Hour | null {
   if (!h) return null
   const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }
   const fence = pendingVerdict(out, pendingTombstones(db))
+  // A deletion that fenced this hour when planned applies even after it has cleared the hour's sources.
+  for (const t of fencedBy(db, 'hour', id)) {
+    if (fence.by.some((b) => b.id === t.id)) continue
+    const removes = t.kind === 'range' && (t.from_wall_ms ?? -Infinity) <= out.start_wall_ms && (t.to_wall_ms ?? Infinity) >= out.end_wall_ms
+    if (removes) return null
+    fence.verdict = 'cleared'
+    fence.by.push(t)
+  }
   if (fence.verdict === 'removed') return null
   if (fence.verdict === 'cleared') {
     for (const f of HOUR_FIELDS) out[f] = null

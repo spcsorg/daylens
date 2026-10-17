@@ -764,3 +764,29 @@ test('a site deletion completes on the capture-only schema, which has no page ad
   assert.notEqual(r.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state, 'pending')
   r.close()
 })
+
+for (const kind of ['range', 'source', 'site'] as const) {
+  for (const stopAfter of ['hours', 'threads'] as const) {
+    test(`mid-deletion (${kind}, stopped after ${stopAfter}): the fence still covers cleared hours, their threads and new references`, () => {
+      const r = rig(tmpDir(), { holdDeletions: true })
+      const sources = kind === 'source' ? [{ app_id: 'com.example.chat' }] : kind === 'site' ? [{ site: 'secret.example' }] : []
+      const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Civet canary', sources }, r.storage.hourBasis(T0))
+      const other = r.storage.writeHour({ start_wall_ms: T0 + 5 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Other' }, r.storage.hourBasis(T0 + 5 * HOUR))
+      r.storage.createThread('Civet canary shared', [h.id, other.id])
+      r.clock.t = T0 + 6 * HOUR
+      const { tombstone } =
+        kind === 'range' ? r.storage.deleteRange(T0 + MIN, T0 + 2 * MIN) : kind === 'source' ? r.storage.deleteSource('com.example.chat') : r.storage.deleteSite('secret.example')
+      const conn = new Database(path.join(r.dir, DB_FILE))
+      conn.pragma('foreign_keys = ON')
+      assert.throws(() => new Deleter(conn).run(tombstone, r.clock.t, { stopAfter }), /stopped after/)
+      conn.close()
+      const span = { assistant: 'claude', tool: 'getDay', from_wall_ms: T0 + 5 * HOUR, to_wall_ms: T0 + 6 * HOUR }
+      assert.throws(() => r.storage.createThread('Civet canary again', [h.id]), PendingDeletionError)
+      assert.throws(() => r.storage.correct(h.id, 'title', 'Civet canary corrected'), PendingDeletionError)
+      assert.throws(() => r.storage.recordAssistantRead({ ...span, query: 'Civet canary read', hours: [h.id] }), PendingDeletionError)
+      assert.equal(r.storage.hour(h.id)?.title ?? null, null)
+      assert.deepEqual(r.storage.threadsForHour(other.id).map((t) => t.title), [''], 'the shared thread shows no title until the deletion is done')
+      r.close()
+    })
+  }
+}

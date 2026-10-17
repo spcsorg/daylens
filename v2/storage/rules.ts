@@ -43,6 +43,16 @@ export function tombstoneMatches(t: Pick<Tombstone, 'kind' | 'app_id' | 'site'>,
   return matchesSite(siteOf(url), t.site!)
 }
 
+/** The pending deletions that fenced this hour, thread or read when they were planned. */
+export function fencedBy(db: Database.Database, kind: 'hour' | 'thread' | 'read', ref: number): Tombstone[] {
+  return db
+    .prepare(
+      `SELECT d.id, d.kind, d.from_wall_ms, d.to_wall_ms, lower(d.app_id) AS app_id, lower(d.site) AS site, d.state
+       FROM deletion_fence f JOIN deletions d ON d.id = f.tombstone_id WHERE f.kind = ? AND f.ref = ? AND d.state = 'pending'`,
+    )
+    .all(kind, ref) as Tombstone[]
+}
+
 export function pendingTombstones(db: Database.Database): Tombstone[] {
   return db.prepare(`SELECT id, kind, from_wall_ms, to_wall_ms, lower(app_id) AS app_id, lower(site) AS site, state FROM deletions WHERE state = 'pending'`).all() as Tombstone[]
 }
@@ -54,7 +64,6 @@ export function pendingTombstones(db: Database.Database): Tombstone[] {
 export function searchFence(pending: readonly Tombstone[]): { sql: string; params: unknown[] } {
   const parts: string[] = []
   const params: unknown[] = []
-  const hourSource = (cond: string) => `EXISTS (SELECT 1 FROM hours h, json_each(h.sources) j WHERE h.id = d.hour_id AND ${cond})`
   for (const t of pending) {
     const overlap = 'd.last_wall_ms >= ? AND d.first_wall_ms < ?'
     const span = [t.from_wall_ms ?? Number.MIN_SAFE_INTEGER, t.to_wall_ms ?? Number.MAX_SAFE_INTEGER]
@@ -62,15 +71,15 @@ export function searchFence(pending: readonly Tombstone[]): { sql: string; param
       parts.push(`NOT (${overlap})`)
       params.push(...span)
     } else if (t.kind === 'source') {
-      parts.push(`NOT (${overlap} AND ((d.kind = 'activity' AND lower(d.app_id) = ?) OR (d.kind = 'hour' AND ${hourSource(`lower(json_extract(j.value, '$.app_id')) = ?`)})))`)
-      params.push(...span, t.app_id, t.app_id)
+      parts.push(`NOT (${overlap} AND d.kind = 'activity' AND lower(d.app_id) = ?)`)
+      params.push(...span, t.app_id)
     } else {
-      const site = `lower(json_extract(j.value, '$.site'))`
-      parts.push(
-        `NOT (${overlap} AND ((d.kind = 'activity' AND (d.site = ? OR d.site LIKE '%.' || ?)) OR (d.kind = 'hour' AND ${hourSource(`(${site} = ? OR ${site} LIKE '%.' || ?)`)})))`,
-      )
-      params.push(...span, t.site, t.site, t.site, t.site)
+      parts.push(`NOT (${overlap} AND d.kind = 'activity' AND (d.site = ? OR d.site LIKE '%.' || ?))`)
+      params.push(...span, t.site, t.site)
     }
+    // Hours this deletion fenced when it was planned, whatever their text or sources say now.
+    parts.push(`NOT (d.kind = 'hour' AND d.hour_id IN (SELECT ref FROM deletion_fence WHERE tombstone_id = ? AND kind = 'hour'))`)
+    params.push(t.id)
   }
   return { sql: parts.length ? parts.join(' AND ') : '1', params }
 }

@@ -104,6 +104,7 @@ export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec
        WHERE ${match} AND a.to_wall_ms > @from AND a.from_wall_ms < @to`,
     ).run({ id: tombstoneId, app, site, from, to })
   }
+  db.prepare(`INSERT OR IGNORE INTO deletion_fence SELECT tombstone_id, kind, ref FROM deletion_work WHERE tombstone_id = ? AND kind IN ('hour', 'thread', 'read')`).run(tombstoneId)
 }
 
 const ROWS_PER_STEP = 500
@@ -389,6 +390,7 @@ export class Deleter {
       const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
       for (const id of this.work(tombstoneId, 'read', Number.MAX_SAFE_INTEGER)) r.assistantReads += delRead.run(id).changes
       db.prepare(`DELETE FROM deletion_work WHERE tombstone_id = ?`).run(tombstoneId)
+      db.prepare(`DELETE FROM deletion_fence WHERE tombstone_id = ?`).run(tombstoneId)
       db.prepare(`UPDATE deletions SET state = 'done' WHERE id = ? AND state = 'pending'`).run(tombstoneId)
     })
     return r

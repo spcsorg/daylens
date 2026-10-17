@@ -9,7 +9,7 @@ import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResul
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
-import { DAY_MS, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
+import { DAY_MS, fencedBy, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 import { immediate, isBusy } from './tx.ts'
 
@@ -405,6 +405,7 @@ export class Storage {
     if (pending.length === 0) return
     const hour = this.db.prepare('SELECT start_wall_ms, end_wall_ms, sources FROM hours WHERE id = ?')
     for (const id of hourIds) {
+      if (fencedBy(this.db, 'hour', id).length > 0) throw new PendingDeletionError('this hour is being deleted')
       const h = hour.get(id) as { start_wall_ms: number; end_wall_ms: number; sources: string } | undefined
       if (h && pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null) throw new PendingDeletionError('this hour is being deleted')
     }
@@ -512,6 +513,7 @@ export class Storage {
 
   linkHour(threadId: number, hourId: number): void {
     this.bus.commit('hour', { thread: threadId }, () => {
+      if (fencedBy(this.db, 'thread', threadId).length > 0) throw new PendingDeletionError('this thread is being deleted')
       this.refuseFenced([hourId])
       this.db.prepare('INSERT OR IGNORE INTO thread_hours (thread_id, hour_id) VALUES (?, ?)').run(threadId, hourId)
       this.db.prepare('UPDATE threads SET updated_wall_ms = ? WHERE id = ?').run(this.now(), threadId)
@@ -529,9 +531,11 @@ export class Storage {
     if (pending.length === 0) return threads
     const hoursOf = this.db.prepare('SELECT h.start_wall_ms, h.end_wall_ms, h.sources FROM hours h JOIN thread_hours th ON th.hour_id = h.id WHERE th.thread_id = ?')
     return threads.map((t) => {
-      const fenced = (hoursOf.all(t.id) as { start_wall_ms: number; end_wall_ms: number; sources: string }[]).some(
-        (h) => pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null,
-      )
+      const fenced =
+        fencedBy(this.db, 'thread', t.id).length > 0 ||
+        (hoursOf.all(t.id) as { start_wall_ms: number; end_wall_ms: number; sources: string }[]).some(
+          (h) => pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null,
+        )
       return fenced ? { ...t, title: '' } : t
     })
   }
