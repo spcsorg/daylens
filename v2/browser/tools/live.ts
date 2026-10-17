@@ -19,6 +19,7 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { cleanAddress } from '../../capture/address.ts'
 import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -370,6 +371,8 @@ class ChromiumDriver implements Driver {
     return (await this.cdp.send('Target.createTarget', { url, newWindow: true })).targetId
   }
   async openPrivate(url: string): Promise<string> {
+    // Dia hands a second launch to whichever Dia is already running, which may be the person's own.
+    if (this.name === 'dia') throw new Error('dia: a private window cannot be opened from the command line in the test instance')
     // A real incognito window, opened the way a person opens one, not a DevTools browser context.
     execFileSync(this.binary, [`--user-data-dir=${this.profile}`, '--incognito', url], { env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() }, stdio: 'ignore' })
     const id = await this.waitTarget((t) => t.type === 'page' && t.url === url, 10_000, 'private window')
@@ -804,7 +807,8 @@ async function canary(): Promise<void> {
   let pairingSeen: unknown = null
   const markers: Marker[] = []
   const mark = (label: string, page: string | null | undefined, isPrivate: boolean) => {
-    markers.push({ t: Date.now(), label, expect: page === undefined ? undefined : { page }, private: isPrivate })
+    // The service stores the address after the address rule, so that is what a step expects.
+    markers.push({ t: Date.now(), label, expect: page === undefined ? undefined : { page: page === null ? null : cleanAddress(page) }, private: isPrivate })
     log(label)
   }
   let interruptions = 0
