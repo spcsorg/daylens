@@ -28,7 +28,7 @@ test('a scrub whose marker cannot be written on a full disk stays pending until 
   const page_count = store.query<{ page_count: number }>('PRAGMA page_count')[0]!.page_count
   store.query(`PRAGMA max_page_count = ${page_count}`)
   store.setMeta('filler', 'x'.repeat(20_000))
-  assert.equal(store.scrub(), false, 'not done while nothing can be written')
+  assert.equal(store.scrub([KEY]), false, 'not done while nothing can be written')
   assert.ok(errors.includes('SQLITE_FULL'))
   assert.equal(store.storeHealth().scrubPending, true)
   store.query('PRAGMA max_page_count = 1073741823')
@@ -43,7 +43,7 @@ test('a scrub whose marker write is blocked by another writer stays pending unti
   const { dir, store, errors } = withLegacyKey()
   const other = new Database(path.join(dir, DB_FILE))
   other.prepare('BEGIN IMMEDIATE').run()
-  assert.equal(store.scrub(), false)
+  assert.equal(store.scrub([KEY]), false)
   assert.ok(errors.some((e) => e.startsWith('SQLITE_BUSY')))
   assert.equal(store.storeHealth().scrubPending, true)
   other.prepare('COMMIT').run()
@@ -63,7 +63,7 @@ test('a full queue drops neither the migration write nor the scrub marker, so th
   const other = new Database(path.join(dir, DB_FILE))
   other.prepare('BEGIN IMMEDIATE').run()
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), origin: 'chrome-extension://x', paired_wall_ms: 1 }]), { keep: true })
-  assert.equal(store.scrub(), false)
+  assert.equal(store.scrub([KEY]), false)
   for (let i = 0; i < 50_001; i++) store.touchAlive(1_000 + i)
   assert.ok(store.storeHealth().droppedOps > 0, 'the queue overflowed')
   other.prepare('COMMIT').run()
@@ -79,11 +79,33 @@ test('a scrub stays pending while a pairing row or any file still holds a key, e
   const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-verify-'))
   const store = new Store(dir, { onError: () => {} })
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), key: KEY, origin: 'chrome-extension://x', paired_wall_ms: 1 }]))
-  assert.equal(store.scrub(), false, 'the key is still in the row')
+  assert.equal(store.scrub([KEY]), false, 'the key is still in the row')
   assert.equal(store.storeHealth().scrubPending, true)
   assert.equal(store.meta('scrub_pending'), '1')
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), origin: 'chrome-extension://x', paired_wall_ms: 1 }]))
   assert.equal(store.retryScrub(), true)
   assert.equal(keyInFiles(dir), false)
   store.close()
+})
+
+function pageTitled(store: Store, title: string): void {
+  store.insertObservation({
+    run: 'r', seq: 0, boot: 'b', platform: 'macos', source: 's', kind: 'focus', event_wall_ms: 1, event_mono_us: 0, tz: 'UTC', tz_offset_min: 0,
+    app_id: 'com.example.browser', app_name: 'Browser', app_path: null, pid: 1, window: 'w', title, title_raw: title, title_state: null, state: null, detail: null,
+  })
+}
+
+test('a page whose title merely looks like a stored key does not hold the scrub up; the migrated key itself does', () => {
+  const { dir, store } = withLegacyKey()
+  pageTitled(store, `{"key":"${'Z'.repeat(43)}"}`)
+  assert.equal(store.scrub([KEY]), true)
+  assert.equal(store.storeHealth().scrubPending, false)
+  assert.equal(keyInFiles(dir), false)
+  store.close()
+
+  const second = withLegacyKey()
+  pageTitled(second.store, `copied ${KEY} by hand`)
+  assert.equal(second.store.scrub([KEY]), false, 'the exact key is still in the files')
+  assert.equal(second.store.storeHealth().scrubPending, true)
+  second.store.close()
 })

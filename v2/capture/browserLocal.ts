@@ -75,7 +75,7 @@ export interface PairingStore {
   meta(key: string): string | null
   setMeta(key: string, value: string | null, opts?: { keep?: boolean }): void
   // Clears old copies of rewritten rows from the database files; false while that is still pending.
-  scrub?(): boolean
+  scrub?(keys: readonly string[]): boolean
 }
 
 // What the database keeps about a pairing. The key is in the secret store under the pairing's id.
@@ -259,7 +259,7 @@ export class BrowserLocal {
     }
     if (legacy.length) {
       this.save()
-      if (this.store.scrub && !this.store.scrub()) this.log('browser pairing scrub_pending')
+      if (this.store.scrub && !this.store.scrub(legacy.map((l) => l.key))) this.log('browser pairing scrub_pending')
     }
   }
 

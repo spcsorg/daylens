@@ -138,8 +138,9 @@ Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
   an earlier version moves to secure storage at start, and the database is then checkpointed and vacuumed so no older
   copy of the row is left in the files. Another open reader can hold that up: the database keeps a `scrub_pending`
   marker, store health reports `scrubPending`, and the scrub is retried at every start and every minute until a
-  checkpoint reports it complete and neither the `browser_pairings` row nor any database file still holds a
-  `"key":"<43 characters>"` value. The rewritten row and the marker are never the writes dropped when the write queue
+  checkpoint reports it complete, no `browser_pairings` entry still has a `key` field, and no database file still
+  holds one of the migrated keys. Those keys are held in memory only while the scrub runs; a scrub resumed after a
+  restart relies on the checkpoint and vacuum alone. The rewritten row and the marker are never the writes dropped when the write queue
   is full. A pairing whose key is missing from secure storage is removed
   and the browser shows Connect again; unpairing or replacing a pairing deletes its key.
 - A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own

@@ -13,8 +13,6 @@ const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
 const SCRUB_KEY = 'scrub_pending'
 const SCRUB_RETRY_MS = 60_000
-// How a pairing secret was stored before it moved to the system's secret store: found without knowing the key.
-const LEGACY_KEY = /"key":"[A-Za-z0-9_-]{43}"/
 const SCAN_CHUNK = 1 << 20
 
 export function defaultDataDir(): string {
@@ -190,6 +188,16 @@ function errorCode(err: unknown): string {
   return typeof code === 'string' ? code : 'unknown'
 }
 
+function pairingRowHasKey(row: string | null): boolean {
+  if (row === null) return false
+  try {
+    const list: unknown = JSON.parse(row)
+    return Array.isArray(list) && list.some((p) => !!p && typeof p === 'object' && 'key' in p)
+  } catch {
+    return false
+  }
+}
+
 export class Store implements Sink {
   readonly file: string
   private readonly db: Database.Database
@@ -203,6 +211,8 @@ export class Store implements Sink {
   private nextGapId: number
   private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, droppedOps: 0, pendingOps: 0, scrubPending: false }
   private scrubTimer: ReturnType<typeof setInterval> | null = null
+  // The exact keys being moved out, held only in memory until the scrub completes.
+  private scrubKeys: Buffer[] = []
   private droppedSinceFailure = 0
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
@@ -326,7 +336,8 @@ export class Store implements Sink {
 
   // Removes every older copy of rewritten rows from the files (WAL frames and free pages) after a secret is moved out
   // of the database. Pending until a checkpoint reports it completed; an open reader elsewhere can hold it up.
-  scrub(): boolean {
+  scrub(keys: readonly string[] = []): boolean {
+    for (const k of keys) if (k) this.scrubKeys.push(Buffer.from(k))
     this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [], true)
     return this.retryScrub()
   }
@@ -353,25 +364,27 @@ export class Store implements Sink {
     return this.scrubDone()
   }
 
-  // Whether a pairing row or any of the database's files still holds a key in the legacy shape.
+  // Whether a pairing row still has a key field, or any of the database's files still holds one of the migrated keys.
   private holdsLegacyKey(): boolean {
-    const row = this.meta('browser_pairings')
-    if (row !== null && LEGACY_KEY.test(row)) return true
+    if (pairingRowHasKey(this.meta('browser_pairings'))) return true
+    if (this.scrubKeys.length === 0) return false
+    const overlap = Math.max(...this.scrubKeys.map((k) => k.length)) - 1
     for (const f of [this.file, `${this.file}-wal`, `${this.file}-shm`]) {
       if (!existsSync(f)) continue
       const fd = openSync(f, 'r')
       try {
-        const buf = Buffer.alloc(SCAN_CHUNK + 64)
+        const buf = Buffer.alloc(SCAN_CHUNK + overlap)
         let carry = 0
         let pos = 0
         for (;;) {
           const n = readSync(fd, buf, carry, SCAN_CHUNK, pos)
           if (n === 0) break
-          if (LEGACY_KEY.test(buf.toString('latin1', 0, carry + n))) return true
-          pos += n
-          // Keeps the tail so a match split across two reads is still seen.
           const total = carry + n
-          carry = Math.min(64, total)
+          const window = buf.subarray(0, total)
+          if (this.scrubKeys.some((k) => window.includes(k))) return true
+          pos += n
+          // Keeps the tail so a key split across two reads is still seen.
+          carry = Math.min(overlap, total)
           buf.copy(buf, 0, total - carry, total)
         }
       } finally {
@@ -392,6 +405,7 @@ export class Store implements Sink {
   }
 
   private scrubDone(): boolean {
+    this.scrubKeys = []
     this.health.scrubPending = false
     if (this.scrubTimer) clearInterval(this.scrubTimer)
     this.scrubTimer = null
