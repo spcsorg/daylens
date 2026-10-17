@@ -1,0 +1,31 @@
+// Write transactions that take the writer lock first (BEGIN IMMEDIATE). A deferred transaction that reads before
+// writing fails with SQLITE_BUSY_SNAPSHOT if another connection commits in between, which waiting cannot fix.
+import type Database from 'better-sqlite3'
+
+const BUSY = new Set(['SQLITE_BUSY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_BUSY_RECOVERY', 'SQLITE_BUSY_TIMEOUT', 'SQLITE_LOCKED', 'SQLITE_LOCKED_SHAREDCACHE'])
+
+export function isBusy(err: unknown): boolean {
+  return BUSY.has((err as { code?: string })?.code ?? '')
+}
+
+/** One immediate transaction; busy errors are thrown for the caller to retry. */
+export function immediate<T>(db: Database.Database, fn: () => T): T {
+  return db.transaction(fn).immediate()
+}
+
+const parked = new Int32Array(new SharedArrayBuffer(4))
+
+/**
+ * For the deletion worker, which may block: retries the whole transaction while another connection holds the lock,
+ * waiting a little longer each time (up to a second between tries). Any other error is thrown.
+ */
+export function immediateRetrying<T>(db: Database.Database, fn: () => T): T {
+  for (let wait = 10; ; wait = Math.min(wait * 2, 1000)) {
+    try {
+      return immediate(db, fn)
+    } catch (err) {
+      if (!isBusy(err)) throw err
+      Atomics.wait(parked, 0, 0, wait)
+    }
+  }
+}

@@ -10,6 +10,7 @@ import type { ObservationRow } from '../capture/normalize.ts'
 import { Derived, hoursOf, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
+import { immediateRetrying } from './tx.ts'
 
 export interface DeletionResult {
   tombstone: number
@@ -81,12 +82,12 @@ export class Deleter {
 
   // FTS5 secure-delete removes a deleted entry's terms as it goes; set only inside these transactions, as a literal.
   private withSecureFts<T>(fn: () => T): T {
-    return this.db.transaction(() => {
+    return immediateRetrying(this.db, () => {
       this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
       const out = fn()
       this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
       return out
-    })()
+    })
   }
 
   run(tombstoneId: number, nowWallMs: number): DeletionResult {
@@ -117,24 +118,24 @@ export class Deleter {
       for (let after = 0; hasUrl(db); ) {
         const rows = page.all({ ...args, after }) as Obs[]
         if (rows.length === 0) break
-        db.transaction(() => {
+        immediateRetrying(db, () => {
           for (const o of rows.filter(matches)) r.observations += del.run(o.id).changes
-        })()
+        })
         after = rows[rows.length - 1]!.id
       }
     } else {
       const step = db.prepare(`DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre} LIMIT ${ROWS_PER_STEP})`)
-      for (let n = -1; n !== 0; ) r.observations += n = step.run(args).changes
+      for (let n = -1; n !== 0; ) r.observations += n = immediateRetrying(db, () => step.run(args).changes)
     }
     const ivStep = db.prepare(`DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP})`)
-    for (let n = -1; n !== 0; ) r.intervals += n = ivStep.run(args).changes
+    for (let n = -1; n !== 0; ) r.intervals += n = immediateRetrying(db, () => ivStep.run(args).changes)
 
     const docCount = db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`)
     if (bounded) {
       // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
       for (let at: number | null = from; at !== null; ) {
         const s: number = at
-        at = db.transaction(() => derived.rederiveStep(s, to))()
+        at = immediateRetrying(db, () => derived.rederiveStep(s, to))
       }
       const before = (docCount.get() as { n: number }).n
       const hours = [...touchedHours]
@@ -146,10 +147,10 @@ export class Deleter {
       for (let n = -1; n !== 0; ) r.searchDocs += n = this.withSecureFts(() => step.run(args).changes)
     }
     if (t.kind === 'range') {
-      db.transaction(() => {
+      immediateRetrying(db, () => {
         db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
         db.prepare(`DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ? AND reason != 'paused'`).run(from, to)
-      })()
+      })
     }
 
     // Hours: wholly inside a deleted range they go; otherwise any hour that drew on the material loses its text.
@@ -179,7 +180,7 @@ export class Deleter {
       })
     }
 
-    db.transaction(() => {
+    immediateRetrying(db, () => {
       // Threads: one left with no hours goes; one still linked elsewhere keeps its id and waits for a new title.
       for (const id of touchedThreads) {
         const left = (db.prepare('SELECT count(*) AS n FROM thread_hours WHERE thread_id = ?').get(id) as { n: number }).n
@@ -203,7 +204,7 @@ export class Deleter {
       const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
       for (const id of touchedReads) r.assistantReads += delRead.run(id).changes
       db.prepare(`UPDATE deletions SET state = 'done' WHERE id = ? AND state = 'pending'`).run(tombstoneId)
-    })()
+    })
     return r
   }
 

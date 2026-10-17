@@ -59,13 +59,14 @@ export class ChangeBus {
    */
   commit<T>(kind: ChangeKind, payload: Record<string, unknown>, write: () => T, install?: (result: T) => void): T {
     let change!: Change
+    // Immediate: write() may read before writing while another connection (the deletion worker) commits.
     const result = this.db.transaction(() => {
       const out = write()
       const at = this.now()
       const info = this.db.prepare('INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (?, ?, ?)').run(at, kind, JSON.stringify(payload))
       change = { seq: Number(info.lastInsertRowid), at, kind, payload }
       return out
-    })()
+    }).immediate()
     install?.(result)
     this.queue.push(change)
     this.dispatch()
@@ -117,7 +118,7 @@ export function pruneChangeLog(db: Database.Database, keepFromWallMs: number, li
     const n = db.prepare('DELETE FROM change_log WHERE seq <= ?').run(top.m).changes
     db.prepare(`INSERT INTO meta (key, value) VALUES ('change_log_floor', ?) ON CONFLICT (key) DO UPDATE SET value = max(CAST(value AS INTEGER), excluded.value)`).run(String(top.m))
     return n
-  })()
+  }).immediate()
 }
 
 export function changesSince(db: Database.Database, seq: number, limit = 1000): Change[] {

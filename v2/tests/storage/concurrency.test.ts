@@ -1,0 +1,70 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import path from 'node:path'
+import { Worker } from 'node:worker_threads'
+import type { ObservationRow } from '../../capture/normalize.ts'
+import { DB_FILE, Store } from '../../capture/store.ts'
+import { HOUR, rig, T0, tmpDir } from './support.ts'
+import Database from 'better-sqlite3'
+import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
+
+function row(t: number, app: string, title: string): ObservationRow {
+  return {
+    run: 'seed', seq: 0, boot: 'b', platform: 'macos', source: 'seed', kind: 'focus', event_wall_ms: t, event_mono_us: t * 1000, tz: 'Africa/Kigali',
+    tz_offset_min: 120, app_id: app, app_name: app, app_path: null, pid: 1, window: 'w', title, title_raw: null, title_state: 'ok', state: 'ok', detail: null,
+  }
+}
+
+function hammer(dir: string, ms: number): Promise<number> {
+  const w = new Worker(new URL('./hammer.ts', import.meta.url), { workerData: { file: path.join(dir, DB_FILE), ms } })
+  return new Promise((resolve, reject) => {
+    w.on('message', resolve)
+    w.on('error', reject)
+  })
+}
+
+test('a deletion finishes while another connection keeps committing', async () => {
+  const r = rig()
+  for (let i = 0; i < 9000; i++) r.store.insertObservation(row(T0 + i * 20_000, i % 3 ? 'com.example.editor' : 'com.example.chat', `item ${i} canary${i % 500}`))
+  r.store.flush()
+  r.clock.t = T0 + 9000 * 20_000 + HOUR
+  const writes = hammer(r.dir, 2500)
+  await new Promise((res) => setTimeout(res, 100))
+  const result = await r.storage.deleteSource('com.example.chat').done
+  assert.ok((await writes) > 100)
+  assert.equal(result.observations, 3000)
+  assert.deepEqual(r.q(`SELECT state FROM deletions`).length, 1)
+  assert.notEqual(r.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state, 'pending')
+  assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
+  r.close()
+})
+
+test('a backfill completes while another connection keeps committing, and reports settled only when it has', async () => {
+  const dir = tmpDir()
+  const store = new Store(dir, { now: () => T0 })
+  for (let i = 0; i < 8000; i++) store.insertObservation(row(T0 + i * 20_000, 'com.example.editor', `history ${i}`))
+  store.close()
+  const r = rig(dir)
+  const writes = hammer(dir, 2500)
+  await new Promise((res) => setTimeout(res, 100))
+  r.storage.start()
+  await r.storage.derivationSettled()
+  assert.ok((await writes) > 100)
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM intervals`)[0]!.n, 8000)
+  r.close()
+})
+
+test('a worker transaction retries while another connection holds the lock longer than the busy timeout', async () => {
+  const r = rig()
+  const db = new Database(path.join(r.dir, DB_FILE))
+  db.pragma('busy_timeout = 20')
+  const w = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 300 } })
+  await new Promise((res) => w.once('message', res))
+  assert.throws(() => immediate(db, () => db.prepare(`INSERT INTO meta (key, value) VALUES ('t', '1')`).run()), (e: unknown) => isBusy(e))
+  const t0 = Date.now()
+  immediateRetrying(db, () => db.prepare(`INSERT INTO meta (key, value) VALUES ('t', '2') ON CONFLICT (key) DO UPDATE SET value = '2'`).run())
+  assert.ok(Date.now() - t0 >= 200, 'waited for the other writer')
+  assert.deepEqual(db.prepare(`SELECT value FROM meta WHERE key = 't'`).get(), { value: '2' })
+  db.close()
+  r.close()
+})

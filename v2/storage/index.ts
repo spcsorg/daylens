@@ -11,6 +11,7 @@ import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type Hou
 import { applyMigrations } from './migrations.ts'
 import { DAY_MS, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
+import { isBusy } from './tx.ts'
 
 export type { DeletionResult } from './deletion.ts'
 export { HOUR_FIELDS, readHour, type Hour, type HourField, type HourSource } from './hours.ts'
@@ -166,6 +167,7 @@ export class Storage {
                   ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`)
     this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
     this.backfill = this.runBackfill()
+    this.backfill.catch(() => {})
     for (const t of this.rules.tombstones) {
       if (t.state === 'pending') {
         this.track(this.finishDeletion(t.id))
@@ -187,12 +189,19 @@ export class Storage {
     return this.backfill
   }
 
+  // Busy and other errors are retried with backoff; settled is reported only when the work is done.
   private async runBackfill(): Promise<void> {
-    try {
-      // Steps are short transactions with a yield between them, so capture keeps flushing.
-      while (!this.stopped && this.derived.backfillStep()) await new Promise((r) => setImmediate(r))
-    } catch (err) {
-      this.onError(`backfill_${(err as { code?: string }).code ?? 'failed'}`)
+    for (let wait = 50; ; ) {
+      if (this.stopped) throw new Error('storage stopped before derivation caught up')
+      try {
+        if (!this.derived.backfillStep()) return
+        wait = 50
+        await new Promise((r) => setImmediate(r))
+      } catch (err) {
+        if (!isBusy(err)) this.onError(`backfill_${(err as { code?: string }).code ?? 'failed'}`)
+        await new Promise((r) => setTimeout(r, wait).unref())
+        wait = Math.min(wait * 2, 5000)
+      }
     }
   }
 
@@ -644,7 +653,7 @@ export class Storage {
       for (const h of r.hours ?? []) item.run(id, h, null, null)
       for (const s of r.sources ?? []) item.run(id, null, s.app_id?.toLowerCase() ?? null, s.site?.toLowerCase().replace(/^www\./, '') ?? null)
       return id
-    })()
+    }).immediate()
   }
 
   // --- search ----------------------------------------------------------------
@@ -690,7 +699,7 @@ export class Storage {
         .run(cutoff, cutoff, Math.ceil(batch / 10)).changes
       n += this.db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?)').run(cutoff, Math.ceil(batch / 25)).changes
       this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
-    })()
+    }).immediate()
     this.prunedData += n
     return n + logRows
   }

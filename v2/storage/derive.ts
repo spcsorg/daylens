@@ -1,6 +1,7 @@
 // Intervals and activity search documents, derived from observations. Both can be dropped and rebuilt.
 import type Database from 'better-sqlite3'
 import { MAX_ROW_SPAN_MS } from '../capture/store.ts'
+import { immediate } from './tx.ts'
 import { hasColumn } from './migrations.ts'
 
 export const HOUR_MS = 3_600_000
@@ -198,17 +199,17 @@ export class Derived {
     }
     if (minEvent === null) return
     const start = this.startKey(minEvent)
-    this.db.transaction(() => this.derive(start, null))()
+    immediate(this.db, () => this.derive(start, null))
   }
 
   /** Brings derived state up to date from the mark capture commits with its rows, and clears the mark with it. */
   refreshFromMark(): void {
-    this.db.transaction(() => {
+    immediate(this.db, () => {
       const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'derive_from'`).get() as { value: string } | undefined
       if (!mark) return
       this.derive(this.startKey(Number(mark.value)), null)
       this.db.prepare(`DELETE FROM meta WHERE key = 'derive_from'`).run()
-    })()
+    })
   }
 
   /**
@@ -216,7 +217,7 @@ export class Derived {
    * on in the same transaction. Returns false once the backfill is complete.
    */
   backfillStep(rows = 2000): boolean {
-    return this.db.transaction(() => {
+    return immediate(this.db, () => {
       const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'derive_backfill_from'`).get() as { value: string } | undefined
       if (!mark) return false
       const from = Number(mark.value)
@@ -231,7 +232,7 @@ export class Derived {
       this.derive(this.startKey(from), edge.e)
       this.db.prepare(`UPDATE meta SET value = ? WHERE key = 'derive_backfill_from'`).run(String(edge.e))
       return true
-    })()
+    })
   }
 
   /**
@@ -252,10 +253,10 @@ export class Derived {
 
   /** Drops every interval and activity document and derives them again from observations. */
   rebuild(): void {
-    this.db.transaction(() => {
+    immediate(this.db, () => {
       this.db.exec(`DELETE FROM intervals; DELETE FROM search_docs WHERE kind = 'activity'`)
       this.derive({ e: Number.MIN_SAFE_INTEGER, id: 0 }, null)
-    })()
+    })
   }
 
   // The leading range on event_wall_ms lets the index bound the scan; the OR alone would read every row each flush.

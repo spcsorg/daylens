@@ -536,9 +536,11 @@ export class Store implements Sink {
     }
     if (ops.length === 0) return true
     try {
+      // Immediate: storage's deletion worker writes on its own connection, and a deferred transaction that read
+      // first could not commit after it.
       this.db.transaction(() => {
         for (const op of ops) this.stmt(op.sql).run(...(op.params as unknown[]))
-      })()
+      }).immediate()
     } catch (err) {
       const code = errorCode(err)
       this.onError(code)
@@ -606,7 +608,7 @@ export class Store implements Sink {
           this.health.droppedOps++
         }
       }
-    })()
+    }).immediate()
   }
 
   storeHealth(): StoreHealth {
