@@ -280,9 +280,15 @@ export class Storage {
 
   private delete(t: Omit<Tombstone, 'id'>): DeletionResult {
     this.flushOrThrow()
-    const result = this.bus.commit('deletion', { kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms }, () => this.applyDeletion(t))
-    this.loadTombstones()
-    this.capture?.interrupt()
+    const result = this.bus.commit(
+      'deletion',
+      { kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
+      () => this.applyDeletion(t),
+      () => {
+        this.loadTombstones()
+        this.capture?.interrupt()
+      },
+    )
     this.compactAfterDeletion()
     return result
   }
@@ -531,10 +537,11 @@ export class Storage {
       const s: PauseState = { from_wall_ms: from, until_wall_ms: untilWallMs, gap_id: gap }
       this.putSetting('pause', s)
       return s
+    }, (s) => {
+      this.pauseState = s
+      this.store.flush()
+      this.capture?.interrupt()
     })
-    this.pauseState = state
-    this.store.flush()
-    this.capture?.interrupt()
     this.armPauseTimer()
     return state
   }
@@ -556,10 +563,11 @@ export class Storage {
     this.bus.commit('pause', { ended: reason, at_wall_ms: end }, () => {
       this.store.closeGap(p.gap_id, this.point(end))
       this.db.prepare(`DELETE FROM settings WHERE key = 'pause'`).run()
+    }, () => {
+      this.pauseState = null
+      this.store.flush()
+      if (reason !== 'replaced') this.capture?.interrupt()
     })
-    this.pauseState = null
-    this.store.flush()
-    if (reason !== 'replaced') this.capture?.interrupt()
   }
 
   private armPauseTimer(): void {
@@ -582,16 +590,17 @@ export class Storage {
     this.flushOrThrow()
     this.bus.commit('exclusion', { match: rule.match, added: true }, () => {
       this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 0)').run(rule.match, rule.value, rule.label)
-    })
-    this.capture?.setExclusions(this.store.exclusions())
-    this.capture?.interrupt()
+    }, () => this.installExclusions())
   }
 
   removeExclusion(match: ExclusionRule['match'], value: string): void {
     this.flushOrThrow()
     this.bus.commit('exclusion', { match, removed: true }, () => {
       this.db.prepare('DELETE FROM exclusions WHERE match = ? AND value = ?').run(match, value)
-    })
+    }, () => this.installExclusions())
+  }
+
+  private installExclusions(): void {
     this.capture?.setExclusions(this.store.exclusions())
     this.capture?.interrupt()
   }

@@ -323,3 +323,39 @@ test('a range deletion reaches a zero-length row that starts exactly at the rang
   assert.deepEqual(containsAnywhere(r, 'Okapi'), [])
   r.close()
 })
+
+test('by the time a deletion or pause is announced, capture and import already refuse the material', () => {
+  resetSeq()
+  const r = rig()
+  day(r, T0, [[chat, 'Tapir canary'], [editor, 'x.md - Editor']])
+  const exported = r.q<ObservationRow>(`SELECT * FROM observations`)
+  const results: string[] = []
+  r.storage.bus.on((c) => {
+    if (c.kind === 'deletion') results.push(`import:${JSON.stringify(r.storage.importObservations(exported.filter((o) => o.title === 'Tapir canary')))}`)
+    if (c.kind === 'pause' && c.payload.until_wall_ms !== undefined) {
+      r.feed(focus(chat, 'Tapir canary during pause', r.clock.t + 1000))
+      results.push(`paused-rows:${r.q(`SELECT 1 FROM observations WHERE title LIKE '%during pause%'`).length}`)
+    }
+  })
+  r.clock.t = T0 + 20 * MIN
+  r.storage.deleteSource('com.example.chat')
+  r.storage.pause(T0 + HOUR)
+  assert.deepEqual(results, ['import:{"imported":0,"refused":1}', 'paused-rows:0'])
+  assert.deepEqual(containsAnywhere(r, 'Tapir'), [])
+  r.close()
+})
+
+test('a change made by a listener is delivered after the change that caused it, to every listener', () => {
+  const r = rig()
+  const a: string[] = []
+  const b: string[] = []
+  r.storage.bus.on((c) => {
+    a.push(String(c.payload.key))
+    if (c.payload.key === 'first') r.storage.setSetting('second', 1)
+  })
+  r.storage.bus.on((c) => b.push(String(c.payload.key)))
+  r.storage.setSetting('first', 1)
+  assert.deepEqual(a, ['first', 'second'])
+  assert.deepEqual(b, ['first', 'second'], 'not second before first')
+  r.close()
+})

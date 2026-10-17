@@ -49,8 +49,15 @@ export class ChangeBus {
     return () => this.listeners.delete(listener)
   }
 
-  /** Runs `write` and records the change in one transaction; announces only after it commits. */
-  commit<T>(kind: ChangeKind, payload: Record<string, unknown>, write: () => T): T {
+  private readonly queue: Change[] = []
+  private dispatching = false
+
+  /**
+   * Runs `write` and records the change in one transaction. After it commits, `install` puts the new rules in force
+   * (what capture and import may store), and only then is the change announced: a listener never acts on a change
+   * whose rules are not yet in force. Changes made by listeners are queued, so every listener sees them in order.
+   */
+  commit<T>(kind: ChangeKind, payload: Record<string, unknown>, write: () => T, install?: (result: T) => void): T {
     let change!: Change
     const result = this.db.transaction(() => {
       const out = write()
@@ -59,15 +66,29 @@ export class ChangeBus {
       change = { seq: Number(info.lastInsertRowid), at, kind, payload }
       return out
     })()
-    this.signal(change.seq)
-    for (const l of this.listeners) {
-      try {
-        l(change)
-      } catch {
-        // One reader's failure must not stop the others.
-      }
-    }
+    install?.(result)
+    this.queue.push(change)
+    this.dispatch()
     return result
+  }
+
+  private dispatch(): void {
+    if (this.dispatching) return
+    this.dispatching = true
+    try {
+      for (let c = this.queue.shift(); c; c = this.queue.shift()) {
+        this.signal(c.seq)
+        for (const l of this.listeners) {
+          try {
+            l(c)
+          } catch {
+            // One reader's failure must not stop the others.
+          }
+        }
+      }
+    } finally {
+      this.dispatching = false
+    }
   }
 
   private signal(seq: number): void {
