@@ -27,4 +27,16 @@ final class BrowserRegistryTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: url) }
     XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
   }
+
+  func testRegistrationChangesAreSeenWithoutRestartingTheRegistry() throws {
+    let registry = BrowserRegistry()
+    let url = try bundle(["notes"])
+    defer { try? FileManager.default.removeItem(at: url) }
+    XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+    try writeSchemes(["http", "https"], to: url)
+    XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+    try writeSchemes(["notes"], to: url)
+    XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+  }
+
 }

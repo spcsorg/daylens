@@ -24,7 +24,6 @@ internal sealed unsafe class Resolver
     // Packaged browsers declare http/https in their manifest instead of a registry command.
     readonly Dictionary<string, bool> _webPackages = new(StringComparer.OrdinalIgnoreCase);
     HashSet<string> _browserExes = new(StringComparer.OrdinalIgnoreCase);
-    long _browsersLoadedMs;
     long _busySinceMs;
     long _generation;
     (AppInfo App, WindowInfo Window)? _last;
@@ -34,8 +33,6 @@ internal sealed unsafe class Resolver
         _emitter = emitter;
         new Thread(() =>
         {
-            // Warm the browser list before the first lookup so it never counts against a stall.
-            try { LoadBrowsers(); } catch { Diag.Write("browser_registry_failed"); }
             Loop();
         }) { IsBackground = true, Name = "daylens.capture.resolver" }.Start();
     }
@@ -119,11 +116,18 @@ internal sealed unsafe class Resolver
                 if (p.State != IdentityState.Ok) return AppInfo.Unknown(pid, p.State);
             }
             // A creation time of 0 means it could not be read; then a reused pid could hit a stale entry.
-            if (p.Created != 0 && _identities.TryGetValue((pid, p.Created), out var cached)) return cached;
-            var app = Describe(p.Handle, pid, p.Path!, p.Created);
-            if (_identities.Count > 512) _identities.Clear();
-            if (p.Created != 0) _identities[(pid, p.Created)] = app;
-            return app;
+            AppInfo app;
+            if (p.Created != 0 && _identities.TryGetValue((pid, p.Created), out var cached)) app = cached;
+            else
+            {
+                app = Describe(p.Handle, pid, p.Path!, p.Created);
+                if (_identities.Count > 512) _identities.Clear();
+                if (p.Created != 0) _identities[(pid, p.Created)] = app;
+            }
+            // URL associations can change while the same process and its verified identity stay alive.
+            var registered = IsRegisteredBrowser(p.Path!);
+            var packageWeb = app.Store?.Package is { } package && _webPackages.GetValueOrDefault(package);
+            return app with { RegisteredBrowser = registered || packageWeb };
         }
         finally { if (p.Handle != 0) Native.CloseHandle(p.Handle); }
     }
@@ -160,15 +164,13 @@ internal sealed unsafe class Resolver
         if (Native.GetApplicationUserModelId(h, ref len, buf) == 0 && len > 1) aumid = new string(buf, 0, (int)len - 1);
         len = 512;
         if (Native.GetPackageFullName(h, ref len, buf) == 0 && len > 1) package = new string(buf, 0, (int)len - 1);
-        var browser = IsRegisteredBrowser(path);
         if (aumid is not null)
         {
             var name = package is null ? null : PackageDisplayName(aumid, package);
             bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
-            browser |= web == true;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, _engineCache.Get(pid, created, path)), SignerOf(path), VersionOf(path));
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, web == true, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, _engineCache.Get(pid, created, path)), SignerOf(path), VersionOf(path));
         }
-        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, _engineCache.Get(pid, created, path), SignerOf(path), VersionOf(path));
+        return new AppInfo(path, ExeName(path), path, pid, false, IdentityState.Ok, null, _engineCache.Get(pid, created, path), SignerOf(path), VersionOf(path));
     }
 
     string? ExeName(string path)
@@ -309,14 +311,13 @@ internal sealed unsafe class Resolver
 
     bool IsRegisteredBrowser(string exePath)
     {
-        if (Environment.TickCount64 - _browsersLoadedMs > 3_600_000 || _browsersLoadedMs == 0) LoadBrowsers();
+        LoadBrowsers();
         return _browserExes.Contains(exePath);
     }
 
     // Apps registered for either http or https, plus the StartMenuInternet list.
     void LoadBrowsers()
     {
-        _browsersLoadedMs = Environment.TickCount64;
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
         {
