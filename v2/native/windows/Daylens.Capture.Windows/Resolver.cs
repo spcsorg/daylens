@@ -226,13 +226,15 @@ internal sealed unsafe class Resolver
         return name;
     }
 
-    readonly Dictionary<string, Engine> _engines = new(StringComparer.OrdinalIgnoreCase);
-    readonly Dictionary<string, string?> _signers = new(StringComparer.OrdinalIgnoreCase);
+    // Keyed on the executable's current file, so an update that changes what the app is is never answered from cache.
+    readonly Dictionary<FileStamp, Engine> _engines = new();
+    readonly Dictionary<FileStamp, string?> _signers = new();
 
     // The Authenticode publisher, only once WinVerifyTrust accepts the file's signature (no network, no revocation fetch).
     string? SignerOf(string exePath)
     {
-        if (_signers.TryGetValue(exePath, out var cached)) return cached;
+        var stamp = FileStamp.Of(exePath);
+        if (stamp is { } s && _signers.TryGetValue(s, out var cached)) return cached;
         string? publisher = null;
         try
         {
@@ -246,7 +248,7 @@ internal sealed unsafe class Resolver
         }
         catch { Diag.Write("signer_read_failed"); }
         if (_signers.Count > 512) _signers.Clear();
-        _signers[exePath] = publisher;
+        if (stamp is { } key) _signers[key] = publisher;
         return publisher;
     }
 
@@ -285,13 +287,14 @@ internal sealed unsafe class Resolver
     {
         var dir = Path.GetDirectoryName(exePath);
         if (dir is null) return Engine.Unknown;
-        if (_engines.TryGetValue(dir, out var cached)) return cached;
+        var stamp = FileStamp.Of(exePath);
+        if (stamp is { } s && _engines.TryGetValue(s, out var cached)) return cached;
         var listing = Engines.Scan(dir);
         if (listing is null) Diag.Write("engine_scan_uncertain");
         var engine = Engines.Classify(listing);
         if (_engines.Count > 512) _engines.Clear();
-        // An uncertain scan is retried next time rather than remembered.
-        if (engine != Engine.Unknown) _engines[dir] = engine;
+        // An uncertain scan, or an executable that could not be stamped, is looked at again next time.
+        if (engine != Engine.Unknown && stamp is { } key) _engines[key] = engine;
         return engine;
     }
 

@@ -238,6 +238,32 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertEqual(classifyBundle(scanBundle(at: app)), .none)
   }
 
+  func testAnAppUpdateChangesTheBundleStampSoNoVerdictSurvivesIt() throws {
+    let app = try makeBundle(["Contents/Resources/x.icns", "Contents/MacOS/Thing"])
+    let plist = app.appendingPathComponent("Contents/Info.plist")
+    try (["CFBundleExecutable": "Thing"] as NSDictionary).write(to: plist)
+    let before = try XCTUnwrap(BundleStamp.of(app))
+    XCTAssertEqual(BundleStamp.of(app), before, "unchanged files, same key")
+    XCTAssertEqual(classifyBundle(scanBundle(at: app)), .none)
+    // The update: the app becomes an Electron app and its executable is replaced.
+    try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/Frameworks/Electron Framework.framework"), withIntermediateDirectories: true)
+    let exe = app.appendingPathComponent("Contents/MacOS/Thing")
+    try FileManager.default.removeItem(at: exe)
+    try Data(repeating: 1, count: 64).write(to: exe)
+    let after = try XCTUnwrap(BundleStamp.of(app))
+    XCTAssertNotEqual(before, after, "a cached none cannot be reused for the updated app")
+    XCTAssertEqual(classifyBundle(scanBundle(at: app)), .app_runtime)
+  }
+
+  func testAProcessKeyIncludesItsStartTimeSoAReusedPidIsAnotherProcess() throws {
+    let me = try XCTUnwrap(ProcessKey.of(getpid()))
+    XCTAssertEqual(ProcessKey.of(getpid()), me, "the same process keeps its key")
+    var reused = me
+    reused.startSec += 1
+    XCTAssertNotEqual(reused, me, "same PID, later start: not the same key")
+    XCTAssertNil(ProcessKey.of(-1))
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

@@ -51,44 +51,55 @@ func diag(_ code: String, _ value: String = "1") {
 }
 
 /// Whether an app registers to open http and https links. A platform fact; shared code decides what it means.
+/// Keyed on the bundle's current files, and read straight from Info.plist (Bundle caches it), so an update is seen.
 final class BrowserRegistry {
   private let lock = NSLock()
-  private var cache: [String: Bool] = [:]
+  private var cache: [BundleStamp: Bool] = [:]
 
   func isRegisteredBrowser(bundleURL: URL?, bundleId: String?) -> Bool {
-    guard let url = bundleURL else { return false }
-    let key = bundleId ?? url.path
+    guard let url = bundleURL, let stamp = BundleStamp.of(url) else { return false }
     lock.lock()
-    if let v = cache[key] { lock.unlock(); return v }
+    if let v = cache[stamp] { lock.unlock(); return v }
     lock.unlock()
     var result = false
-    if let info = Bundle(url: url)?.infoDictionary, let types = info["CFBundleURLTypes"] as? [[String: Any]] {
+    let plist = url.appendingPathComponent("Contents/Info.plist")
+    if let info = NSDictionary(contentsOf: plist) as? [String: Any], let types = info["CFBundleURLTypes"] as? [[String: Any]] {
       let schemes = Set(types.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] }.map { $0.lowercased() })
       result = schemes.contains("http") && schemes.contains("https")
     }
-    lock.lock(); cache[key] = result; lock.unlock()
+    lock.lock()
+    if cache.count > 512 { cache.removeAll() }
+    cache[stamp] = result
+    lock.unlock()
     return result
   }
 }
 
 let browsers = BrowserRegistry()
 
-/// Reads a bundle's own files to tell a browser from an app built on a web runtime; cached per bundle.
+/// Reads a bundle's own files to tell a browser from an app built on a web runtime; cached per bundle contents.
 final class EngineRegistry {
   private let lock = NSLock()
-  private var cache: [String: Engine] = [:]
+  private var cache: [BundleStamp: Engine] = [:]
 
   func engine(bundleURL: URL?) -> Engine {
     guard let url = bundleURL else { return .unknown }
-    lock.lock()
-    if let e = cache[url.path] { lock.unlock(); return e }
-    lock.unlock()
+    let stamp = BundleStamp.of(url)
+    if let stamp {
+      lock.lock()
+      if let e = cache[stamp] { lock.unlock(); return e }
+      lock.unlock()
+    }
     let e = classifyBundle(scanBundle(at: url))
-    // An uncertain scan is retried next time rather than remembered.
-    if e != .unknown { lock.lock(); cache[url.path] = e; lock.unlock() }
+    // An uncertain scan, or a bundle whose files could not be stamped, is looked at again next time.
+    if e != .unknown, let stamp {
+      lock.lock()
+      if cache.count > 512 { cache.removeAll() }
+      cache[stamp] = e
+      lock.unlock()
+    }
     return e
   }
-
 }
 
 let engines = EngineRegistry()
@@ -97,16 +108,18 @@ let engines = EngineRegistry()
 /// is valid for the running process. Nil for unsigned, ad-hoc or Apple platform code. Cached per process.
 final class SignerRegistry {
   private let lock = NSLock()
-  private var cache: [pid_t: String?] = [:]
+  private var cache: [ProcessKey: String?] = [:]
 
   func teamId(pid: pid_t) -> String? {
+    // Keyed on PID plus start time, so a reused PID never inherits another process's signer.
+    guard let key = ProcessKey.of(pid) else { return lookUp(pid) }
     lock.lock()
-    if let hit = cache[pid] { lock.unlock(); return hit }
+    if let hit = cache[key] { lock.unlock(); return hit }
     lock.unlock()
     let team = lookUp(pid)
     lock.lock()
     if cache.count > 256 { cache.removeAll() }
-    cache[pid] = team
+    cache[key] = team
     lock.unlock()
     return team
   }
