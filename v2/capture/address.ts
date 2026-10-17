@@ -24,7 +24,6 @@ const SECRET_PARTS = [
 const CREDENTIAL_VALUE = /^(bearer|basic)\s/i
 // Parameter values that are addresses in their own right (returnUrl, next, redirect) get the same rule; addresses
 // that can run code or carry content are dropped. A plain "site:example.com" is not an address and stays.
-const NESTED_ADDRESS = /^(https?:|file:|\/\/)/i
 const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
 const MAX_NESTING = 4
 const RELATIVE_BASE = 'https://relative.invalid'
@@ -48,32 +47,58 @@ export function cleanAddress(raw: string | null | undefined): string | null {
   return clean(raw, 0)
 }
 
-// A parameter value after the rule: unchanged, cleaned as an address, or null to drop the parameter.
-// Values are judged the way a URL parser reads them (tabs and newlines removed, ends trimmed); when unsure, drop.
+// A parameter value after the rule: kept exactly as written, or null to drop it. A value is never rewritten.
+// It is read the way a URL parser would (C0 controls removed) and percent-decoded up to three times; if any form of
+// it looks like an address and the rule would remove anything from that address, or the decoding is ambiguous, the
+// whole value is dropped. Plain text such as "how to fix this?" stays.
+const MAX_DECODES = 3
+const CONTROLS = /[\u0000-\u001f\u007f]/g
+const ENCODED_SYNTAX = /%(3a|2f|3f|23|40|25|5c)/i
+
+function looksLikeAddress(f: string): boolean {
+  return f.includes('://') || /^(\/\/|\\)/.test(f) || /[?#]/.test(f) || (f.includes('@') && f.includes(':'))
+}
+
 function cleanValue(value: string, depth: number): string | null {
-  const t = value.replace(/[\t\n\r]/g, '').trim()
-  if (DROPPED_ADDRESS.test(t)) return null
-  if (NESTED_ADDRESS.test(t)) {
-    if (depth >= MAX_NESTING) return null
-    return clean(t.startsWith('//') ? 'https:' + t : t, depth + 1)
+  let f = value.replace(CONTROLS, '').trim()
+  const forms = [f]
+  for (let i = 0; i < MAX_DECODES && /%[0-9a-f]{2}/i.test(f); i++) {
+    let d: string
+    try {
+      d = decodeURIComponent(f)
+    } catch {
+      if (forms.some(looksLikeAddress)) return null
+      break
+    }
+    d = d.replace(CONTROLS, '').trim()
+    if (d === f) break
+    forms.push((f = d))
   }
-  const looksAddressed = /[?#]/.test(t)
-  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return looksAddressed || t.includes('@') ? null : value
-  if (!looksAddressed && !t.includes('\\')) return value
-  if (depth >= MAX_NESTING) return null
-  // A relative address: read against a placeholder base; one that escapes the base (\\host, //host) is dropped.
+  // Still carrying encoded URL syntax after the last decode: what it hides cannot be judged.
+  if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
+  for (const form of forms) if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
+  return value
+}
+
+// Whether the rule would take anything out of this address, or cannot read it as one it keeps.
+function wouldRemove(form: string, depth: number): boolean {
+  if (depth >= MAX_NESTING || DROPPED_ADDRESS.test(form)) return true
   let u: URL
   try {
-    u = new URL(t, RELATIVE_BASE + '/')
+    if (/^[\\/]{2}/.test(form)) u = new URL('https://' + form.replace(/^[\\/]+/, ''))
+    else if (/^[a-z][a-z0-9+.-]*:/i.test(form)) {
+      if (!/^(https?|file):/i.test(form)) return true
+      u = new URL(form)
+    } else {
+      u = new URL(form, RELATIVE_BASE + '/')
+      if (u.origin !== RELATIVE_BASE) return true
+    }
   } catch {
-    return null
+    return true
   }
-  if (u.origin !== RELATIVE_BASE) return null
-  const cleaned = clean(u.href, depth + 1)
-  if (cleaned === null) return null
-  // Nothing removed: keep the text as written (a search such as "how to fix this?" is not an address).
-  if (cleaned === u.href) return value
-  return t.startsWith('/') ? cleaned.slice(RELATIVE_BASE.length) : cleaned.slice(RELATIVE_BASE.length + 1)
+  if (u.username || u.password || u.hash) return true
+  for (const [k, v] of u.searchParams) if (isSecretParam(k, v) || cleanValue(v, depth + 1) === null) return true
+  return false
 }
 
 function clean(raw: string | null | undefined, depth: number): string | null {

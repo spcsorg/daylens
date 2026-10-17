@@ -64,18 +64,16 @@ test('authorization and access-key parameters are dropped, whatever the spelling
   assert.equal(cleanAddress('https://x.example.com/?h=Bearer%20abc123&q=2'), 'https://x.example.com/?q=2', 'a bearer value goes whatever the name')
 })
 
-test('URL-valued parameters are cleaned by the same rule, nested or relative', () => {
-  assert.equal(
-    cleanAddress('https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Ftoken%3Dabc%26doc%3D7%23frag&q=1'),
-    'https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Fdoc%3D7&q=1',
-  )
-  assert.equal(
-    cleanAddress('https://a.example.com/?next=https%3A%2F%2Fb.example.com%2F%3Fredirect%3Dhttps%253A%252F%252Fc.example.com%252F%253Fcode%253Dzz'),
-    'https://a.example.com/?next=https%3A%2F%2Fb.example.com%2F%3Fredirect%3Dhttps%253A%252F%252Fc.example.com%252F',
-  )
-  assert.equal(cleanAddress('https://a.example.com/?next=%2Fhome%3Fsession%3Ds1%26tab%3D2%23x'), 'https://a.example.com/?next=%2Fhome%3Ftab%3D2')
-  assert.equal(cleanAddress('https://a.example.com/?u=https%3A%2F%2Fme%3Apw%40b.example.com%2F'), 'https://a.example.com/?u=https%3A%2F%2Fb.example.com%2F')
-  assert.equal(cleanAddress('https://a.example.com/?u=javascript%3Aalert(1)&q=1'), 'https://a.example.com/?q=1', 'a URL value with a scheme the rule does not keep is dropped')
+test('an address inside a parameter is kept as written when it carries nothing to remove, and dropped whole when it does', () => {
+  assert.equal(cleanAddress('https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Fdoc%3D7&q=1'), 'https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Fdoc%3D7&q=1')
+  for (const v of [
+    'https://app.example.com/cb?token=abc&doc=7#frag',
+    'https://b.example.com/?redirect=' + encodeURIComponent('https://c.example.com/?code=zz'),
+    '/home?session=s1&tab=2#x',
+    'https://me:pw@b.example.com/',
+    'javascript:alert(1)',
+  ])
+    assert.equal(cleanAddress('https://a.example.com/?next=' + encodeURIComponent(v) + '&q=1'), 'https://a.example.com/?q=1', v)
 })
 
 test('nested addresses are found after normalizing, relative or absolute, and cleaned or dropped', () => {
@@ -95,3 +93,24 @@ test('nested addresses are found after normalizing, relative or absolute, and cl
   assert.equal(cleanAddress('https://www.google.com/search?q=how+to+fix+this%3F'), 'https://www.google.com/search?q=how+to+fix+this%3F', 'a question is not an address')
   assert.equal(cleanAddress('https://www.google.com/search?q=site%3Aexample.com+budget'), 'https://www.google.com/search?q=site%3Aexample.com+budget')
 })
+
+test('percent-encoded and control-prefixed addresses inside parameters are decoded before judging', () => {
+  const secret = 'https://u:CANARY@app.example/cb?access_token=CANARY#CANARY'
+  for (const v of [
+    encodeURIComponent(secret),
+    encodeURIComponent(encodeURIComponent(secret)),
+    '\u0000' + secret,
+    '\u001f\u0001' + secret,
+    '%00' + encodeURIComponent(secret),
+    encodeURIComponent(encodeURIComponent(encodeURIComponent(encodeURIComponent(secret)))),
+  ]) {
+    const out = cleanAddress('https://login.example.com/?next=' + encodeURIComponent(v) + '&q=1')!
+    let d = out
+    for (let i = 0; i < 6; i++) d = decodeURIComponent(d)
+    assert.ok(!d.includes('CANARY'), `${JSON.stringify(v).slice(0, 60)} -> ${out}`)
+    assert.ok(out.endsWith('q=1'))
+  }
+  assert.equal(cleanAddress('https://shop.example.com/?q=50%25+off'), 'https://shop.example.com/?q=50%25+off', 'a literal percent in text stays')
+  assert.equal(cleanAddress('https://www.google.com/search?q=how+to+fix+this%3F'), 'https://www.google.com/search?q=how+to+fix+this%3F')
+})
+
