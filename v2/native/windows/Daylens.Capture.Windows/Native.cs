@@ -78,6 +78,23 @@ internal static unsafe partial class Native
     [LibraryImport("kernel32.dll")] public static partial uint GetTickCount();
     [LibraryImport("kernel32.dll")] public static partial nint GetModuleHandleW(nint name);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINTRUST_FILE_INFO { public uint cbStruct; public nint pcwszFilePath; public nint hFile; public nint pgKnownSubject; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINTRUST_DATA
+    {
+        public uint cbStruct; public nint pPolicyCallbackData; public nint pSIPClientData; public uint dwUIChoice; public uint fdwRevocationChecks;
+        public uint dwUnionChoice; public nint pFile; public uint dwStateAction; public nint hWVTStateData; public nint pwszURLReference;
+        public uint dwProvFlags; public uint dwUIContext; public nint pSignatureSettings;
+    }
+
+    public const uint WTD_UI_NONE = 2, WTD_REVOKE_NONE = 0, WTD_CHOICE_FILE = 1, WTD_STATEACTION_VERIFY = 1, WTD_STATEACTION_CLOSE = 2;
+    public const uint WTD_REVOCATION_CHECK_NONE = 0x10, WTD_CACHE_ONLY_URL_RETRIEVAL = 0x1000;
+    public static readonly Guid WINTRUST_ACTION_GENERIC_VERIFY_V2 = new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+
+    [LibraryImport("wintrust.dll")] public static partial int WinVerifyTrust(nint hwnd, ref Guid action, ref WINTRUST_DATA data);
+
     [LibraryImport("shlwapi.dll", EntryPoint = "SHLoadIndirectString", StringMarshalling = StringMarshalling.Utf16)]
     public static partial int SHLoadIndirectString(string source, char* outBuf, uint cch, nint reserved);
 }

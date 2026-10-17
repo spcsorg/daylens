@@ -50,6 +50,8 @@ export interface AppIdentity {
   pid: number | null
   registered_browser: boolean
   engine: Engine
+  // Who signed the app, verified by the OS: the Team ID on macOS, the Authenticode publisher on Windows. Null if unsigned or unverified.
+  signer: string | null
   identity_state: IdentityState
   store: { aumid: string; package: string | null } | null
 }
@@ -224,6 +226,7 @@ function appIdentity(v: unknown): AppIdentity {
     pid: intOrNull(o, 'pid'),
     registered_browser: bool(o, 'registered_browser'),
     engine: oneOf(o, 'engine', ['browser', 'app_runtime', 'none', 'unknown'] as const),
+    signer: strOrNull(o, 'signer', 256),
     identity_state: oneOf(o, 'identity_state', IDENTITY_STATES),
     store,
   }

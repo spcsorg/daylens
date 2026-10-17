@@ -153,3 +153,13 @@ test('the real helper tells installed browsers from Electron and CEF apps by the
   for (const p of present) assert.equal(got[p], expected[p], p)
   assert.ok(present.length >= 4, 'enough real bundles to mean something')
 })
+
+test('the real helper reports the OS-verified Team ID of a running signed app, and none for unsigned code', { skip }, () => {
+  const out = (args: string[]) => execFileSync(HELPER, ['--signer', ...args]).toString().trim().split('\n').map((l) => l.split('\t')[0])
+  assert.deepEqual(out([String(process.pid)]), ['-'], 'node from nvm carries no Team ID here')
+  let claude: string | null = null
+  try {
+    claude = execFileSync('pgrep', ['-x', 'Claude']).toString().trim().split('\n')[0] ?? null
+  } catch {}
+  if (claude) assert.deepEqual(out([claude]), ['Q6L2SF6YDW'], 'Claude, signed by Anthropic')
+})

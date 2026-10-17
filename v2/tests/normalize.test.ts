@@ -263,7 +263,7 @@ test('locking or sleeping ends an excluded gap; a later snapshot reopens it', ()
 
 test('Codex registers for web links but is not a browser; Atlas stays withheld', () => {
   const { sink, n } = setup()
-  n.handle(focus(app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, pid: 1 }), 'Fix capture tests', T0, 'app_changed'))
+  n.handle(focus(app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, engine: 'app_runtime', signer: '2DC432GLL2', pid: 1 }), 'Fix capture tests', T0, 'app_changed'))
   n.handle(focus(app('com.openai.atlas', { name: 'ChatGPT Atlas', registered_browser: true, pid: 2 }), `${CANARY} page`, T0 + 1, 'app_changed'))
   n.handle(focus(app('com.openai.atlas.beta', { name: 'ChatGPT Atlas', registered_browser: false, pid: 3 }), `${CANARY} beta`, T0 + 2, 'app_changed'))
   const [codex, atlas, beta] = sink.rows
@@ -276,7 +276,7 @@ test('Codex registers for web links but is not a browser; Atlas stays withheld',
 
 test('Codex keeps its titles only while its window is not reported private; exclusions still apply', () => {
   const { sink, n } = setup()
-  const codex = app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, engine: 'app_runtime' })
+  const codex = app('com.openai.codex', { name: 'ChatGPT', registered_browser: true, engine: 'app_runtime', signer: '2DC432GLL2' })
   const at = (mode: 'normal' | 'private' | 'unknown' | undefined, title: string, t: number) => {
     const l = focus(codex, title, t, 'title_changed') as unknown as { obs: { window: Record<string, unknown> } }
     if (mode) l.obs.window.mode = mode
@@ -305,22 +305,43 @@ test('a browser on no list and without a link registration is still withheld whe
     engine: 'browser',
   })
   n.handle(focus(palemoon, `${CANARY} Private Browsing`, T0, 'app_changed'))
-  assert.equal(sink.rows[0]!.title_state, 'withheld_browser')
+  assert.equal(sink.rows[0]!.title_state, 'unknown')
+  assert.equal(JSON.parse(sink.rows[0]!.detail!).title_reason, 'browser_engine')
   assert.ok(!JSON.stringify(sink).includes(CANARY))
 })
 
 test('when the helper cannot tell what engine an app has, its title is withheld', () => {
   const { sink, n } = setup()
   n.handle(focus(app('com.example.NewBrowser', { registered_browser: false, engine: 'unknown' }), `${CANARY} private`, T0, 'app_changed'))
-  assert.equal(sink.rows[0]!.title_state, 'withheld_unclassified')
+  assert.equal(sink.rows[0]!.title_state, 'unknown')
+  assert.equal(JSON.parse(sink.rows[0]!.detail!).title_reason, 'engine_uncertain')
   assert.equal(sink.rows[0]!.app_id, 'com.example.NewBrowser', 'the app time is still recorded')
   assert.ok(!JSON.stringify(sink).includes(CANARY))
 })
 
-test('Electron and CEF apps keep their titles; they ship Chromium but are not browsers', () => {
+test('an unregistered Electron browser with private tabs (Min, portable) stores no title', () => {
   const { sink, n } = setup()
-  n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', pid: 1 }), 'general - Slack', T0, 'app_changed'))
-  n.handle(focus(app('com.microsoft.VSCode', { engine: 'app_runtime', pid: 2 }), 'store.ts — v2', T0 + 1, 'app_changed'))
-  n.handle(focus(app('com.spotify.client', { engine: 'app_runtime', pid: 3 }), 'Spotify Premium', T0 + 2, 'app_changed'))
-  assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'ok', 'ok'])
+  const minMac = app('com.electron.min', { engine: 'app_runtime', signer: null, pid: 1 })
+  const minWin = app('C:\\Tools\\Min\\Min.exe', { path: 'C:\\Tools\\Min\\Min.exe', engine: 'app_runtime', signer: null, pid: 2 })
+  n.handle(focus(minMac, `${CANARY} private tab`, T0, 'app_changed'))
+  n.handle(focus(minWin, `${CANARY} private tab`, T0 + 1, 'app_changed'))
+  for (const r of sink.rows) {
+    assert.equal(r.title_state, 'unknown')
+    assert.equal(JSON.parse(r.detail!).title_reason, 'web_runtime_not_listed')
+  }
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
+test('listed web-runtime apps keep their titles only with a matching OS-verified signer, never by ID or name alone', () => {
+  const { sink, n } = setup()
+  n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', signer: 'BQR82RBBHL', pid: 1 }), 'general - Slack', T0, 'app_changed'))
+  n.handle(focus(app('com.spotify.client', { engine: 'app_runtime', signer: '2FNC3A47ZF', pid: 2 }), 'Spotify Premium', T0 + 1, 'app_changed'))
+  n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', signer: null, pid: 3 }), `${CANARY} unsigned look-alike`, T0 + 2, 'app_changed'))
+  n.handle(focus(app('com.tinyspeck.slackmacgap', { engine: 'app_runtime', signer: 'ABCDE12345', pid: 4 }), `${CANARY} other team`, T0 + 3, 'app_changed'))
+  const slackExe = 'C:\\Users\\me\\AppData\\Local\\slack\\app-4.41.0\\slack.exe'
+  n.handle(focus(app(slackExe, { path: slackExe, engine: 'app_runtime', signer: 'Slack Technologies, LLC', pid: 5 }), 'general - Slack', T0 + 4, 'app_changed'))
+  n.handle(focus(app(slackExe, { path: slackExe, engine: 'app_runtime', signer: null, pid: 6 }), `${CANARY} unsigned slack.exe`, T0 + 5, 'app_changed'))
+  n.handle(focus(app('MSTeams_8wekyb3d8bbwe!MSTeams', { engine: 'app_runtime', pid: 7, store: { aumid: 'MSTeams_8wekyb3d8bbwe!MSTeams', package: 'MSTeams_25.1.0_x64__8wekyb3d8bbwe' } }), 'Chat | Microsoft Teams', T0 + 6, 'app_changed'))
+  assert.deepEqual(sink.rows.map((r) => r.title_state), ['ok', 'ok', 'unknown', 'unknown', 'ok', 'unknown', 'ok'])
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
 })

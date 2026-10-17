@@ -2,6 +2,7 @@ import AppKit
 import CaptureCore
 import Darwin
 import Foundation
+import Security
 
 enum Clock {
   // CLOCK_MONOTONIC_RAW keeps counting while the Mac sleeps (CLOCK_UPTIME_RAW does not).
@@ -92,6 +93,39 @@ final class EngineRegistry {
 
 let engines = EngineRegistry()
 
+/// The Team ID of a running app, taken from its code signature only after the system confirms that signature
+/// is valid for the running process. Nil for unsigned, ad-hoc or Apple platform code. Cached per process.
+final class SignerRegistry {
+  private let lock = NSLock()
+  private var cache: [pid_t: String?] = [:]
+
+  func teamId(pid: pid_t) -> String? {
+    lock.lock()
+    if let hit = cache[pid] { lock.unlock(); return hit }
+    lock.unlock()
+    let team = lookUp(pid)
+    lock.lock()
+    if cache.count > 256 { cache.removeAll() }
+    cache[pid] = team
+    lock.unlock()
+    return team
+  }
+
+  private func lookUp(_ pid: pid_t) -> String? {
+    var code: SecCode?
+    let attributes = [kSecGuestAttributePid: NSNumber(value: pid)] as CFDictionary
+    guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code else { return nil }
+    guard SecCodeCheckValidity(code, [], nil) == errSecSuccess else { return nil }
+    var staticCode: SecStaticCode?
+    guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+    var info: CFDictionary?
+    guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess else { return nil }
+    return (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String
+  }
+}
+
+let signers = SignerRegistry()
+
 func appInfo(_ app: NSRunningApplication?) -> AppInfo {
   guard let app else { return .none }
   if app.isTerminated {
@@ -104,6 +138,7 @@ func appInfo(_ app: NSRunningApplication?) -> AppInfo {
     pid: Int(app.processIdentifier),
     registeredBrowser: browsers.isRegisteredBrowser(bundleURL: app.bundleURL, bundleId: app.bundleIdentifier),
     engine: engines.engine(bundleURL: app.bundleURL),
+    signer: signers.teamId(pid: app.processIdentifier),
     identityState: .ok)
 }
 

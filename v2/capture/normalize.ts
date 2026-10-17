@@ -6,8 +6,9 @@ import {
   DISPLAY_NAME_OVERRIDES,
   KNOWN_BROWSER_APP_IDS,
   KNOWN_BROWSER_EXES,
-  KNOWN_NON_BROWSER_APP_IDS,
+  TRUSTED_WEB_RUNTIME_APPS,
   type ExclusionRule,
+  type TrustedApp,
 } from './defaults.ts'
 import type { AppIdentity, ChannelState, Line, LineOf } from './protocol.ts'
 
@@ -21,7 +22,7 @@ export type StoredTitleState =
   | 'unavailable'
   | 'withheld_browser'
   | 'withheld_unknown_app'
-  | 'withheld_unclassified'
+  | 'unknown'
 
 export interface ObservationRow {
   run: string
@@ -129,9 +130,25 @@ export function cleanTitle(raw: string): CleanTitle {
 
 // --- privacy --------------------------------------------------------------
 
+// Why a title was withheld as 'unknown': the app ships a browser engine and is not on the trusted list,
+// or the helper could not tell what engine it has.
+export type TitleReason = 'browser_engine' | 'web_runtime_not_listed' | 'engine_uncertain'
+
 export interface Classification {
   excluded: boolean
-  title: 'allowed' | 'withheld_browser' | 'withheld_unknown_app' | 'withheld_unclassified'
+  title: 'allowed' | 'withheld_browser' | 'withheld_unknown_app' | 'unknown'
+  reason?: TitleReason
+}
+
+function trusted(app: AppIdentity, appId: string | null, exe: string | null, list: readonly TrustedApp[]): boolean {
+  const signer = app.signer?.toLowerCase() ?? null
+  return list.some((t) => {
+    if (t.app_id && appId === t.app_id.toLowerCase()) {
+      // A Windows package ID already carries the publisher's identity; everything else needs a matching signer.
+      return t.signer ? signer === t.signer.toLowerCase() : app.store !== null
+    }
+    return !!t.exe && !!t.signer && exe === t.exe && signer === t.signer.toLowerCase()
+  })
 }
 
 function basename(p: string): string {
@@ -143,7 +160,10 @@ export class Privacy {
   private readonly byAppId = new Set<string>()
   private readonly byExe = new Set<string>()
 
-  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS) {
+  private readonly trustedApps: readonly TrustedApp[]
+
+  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS) {
+    this.trustedApps = trustedApps
     for (const r of rules) (r.match === 'app_id' ? this.byAppId : this.byExe).add(r.value.toLowerCase())
   }
 
@@ -159,14 +179,16 @@ export class Privacy {
     if (app.identity_state !== 'ok' || (appId === null && exe === null)) {
       return { excluded: false, title: 'withheld_unknown_app' }
     }
-    // Order matters: a known browser is always withheld; a known non-browser overrides the platform facts;
-    // otherwise any sign of a browser, or no way to tell, withholds the title. Unknown is never treated as normal.
+    // A known or registered browser is always withheld. Anything that ships a browser engine keeps its titles
+    // only when it is on the trusted list with a matching signer; no way to tell is never treated as normal.
     if ((appId !== null && KNOWN_BROWSER_APP_IDS.has(appId)) || (exe !== null && KNOWN_BROWSER_EXES.has(exe))) {
       return { excluded: false, title: 'withheld_browser' }
     }
-    if (appId !== null && KNOWN_NON_BROWSER_APP_IDS.has(appId)) return { excluded: false, title: 'allowed' }
-    if (app.registered_browser || app.engine === 'browser') return { excluded: false, title: 'withheld_browser' }
-    if (app.engine === 'unknown') return { excluded: false, title: 'withheld_unclassified' }
+    const listed = trusted(app, appId ?? aumid, exe, this.trustedApps)
+    if (app.registered_browser && !listed) return { excluded: false, title: 'withheld_browser' }
+    if (app.engine === 'unknown') return { excluded: false, title: 'unknown', reason: 'engine_uncertain' }
+    if (app.engine === 'browser' && !listed) return { excluded: false, title: 'unknown', reason: 'browser_engine' }
+    if (app.engine === 'app_runtime' && !listed) return { excluded: false, title: 'unknown', reason: 'web_runtime_not_listed' }
     return { excluded: false, title: 'allowed' }
   }
 }
@@ -336,7 +358,11 @@ export class Normalizer {
     row.title_raw = titleRaw
     row.title_state = titleState
     row.state = app.identity_state
-    row.detail = JSON.stringify({ trigger: line.obs.trigger, ...(known && app.store ? { store: app.store } : {}) })
+    row.detail = JSON.stringify({
+      trigger: line.obs.trigger,
+      ...(known && app.store ? { store: app.store } : {}),
+      ...(c.reason && titleState === 'unknown' ? { title_reason: c.reason } : {}),
+    })
     this.focus = { id: this.sink.insertObservation(row), key, hasTitle: title !== null, sinceWall: line.t.wall_ms, stale: false }
   }
 

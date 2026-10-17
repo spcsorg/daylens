@@ -23,6 +23,10 @@ let reconcileS = intArg("--reconcile-s", 60, max: 86400)
 signal(SIGPIPE, SIG_IGN)
 
 // Diagnostic: classify app bundles and exit, so the engine rule can be checked against real installed apps.
+if let i = CommandLine.arguments.firstIndex(of: "--signer") {
+  for p in CommandLine.arguments[(i + 1)...] { print("\(signers.teamId(pid: pid_t(p) ?? 0) ?? "-")\t\(p)") }
+  exit(0)
+}
 if let i = CommandLine.arguments.firstIndex(of: "--classify") {
   for path in CommandLine.arguments[(i + 1)...] { print("\(engines.engine(bundleURL: URL(fileURLWithPath: path)).rawValue)\t\(path)") }
   exit(0)

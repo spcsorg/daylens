@@ -166,9 +166,9 @@ internal sealed unsafe class Resolver
             var name = package is null ? null : PackageDisplayName(aumid, package);
             bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
             browser |= web == true;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web));
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web), SignerOf(path));
         }
-        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path));
+        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path), SignerOf(path));
     }
 
     string? ExeName(string path)
@@ -227,6 +227,59 @@ internal sealed unsafe class Resolver
     }
 
     readonly Dictionary<string, Engine> _engines = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, string?> _signers = new(StringComparer.OrdinalIgnoreCase);
+
+    // The Authenticode publisher, only once WinVerifyTrust accepts the file's signature (no network, no revocation fetch).
+    string? SignerOf(string exePath)
+    {
+        if (_signers.TryGetValue(exePath, out var cached)) return cached;
+        string? publisher = null;
+        try
+        {
+            if (SignatureVerifies(exePath))
+            {
+#pragma warning disable SYSLIB0057 // Reads the signer certificate only; trust was established by WinVerifyTrust above.
+                using var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(exePath);
+#pragma warning restore SYSLIB0057
+                publisher = Signers.PublisherFromSubject(cert.Subject);
+            }
+        }
+        catch { Diag.Write("signer_read_failed"); }
+        if (_signers.Count > 512) _signers.Clear();
+        _signers[exePath] = publisher;
+        return publisher;
+    }
+
+    static bool SignatureVerifies(string path)
+    {
+        var pathPtr = System.Runtime.InteropServices.Marshal.StringToHGlobalUni(path);
+        var file = new Native.WINTRUST_FILE_INFO { cbStruct = (uint)sizeof(Native.WINTRUST_FILE_INFO), pcwszFilePath = pathPtr };
+        var filePtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(Native.WINTRUST_FILE_INFO));
+        try
+        {
+            System.Runtime.InteropServices.Marshal.StructureToPtr(file, filePtr, false);
+            var data = new Native.WINTRUST_DATA
+            {
+                cbStruct = (uint)sizeof(Native.WINTRUST_DATA),
+                dwUIChoice = Native.WTD_UI_NONE,
+                fdwRevocationChecks = Native.WTD_REVOKE_NONE,
+                dwUnionChoice = Native.WTD_CHOICE_FILE,
+                pFile = filePtr,
+                dwStateAction = Native.WTD_STATEACTION_VERIFY,
+                dwProvFlags = Native.WTD_REVOCATION_CHECK_NONE | Native.WTD_CACHE_ONLY_URL_RETRIEVAL,
+            };
+            var action = Native.WINTRUST_ACTION_GENERIC_VERIFY_V2;
+            var result = Native.WinVerifyTrust(-1, ref action, ref data);
+            data.dwStateAction = Native.WTD_STATEACTION_CLOSE;
+            Native.WinVerifyTrust(-1, ref action, ref data);
+            return result == 0;
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(filePtr);
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(pathPtr);
+        }
+    }
 
     Engine EngineOf(string exePath)
     {

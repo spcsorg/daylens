@@ -16,7 +16,7 @@ public sealed record StoreIdentity(string Aumid, string? Package);
 /// Whether each event source's subscription is in place.
 public readonly record struct Registrations(bool Focus, bool Session, bool Power);
 
-public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store, Engine Engine = Engine.Unknown)
+public sealed record AppInfo(string? AppId, string? Name, string? Path, int? Pid, bool RegisteredBrowser, IdentityState IdentityState, StoreIdentity? Store, Engine Engine = Engine.Unknown, string? Signer = null)
 {
     public static readonly AppInfo NoneInFront = new(null, null, null, null, false, IdentityState.None, null);
     public static AppInfo Unknown(int? pid, IdentityState state) => new(null, null, null, pid, false, state, null);
@@ -129,6 +129,7 @@ public static class Obs
         if (app.Pid is int pid) w.WriteNumber("pid", pid); else w.WriteNull("pid");
         w.WriteBoolean("registered_browser", app.RegisteredBrowser);
         w.WriteString("engine", Names.Of(app.Engine));
+        WriteNullable(w, "signer", Clip(app.Signer, 256));
         w.WriteString("identity_state", Names.Of(app.IdentityState));
         if (app.Store is { } s)
         {

@@ -88,6 +88,7 @@
      "pid": 501,
      "registered_browser": false,
      "engine": "none",
+     "signer": null,
      "identity_state": "ok",
      "store": null
     },
@@ -124,6 +125,7 @@
      "pid": 501,
      "registered_browser": false,
      "engine": "none",
+     "signer": null,
      "identity_state": "ok",
      "store": null
     },
@@ -160,6 +162,7 @@
      "pid": 501,
      "registered_browser": false,
      "engine": "none",
+     "signer": null,
      "identity_state": "ok",
      "store": null
     },
@@ -369,6 +372,7 @@
      "pid": 9120,
      "registered_browser": false,
      "engine": "none",
+     "signer": null,
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -408,6 +412,7 @@
      "pid": 4,
      "registered_browser": false,
      "engine": "unknown",
+     "signer": null,
      "identity_state": "access_denied",
      "store": null
     },
@@ -444,6 +449,7 @@
      "pid": 9120,
      "registered_browser": false,
      "engine": "none",
+     "signer": null,
      "identity_state": "ok",
      "store": {
       "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -603,6 +609,7 @@
      "pid": 7712,
      "registered_browser": false,
      "engine": "unknown",
+     "signer": null,
      "identity_state": "unresolved",
      "store": null
     },

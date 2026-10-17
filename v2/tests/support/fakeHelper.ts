@@ -28,8 +28,8 @@ function emit(kind: string, obs: unknown, source = 'fake'): void {
   process.stdout.write(JSON.stringify({ v: 1, run, seq: seq++, boot: bootId(time), t: time, platform: 'macos', source, kind, obs }) + '\n')
 }
 
-const term = { app_id: 'com.apple.Terminal', name: 'Terminal', path: null, pid: 501, registered_browser: false, engine: 'none', identity_state: 'ok', store: null }
-const chrome = { app_id: 'com.google.Chrome', name: 'Chrome', path: null, pid: 502, registered_browser: true, engine: 'browser', identity_state: 'ok', store: null }
+const term = { app_id: 'com.apple.Terminal', name: 'Terminal', path: null, pid: 501, registered_browser: false, engine: 'none', signer: null, identity_state: 'ok', store: null }
+const chrome = { app_id: 'com.google.Chrome', name: 'Chrome', path: null, pid: 502, registered_browser: true, engine: 'browser', signer: 'EQHXZ8M8AV', identity_state: 'ok', store: null }
 let n = 0
 function focus(trigger: string): void {
   const browser = n % 2 === 1

@@ -60,13 +60,55 @@ export const KNOWN_BROWSER_APP_IDS: ReadonlySet<string> = new Set(
   ].map((s) => s.toLowerCase()),
 )
 
-// Apps that register as http/https handlers but whose window titles are the work context, not browsing.
+// Apps that ship a browser engine (Chromium, Gecko, Electron, CEF) but are not browsers. Files cannot prove
+// that (an Electron app can be a browser with private tabs), so only these keep their titles, and only when
+// both the app ID and the OS-verified signer match: macOS bundle ID + Team ID; a Windows package (whose
+// identity is bound to its publisher); or a Windows executable + Authenticode publisher. Never a name alone.
 // Codex (com.openai.codex) embeds ordinary, non-private pages; its titles are kept. Capture stores no addresses
-// from any app, and when browser pages arrive Codex must not become a page source. Exclusions still apply,
-// and a window reported in private mode is withheld (normalize.ts). The known-browser list above wins over this one.
-export const KNOWN_NON_BROWSER_APP_IDS: ReadonlySet<string> = new Set(['com.openai.codex'].map((s) => s.toLowerCase()))
+// from any app. Exclusions still apply, and a window reported in private mode is withheld (normalize.ts).
+export interface TrustedApp {
+  label: string
+  app_id?: string
+  exe?: string
+  signer?: string
+  // Team IDs and publishers not read from an installed copy yet; a wrong value only withholds that app's titles.
+  unverified?: true
+}
 
-// Apps whose bundle names itself after a different product.
+export const TRUSTED_WEB_RUNTIME_APPS: readonly TrustedApp[] = [
+  // macOS: bundle ID + Team ID
+  { label: 'Slack', app_id: 'com.tinyspeck.slackmacgap', signer: 'BQR82RBBHL', unverified: true },
+  { label: 'Visual Studio Code', app_id: 'com.microsoft.VSCode', signer: 'UBF8T346G9', unverified: true },
+  { label: 'Cursor', app_id: 'com.todesktop.230313mzl4w4u92', signer: 'VDXQ22DGB9' },
+  { label: 'Discord', app_id: 'com.hnc.Discord', signer: '53Q6R32WPB', unverified: true },
+  { label: 'Notion', app_id: 'notion.id', signer: 'LBQJ96FQ8D' },
+  { label: 'Figma', app_id: 'com.figma.Desktop', signer: 'T8RA8NE3B7' },
+  { label: 'Linear', app_id: 'com.linear', signer: '7VZ2S3V9RV' },
+  { label: 'Obsidian', app_id: 'md.obsidian', signer: '6JSW4SJWN9' },
+  { label: 'Spotify', app_id: 'com.spotify.client', signer: '2FNC3A47ZF' },
+  { label: 'WhatsApp', app_id: 'net.whatsapp.WhatsApp', signer: '57T9237FN3', unverified: true },
+  { label: 'Microsoft Teams', app_id: 'com.microsoft.teams2', signer: 'UBF8T346G9' },
+  { label: 'Claude', app_id: 'com.anthropic.claudefordesktop', signer: 'Q6L2SF6YDW' },
+  { label: 'ChatGPT / Codex', app_id: 'com.openai.codex', signer: '2DC432GLL2' },
+  { label: 'Daylens', app_id: 'com.daylens.desktop', signer: '9AVJWGP6MS' },
+  // Windows packages: the package family name carries the publisher's identity
+  { label: 'Microsoft Teams', app_id: 'MSTeams_8wekyb3d8bbwe!MSTeams', unverified: true },
+  { label: 'WhatsApp', app_id: '5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App', unverified: true },
+  { label: 'Spotify', app_id: 'SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify', unverified: true },
+  // Windows executables: file name + Authenticode publisher
+  { label: 'Slack', exe: 'slack.exe', signer: 'Slack Technologies, LLC', unverified: true },
+  { label: 'Visual Studio Code', exe: 'code.exe', signer: 'Microsoft Corporation', unverified: true },
+  { label: 'Cursor', exe: 'cursor.exe', signer: 'Anysphere, Inc.', unverified: true },
+  { label: 'Discord', exe: 'discord.exe', signer: 'Discord Inc.', unverified: true },
+  { label: 'Notion', exe: 'notion.exe', signer: 'Notion Labs, Inc.', unverified: true },
+  { label: 'Figma', exe: 'figma.exe', signer: 'Figma, Inc.', unverified: true },
+  { label: 'Linear', exe: 'linear.exe', signer: 'Linear Orbit, Inc.', unverified: true },
+  { label: 'Obsidian', exe: 'obsidian.exe', signer: 'Dynalist Inc.', unverified: true },
+  { label: 'Spotify', exe: 'spotify.exe', signer: 'Spotify AB', unverified: true },
+  { label: 'Claude', exe: 'claude.exe', signer: 'Anthropic, PBC', unverified: true },
+  { label: 'ChatGPT / Codex', exe: 'chatgpt.exe', signer: 'OpenAI OpCo, LLC', unverified: true },
+]
+
 export const DISPLAY_NAME_OVERRIDES: ReadonlyMap<string, string> = new Map([['com.openai.codex', 'Codex']])
 
 export const KNOWN_BROWSER_EXES: ReadonlySet<string> = new Set([
