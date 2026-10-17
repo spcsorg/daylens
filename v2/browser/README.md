@@ -64,6 +64,8 @@ node browser/tools/live.ts canary --browser cft --app "<Chrome for Testing.app>"
 `--browser` takes `cft`, `dia` or `firefox`. `--local` forces the local connection (no host manifest, the listener
 on, pairing through the popup). `soak --minutes 60` runs an hour of scripted browsing while `procstat` samples the host,
 the extension's process and the service.
+`storeshots --browser cft` captures the popup connected, paused and with Daylens not running, over a neutral page,
+as 1280×800 store screenshots.
 
 The canary opens unique canary pages in a private window next to a normal window showing the same page. It then
 checks the database, the WAL, the service log and the browser's log for the canary strings, while the window is open,

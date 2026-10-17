@@ -75,6 +75,11 @@ interface Pages {
 function servePages(): Promise<Pages> {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://x')
+    if (u.pathname === '/sample') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(SAMPLE_PAGE)
+      return
+    }
     const title = u.searchParams.get('title') ?? u.pathname.slice(1)
     const ticking = u.searchParams.get('tick') === '1'
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
@@ -88,6 +93,22 @@ function servePages(): Promise<Pages> {
     }),
   )
 }
+
+// A neutral page for store screenshots: nothing personal, nothing that looks like a real site.
+const SAMPLE_PAGE = `<!doctype html><title>Caring for houseplants</title>
+<body style="margin:0;font:18px/1.6 Georgia,serif;color:#222;background:#fbfaf7">
+<main style="max-width:680px;margin:0 auto;padding:72px 32px">
+<p style="font:600 13px system-ui;letter-spacing:.08em;text-transform:uppercase;color:#7a7368">Guide</p>
+<h1 style="font-size:40px;line-height:1.15;margin:8px 0 24px">Caring for houseplants</h1>
+<p>Most houseplants want three things: the right light, water when the top of the soil is dry, and a pot that drains.
+Start by finding out how much light each spot in your home gets through the day.</p>
+<h2 style="font-size:24px;margin:36px 0 8px">Light</h2>
+<p>A window that faces the sun gives bright light for a few hours. Plants that like shade do well a little further
+back in the room, where the light is soft and even.</p>
+<h2 style="font-size:24px;margin:36px 0 8px">Water</h2>
+<p>Press a finger into the soil. If the first few centimetres are dry, water slowly until it runs out of the bottom
+of the pot, then let it drain.</p>
+</main>`
 
 // --- capture service ---------------------------------------------------------------------------------------------
 
@@ -395,6 +416,31 @@ class ChromiumDriver implements Driver {
   }
   popupUrl(): string {
     return `chrome-extension://${DEV_CHROMIUM_ID}/popup.html`
+  }
+  // A PNG of the page at a CSS size; height 0 takes the page's own height.
+  async shot(handle: string, width: number, height: number, scale: number): Promise<Buffer> {
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
+    await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, sessionId)
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width, height: height || 600, deviceScaleFactor: scale, mobile: false }, sessionId)
+    if (!height) {
+      const r = await this.cdp.send('Runtime.evaluate', { expression: 'document.documentElement.scrollHeight', returnByValue: true }, sessionId)
+      await this.cdp.send('Emulation.setDeviceMetricsOverride', { width, height: r.result.value, deviceScaleFactor: scale, mobile: false }, sessionId)
+    }
+    await sleep(500)
+    const shot = await this.cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId)
+    await this.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sessionId)
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+    return Buffer.from(shot.data, 'base64')
+  }
+  async render(html: string, width: number, height: number): Promise<Buffer> {
+    const id = (await this.cdp.send('Target.createTarget', { url: 'about:blank' })).targetId
+    const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: id, flatten: true })
+    const { frameTree } = await this.cdp.send('Page.getFrameTree', {}, sessionId)
+    await this.cdp.send('Page.setDocumentContent', { frameId: frameTree.frame.id, html }, sessionId)
+    await this.cdp.send('Target.detachFromTarget', { sessionId })
+    const png = await this.shot(id, width, height, 1)
+    await this.close(id)
+    return png
   }
   async tabs(): Promise<{ url: string; title?: string }[]> {
     return (await this.targets()).filter((t) => t.type === 'page').map((t) => ({ url: t.url, title: (t as { title?: string }).title }))
@@ -1075,9 +1121,71 @@ async function soak(): Promise<void> {
   }
 }
 
+// --- store screenshots ---------------------------------------------------------------------------------------------
+
+// The real popup in each state, laid over a neutral page at 1280x800 (a size both the Chrome Web Store and Edge
+// Add-ons accept), in a Chrome for Testing test profile talking to a real capture service over native messaging.
+async function storeshots(): Promise<void> {
+  if (kind !== 'cft' || LOCAL) throw new Error('storeshots runs on Chrome for Testing over native messaging')
+  const dir = path.join(out, 'store-screenshots')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const pages = await servePages()
+  const svc = new Service(path.join(dir, 'data'), path.join(dir, 'service.log'))
+  const d = makeDriver(dir) as ChromiumDriver
+  const hosts = hostDir(d)
+  register('chromium', hosts, values.helper!)
+  try {
+    await announce('The store screenshots', 30)
+    if (!HEADLESS) spawn('/usr/bin/caffeinate', ['-d', '-i', '-w', String(process.pid)], { stdio: 'ignore', detached: true }).unref()
+    await svc.start()
+    await d.launch(`${pages.base}/sample`)
+    activateApp(values.app!)
+    const tab = await d.firstPage(pages.base)
+    await sleep(1500)
+    const background = (await d.shot(tab, 1280, 800, 1)).toString('base64')
+    let popup = await d.openWindow(d.popupUrl())
+    const status = async () => String(await d.evaluate(popup, `document.getElementById('status')?.textContent ?? ''`))
+    const waitStatus = async (want: RegExp, ms: number) => {
+      const until = Date.now() + ms
+      for (let t = await status(); ; t = await status()) {
+        if (want.test(t)) return t
+        if (Date.now() > until) throw new Error(`popup said "${t}", wanted ${want}`)
+        await sleep(300)
+      }
+    }
+    const grab = async (name: string, want: RegExp, ms = 15_000) => {
+      const said = await waitStatus(want, ms)
+      const card = (await d.shot(popup, 264, 0, 2)).toString('base64')
+      const html = `<!doctype html><body style="margin:0;width:1280px;height:800px;overflow:hidden;position:relative">
+<img src="data:image/png;base64,${background}" style="position:absolute;left:0;top:0;width:1280px;height:800px">
+<img src="data:image/png;base64,${card}" style="position:absolute;top:12px;right:16px;width:264px;border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.08)">`
+      const file = path.join(dir, `daylens-popup-${name}-1280x800.png`)
+      writeFileSync(file, await d.render(html, 1280, 800))
+      log(`${name}: popup said "${said}" -> ${file}`)
+    }
+    await grab('connected', /^Connected/)
+    await d.evaluate(popup, `document.getElementById('pause').click()`)
+    await d.evaluate(popup, `document.querySelector('[data-for="until_resumed"]').click()`)
+    await grab('paused', /^Paused/)
+    await d.evaluate(popup, `document.getElementById('resume').click()`)
+    await waitStatus(/^Connected/, 15_000)
+    await svc.stop()
+    await d.close(popup)
+    await sleep(3000)
+    popup = await d.openWindow(d.popupUrl())
+    await grab('not-running', /isn.t running/, 60_000)
+  } finally {
+    await d.quit().catch(() => {})
+    await svc.stop().catch(() => {})
+    pages.close()
+  }
+}
+
 if (mode === 'canary') await canary()
+else if (mode === 'storeshots') await storeshots()
 else if (mode === 'soak') await soak()
 else {
-  process.stderr.write('usage: live.ts canary|soak --browser cft|dia|firefox --app <app> --helper <bin> --out <dir>\n')
+  process.stderr.write('usage: live.ts canary|soak|storeshots --browser cft|dia|firefox --app <app> --helper <bin> --out <dir>\n')
   process.exit(64)
 }
