@@ -517,6 +517,7 @@ class FirefoxDriver implements Driver {
       env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath() },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    activatePid = this.proc.pid ?? null
     this.proc.stdout!.pipe(logStream)
     this.proc.stderr!.pipe(logStream)
     const start = Date.now()
@@ -693,11 +694,13 @@ async function announce(what: string, seconds: number): Promise<void> {
   }
 }
 
-// A second instance of an app the user also runs (Dia) is brought forward by pid, never by name.
+// The browser the runner launched is brought forward by pid, never by name: `open -a` does not see a browser started
+// with its own profile as that app, so it launches another copy on the default profile.
 let activatePid: number | null = null
-function activateApp(app: string): void {
-  if (kind === 'dia' && activatePid !== null) execFileSync(values.activate!, [String(activatePid)])
-  else execFileSync('/usr/bin/open', ['-a', app])
+function activateApp(_app: string): void {
+  if (activatePid === null) throw new Error('no browser launched to bring forward')
+  if (!values.activate) throw new Error('--activate <binary> is required to bring the test browser forward')
+  execFileSync(values.activate, [String(activatePid)])
 }
 
 // --- evidence ---------------------------------------------------------------------------------------------------
