@@ -421,9 +421,9 @@ class ChromiumDriver implements Driver {
   async shot(handle: string, width: number, height: number, scale: number): Promise<Buffer> {
     const { sessionId } = await this.cdp.send('Target.attachToTarget', { targetId: handle, flatten: true })
     await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, sessionId)
-    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width, height: height || 600, deviceScaleFactor: scale, mobile: false }, sessionId)
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width, height: height || 100, deviceScaleFactor: scale, mobile: false }, sessionId)
     if (!height) {
-      const r = await this.cdp.send('Runtime.evaluate', { expression: 'document.documentElement.scrollHeight', returnByValue: true }, sessionId)
+      const r = await this.cdp.send('Runtime.evaluate', { expression: 'Math.ceil(document.body.getBoundingClientRect().bottom)', returnByValue: true }, sessionId)
       await this.cdp.send('Emulation.setDeviceMetricsOverride', { width, height: r.result.value, deviceScaleFactor: scale, mobile: false }, sessionId)
     }
     await sleep(500)
