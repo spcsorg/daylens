@@ -6,7 +6,7 @@ import {
 } from "@/app/lib/sessionConfig";
 import { stripBasePath, withBasePath } from "@/app/lib/basePath";
 
-const PUBLIC_PATHS = ["/", "/link", "/recover", "/docs", "/roadmap", "/changelog", "/hackathon", "/linux"];
+const PUBLIC_PATHS = ["/", "/privacy", "/devlog", "/press", "/link", "/recover", "/docs", "/roadmap", "/changelog", "/hackathon", "/linux"];
 const PUBLIC_API_PATHS = [
   "/api/link",
   "/api/recover",
@@ -24,6 +24,16 @@ function redirectToLink(request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const pathname = stripBasePath(request.nextUrl.pathname);
+
+  // Desktop QR codes from V1 still point at the landing page with a pairing token.
+  const token = request.nextUrl.searchParams.get("token");
+  if (pathname === "/" && token && /^[0-9a-f]{32}$/i.test(token)) {
+    return NextResponse.redirect(new URL(withBasePath(`/link?token=${token}`), request.url));
+  }
+
+  if (pathname.startsWith("/opengraph-image")) {
+    return NextResponse.next();
+  }
 
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + "/"))) {
     return NextResponse.next();
@@ -61,5 +71,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon-.*|manifest.json|sw.js|workbox-.*).*)"],
+  matcher: ["/", "/((?!_next/static|_next/image|favicon.ico|icon-.*|manifest.json|sw.js|workbox-.*).*)"],
 };

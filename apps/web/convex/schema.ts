@@ -145,7 +145,9 @@ export default defineSchema({
     key: v.string(),
     count: v.number(),
     expiresAt: v.number(),
-  }).index("by_key", ["key"]),
+  })
+    .index("by_key", ["key"])
+    .index("by_expires_at", ["expiresAt"]),
   web_ai_threads: defineTable({
     workspaceId: v.id("workspaces"),
     workspaceThreadId: v.string(),

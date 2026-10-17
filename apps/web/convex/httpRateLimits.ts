@@ -51,3 +51,20 @@ export const checkAndIncrement = internalMutation({
     };
   },
 });
+
+const EXPIRED_BATCH = 500;
+
+// Buckets are keyed by client IP, so expired ones are deleted rather than kept.
+export const deleteExpired = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db
+      .query("http_rate_limits")
+      .withIndex("by_expires_at", (q) => q.lt("expiresAt", Date.now()))
+      .take(EXPIRED_BATCH);
+    for (const bucket of expired) {
+      await ctx.db.delete(bucket._id);
+    }
+    return { deleted: expired.length };
+  },
+});
