@@ -15,7 +15,19 @@ const SECRET_WORDS = new Set([
 
 // Names written as one lowercase word (accesstoken, sessionkey) still carry these; short words like key or code are
 // matched as whole words only, so keyboard and codec stay.
-const SECRET_PARTS = ['token', 'secret', 'password', 'passwd', 'signature', 'apikey', 'sessionid', 'sessionkey', 'authcode', 'verifier', 'credential']
+const SECRET_PARTS = [
+  'token', 'secret', 'password', 'passwd', 'signature', 'apikey', 'accesskey', 'privatekey', 'sessionid', 'sessionkey', 'authcode',
+  'authoriz', 'verifier', 'credential',
+]
+
+// An HTTP credential pasted into a parameter, whatever the parameter is called.
+const CREDENTIAL_VALUE = /^(bearer|basic)\s/i
+// Parameter values that are addresses in their own right (returnUrl, next, redirect) get the same rule; addresses
+// that can run code or carry content are dropped. A plain "site:example.com" is not an address and stays.
+const NESTED_ADDRESS = /^(https?:|file:|\/\/)/i
+const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
+const MAX_NESTING = 4
+const RELATIVE_BASE = 'https://relative.invalid'
 
 const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/
 
@@ -28,11 +40,30 @@ function nameWords(name: string): string[] {
 }
 
 export function isSecretParam(name: string, value: string): boolean {
-  return nameWords(name).some((w) => SECRET_WORDS.has(w) || SECRET_PARTS.some((p) => w.includes(p))) || JWT_VALUE.test(value)
+  return nameWords(name).some((w) => SECRET_WORDS.has(w) || SECRET_PARTS.some((p) => w.includes(p))) || JWT_VALUE.test(value) || CREDENTIAL_VALUE.test(value)
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
 export function cleanAddress(raw: string | null | undefined): string | null {
+  return clean(raw, 0)
+}
+
+// A parameter value after the rule: unchanged, cleaned as an address, or null to drop the parameter.
+function cleanValue(value: string, depth: number): string | null {
+  if (DROPPED_ADDRESS.test(value)) return null
+  if (NESTED_ADDRESS.test(value)) {
+    if (depth >= MAX_NESTING) return null
+    return clean(value.startsWith('//') ? 'https:' + value : value, depth + 1)
+  }
+  if (value.startsWith('/') && /[?#]/.test(value)) {
+    if (depth >= MAX_NESTING) return null
+    const c = clean(RELATIVE_BASE + value, depth + 1)
+    return c === null ? null : c.slice(RELATIVE_BASE.length)
+  }
+  return value
+}
+
+function clean(raw: string | null | undefined, depth: number): string | null {
   if (!raw) return null
   let u: URL
   try {
@@ -46,7 +77,11 @@ export function cleanAddress(raw: string | null | undefined): string | null {
   u.hash = ''
   if (u.search) {
     const kept = new URLSearchParams()
-    for (const [k, v] of u.searchParams) if (!isSecretParam(k, v)) kept.append(k, v)
+    for (const [k, v] of u.searchParams) {
+      if (isSecretParam(k, v)) continue
+      const c = cleanValue(v, depth)
+      if (c !== null) kept.append(k, c)
+    }
     u.search = kept.toString()
   }
   let out = u.href

@@ -55,3 +55,25 @@ test('a site rule never excludes an app by executable name', () => {
   const app = { app_id: 'C:\\x\\chrome.exe', name: 'Chrome', path: 'C:\\x\\chrome.exe', pid: 1, registered_browser: true, identity_state: 'ok' as const, store: null }
   assert.equal(p.classify(app).excluded, false)
 })
+
+test('authorization and access-key parameters are dropped, whatever the spelling', () => {
+  for (const name of ['authorization', 'Authorization', 'http_authorization', 'accesskey', 'AccessKey', 'access_key', 'accessKeyId', 'awsAccessKeyId', 'privatekey'])
+    assert.ok(isSecretParam(name, 'v'), name)
+  assert.equal(cleanAddress('https://api.example.com/x?authorization=Bearer+abc.def&q=1'), 'https://api.example.com/x?q=1')
+  assert.equal(cleanAddress('https://s3.example.com/b?accesskey=AKIA123&page=2'), 'https://s3.example.com/b?page=2')
+  assert.equal(cleanAddress('https://x.example.com/?h=Bearer%20abc123&q=2'), 'https://x.example.com/?q=2', 'a bearer value goes whatever the name')
+})
+
+test('URL-valued parameters are cleaned by the same rule, nested or relative', () => {
+  assert.equal(
+    cleanAddress('https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Ftoken%3Dabc%26doc%3D7%23frag&q=1'),
+    'https://login.example.com/?returnUrl=https%3A%2F%2Fapp.example.com%2Fcb%3Fdoc%3D7&q=1',
+  )
+  assert.equal(
+    cleanAddress('https://a.example.com/?next=https%3A%2F%2Fb.example.com%2F%3Fredirect%3Dhttps%253A%252F%252Fc.example.com%252F%253Fcode%253Dzz'),
+    'https://a.example.com/?next=https%3A%2F%2Fb.example.com%2F%3Fredirect%3Dhttps%253A%252F%252Fc.example.com%252F',
+  )
+  assert.equal(cleanAddress('https://a.example.com/?next=%2Fhome%3Fsession%3Ds1%26tab%3D2%23x'), 'https://a.example.com/?next=%2Fhome%3Ftab%3D2')
+  assert.equal(cleanAddress('https://a.example.com/?u=https%3A%2F%2Fme%3Apw%40b.example.com%2F'), 'https://a.example.com/?u=https%3A%2F%2Fb.example.com%2F')
+  assert.equal(cleanAddress('https://a.example.com/?u=javascript%3Aalert(1)&q=1'), 'https://a.example.com/?q=1', 'a URL value with a scheme the rule does not keep is dropped')
+})
