@@ -103,7 +103,7 @@ test('pause is exact: nothing with an event time inside the hour is stored, and 
   assert.deepEqual([g.start.wall_ms, g.end?.wall_ms], [T, T + H])
   assert.ok(sink.rows.some((r) => r.kind === 'focus' && r.event_wall_ms === T + H && r.title === 'after'), 'capture resumes at the end')
   assert.deepEqual(changes, [true, false])
-  assert.equal(sink.meta('pause'), null)
+  assert.equal(JSON.parse(sink.meta('pause') ?? '{}').since_wall_ms ?? null, null, 'no pause is active')
 })
 
 test('pause until resumed, resume, and a pause that outlives a restart', () => {
@@ -135,7 +135,7 @@ test('a pause that expired while the service was down is cleared on restore', ()
   const p2 = new Pause(sink, { now: () => now })
   p2.restore()
   assert.equal(p2.state().paused, false)
-  assert.equal(sink.meta('pause'), null)
+  assert.equal(JSON.parse(sink.meta('pause') ?? '{}').since_wall_ms ?? null, null, 'no pause is active')
 })
 
 test('until tomorrow ends at the next local midnight', () => {
@@ -144,4 +144,28 @@ test('until tomorrow ends at the next local midnight', () => {
   const p = new Pause(sink, { now: () => now })
   assert.equal(p.pause('tomorrow').until_wall_ms, new Date(2026, 9, 17, 0, 0).getTime())
   p.stop()
+})
+
+test('an event stamped inside a finished pause is still dropped when it arrives late, across restarts', () => {
+  const sink = new Sink()
+  let now = 1000
+  const p = new Pause(sink, { now: () => now })
+  p.pause('until_resumed')
+  now = 2000
+  p.resume()
+  assert.ok(p.blocks(1500), 'manual resume: a late event from inside the pause')
+  assert.ok(!p.blocks(2500))
+  now = 10_000
+  p.pause('hour')
+  now = 10_000 + 3_600_000 + 5
+  assert.ok(!p.blocks(now), 'the hour is over')
+  assert.ok(p.blocks(10_000 + 60_000), 'expired pause: a late event from inside it')
+  assert.ok(p.blocks(1999), 'the first pause still counts')
+  assert.ok(!p.blocks(5000), 'time between pauses is not paused')
+  p.stop()
+  const after = new Pause(sink, { now: () => now })
+  after.restore()
+  assert.equal(after.state().paused, false)
+  assert.ok(after.blocks(1500) && after.blocks(10_000 + 60_000), 'finished pauses survive a restart')
+  assert.ok(!after.blocks(5000))
 })

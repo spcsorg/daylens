@@ -49,6 +49,8 @@ export class Pause {
   private since: number | null = null
   private until: number | null = null
   private gap: number | null = null
+  // Finished pauses, kept so a line stamped inside one but delivered later is still dropped.
+  private done: { since_wall_ms: number; until_wall_ms: number }[] = []
   private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(store: PauseStore, opts: PauseOptions = {}) {
@@ -62,20 +64,27 @@ export class Pause {
   restore(): void {
     const raw = this.store.meta(META_KEY)
     if (raw === null) return
-    let saved: { since_wall_ms?: unknown; until_wall_ms?: unknown }
+    let saved: { since_wall_ms?: unknown; until_wall_ms?: unknown; done?: unknown }
     try {
       saved = JSON.parse(raw)
     } catch {
       this.store.setMeta(META_KEY, null)
       return
     }
+    if (Array.isArray(saved.done)) {
+      for (const d of saved.done) {
+        if (d && typeof d.since_wall_ms === 'number' && typeof d.until_wall_ms === 'number') this.done.push({ since_wall_ms: d.since_wall_ms, until_wall_ms: d.until_wall_ms })
+      }
+    }
+    if (typeof saved.since_wall_ms !== 'number') return
     const until = typeof saved.until_wall_ms === 'number' ? saved.until_wall_ms : null
     const now = this.now()
     if (until !== null && until <= now) {
-      this.store.setMeta(META_KEY, null)
+      this.done.push({ since_wall_ms: saved.since_wall_ms, until_wall_ms: until })
+      this.persist()
       return
     }
-    this.since = typeof saved.since_wall_ms === 'number' ? saved.since_wall_ms : now
+    this.since = saved.since_wall_ms
     this.until = until
     this.gap = this.store.openGap({ reason: 'paused', scope: 'all', run: null, start: point(now), detail: { restored: true } })
     this.arm()
@@ -111,7 +120,8 @@ export class Pause {
   // Whether a line with this event time must be dropped.
   blocks(eventWallMs: number): boolean {
     this.expireIfDue(eventWallMs)
-    return this.since !== null && eventWallMs >= this.since
+    if (this.since !== null && eventWallMs >= this.since) return true
+    return this.done.some((d) => eventWallMs >= d.since_wall_ms && eventWallMs < d.until_wall_ms)
   }
 
   stop(): void {
@@ -126,6 +136,7 @@ export class Pause {
   private end(at: number): void {
     if (this.since === null) return
     if (this.gap !== null) this.store.closeGap(this.gap, point(at))
+    if (at > this.since) this.done.push({ since_wall_ms: this.since, until_wall_ms: at })
     this.since = null
     this.until = null
     this.gap = null
@@ -147,6 +158,7 @@ export class Pause {
   }
 
   private persist(): void {
-    this.store.setMeta(META_KEY, this.since === null ? null : JSON.stringify({ since_wall_ms: this.since, until_wall_ms: this.until }))
+    if (this.since === null && this.done.length === 0) return this.store.setMeta(META_KEY, null)
+    this.store.setMeta(META_KEY, JSON.stringify({ since_wall_ms: this.since, until_wall_ms: this.until, done: this.done }))
   }
 }
