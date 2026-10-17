@@ -467,3 +467,36 @@ test('a scrub blocked by an open reader stays pending, shows in health, and fini
   for (const f of files) assert.equal(readFileSync(f).includes(Buffer.from(pairing.key)), false, f)
   store.close()
 })
+
+test('unpairing while a reconnect waits on secure storage refuses that reconnect', async () => {
+  const [p] = await freePorts(1)
+  const inner = memorySecrets()
+  let slow = false
+  const secrets: SecretStore = {
+    set: (n, k) => inner.set(n, k),
+    get: async (n) => {
+      const key = await inner.get(n)
+      if (slow) await sleep(300)
+      return key
+    },
+    delete: (n) => inner.delete(n),
+  }
+  const { local } = await service([p!], undefined, [], chrome, secrets)
+  const pairing = newPairing(ORIGIN)
+  local.addPairLink(pairLink(pairing))
+  const first = await connect([p!], pairing)
+  if (first.r.kind === 'connected') first.r.session.close()
+  // A restart: the key is no longer cached and has to come from the slow store.
+  await local.stop()
+  const { local: after, sink } = await service([p!], undefined, [], chrome, secrets, (local as unknown as { store: Sink }).store)
+  slow = true
+  const reconnect = connect([p!], pairing)
+  await sleep(100)
+  assert.ok(after.unpair(pairing.id))
+  const { r } = await reconnect
+  assert.notEqual(r.kind, 'connected', 'the reconnect that was waiting does not get through')
+  assert.equal(after.pairings().length, 0)
+  assert.equal(inner.items.has(pairing.id), false)
+  void sink
+  await after.stop()
+})

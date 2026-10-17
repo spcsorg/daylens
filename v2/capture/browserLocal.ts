@@ -173,6 +173,8 @@ class Conn {
   timer: ReturnType<typeof setTimeout> | null = null
   // Messages are handled one at a time, in order; a failure in any of them closes this connection only.
   queue: Promise<void> = Promise.resolve()
+  // The stored pairing whose key is being read from secure storage for this connection.
+  lookingUp: string | null = null
 
   constructor(socket: net.Socket, origin: string, extension: string) {
     this.socket = socket
@@ -322,7 +324,7 @@ export class BrowserLocal {
     if (this.paired.length === before) return false
     this.save()
     this.forget(id)
-    for (const c of this.conns) if (c.pairing?.id === id) this.close(c, 1008)
+    for (const c of this.conns) if (c.pairing?.id === id || c.lookingUp === id) this.close(c, 1008)
     this.log('browser pairing removed')
     return true
   }
@@ -336,7 +338,7 @@ export class BrowserLocal {
     const cached = this.keys.get(stored.id)
     if (cached) return cached
     const key = await this.secrets.get(stored.id)
-    if (key) this.keys.set(stored.id, key)
+    if (key && this.paired.some((p) => p.id === stored.id)) this.keys.set(stored.id, key)
     return key
   }
 
@@ -436,12 +438,17 @@ export class BrowserLocal {
     const pend = stored ? null : this.pending.find((p) => p.id === hello.pair && p.origin === c.origin)
     let key = pend?.key ?? null
     if (stored) {
+      c.lookingUp = stored.id
       try {
         key = await this.keyOf(stored)
       } catch {
         return this.refuse(c, 'secret_store_failed')
+      } finally {
+        c.lookingUp = null
       }
       if ((c.phase as Phase) === 'closed') return
+      // Unpaired while the key was being read: the pairing no longer exists, whatever the store returned.
+      if (!this.paired.some((p) => p.id === stored.id)) key = null
       if (key === null) {
         // The secret is gone from secure storage: the pairing cannot be proven any more.
         this.paired = this.paired.filter((p) => p.id !== stored.id)
