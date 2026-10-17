@@ -155,3 +155,44 @@ for (const retry of [false, true]) {
     }
   })
 }
+
+
+for (const order of ['extension then flag', 'flag then extension', 'extension then flag with rollback'] as const) {
+  test(`a pruned replacement keeps its queued stale-title marker: ${order}`, () => {
+    resetSeq()
+    const r = rig()
+    const conn = new Database(path.join(r.dir, DB_FILE))
+    try {
+      r.storage.setRetentionDays(7)
+      r.feed(focus(editor, 'Stalled replacement', T0))
+      r.store.flush()
+      const staleSince = sighting + MIN
+      if (order === 'flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
+      r.feed(focus(editor, 'Stalled replacement', sighting, 'reconcile'))
+      if (order !== 'flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
+      r.clock.t = T0 + 7 * DAY_MS + MIN
+      pruneStep(conn, T0 + MIN, 0)
+      assert.deepEqual(r.store.query('SELECT id FROM observations'), [])
+      if (order.endsWith('rollback')) {
+        let fail = true
+        r.storage.db.function('fail_stale_id_mark_once', () => {
+          if (fail) {
+            fail = false
+            throw Object.assign(new Error('injected id mark failure'), { code: 'SQLITE_BUSY' })
+          }
+          return 1
+        })
+        r.storage.db.exec("CREATE TEMP TRIGGER fail_stale_id_mark BEFORE INSERT ON meta WHEN NEW.key = 'next_observation_id' BEGIN SELECT fail_stale_id_mark_once(); END")
+        assert.equal(r.store.flush(), false)
+        assert.deepEqual(r.store.query('SELECT id FROM observations'), [])
+      }
+      assert.equal(r.store.flush(), true)
+      assert.deepEqual(r.store.query('SELECT title, event_wall_ms, possibly_stale_since_wall_ms FROM observations'), [
+        { title: 'Stalled replacement', event_wall_ms: sighting, possibly_stale_since_wall_ms: staleSince },
+      ])
+    } finally {
+      conn.close()
+      r.close()
+    }
+  })
+}

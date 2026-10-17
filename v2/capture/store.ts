@@ -154,6 +154,7 @@ type Op = {
   sql: string
   params: unknown[]
   extension?: { sourceId: number; sighting: ObservationRow; replacementId?: number; missing?: boolean }
+  flagSourceId?: number
 }
 
 export interface StoreHealth {
@@ -459,18 +460,20 @@ export class Store implements Sink {
     this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
     this.touched.add(id)
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id], {
-      sourceId: id,
-      sighting: {
-        ...open.row,
-        event_wall_ms: lastSeenWallMs,
-        event_mono_us: open.row.event_mono_us + (lastSeenWallMs - open.row.event_wall_ms) * 1000,
+      extension: {
+        sourceId: id,
+        sighting: {
+          ...open.row,
+          event_wall_ms: lastSeenWallMs,
+          event_mono_us: open.row.event_mono_us + (lastSeenWallMs - open.row.event_wall_ms) * 1000,
+        },
       },
     })
     return true
   }
 
   flagObservation(id: number, _flag: 'possibly_stale', wallMs: number): void {
-    this.enqueue('UPDATE observations SET possibly_stale_since_wall_ms = coalesce(possibly_stale_since_wall_ms, ?) WHERE id = ?', [wallMs, id])
+    this.enqueue('UPDATE observations SET possibly_stale_since_wall_ms = coalesce(possibly_stale_since_wall_ms, ?) WHERE id = ?', [wallMs, id], { flagSourceId: id })
   }
 
   openGap(gap: GapStart): number {
@@ -519,7 +522,7 @@ export class Store implements Sink {
 
   // --- batching ---------------------------------------------------------
 
-  private enqueue(sql: string, params: unknown[], extension?: Op['extension']): void {
+  private enqueue(sql: string, params: unknown[], metadata: Pick<Op, 'extension' | 'flagSourceId'> = {}): void {
     if (this.pending.length >= this.maxPendingOps) {
       this.pending.shift()
       this.health.droppedOps++
@@ -529,7 +532,7 @@ export class Store implements Sink {
         this.onOverflow()
       }
     }
-    this.pending.push({ sql, params, extension })
+    this.pending.push({ sql, params, ...metadata })
     if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null) this.flush()
     else this.schedule()
   }
@@ -552,6 +555,10 @@ export class Store implements Sink {
   }
 
   private runOp(op: Op, replacements: Map<number, number>): void {
+    if (op.flagSourceId !== undefined) {
+      this.stmt(op.sql).run(op.params[0], replacements.get(op.flagSourceId) ?? op.flagSourceId)
+      return
+    }
     const extension = op.extension
     const replacement = extension && replacements.get(extension.sourceId)
     if (extension && replacement !== undefined) {
@@ -594,7 +601,9 @@ export class Store implements Sink {
       clearTimeout(this.timer)
       this.timer = null
     }
-    const ops = this.pending.concat([...this.heartbeatOps.values()])
+    const queued = this.pending.concat([...this.heartbeatOps.values()])
+    // Flags follow extensions so a pruned source has its replacement before flags are applied.
+    const ops = [...queued.filter((op) => op.flagSourceId === undefined), ...queued.filter((op) => op.flagSourceId !== undefined)]
     // Committed with the rows: where derived state (intervals, search) must be brought up to date from. Whoever
     // derives clears it in the same transaction as the derivation, so a crash in between loses nothing.
     if (this.touched.size > 0 && Number.isFinite(this.touchedFromWallMs)) {
