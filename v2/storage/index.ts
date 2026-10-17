@@ -4,8 +4,8 @@ import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
 import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
-import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
-import { DeletionWorker, fenceEdges, planDeletion, type DeletionResult } from './deletion.ts'
+import { ChangeBus, type ChangeKind } from './changes.ts'
+import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
@@ -120,7 +120,6 @@ export class Storage {
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onError: (code: string) => void
-  private prunedData = 0
   private backfill: Promise<void> = Promise.resolve()
   private stopped = false
   private readonly deletions: DeletionWorker
@@ -682,49 +681,26 @@ export class Storage {
 
   // --- retention ---------------------------------------------------------------
 
-  /** Removes one small batch of rows older than the retention window; returns how many went. Each statement is its own short transaction. */
-  pruneBatch(batch = PRUNE_BATCH): number {
-    const now = this.now()
-    const logRows = pruneChangeLog(this.db, now - CHANGE_LOG_KEEP_MS, batch)
-    let n = 0
-    if (this.rules.retentionDays === null) return logRows
-    const cutoff = now - this.rules.retentionDays * DAY_MS
-    const statements = [
-      'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
-      'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',
-      'DELETE FROM capture_gaps WHERE id IN (SELECT id FROM capture_gaps WHERE end_wall_ms < ? LIMIT ?)',
-      'DELETE FROM assistant_reads WHERE id IN (SELECT id FROM assistant_reads WHERE to_wall_ms < ? LIMIT ?)',
-    ]
-    for (const sql of statements) n += this.db.prepare(sql).run(cutoff, batch).changes
-    // Pruning is spread over many small batches, so here FTS5 secure-delete removes each document's terms as it goes
-    // (about 0.5 ms a document at a year's size) instead of one long 'optimize'. The setting is a literal: FTS5 rejects a bound value.
-    this.db.transaction(() => {
-      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
-      n += this.db
-        .prepare(`DELETE FROM search_docs WHERE id IN (SELECT id FROM search_docs WHERE hour_start_wall_ms < ? AND last_wall_ms < ? LIMIT ?)`)
-        .run(cutoff, cutoff, Math.ceil(batch / 10)).changes
-      n += this.db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?)').run(cutoff, Math.ceil(batch / 25)).changes
-      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
-    }).immediate()
-    this.prunedData += n
-    return n + logRows
+  private cutoff(): number | null {
+    const days = this.rules.retentionDays
+    return days === null ? null : this.now() - days * DAY_MS
   }
 
-  /** Prunes in batches, yielding to capture between them; then moves old pages out of the write-ahead log. */
-  async prune(): Promise<number> {
-    let total = 0
-    this.prunedData = 0
-    for (;;) {
-      const n = this.pruneBatch()
-      total += n
-      if (n === 0) break
-      await new Promise((r) => setImmediate(r))
-    }
+  /** One retention batch on this connection (tests and tools); scheduled retention runs in the worker instead. */
+  pruneBatch(batch = PRUNE_BATCH): number {
+    return pruneStep(this.db, this.cutoff(), this.now() - CHANGE_LOG_KEEP_MS, batch).removed
+  }
+
+  /**
+   * Retention in the deletion worker: it reads the search index in first and keeps every transaction short, so the
+   * capture thread neither runs nor waits on it for long. Announces what it removed.
+   */
+  async prune(): Promise<PruneResult> {
+    const cutoff = this.cutoff()
+    const r = await this.deletions.prune(cutoff, this.now() - CHANGE_LOG_KEEP_MS)
     // Readers holding pruned hours, intervals or search results must drop them.
-    const days = this.rules.retentionDays
-    if (this.prunedData > 0 && days !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: this.now() - days * DAY_MS }, () => {})
-    if (total > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
-    return total
+    if (r.data > 0 && cutoff !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: cutoff }, () => {})
+    return r
   }
 
   private scheduleRetention(delayMs: number): void {

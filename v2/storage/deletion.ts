@@ -11,6 +11,7 @@ import { Derived, HOUR_MS, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
 import { immediateRetrying } from './tx.ts'
+import { pruneChangeLog } from './changes.ts'
 
 export interface DeletionResult {
   tombstone: number
@@ -107,6 +108,86 @@ export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec
 const ROWS_PER_STEP = 500
 const DOCS_PER_STEP = 50
 const HOURS_PER_STEP = 25
+// A secure-delete of an hour's text rewrites index pages for each of its many terms (13 ms warm at a year's size);
+// a transaction stops taking on more entries after this long, so capture's flushes never wait long for the lock.
+const FTS_STEP_MS = 20
+
+// Reads the search index into the cache outside any write transaction: cold, the first secure-delete of an hour's
+// text took 136 ms with the writer lock held; warm, 7 ms.
+export function warmSearchIndex(db: Database.Database): void {
+  db.prepare('SELECT count(*) AS n, sum(length(block)) AS b FROM search_data').get()
+}
+
+/** Runs `each` for items in order until all are done or FTS_STEP_MS has passed; returns how many it ran. */
+function timeBoxed<T>(items: readonly T[], each: (item: T) => void): number {
+  const start = performance.now()
+  let n = 0
+  for (const item of items) {
+    each(item)
+    n++
+    if (performance.now() - start > FTS_STEP_MS) break
+  }
+  return n
+}
+
+export interface PruneResult {
+  removed: number
+  data: number
+  batches: number
+  maxTransactionMs: number
+}
+
+/**
+ * One retention batch, each part its own short transaction: announcements older than `logKeepFrom`, and, when a
+ * cutoff is set, observations, intervals, gaps and reads before it, then search entries and hours, time-boxed.
+ */
+export function pruneStep(db: Database.Database, cutoff: number | null, logKeepFrom: number, batch = ROWS_PER_STEP, onTransaction: (ms: number) => void = () => {}): { removed: number; data: number } {
+  const timed = <T>(fn: () => T): T => {
+    const t = performance.now()
+    const out = immediateRetrying(db, fn)
+    onTransaction(performance.now() - t)
+    return out
+  }
+  const logRows = timed(() => pruneChangeLog(db, logKeepFrom, batch))
+  if (cutoff === null) return { removed: logRows, data: 0 }
+  let n = 0
+  for (const sql of [
+    'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
+    'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',
+    'DELETE FROM capture_gaps WHERE id IN (SELECT id FROM capture_gaps WHERE end_wall_ms < ? LIMIT ?)',
+    'DELETE FROM assistant_reads WHERE id IN (SELECT id FROM assistant_reads WHERE to_wall_ms < ? LIMIT ?)',
+  ]) {
+    n += timed(() => db.prepare(sql).run(cutoff, batch).changes)
+  }
+  const docs = (db.prepare('SELECT id FROM search_docs WHERE hour_start_wall_ms < ? AND last_wall_ms < ? LIMIT ?').all(cutoff, cutoff, DOCS_PER_STEP) as { id: number }[]).map((r) => r.id)
+  const hours = (db.prepare('SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?').all(cutoff, HOURS_PER_STEP) as { id: number }[]).map((r) => r.id)
+  const delDoc = db.prepare('DELETE FROM search_docs WHERE id = ?')
+  const delHourDocs = db.prepare(`DELETE FROM search_docs WHERE kind = 'hour' AND hour_id = ?`)
+  const delHour = db.prepare('DELETE FROM hours WHERE id = ?')
+  for (let i = 0; i < docs.length; ) {
+    i += timed(() => secureFts(db, () => timeBoxed(docs.slice(i), (id) => (n += delDoc.run(id).changes))))
+  }
+  for (let i = 0; i < hours.length; ) {
+    i += timed(() =>
+      secureFts(db, () =>
+        timeBoxed(hours.slice(i), (id) => {
+          delHourDocs.run(id)
+          n += delHour.run(id).changes
+        }),
+      ),
+    )
+  }
+  return { removed: n + logRows, data: n }
+}
+
+// FTS5 secure-delete removes a deleted entry's terms as it goes; set only inside the caller's transaction, as a
+// literal (FTS5 rejects a bound value).
+function secureFts<T>(db: Database.Database, fn: () => T): T {
+  db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
+  const out = fn()
+  db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
+  return out
+}
 
 export type DeletionStep = 'observations' | 'intervals' | 'search' | 'hours' | 'threads'
 
@@ -118,14 +199,23 @@ export class Deleter {
     this.db = db
   }
 
-  // FTS5 secure-delete removes a deleted entry's terms as it goes; set only inside these transactions, as a literal.
   private withSecureFts<T>(fn: () => T): T {
-    return immediateRetrying(this.db, () => {
-      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
-      const out = fn()
-      this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
-      return out
-    })
+    return immediateRetrying(this.db, () => secureFts(this.db, fn))
+  }
+
+  /** Retention, off the capture thread: batches until nothing is older than the cutoff, then the log is purged. */
+  prune(cutoff: number | null, logKeepFrom: number): PruneResult {
+    const r: PruneResult = { removed: 0, data: 0, batches: 0, maxTransactionMs: 0 }
+    if (cutoff !== null) warmSearchIndex(this.db)
+    for (;;) {
+      const step = pruneStep(this.db, cutoff, logKeepFrom, ROWS_PER_STEP, (ms) => (r.maxTransactionMs = Math.max(r.maxTransactionMs, ms)))
+      r.removed += step.removed
+      r.data += step.data
+      r.batches++
+      if (step.removed === 0) break
+    }
+    if (r.removed > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
+    return r
   }
 
   private work(tombstoneId: number, kind: 'doc_hour' | 'hour' | 'thread' | 'read', limit: number): number[] {
@@ -187,8 +277,13 @@ export class Deleter {
     const inside = bounded
       ? `hour_start_wall_ms >= @from AND hour_start_wall_ms + ${HOUR_MS} <= @to AND ${ivMatch}`
       : ivMatch
-    const docStep = db.prepare(`DELETE FROM search_docs WHERE id IN (SELECT id FROM search_docs WHERE kind = 'activity' AND ${inside} LIMIT ${DOCS_PER_STEP})`)
-    for (let n = -1; n !== 0; ) r.searchDocs += n = this.withSecureFts(() => docStep.run(args).changes)
+    warmSearchIndex(db)
+    const docIds = db.prepare(`SELECT id FROM search_docs WHERE kind = 'activity' AND ${inside} LIMIT ${DOCS_PER_STEP}`)
+    const delDoc = db.prepare('DELETE FROM search_docs WHERE id = ?')
+    for (let ids = docIds.all(args) as { id: number }[]; ids.length > 0; ids = docIds.all(args) as { id: number }[]) {
+      const batch = ids
+      r.searchDocs += this.withSecureFts(() => timeBoxed(batch, ({ id }) => delDoc.run(id)))
+    }
     const docCount = db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`)
     for (let hours = this.work(tombstoneId, 'doc_hour', HOURS_PER_STEP); hours.length > 0; hours = this.work(tombstoneId, 'doc_hour', HOURS_PER_STEP)) {
       const batch = hours
@@ -211,11 +306,11 @@ export class Deleter {
     for (let ids = this.work(tombstoneId, 'hour', HOURS_PER_STEP); ids.length > 0; ids = this.work(tombstoneId, 'hour', HOURS_PER_STEP)) {
       const batch = ids
       this.withSecureFts(() => {
-        for (const id of batch) {
+        const ran = timeBoxed(batch, (id) => {
           const h = db.prepare('SELECT id, start_wall_ms, end_wall_ms, sources FROM hours WHERE id = ?').get(id) as
             | { id: number; start_wall_ms: number; end_wall_ms: number; sources: string }
             | undefined
-          if (!h) continue
+          if (!h) return
           if (t.kind === 'range' && h.start_wall_ms >= from && h.end_wall_ms <= to) {
             db.prepare('DELETE FROM search_docs WHERE hour_id = ?').run(h.id)
             db.prepare('DELETE FROM hours WHERE id = ?').run(h.id)
@@ -224,8 +319,8 @@ export class Deleter {
             clearHour(db, h.id, JSON.parse(h.sources) as HourSource[], t, nowWallMs)
             r.hoursCleared++
           }
-        }
-        this.done(tombstoneId, 'hour', batch)
+        })
+        this.done(tombstoneId, 'hour', batch.slice(0, ran))
       })
     }
     stop('hours')
@@ -294,6 +389,10 @@ export class DeletionWorker {
 
   purge(tombstone: number): Promise<boolean> {
     return this.send({ op: 'purge', tombstone }) as Promise<boolean>
+  }
+
+  prune(cutoff: number | null, logKeepFrom: number): Promise<PruneResult> {
+    return this.send({ op: 'prune', cutoff, logKeepFrom }) as Promise<PruneResult>
   }
 
   private send(job: Record<string, unknown>): Promise<unknown> {
