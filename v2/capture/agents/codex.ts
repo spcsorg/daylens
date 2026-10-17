@@ -21,7 +21,11 @@ interface CodexState {
   dir: string | null
   branch: string | null
   turn: OpenTurn | null
+  // The session a fork or subagent copied its earlier turns from.
+  source?: string | null
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const PREFIX = /^\{"timestamp":"([^"]+)",(?:"ordinal":\d+,)?"type":"([a-z_]+)"(?:,"payload":\{"type":"([A-Za-z_]+)")?/
 const ITEM_KIND = /"item":\{"type":"([A-Za-z]+)"/
@@ -211,6 +215,7 @@ export class CodexParser implements LineParser {
     // A fork or subagent file repeats its parent's metadata after its own; only the first is this session's.
     if (this.s.session !== null) {
       this.counts.recognized++
+      if (typeof p.id === 'string' && p.id !== this.s.session) this.s.source ??= p.id
       return []
     }
     if (typeof p.id !== 'string') {
@@ -219,6 +224,7 @@ export class CodexParser implements LineParser {
     }
     this.counts.recognized++
     this.s.session = p.id
+    if (typeof p.forked_from_id === 'string') this.s.source = p.forked_from_id
     const source = p.source as unknown
     const spawn = source && typeof source === 'object' ? (source as { subagent?: { thread_spawn?: { parent_thread_id?: unknown } } }).subagent?.thread_spawn : undefined
     const originator = typeof p.originator === 'string' ? p.originator : null
@@ -253,16 +259,19 @@ export class CodexParser implements LineParser {
         let opener: TurnOpener = trigger !== null ? (TRIGGER_OPENER[trigger] ?? 'unknown') : 'unknown'
         if (this.s.origin === 'automated') opener = 'automation'
         else if (this.s.origin === 'subagent') opener = 'agent'
-        this.s.turn = { key: p.turn_id, live, start, last: start, opener, users: 0 }
+        // A UUID names one turn everywhere, so a fork's copy merges with the original. Any other id (imports number
+        // their turns from 1 in every session) only names a turn within the session it came from.
+        const key = UUID.test(p.turn_id) ? p.turn_id : `${(live ? null : this.s.source) ?? this.session}:${p.turn_id}`
+        this.s.turn = { key, live, start, last: start, opener, users: 0 }
         this.seen.clear()
-        out.push({ t: 'turn', key: p.turn_id, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
-        if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${p.turn_id}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
+        out.push({ t: 'turn', key, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
+        if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${key}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
         return out
       }
       case 'task_complete':
       case 'turn_aborted': {
         this.counts.recognized++
-        if (!t || (typeof p.turn_id === 'string' && p.turn_id !== t.key)) return []
+        if (!t || (typeof p.turn_id === 'string' && p.turn_id !== t.key && !t.key.endsWith(`:${p.turn_id}`))) return []
         const completed = typeof p.completed_at === 'number' ? p.completed_at * 1000 : null
         const fromDuration = typeof p.duration_ms === 'number' ? t.start + p.duration_ms : null
         const end = completed ?? fromDuration ?? (t.live ? at : null)
