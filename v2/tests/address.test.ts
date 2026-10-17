@@ -166,3 +166,16 @@ test('values shaped like credentials go whatever they are called; identities and
   ]
   for (const [raw, want] of sweep) assert.equal(cleanAddress(raw), want, raw)
 })
+
+test('a JSON web token is known by its structure, not by how its header happens to be written', () => {
+  const tokens = [
+    'eyJhbGciOiJub25lIn0.e30.',
+    'IHsiYWxnIjoiSFMyNTYiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJhbmEifQ.c2lnbmF0dXJlc2lnbmF0dXJl',
+    'CnsiYWxnIjoiUlMyNTYifQ.e30.',
+  ]
+  for (const t of tokens) {
+    assert.equal(cleanAddress(`https://app.example.com/cb?state=${t}&page=2`), 'https://app.example.com/cb?page=2', t)
+    assert.equal(cleanAddress(`https://app.example.com/cb?id=${t}`), 'https://app.example.com/cb', t)
+  }
+  for (const kept of ['1.2.3', 'www.example.com', 'e30.e30.e30', 'eyJmb28iOiJiYXIifQ.e30.']) assert.equal(cleanAddress(`https://app.example.com/?q=${kept}`), `https://app.example.com/?q=${kept}`, kept)
+})

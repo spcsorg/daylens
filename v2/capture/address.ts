@@ -29,7 +29,23 @@ const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
 const MAX_NESTING = 4
 const RELATIVE_BASE = 'https://relative.invalid'
 
-const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/
+// A JSON web token (three parts) or an encrypted one (five): base64url parts whose first decodes to a JSON object with
+// an alg, however that header is spaced and however short the payload ({} is e30).
+const B64URL_PART = /^[A-Za-z0-9_-]+=*$/
+
+function isJwt(value: string): boolean {
+  const parts = value.trim().split('.')
+  if ((parts.length !== 3 && parts.length !== 5) || !parts.slice(0, -1).every((p) => B64URL_PART.test(p))) return false
+  const last = parts[parts.length - 1] ?? ''
+  if (last !== '' && !B64URL_PART.test(last)) return false
+  try {
+    const bytes = Uint8Array.from(atob((parts[0] ?? '').replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+    const header: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    return !!header && typeof header === 'object' && !Array.isArray(header) && 'alg' in header
+  } catch {
+    return false
+  }
+}
 
 // The 200 most frequent letter pairs in English words (/usr/share/dict/words). Product names, slugs and searches are
 // mostly made of them; random keys are not.
@@ -87,7 +103,7 @@ function nameWords(name: string): string[] {
 
 export function isSecretParam(name: string, value: string): boolean {
   const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || JWT_VALUE.test(value) || CREDENTIAL_VALUE.test(value)
+  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || isJwt(value) || CREDENTIAL_VALUE.test(value)
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
@@ -126,7 +142,7 @@ function cleanValue(value: string, depth: number, identity: boolean): string | n
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
     // A credential can hide behind encoding or a control prefix as well as an address can.
-    if (CREDENTIAL_VALUE.test(form) || JWT_VALUE.test(form) || (!identity && looksGenerated(form))) return null
+    if (CREDENTIAL_VALUE.test(form) || isJwt(form) || (!identity && looksGenerated(form))) return null
     if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
