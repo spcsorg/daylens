@@ -7,7 +7,7 @@ import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import type { ObservationRow } from '../../capture/normalize.ts'
 import { ChangeWatcher } from '../../storage/changes.ts'
-import { readHour } from '../../storage/index.ts'
+import { PendingDeletionError, readHour } from '../../storage/index.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { diskContains, HOUR, MIN, rig, T0, tmpDir } from './support.ts'
 import { Deleter, type DeletionStep } from '../../storage/deletion.ts'
@@ -697,4 +697,29 @@ test('the hour reader takes the hour, its corrections and the pending fence from
   assert.equal(seen?.title ?? null, null, `read ${JSON.stringify(seen?.title)}`)
   reader.close()
   r.close()
+})
+
+test('while a deletion is pending, new threads, links, corrections and assistant reads that reference what it covers are refused', async () => {
+  resetSeq()
+  const r = rig(tmpDir(), { holdDeletions: true })
+  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Marmot hour' }, r.storage.hourBasis(T0))
+  const other = r.storage.writeHour({ start_wall_ms: T0 + 5 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Other' }, r.storage.hourBasis(T0 + 5 * HOUR))
+  const thread = r.storage.createThread('Existing', [other.id])
+  r.clock.t = T0 + 6 * HOUR
+  r.storage.deleteRange(T0 + MIN, T0 + 2 * MIN)
+  r.storage.deleteSource('com.example.chat')
+  const span = { assistant: 'claude', tool: 'getDay', from_wall_ms: T0, to_wall_ms: T0 + 6 * HOUR }
+  assert.throws(() => r.storage.createThread('Marmot canary thread', [h.id]), PendingDeletionError)
+  assert.throws(() => r.storage.linkHour(thread, h.id), PendingDeletionError)
+  assert.throws(() => r.storage.correct(h.id, 'title', 'Marmot canary corrected'), PendingDeletionError)
+  assert.throws(() => r.storage.recordAssistantRead({ ...span, query: 'Marmot canary read', hours: [h.id] }), PendingDeletionError)
+  assert.throws(() => r.storage.recordAssistantRead({ ...span, query: 'Marmot canary chat', sources: [{ app_id: 'com.example.chat' }] }), PendingDeletionError)
+  assert.ok(r.storage.recordAssistantRead({ ...span, from_wall_ms: T0 + 5 * HOUR, query: 'fine', hours: [other.id] }), 'a read outside what is being deleted is recorded')
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 6 * HOUR
+  r2.storage.start()
+  await r2.storage.deletionsSettled()
+  assert.deepEqual(containsAnywhere(r2, 'Marmot canary'), [])
+  r2.close()
 })

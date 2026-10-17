@@ -9,7 +9,7 @@ import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResul
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
-import { DAY_MS, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
+import { DAY_MS, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 import { isBusy } from './tx.ts'
 
@@ -100,6 +100,8 @@ export interface DeletionHandle {
 }
 
 export class DeletedMaterialError extends Error {}
+// The write references material a deletion is still removing; it would survive the deletion's planned work.
+export class PendingDeletionError extends DeletedMaterialError {}
 // The hour changed (rewritten, cleared by a deletion) or material in it was deleted after the result was computed.
 export class StaleHourError extends Error {}
 
@@ -370,6 +372,23 @@ export class Storage {
 
   // --- hours, corrections, threads ----------------------------------------
 
+  /** Inside the writing transaction: refuse what references an hour, app, site or span a pending deletion covers. */
+  private refuseFenced(hourIds: readonly number[], sources: readonly HourSource[] = [], span?: { from_wall_ms: number; to_wall_ms: number }): void {
+    const pending = pendingTombstones(this.db)
+    if (pending.length === 0) return
+    const hour = this.db.prepare('SELECT start_wall_ms, end_wall_ms, sources FROM hours WHERE id = ?')
+    for (const id of hourIds) {
+      const h = hour.get(id) as { start_wall_ms: number; end_wall_ms: number; sources: string } | undefined
+      if (h && pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null) throw new PendingDeletionError('this hour is being deleted')
+    }
+    for (const t of pending) {
+      const overlaps = !span || ((t.to_wall_ms === null || span.from_wall_ms < t.to_wall_ms) && (t.from_wall_ms === null || span.to_wall_ms > t.from_wall_ms))
+      if (!overlaps) continue
+      if (span && t.kind === 'range') throw new PendingDeletionError('this span is being deleted')
+      if (sources.some((src) => sourceMatches(t, src))) throw new PendingDeletionError('this app or site is being deleted')
+    }
+  }
+
   hourBasis(startWallMs: number): HourBasis {
     const h = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(startWallMs) as { version: number } | undefined
     const d = this.db.prepare('SELECT max(id) AS id FROM deletions').get() as { id: number | null }
@@ -437,6 +456,7 @@ export class Storage {
 
   correct(hourId: number, field: HourField, text: string): number {
     return this.bus.commit('correction', { hour_id: hourId, field }, () => {
+      this.refuseFenced([hourId])
       const id = Number(this.db.prepare('INSERT INTO corrections (hour_id, field, text, created_wall_ms) VALUES (?, ?, ?, ?)').run(hourId, field, text, this.now()).lastInsertRowid)
       indexHour(this.db, hourId)
       return id
@@ -455,6 +475,7 @@ export class Storage {
 
   createThread(title: string, hourIds: number[] = []): number {
     return this.bus.commit('hour', { thread: 'created' }, () => {
+      this.refuseFenced(hourIds)
       const now = this.now()
       const id = Number(this.db.prepare('INSERT INTO threads (title, created_wall_ms, updated_wall_ms) VALUES (?, ?, ?)').run(title, now, now).lastInsertRowid)
       for (const h of hourIds) this.db.prepare('INSERT OR IGNORE INTO thread_hours (thread_id, hour_id) VALUES (?, ?)').run(id, h)
@@ -464,6 +485,7 @@ export class Storage {
 
   linkHour(threadId: number, hourId: number): void {
     this.bus.commit('hour', { thread: threadId }, () => {
+      this.refuseFenced([hourId])
       this.db.prepare('INSERT OR IGNORE INTO thread_hours (thread_id, hour_id) VALUES (?, ?)').run(threadId, hourId)
       this.db.prepare('UPDATE threads SET updated_wall_ms = ? WHERE id = ?').run(this.now(), threadId)
     })
@@ -649,6 +671,7 @@ export class Storage {
 
   recordAssistantRead(r: AssistantRead): number {
     return this.db.transaction(() => {
+      this.refuseFenced(r.hours ?? [], r.sources ?? [], r)
       const id = Number(
         this.db
           .prepare('INSERT INTO assistant_reads (assistant, at_wall_ms, tool, from_wall_ms, to_wall_ms, query) VALUES (?, ?, ?, ?, ?, ?)')
