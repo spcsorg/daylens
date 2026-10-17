@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import http from 'node:http'
+import Database from 'better-sqlite3'
 import type { AddressInfo } from 'node:net'
 import { connectLocal, type WsLike } from '../browser/extension/src/local.ts'
 import { BrowserPages } from '../capture/browser.ts'
@@ -435,4 +436,34 @@ test('after a legacy key moves to secure storage, its bytes are gone from the da
   const bytes = [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`].map((f) => path.join(dir, f)).filter((f) => existsSync(f)).map((f) => readFileSync(f))
   store.close()
   for (const b of bytes) assert.equal(b.includes(Buffer.from(pairing.key)), false, 'no copy of the key anywhere in the files')
+})
+
+test('a scrub blocked by an open reader stays pending, shows in health, and finishes once the reader is gone', async () => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const { Store, DB_FILE } = await import('../capture/store.ts')
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-busy-'))
+  const store = new Store(dir)
+  const pairing = newPairing(ORIGIN)
+  store.setMeta('browser_pairings', JSON.stringify([{ id: pairing.id, key: pairing.key, origin: ORIGIN, paired_wall_ms: 1 }]))
+  store.flush()
+  // Another reader (the app, say) holds a snapshot that still contains the key.
+  const reader = new Database(path.join(dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) FROM meta').get()
+  const [p] = await freePorts(1)
+  const local = new BrowserLocal(new BrowserPages(store, new Privacy([])), new Pause(store), store, { ports: [p!], peerCheck: async () => ({ ok: true, browser: chrome }), clock: () => null, secrets: memorySecrets() })
+  assert.ok(await local.start())
+  await local.stop()
+  assert.equal(store.storeHealth().scrubPending, true, 'the scrub could not finish and says so')
+  assert.equal(store.meta('scrub_pending'), '1')
+  reader.prepare('COMMIT').run()
+  reader.close()
+  assert.equal(store.retryScrub(), true)
+  assert.equal(store.storeHealth().scrubPending, false)
+  assert.equal(store.meta('scrub_pending'), null)
+  const files = [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`].map((f) => path.join(dir, f)).filter((f) => existsSync(f))
+  for (const f of files) assert.equal(readFileSync(f).includes(Buffer.from(pairing.key)), false, f)
+  store.close()
 })

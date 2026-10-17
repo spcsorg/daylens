@@ -74,8 +74,8 @@ export interface ClockPoint {
 export interface PairingStore {
   meta(key: string): string | null
   setMeta(key: string, value: string | null): void
-  // Clears old copies of rewritten rows from the database files.
-  scrub?(): void
+  // Clears old copies of rewritten rows from the database files; false while that is still pending.
+  scrub?(): boolean
 }
 
 // What the database keeps about a pairing. The key is in the secret store under the pairing's id.
@@ -256,11 +256,7 @@ export class BrowserLocal {
     }
     if (legacy.length) {
       this.save()
-      try {
-        this.store.scrub?.()
-      } catch {
-        this.log('browser pairing scrub_failed')
-      }
+      if (this.store.scrub && !this.store.scrub()) this.log('browser pairing scrub_pending')
     }
   }
 

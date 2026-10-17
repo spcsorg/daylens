@@ -11,6 +11,8 @@ const SCHEMA_VERSION = 3
 const FLUSH_INTERVAL_MS = 1000
 const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
+const SCRUB_KEY = 'scrub_pending'
+const SCRUB_RETRY_MS = 60_000
 
 export function defaultDataDir(): string {
   if (process.env.DAYLENS_V2_DATA_DIR) return process.env.DAYLENS_V2_DATA_DIR
@@ -158,6 +160,8 @@ export interface StoreHealth {
   failingSinceWallMs: number | null
   droppedOps: number
   pendingOps: number
+  // A rewrite that must not leave old bytes in the files (a moved secret) has not been fully checkpointed yet.
+  scrubPending: boolean
 }
 
 export interface PreviousCoverage {
@@ -193,7 +197,8 @@ export class Store implements Sink {
   private timer: ReturnType<typeof setTimeout> | null = null
   private nextObsId: number
   private nextGapId: number
-  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, droppedOps: 0, pendingOps: 0 }
+  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, droppedOps: 0, pendingOps: 0, scrubPending: false }
+  private scrubTimer: ReturnType<typeof setInterval> | null = null
   private droppedSinceFailure = 0
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
@@ -231,6 +236,8 @@ export class Store implements Sink {
     this.seedExclusions()
     this.nextObsId = ((this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0) + 1
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
+    // A scrub an earlier run could not finish is tried again now and then every minute until it completes.
+    if (this.meta(SCRUB_KEY) === '1') this.retryScrub()
   }
 
   // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
@@ -313,13 +320,44 @@ export class Store implements Sink {
     else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
   }
 
-  // Removes every older copy of rewritten rows from the files: WAL frames and free pages. Used after a secret is
-  // moved out of the database.
-  scrub(): void {
+  // Removes every older copy of rewritten rows from the files (WAL frames and free pages) after a secret is moved out
+  // of the database. Pending until a checkpoint reports it completed; an open reader elsewhere can hold it up.
+  scrub(): boolean {
+    this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [])
+    return this.retryScrub()
+  }
+
+  retryScrub(): boolean {
     this.flush()
+    if (this.meta(SCRUB_KEY) !== '1') return this.scrubDone()
+    let done = false
+    try {
+      const first = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
+      this.db.exec('VACUUM')
+      const second = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
+      done = first[0]?.busy === 0 && second[0]?.busy === 0
+    } catch (err) {
+      this.onError(errorCode(err))
+    }
+    if (!done) {
+      this.health.scrubPending = true
+      this.onError('scrub_failed')
+      if (!this.scrubTimer) {
+        this.scrubTimer = setInterval(() => this.retryScrub(), SCRUB_RETRY_MS)
+        this.scrubTimer.unref?.()
+      }
+      return false
+    }
+    this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
     this.db.pragma('wal_checkpoint(TRUNCATE)')
-    this.db.exec('VACUUM')
-    this.db.pragma('wal_checkpoint(TRUNCATE)')
+    return this.scrubDone()
+  }
+
+  private scrubDone(): boolean {
+    this.health.scrubPending = false
+    if (this.scrubTimer) clearInterval(this.scrubTimer)
+    this.scrubTimer = null
+    return true
   }
 
   markServiceStarted(): void {
@@ -525,6 +563,8 @@ export class Store implements Sink {
   }
 
   close(): void {
+    if (this.scrubTimer) clearInterval(this.scrubTimer)
+    this.scrubTimer = null
     this.flush()
     this.db.close()
     this.releaseLock()
