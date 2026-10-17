@@ -35,10 +35,21 @@ public class EngineTests
         Assert.Equal(Engine.Unknown, Engines.Classify(null));
 
     [Theory]
-    [InlineData(true, Engine.Browser)]
-    [InlineData(false, Engine.None)]
-    [InlineData(null, Engine.Unknown)]
-    public void PackagedAppsFollowTheirManifest(bool? web, Engine expected) => Assert.Equal(expected, Engines.ForPackage(web));
+    [InlineData(true, Engine.None, Engine.Browser)]
+    [InlineData(false, Engine.Browser, Engine.Browser)]
+    [InlineData(null, Engine.Browser, Engine.Browser)]
+    [InlineData(false, Engine.AppRuntime, Engine.AppRuntime)]
+    [InlineData(false, Engine.Unknown, Engine.Unknown)]
+    [InlineData(false, Engine.None, Engine.None)]
+    public void PackagedAppsAreScannedAndAMissingProtocolDeclarationProvesNothing(bool? declaresWeb, Engine scanned, Engine expected) =>
+        Assert.Equal(expected, Engines.ForPackage(declaresWeb, scanned));
+
+    [Fact]
+    public void APackagedChromiumBrowserWithoutAProtocolDeclarationIsStillABrowser()
+    {
+        var dir = TempDir("SomeBrowser.exe", "AppxManifest.xml", "131.0.1/chrome.dll");
+        Assert.Equal(Engine.Browser, Engines.ForPackage(false, Engines.Classify(Engines.Scan(dir))));
+    }
 
     [Fact] public void EngineIsWrittenOnEveryFocusLine()
     {

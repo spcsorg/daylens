@@ -166,7 +166,7 @@ internal sealed unsafe class Resolver
             var name = package is null ? null : PackageDisplayName(aumid, package);
             bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
             browser |= web == true;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web), SignerOf(path));
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, EngineOf(path)), SignerOf(path));
         }
         return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path), SignerOf(path));
     }

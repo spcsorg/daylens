@@ -56,11 +56,8 @@ public static class Engines
         }
     }
 
-    /// Packaged apps: the manifest says whether the app handles web links; unreadable means unknown.
-    public static Engine ForPackage(bool? declaresWebProtocols) => declaresWebProtocols switch
-    {
-        true => Engine.Browser,
-        false => Engine.None,
-        null => Engine.Unknown,
-    };
+    /// Packaged apps: their install folder is scanned like any other app's. A manifest that declares http and
+    /// https makes it a browser outright; a missing declaration proves nothing, so the scan decides.
+    public static Engine ForPackage(bool? declaresWebProtocols, Engine scannedInstallFolder) =>
+        declaresWebProtocols == true ? Engine.Browser : scannedInstallFolder;
 }
