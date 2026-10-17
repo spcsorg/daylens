@@ -28,11 +28,11 @@ test('an hour keeps one row and counts its versions; facts and written are the o
   r.close()
 })
 
-test('an hour that would draw on deleted material is refused', () => {
+test('an hour that would draw on deleted material is refused', async () => {
   const r = rig()
   r.clock.t = T0 + 3 * HOUR
-  r.storage.deleteRange(T0, T0 + HOUR)
-  r.storage.deleteSource('com.example.chat')
+  await r.storage.deleteRange(T0, T0 + HOUR).done
+  await r.storage.deleteSource('com.example.chat').done
   assert.throws(() => r.storage.writeHour({ start_wall_ms: T0, tz: 'z', status: 'facts' }, r.storage.hourBasis(T0)), DeletedMaterialError)
   assert.throws(() => r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.chat' }] }, r.storage.hourBasis(T0 + HOUR)), DeletedMaterialError)
   assert.ok(r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'z', status: 'written', title: 'x', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0 + HOUR)))
@@ -141,13 +141,13 @@ test('composed and decomposed accents match each other in search, whichever form
   r.close()
 })
 
-test('an hour computed before a deletion inside it cannot be written back', () => {
+test('an hour computed before a deletion inside it cannot be written back', async () => {
   const r = rig()
   const basis = r.storage.hourBasis(T0)
   const original = { start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written' as const, title: 'Planned the Narwhal canary launch' }
   const h = r.storage.writeHour(original, basis)
   r.clock.t = T0 + 2 * HOUR
-  r.storage.deleteRange(T0 + 10 * MIN, T0 + 20 * MIN)
+  await r.storage.deleteRange(T0 + 10 * MIN, T0 + 20 * MIN).done
   assert.throws(() => r.storage.writeHour(original, basis), StaleHourError)
   assert.deepEqual(r.storage.search('narwhal'), [])
   assert.equal(r.storage.hour(h.id)!.needs_rewrite, true)

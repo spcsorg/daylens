@@ -232,9 +232,20 @@ export class Derived {
     })()
   }
 
-  /** Re-derives intervals for observations changed between two times (a deletion trimmed or split them). */
-  rederive(fromWallMs: number, toWallMs: number): void {
-    this.derive(this.startKey(fromWallMs), toWallMs)
+  /**
+   * One step of re-deriving the rows around [from, to] (a deletion trimmed, split or removed them): about `rows`
+   * observations from `from`. Returns where the next step starts, or null when the range is done.
+   */
+  rederiveStep(fromWallMs: number, toWallMs: number, rows = 1000): number | null {
+    const edge = this.db
+      .prepare(`SELECT event_wall_ms AS e FROM observations WHERE event_wall_ms >= ? AND (kind = 'focus' OR ${STOPS}) ORDER BY event_wall_ms LIMIT 1 OFFSET ?`)
+      .get(fromWallMs, rows) as { e: number } | undefined
+    if (!edge || edge.e > toWallMs || edge.e === fromWallMs) {
+      this.derive(this.startKey(fromWallMs), toWallMs)
+      return null
+    }
+    this.derive(this.startKey(fromWallMs), edge.e)
+    return edge.e
   }
 
   /** Drops every interval and activity document and derives them again from observations. */

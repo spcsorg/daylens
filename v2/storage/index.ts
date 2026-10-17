@@ -2,24 +2,22 @@
 // writer; every other reader opens the database read-only and follows the change log (changes.ts).
 import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
-import { Privacy, type GapPoint, type ObservationRow } from '../capture/normalize.ts'
+import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
-import { Derived, HOUR_MS, hoursOf, MAX_INTERVAL_MS, nfc, siteOf, type ObsRow } from './derive.ts'
+import { DeletionWorker, fenceEdges, type DeletionResult } from './deletion.ts'
+import { Derived, HOUR_MS, siteOf } from './derive.ts'
+import { indexHour, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
+import { DAY_MS, matchesSite, Rules, tombstoneMatches, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
-const DAY_MS = 86_400_000
+export type { DeletionResult } from './deletion.ts'
+export { HOUR_FIELDS, readHour, type Hour, type HourField, type HourSource } from './hours.ts'
+export type { PauseState, Tombstone } from './rules.ts'
+
 const PRUNE_BATCH = 500
 const CHANGE_LOG_KEEP_MS = 7 * DAY_MS
-
-export type HourField = 'title' | 'summary' | 'detail' | 'outcome' | 'suggestion'
-export const HOUR_FIELDS: readonly HourField[] = ['title', 'summary', 'detail', 'outcome', 'suggestion']
-
-export interface HourSource {
-  app_id?: string
-  site?: string
-}
 
 export interface HourInput {
   start_wall_ms: number
@@ -34,54 +32,6 @@ export interface HourInput {
   writer?: string | null
 }
 
-export interface Hour {
-  id: number
-  start_wall_ms: number
-  end_wall_ms: number
-  tz: string
-  status: 'facts' | 'written'
-  title: string | null
-  summary: string | null
-  detail: string | null
-  outcome: string | null
-  suggestion: string | null
-  sources: HourSource[]
-  writer: string | null
-  version: number
-  needs_rewrite: boolean
-  // Fields where the user's correction replaced the written text.
-  corrected: HourField[]
-}
-
-export interface Tombstone {
-  id: number
-  kind: 'range' | 'source' | 'site'
-  from_wall_ms: number | null
-  to_wall_ms: number | null
-  app_id: string | null
-  site: string | null
-}
-
-export interface DeletionResult {
-  tombstone: number
-  observations: number
-  intervals: number
-  searchDocs: number
-  hoursRemoved: number
-  hoursCleared: number
-  assistantReads: number
-}
-
-export interface PauseState {
-  id: number
-  since_wall_ms: number
-  // null: until resumed.
-  until_wall_ms: number | null
-  // Set once the pause is over; while null the pause is active.
-  ended_wall_ms: number | null
-  gap_id: number | null
-}
-
 export type PauseFor = 'hour' | 'tomorrow' | 'until_resumed'
 
 // There is no start-of-day setting yet, so "until tomorrow" ends at the next local midnight (as on the browser branch).
@@ -89,11 +39,6 @@ export function nextLocalMidnight(nowMs: number): number {
   const d = new Date(nowMs)
   d.setHours(24, 0, 0, 0)
   return d.getTime()
-}
-
-/** Where a pause stops refusing material: when it ended, else when it was set to end, else never. */
-function pauseEnd(p: PauseState): number {
-  return p.ended_wall_ms ?? p.until_wall_ms ?? Number.POSITIVE_INFINITY
 }
 
 export interface UsageEntry {
@@ -144,6 +89,12 @@ export interface CaptureControl {
   setExclusions(rules: ExclusionRule[]): void
 }
 
+/** A deletion is in force (capture and import refuse the material) when this returns; `done` settles once it is removed. */
+export interface DeletionHandle {
+  tombstone: number
+  done: Promise<DeletionResult>
+}
+
 export class DeletedMaterialError extends Error {}
 // The hour changed (rewritten, cleared by a deletion) or material in it was deleted after the result was computed.
 export class StaleHourError extends Error {}
@@ -154,40 +105,21 @@ export interface HourBasis {
   deletion: number
 }
 
-function matchesSite(site: string | null, tombSite: string): boolean {
-  return site !== null && (site === tombSite || site.endsWith(`.${tombSite}`))
-}
-
-/** For every reader (screens, Ask, the MCP server): the user's latest correction of a field wins over the written text. */
-export function readHour(db: Database.Database, id: number): Hour | null {
-  const h = db.prepare('SELECT * FROM hours WHERE id = ?').get(id) as (Omit<Hour, 'sources' | 'needs_rewrite' | 'corrected'> & { sources: string; needs_rewrite: number }) | undefined
-  if (!h) return null
-  const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }
-  const active = db.prepare('SELECT field, text FROM corrections WHERE hour_id = ? AND undone_wall_ms IS NULL ORDER BY id').all(id) as { field: HourField; text: string }[]
-  for (const c of active) {
-    out[c.field] = c.text
-    if (!out.corrected.includes(c.field)) out.corrected.push(c.field)
-  }
-  return out
-}
-
 export class Storage {
   readonly store: Store
   readonly db: Database.Database
   readonly bus: ChangeBus
   readonly derived: Derived
+  readonly rules: Rules
   private readonly now: () => number
   private capture: CaptureControl | null = null
-  private tombstones: Tombstone[] = []
-  private pauses: PauseState[] = []
-  private retentionDays: number | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onError: (code: string) => void
   private prunedData = 0
   private backfill: Promise<void> = Promise.resolve()
   private stopped = false
-  private privacy: Privacy
+  private readonly deletions: DeletionWorker
 
   constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void } = {}) {
     this.store = store
@@ -201,24 +133,15 @@ export class Storage {
     this.db.pragma('journal_size_limit = 16777216')
     applyMigrations(this.db, STORAGE_MIGRATIONS, this.now)
     this.bus = new ChangeBus(this.db, dir, this.now)
+    this.rules = new Rules(this.db, this.now)
     // Derivation follows the same rules as admission, so a rebuild never brings back deleted or paused time.
     this.derived = new Derived(this.db, {
-      cut: (s, e, row) => {
-        for (const p of this.pauses) if (p.since_wall_ms > s && p.since_wall_ms < e) e = p.since_wall_ms
-        for (const t of this.tombstones) {
-          if (t.from_wall_ms === null || t.from_wall_ms <= s || t.from_wall_ms >= e) continue
-          if (this.tombstoneMatches(t, row.app_id, row.url)) e = t.from_wall_ms
-        }
-        return e
-      },
-      admit: (row) => this.accepts(row.event_wall_ms, row.app_id, row.url),
+      cut: (s, e, row) => this.rules.cut(s, e, row),
+      admit: (row) => this.rules.accepts(row.event_wall_ms, row.app_id, row.url),
     })
-    this.loadTombstones()
-    this.privacy = new Privacy(store.exclusions())
-    this.loadPauses()
-    this.retentionDays = this.getSetting<number>('retention_days')
+    this.deletions = new DeletionWorker(store.file)
     store.acceptObservation = (row) => this.admit(row)
-    store.acceptExtension = (row, from, to) => this.mayCover(row, from, to)
+    store.acceptExtension = (row, from, to) => this.rules.mayCover(row.app_id, (row as { url?: string | null }).url ?? null, from, to)
     store.onFlushed = () => {
       try {
         this.derived.refreshFromMark()
@@ -233,13 +156,16 @@ export class Storage {
     this.capture = control
   }
 
-  /** Arms the pause and retention timers, and resumes any derivation left unfinished (a crash, existing history). */
+  /** Arms the pause and retention timers, and resumes work left unfinished: derivation, and deletions still pending. */
   start(): void {
     // A mark left by a capture flush whose derivation never ran becomes part of the backfill.
     this.db.exec(`INSERT INTO meta (key, value) SELECT 'derive_backfill_from', value FROM meta WHERE key = 'derive_from'
                   ON CONFLICT (key) DO UPDATE SET value = CAST(min(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)`)
     this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
     this.backfill = this.runBackfill()
+    for (const t of this.rules.tombstones) {
+      if (t.state === 'pending') this.track(this.finishDeletion(t.id)).catch((err: Error) => this.onError(`deletion_resume_${err.message}`))
+    }
     const p = this.paused()
     if (p) {
       if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.endPause('expired')
@@ -267,25 +193,14 @@ export class Storage {
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     if (this.retentionTimer) clearTimeout(this.retentionTimer)
     this.pauseTimer = this.retentionTimer = null
+    void this.deletions.close()
   }
 
   // --- what may be stored --------------------------------------------------
 
   /** One rule for capture and import: paused, past retention, or deleted material is never written. */
   accepts(eventWallMs: number, appId: string | null, url: string | null): boolean {
-    for (const p of this.pauses) if (eventWallMs >= p.since_wall_ms && eventWallMs < pauseEnd(p)) return false
-    if (this.retentionDays !== null && eventWallMs < this.now() - this.retentionDays * DAY_MS) return false
-    if (this.tombstones.length === 0) return true
-    const site = siteOf(url)
-    const app = appId?.toLowerCase() ?? null
-    for (const t of this.tombstones) {
-      const inRange = (t.from_wall_ms === null || eventWallMs >= t.from_wall_ms) && (t.to_wall_ms === null || eventWallMs < t.to_wall_ms)
-      if (!inRange) continue
-      if (t.kind === 'range') return false
-      if (t.kind === 'source' && app !== null && app === t.app_id) return false
-      if (t.kind === 'site' && matchesSite(site, t.site!)) return false
-    }
-    return true
+    return this.rules.accepts(eventWallMs, appId, url)
   }
 
   /**
@@ -293,43 +208,14 @@ export class Storage {
    * expired or deleted material is dropped.
    */
   private admit(row: ObservationRow & { url?: string | null; last_seen_wall_ms?: number }): boolean {
-    let aumid: string | null = null
-    if (row.detail?.includes('"aumid"')) {
-      try {
-        aumid = (JSON.parse(row.detail) as { store?: { aumid?: string } }).store?.aumid ?? null
-      } catch {
-        aumid = null
-      }
-    }
-    if (row.kind === 'focus' && this.privacy.excludes(row.app_id, row.app_path, aumid)) {
-      if (this.accepts(row.event_wall_ms, null, null)) {
+    if (this.rules.excluded(row)) {
+      if (this.rules.accepts(row.event_wall_ms, null, null)) {
         const gap = this.store.openGap({ reason: 'excluded', scope: 'all', run: row.run, start: this.point(row.event_wall_ms), detail: null })
         this.store.closeGap(gap, this.point(Math.max(row.event_wall_ms, row.last_seen_wall_ms ?? row.event_wall_ms)))
       }
       return false
     }
-    return this.accepts(row.event_wall_ms, row.app_id, row.url ?? null)
-  }
-
-  private tombstoneMatches(t: Tombstone, appId: string | null, url: string | null): boolean {
-    if (t.kind === 'range') return true
-    if (t.kind === 'source') return appId !== null && appId.toLowerCase() === t.app_id
-    return matchesSite(siteOf(url), t.site!)
-  }
-
-  /** Whether a row seen at fromWallMs may be taken to cover (from, to]: no pause or deletion for it falls in between. */
-  private mayCover(row: ObservationRow & { url?: string | null }, fromWallMs: number, toWallMs: number): boolean {
-    const overlaps = (s: number, e: number) => s <= toWallMs && e > fromWallMs
-    for (const p of this.pauses) if (overlaps(p.since_wall_ms, pauseEnd(p))) return false
-    const app = row.app_id?.toLowerCase() ?? null
-    const site = siteOf(row.url ?? null)
-    for (const t of this.tombstones) {
-      if (!overlaps(t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY)) continue
-      if (t.kind === 'range') return false
-      if (t.kind === 'source' && app !== null && app === t.app_id) return false
-      if (t.kind === 'site' && matchesSite(site, t.site!)) return false
-    }
-    return true
+    return this.rules.accepts(row.event_wall_ms, row.app_id, row.url ?? null)
   }
 
   /** Re-import (a backup, an older Daylens): the same rules as capture, so deleted material stays deleted. */
@@ -338,14 +224,6 @@ export class Storage {
     for (const r of rows) if (this.store.insertObservation(r) !== Store.REFUSED) imported++
     this.flushOrThrow()
     return { imported, refused: rows.length - imported }
-  }
-
-  private loadTombstones(): void {
-    this.tombstones = (this.db.prepare('SELECT id, kind, from_wall_ms, to_wall_ms, app_id, site FROM deletions').all() as Tombstone[]).map((t) => ({
-      ...t,
-      app_id: t.app_id?.toLowerCase() ?? null,
-      site: t.site?.toLowerCase() ?? null,
-    }))
   }
 
   private flushOrThrow(): void {
@@ -359,205 +237,77 @@ export class Storage {
 
   // --- deletion --------------------------------------------------------------
 
-  deleteLast(ms: number): DeletionResult {
+  deleteLast(ms: number): DeletionHandle {
     const now = this.now()
     return this.deleteRange(now - ms, now)
   }
 
-  deleteEverything(): DeletionResult {
+  deleteEverything(): DeletionHandle {
     return this.deleteRange(0, this.now())
   }
 
   /** Deletes everything captured in [from, to). */
-  deleteRange(fromWallMs: number, toWallMs: number): DeletionResult {
+  deleteRange(fromWallMs: number, toWallMs: number): DeletionHandle {
     return this.delete({ kind: 'range', from_wall_ms: fromWallMs, to_wall_ms: toWallMs, app_id: null, site: null })
   }
 
   /** Deletes one app's material, in a range or across all time. */
-  deleteSource(appId: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionResult {
+  deleteSource(appId: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionHandle {
     return this.delete({ kind: 'source', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: appId.toLowerCase(), site: null })
   }
 
   /** Deletes one site (and its subdomains), in a range or across all time. */
-  deleteSite(site: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionResult {
+  deleteSite(site: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionHandle {
     const s = site.toLowerCase().replace(/^www\./, '')
     return this.delete({ kind: 'site', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: null, site: s })
   }
 
-  private delete(t: Omit<Tombstone, 'id'>): DeletionResult {
+  private delete(t: Omit<Tombstone, 'id' | 'state'>): DeletionHandle {
     this.flushOrThrow()
-    let result: DeletionResult
+    let tombstone: number
     try {
-      result = this.bus.commit(
+      tombstone = this.bus.commit(
         'deletion',
-        { kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
-        () => this.applyDeletion(t),
+        { state: 'started', kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
         () => {
-          this.loadTombstones()
+          const id = Number(
+            this.db
+              .prepare(`INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, app_id, site, created_wall_ms, state) VALUES (?, ?, ?, ?, ?, ?, 'pending')`)
+              .run(t.kind, t.from_wall_ms, t.to_wall_ms, t.app_id, t.site, this.now()).lastInsertRowid,
+          )
+          fenceEdges(this.db, t, () => this.store.allocateObservationId())
+          return id
+        },
+        () => {
+          this.rules.loadTombstones()
           this.capture?.interrupt()
         },
       )
     } catch (err) {
-      this.loadTombstones()
+      this.rules.loadTombstones()
       throw err
     }
-    this.compactAfterDeletion()
+    return { tombstone, done: this.track(this.finishDeletion(tombstone)) }
+  }
+
+  private readonly inFlight = new Set<Promise<unknown>>()
+
+  private track<T>(p: Promise<T>): Promise<T> {
+    this.inFlight.add(p)
+    const forget = () => this.inFlight.delete(p)
+    p.then(forget, forget)
+    return p
+  }
+
+  /** Resolves once every deletion started so far (or resumed at start) has finished or failed. */
+  async deletionsSettled(): Promise<void> {
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight])
+  }
+
+  private async finishDeletion(tombstone: number): Promise<DeletionResult> {
+    const result = await this.deletions.run(tombstone, this.now())
+    this.bus.commit('deletion', { state: 'done', tombstone }, () => {}, () => this.rules.loadTombstones())
     return result
-  }
-
-  private applyDeletion(t: Omit<Tombstone, 'id'>): DeletionResult {
-    const db = this.db
-    const tombstone = Number(
-      db.prepare('INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, app_id, site, created_wall_ms) VALUES (?, ?, ?, ?, ?, ?)').run(t.kind, t.from_wall_ms, t.to_wall_ms, t.app_id, t.site, this.now())
-        .lastInsertRowid,
-    )
-    // Re-derivation below must already follow the new tombstone; if the transaction fails, delete() reloads.
-    this.loadTombstones()
-    const from = t.from_wall_ms ?? Number.MIN_SAFE_INTEGER
-    const to = t.to_wall_ms ?? Number.MAX_SAFE_INTEGER
-    const r: DeletionResult = { tombstone, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0 }
-    const touchedHours = new Set<number>()
-    const hasUrl = (db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'url'`).get() as unknown) !== undefined
-    const bounded = t.from_wall_ms !== null && t.to_wall_ms !== null
-    const tomb = { ...t, id: tombstone } as Tombstone
-    const matches = (o: { app_id: string | null; url?: string | null }) => this.tombstoneMatches(tomb, o.app_id, o.url ?? null)
-    // SQL narrows the candidates; `matches` decides (sites are matched on the parsed address).
-    const pre = t.kind === 'range' ? '1' : t.kind === 'source' ? 'lower(app_id) = @app' : hasUrl ? 'url IS NOT NULL' : '0'
-    const ivMatch = t.kind === 'range' ? '1' : t.kind === 'source' ? 'lower(app_id) = @app' : `(site = @site OR site LIKE '%.' || @site)`
-    const args = { from, to, app: t.app_id, site: t.site, lo: from - MAX_INTERVAL_MS }
-
-    // Hours whose search entries may change: every hour an affected interval touched, by start or by overlap.
-    for (const row of db
-      .prepare(`SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE ${ivMatch} AND ((start_wall_ms >= @from AND start_wall_ms < @to) OR (end_wall_ms > @from AND start_wall_ms < @to))`)
-      .all(args) as { start_wall_ms: number; end_wall_ms: number; tz_offset_min: number }[]) {
-      for (const h of hoursOf(row.start_wall_ms, row.end_wall_ms, row.tz_offset_min)) touchedHours.add(h)
-    }
-
-    // Rows crossing an edge keep only their parts outside the range: one that spans it is split in two.
-    type Obs = ObservationRow & { id: number; last_seen_wall_ms: number; url?: string | null }
-    const cols = (db.prepare('PRAGMA table_info(observations)').all() as { name: string }[]).map((c) => c.name)
-    const insertCopy = db.prepare(`INSERT INTO observations (${cols.join(', ')}) VALUES (${cols.map((c) => '@' + c).join(', ')})`)
-    if (bounded) {
-      const before = (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @lo AND event_wall_ms < @from AND last_seen_wall_ms > @from AND ${pre}`).all(args) as Obs[]).filter(matches)
-      for (const o of before) {
-        if (o.last_seen_wall_ms > to) {
-          insertCopy.run({ ...o, id: this.store.allocateObservationId(), event_wall_ms: to, event_mono_us: o.event_mono_us + (to - o.event_wall_ms) * 1000 })
-        }
-        db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE id = ?').run(from, o.id)
-      }
-      const across = (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND last_seen_wall_ms > @to AND ${pre}`).all(args) as Obs[]).filter(matches)
-      for (const o of across) {
-        db.prepare('UPDATE observations SET event_wall_ms = ?, event_mono_us = ? WHERE id = ?').run(to, o.event_mono_us + (to - o.event_wall_ms) * 1000, o.id)
-      }
-    }
-    if (t.kind === 'site') {
-      const del = db.prepare('DELETE FROM observations WHERE id = ?')
-      for (const o of (hasUrl ? (db.prepare(`SELECT id, app_id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to`).all(args) as Obs[]) : []).filter(matches)) {
-        r.observations += del.run(o.id).changes
-      }
-    } else {
-      r.observations = db.prepare(`DELETE FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre}`).run(args).changes
-    }
-    r.intervals = db.prepare(`DELETE FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to`).run(args).changes
-
-    if (bounded) {
-      // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
-      this.derived.rederive(from, to)
-      const before = (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n
-      this.derived.rebuildDocs(touchedHours)
-      r.searchDocs += Math.max(0, before - (db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`).get() as { n: number }).n)
-    } else {
-      // Across all time no row crosses an edge; every search entry of the app or site goes.
-      r.searchDocs += db.prepare(`DELETE FROM search_docs WHERE kind = 'activity' AND ${ivMatch}`).run(args).changes
-    }
-    if (t.kind === 'range') {
-      db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
-      db.prepare(`DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ? AND reason != 'paused'`).run(from, to)
-    }
-
-    // Hours: wholly inside a deleted range they go; otherwise any hour that drew on the material loses its text.
-    const hours = db.prepare('SELECT id, start_wall_ms, end_wall_ms, sources FROM hours WHERE end_wall_ms > ? AND start_wall_ms < ?').all(from, to) as {
-      id: number
-      start_wall_ms: number
-      end_wall_ms: number
-      sources: string
-    }[]
-    const threadOf = db.prepare('SELECT thread_id AS id FROM thread_hours WHERE hour_id = ?')
-    // Reads that returned an affected hour saw its text; collected before the hour is removed or cleared.
-    const readsOfHour = db.prepare('SELECT read_id AS id FROM assistant_read_items WHERE hour_id = ?')
-    const touchedReads = new Set<number>()
-    const touchedThreads = new Set<number>()
-    for (const h of hours) {
-      const sources = JSON.parse(h.sources) as HourSource[]
-      const affected =
-        t.kind === 'range' ||
-        (t.kind === 'source' && sources.some((s) => s.app_id?.toLowerCase() === t.app_id)) ||
-        (t.kind === 'site' && sources.some((s) => matchesSite(s.site?.toLowerCase() ?? null, t.site!)))
-      if (!affected) continue
-      for (const { id } of threadOf.all(h.id) as { id: number }[]) touchedThreads.add(id)
-      for (const { id } of readsOfHour.all(h.id) as { id: number }[]) touchedReads.add(id)
-      if (t.kind === 'range' && h.start_wall_ms >= from && h.end_wall_ms <= to) {
-        db.prepare('DELETE FROM search_docs WHERE hour_id = ?').run(h.id)
-        db.prepare('DELETE FROM hours WHERE id = ?').run(h.id)
-        r.hoursRemoved++
-      } else {
-        this.clearHour(h.id, sources, t)
-        r.hoursCleared++
-      }
-    }
-
-    // Threads: one left with no hours goes; one still linked elsewhere keeps its id and waits for a new title.
-    // A thread created inside a deleted range with no hours at all goes too.
-    for (const id of touchedThreads) {
-      const left = (db.prepare('SELECT count(*) AS n FROM thread_hours WHERE thread_id = ?').get(id) as { n: number }).n
-      if (left === 0) db.prepare('DELETE FROM threads WHERE id = ?').run(id)
-      else db.prepare(`UPDATE threads SET title = '', needs_rewrite = 1, updated_wall_ms = ? WHERE id = ?`).run(this.now(), id)
-    }
-    if (t.kind === 'range') {
-      db.prepare('DELETE FROM threads WHERE created_wall_ms >= ? AND created_wall_ms < ? AND id NOT IN (SELECT thread_id FROM thread_hours)').run(from, to)
-    }
-
-    // Reads go by what they read: any read over a deleted range, a read that returned the deleted app or site within
-    // its span, and a read that returned an affected hour.
-    if (t.kind === 'range') {
-      for (const { id } of db.prepare('SELECT id FROM assistant_reads WHERE to_wall_ms > ? AND from_wall_ms < ?').all(from, to) as { id: number }[]) touchedReads.add(id)
-    } else {
-      const items =
-        t.kind === 'source'
-          ? db.prepare('SELECT i.read_id AS id FROM assistant_read_items i JOIN assistant_reads a ON a.id = i.read_id WHERE i.app_id = ? AND a.to_wall_ms > ? AND a.from_wall_ms < ?').all(t.app_id, from, to)
-          : db
-              .prepare(`SELECT i.read_id AS id FROM assistant_read_items i JOIN assistant_reads a ON a.id = i.read_id WHERE (i.site = ? OR i.site LIKE '%.' || ?) AND a.to_wall_ms > ? AND a.from_wall_ms < ?`)
-              .all(t.site, t.site, from, to)
-      for (const { id } of items as { id: number }[]) touchedReads.add(id)
-    }
-    const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
-    for (const id of touchedReads) r.assistantReads += delRead.run(id).changes
-    return r
-  }
-
-  // The hour's text and the corrections on it may describe the deleted material; both go, and the hour waits for a rewrite.
-  private clearHour(id: number, sources: HourSource[], t: Omit<Tombstone, 'id'>): void {
-    const kept = sources.filter((s) => !(t.kind === 'source' && s.app_id?.toLowerCase() === t.app_id) && !(t.kind === 'site' && matchesSite(s.site?.toLowerCase() ?? null, t.site!)))
-    this.db.prepare('DELETE FROM corrections WHERE hour_id = ?').run(id)
-    this.db
-      .prepare(
-        `UPDATE hours SET status = 'facts', title = NULL, summary = NULL, detail = NULL, outcome = NULL, suggestion = NULL, writer = NULL,
-           sources = ?, needs_rewrite = 1, version = version + 1, updated_wall_ms = ? WHERE id = ?`,
-      )
-      .run(JSON.stringify(kept), this.now(), id)
-    this.indexHour(id)
-  }
-
-  // A deleted search document is only masked until its index segment is rewritten: 'optimize' rewrites the index now,
-  // and secure_delete zeroes the pages it frees. The checkpoint then moves old pages out of the write-ahead log.
-  // Best effort: a reader holding an old snapshot keeps the log until it finishes, and the next checkpoint clears it.
-  private compactAfterDeletion(): void {
-    try {
-      this.db.exec(`INSERT INTO search (search) VALUES ('optimize')`)
-      this.db.pragma('wal_checkpoint(TRUNCATE)')
-    } catch (err) {
-      this.onError(`checkpoint_${(err as { code?: string }).code ?? 'failed'}`)
-    }
   }
 
   // --- hours, corrections, threads ----------------------------------------
@@ -575,16 +325,15 @@ export class Storage {
     const sources = h.sources ?? []
     const current = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(start) as { version: number } | undefined
     if ((current?.version ?? null) !== basis.version) throw new StaleHourError('the hour changed after this text was computed')
-    for (const t of this.tombstones) {
+    for (const t of this.rules.tombstones) {
       const overlaps = (t.from_wall_ms === null || end > t.from_wall_ms) && (t.to_wall_ms === null || start < t.to_wall_ms)
       if (overlaps && t.id > basis.deletion) throw new StaleHourError('material in this hour was deleted after this text was computed')
     }
-    for (const t of this.tombstones) {
+    for (const t of this.rules.tombstones) {
       const overlaps = (t.from_wall_ms === null || end > t.from_wall_ms) && (t.to_wall_ms === null || start < t.to_wall_ms)
       if (!overlaps) continue
       const covers = t.kind === 'range' && (t.from_wall_ms ?? -Infinity) <= start && (t.to_wall_ms ?? Infinity) >= end
-      const uses =
-        (t.kind === 'source' && sources.some((s) => s.app_id?.toLowerCase() === t.app_id)) || (t.kind === 'site' && sources.some((s) => matchesSite(s.site?.toLowerCase() ?? null, t.site!)))
+      const uses = sources.some((s) => sourceMatches(t, s))
       if (covers || uses) throw new DeletedMaterialError('this hour draws on deleted material')
     }
     const id = this.bus.commit('hour', { start_wall_ms: start }, () => {
@@ -612,7 +361,7 @@ export class Storage {
            RETURNING id`,
         )
         .get(v) as { id: number }
-      this.indexHour(row.id)
+      indexHour(this.db, row.id)
       return row.id
     })
     return this.hour(id)!
@@ -631,7 +380,7 @@ export class Storage {
   correct(hourId: number, field: HourField, text: string): number {
     return this.bus.commit('correction', { hour_id: hourId, field }, () => {
       const id = Number(this.db.prepare('INSERT INTO corrections (hour_id, field, text, created_wall_ms) VALUES (?, ?, ?, ?)').run(hourId, field, text, this.now()).lastInsertRowid)
-      this.indexHour(hourId)
+      indexHour(this.db, hourId)
       return id
     })
   }
@@ -642,22 +391,8 @@ export class Storage {
     if (!c) return
     this.bus.commit('correction', { hour_id: c.hour_id, undone: correctionId }, () => {
       this.db.prepare('UPDATE corrections SET undone_wall_ms = ? WHERE id = ?').run(this.now(), correctionId)
-      this.indexHour(c.hour_id)
+      indexHour(this.db, c.hour_id)
     })
-  }
-
-  private indexHour(id: number): void {
-    const h = this.hour(id)
-    if (!h) return
-    const text = HOUR_FIELDS.map((f) => h[f])
-      .filter((x): x is string => typeof x === 'string' && x.length > 0)
-      .join('\n')
-    this.db.prepare(`DELETE FROM search_docs WHERE kind = 'hour' AND hour_id = ?`).run(id)
-    if (text) {
-      this.db
-        .prepare(`INSERT INTO search_docs (kind, hour_start_wall_ms, hour_id, hour_text, first_wall_ms, last_wall_ms) VALUES ('hour', ?, ?, ?, ?, ?)`)
-        .run(h.start_wall_ms, id, nfc(text), h.start_wall_ms, h.end_wall_ms)
-    }
   }
 
   createThread(title: string, hourIds: number[] = []): number {
@@ -702,7 +437,7 @@ export class Storage {
         return { id, since_wall_ms: since, until_wall_ms: untilWallMs, ended_wall_ms: null, gap_id: gap }
       },
       () => {
-        this.loadPauses()
+        this.rules.loadPauses()
         this.store.flush()
         this.capture?.interrupt()
       },
@@ -717,11 +452,7 @@ export class Storage {
 
   /** The active pause, if any. */
   paused(): PauseState | null {
-    return this.pauses.find((p) => p.ended_wall_ms === null) ?? null
-  }
-
-  private loadPauses(): void {
-    this.pauses = this.db.prepare('SELECT id, since_wall_ms, until_wall_ms, ended_wall_ms, gap_id FROM pauses ORDER BY id').all() as PauseState[]
+    return this.rules.pauses.find((p) => p.ended_wall_ms === null) ?? null
   }
 
   private endPause(reason: 'resumed' | 'expired' | 'replaced'): void {
@@ -738,7 +469,7 @@ export class Storage {
         this.db.prepare('UPDATE pauses SET ended_wall_ms = ? WHERE id = ?').run(end, p.id)
       },
       () => {
-        this.loadPauses()
+        this.rules.loadPauses()
         this.store.flush()
         if (reason !== 'replaced') this.capture?.interrupt()
       },
@@ -777,7 +508,7 @@ export class Storage {
   }
 
   private installExclusions(): void {
-    this.privacy = new Privacy(this.store.exclusions())
+    this.rules.loadExclusions()
     this.capture?.setExclusions(this.store.exclusions())
     this.capture?.interrupt()
   }
@@ -804,7 +535,7 @@ export class Storage {
   /** null keeps everything. Applies to capture and import at once; older rows are pruned in the background. */
   setRetentionDays(days: number | null): void {
     this.setSetting('retention_days', days, 'retention')
-    this.retentionDays = days
+    this.rules.retentionDays = days
     this.scheduleRetention(0)
   }
 
@@ -868,14 +599,28 @@ export class Storage {
     const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []
     if (words.length === 0) return []
     const q = words.map((w, i) => `"${w}"${i === words.length - 1 ? '*' : ''}`).join(' ')
-    return this.db
+    const limit = opts.limit ?? 50
+    const pending = this.rules.tombstones.filter((t) => t.state === 'pending')
+    // While a deletion is still being carried out, what it covers is already hidden.
+    const hidden = (h: SearchHit) =>
+      pending.some((t) => {
+        if ((t.from_wall_ms !== null && h.last_wall_ms < t.from_wall_ms) || (t.to_wall_ms !== null && h.first_wall_ms >= t.to_wall_ms)) return false
+        if (h.kind === 'hour') {
+          if (t.kind === 'range') return true
+          const row = this.db.prepare('SELECT sources FROM hours WHERE id = ?').get(h.hour_id) as { sources: string } | undefined
+          return (JSON.parse(row?.sources ?? '[]') as HourSource[]).some((s) => sourceMatches(t, s))
+        }
+        return tombstoneMatches(t, h.app_id || null, h.url || null)
+      })
+    const rows = this.db
       .prepare(
         `SELECT d.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.hour_id, d.first_wall_ms, d.last_wall_ms
          FROM search JOIN search_docs d ON d.id = search.rowid
          WHERE search MATCH ? AND d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ?
          ORDER BY search.rank LIMIT ?`,
       )
-      .all(q, opts.fromWallMs ?? Number.MIN_SAFE_INTEGER, opts.toWallMs ?? Number.MAX_SAFE_INTEGER, opts.limit ?? 50) as SearchHit[]
+      .all(q, opts.fromWallMs ?? Number.MIN_SAFE_INTEGER, opts.toWallMs ?? Number.MAX_SAFE_INTEGER, pending.length ? limit * 4 : limit) as SearchHit[]
+    return pending.length ? rows.filter((h) => !hidden(h)).slice(0, limit) : rows
   }
 
   // --- retention ---------------------------------------------------------------
@@ -885,8 +630,8 @@ export class Storage {
     const now = this.now()
     const logRows = pruneChangeLog(this.db, now - CHANGE_LOG_KEEP_MS, batch)
     let n = 0
-    if (this.retentionDays === null) return logRows
-    const cutoff = now - this.retentionDays * DAY_MS
+    if (this.rules.retentionDays === null) return logRows
+    const cutoff = now - this.rules.retentionDays * DAY_MS
     const statements = [
       'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
       'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',
@@ -919,7 +664,8 @@ export class Storage {
       await new Promise((r) => setImmediate(r))
     }
     // Readers holding pruned hours, intervals or search results must drop them.
-    if (this.prunedData > 0 && this.retentionDays !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: this.now() - this.retentionDays * DAY_MS }, () => {})
+    const days = this.rules.retentionDays
+    if (this.prunedData > 0 && days !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: this.now() - days * DAY_MS }, () => {})
     if (total > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
     return total
   }

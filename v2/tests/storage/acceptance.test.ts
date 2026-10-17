@@ -45,7 +45,7 @@ function day(r: R, startWall: number, items: [ReturnType<typeof app>, string][],
   return t
 }
 
-test('deletion reaches everything: a range is gone from observations, intervals, hours, search, assistant reads and the file on disk', () => {
+test('deletion reaches everything: a range is gone from observations, intervals, hours, search, assistant reads and the file on disk', async () => {
   resetSeq()
   const r = rig()
   day(r, T0, [
@@ -61,7 +61,7 @@ test('deletion reaches everything: a range is gone from observations, intervals,
   r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getDay', from_wall_ms: inRange.from, to_wall_ms: inRange.to, query: 'what about Zanzibar canary?' })
   assert.ok(containsAnywhere(r, 'Zanzibar').length > 3, 'the canary is present before deletion')
 
-  const res = r.storage.deleteRange(inRange.from, inRange.to)
+  const res = (await r.storage.deleteRange(inRange.from, inRange.to).done)
   assert.ok(res.observations >= 2 && res.intervals >= 2 && res.hoursCleared === 1 && res.assistantReads === 1, JSON.stringify(res))
   assert.deepEqual(containsAnywhere(r, 'Zanzibar'), [])
   assert.equal(r.storage.search('keep before').length, 1, 'material outside the range is still searchable')
@@ -74,7 +74,7 @@ test('deletion reaches everything: a range is gone from observations, intervals,
   assert.deepEqual(diskContains(r.dir, 'Zanzibar'), [], 'nothing on disk after close either')
 })
 
-test('deletion reaches everything: one app, across days, and the hours that drew on it', () => {
+test('deletion reaches everything: one app, across days, and the hours that drew on it', async () => {
   resetSeq()
   const r = rig()
   day(r, T0, [[chat, 'Quokka canary thread'], [editor, 'notes.md - Editor']])
@@ -84,7 +84,7 @@ test('deletion reaches everything: one app, across days, and the hours that drew
   const h2 = r.storage.writeHour({ start_wall_ms: T0 + 2 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Editing only', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0 + 2 * HOUR))
   r.storage.recordAssistantRead({ assistant: 'claude', tool: 'search', from_wall_ms: T0, to_wall_ms: T0 + 48 * HOUR, query: 'time in Chat this week', sources: [{ app_id: 'com.example.chat' }] })
 
-  r.storage.deleteSource('com.example.chat')
+  await r.storage.deleteSource('com.example.chat').done
   assert.deepEqual(containsAnywhere(r, 'Quokka'), [])
   // The tombstone keeps the app id so a re-import can be refused; nothing else does.
   assert.deepEqual(containsAnywhere(r, 'com.example.chat').filter((w) => !w.startsWith('disk:')), [])
@@ -96,7 +96,7 @@ test('deletion reaches everything: one app, across days, and the hours that drew
   r.close()
 })
 
-test('deletion reaches everything: a site and its subdomains, once page addresses are captured', () => {
+test('deletion reaches everything: a site and its subdomains, once page addresses are captured', async () => {
   resetSeq()
   const r = rig()
   // The browser step adds this column; deletion and search already use it when present.
@@ -115,7 +115,7 @@ test('deletion reaches everything: a site and its subdomains, once page addresse
   assert.equal(r2.storage.search('wombat').length, 2)
   assert.equal(r2.storage.search('secret bank').length, 2, 'addresses are searchable')
 
-  r2.storage.deleteSite('secret-bank.example')
+  await r2.storage.deleteSite('secret-bank.example').done
   assert.deepEqual(containsAnywhere(r2, 'Wombat'), [])
   assert.deepEqual(containsAnywhere(r2, 'secret-bank').filter((w) => !w.startsWith('disk:')), [])
   assert.equal(r2.storage.search('public guide').length, 1)
@@ -123,7 +123,7 @@ test('deletion reaches everything: a site and its subdomains, once page addresse
   r2.close()
 })
 
-test('delete the last ten minutes is one call; an open row keeps only its part before, and capture continues after', () => {
+test('delete the last ten minutes is one call; an open row keeps only its part before, and capture continues after', async () => {
   resetSeq()
   const r = rig()
   r.feed(focus(editor, 'long-running.md - Editor', T0))
@@ -131,7 +131,7 @@ test('delete the last ten minutes is one call; an open row keeps only its part b
   r.feed(focus(chat, 'Numbat canary', T0 + 25 * MIN))
   r.feed(focus(chat, 'Numbat canary', T0 + 30 * MIN, 'reconcile'))
   r.clock.t = T0 + 30 * MIN
-  r.storage.deleteLast(10 * MIN)
+  await r.storage.deleteLast(10 * MIN).done
   assert.deepEqual(containsAnywhere(r, 'Numbat'), [])
   const kept = r.q<{ title: string; last_seen_wall_ms: number }>(`SELECT title, last_seen_wall_ms FROM observations WHERE kind = 'focus'`)
   assert.deepEqual(kept, [{ title: 'long-running.md - Editor', last_seen_wall_ms: T0 + 20 * MIN }])
@@ -148,13 +148,13 @@ test('delete the last ten minutes is one call; an open row keeps only its part b
   r.close()
 })
 
-test('a re-import after deletion brings nothing back, and a late capture line inside a deleted range is refused', () => {
+test('a re-import after deletion brings nothing back, and a late capture line inside a deleted range is refused', async () => {
   resetSeq()
   const r = rig()
   day(r, T0, [[editor, 'a.md - Editor'], [chat, 'Bilby canary'], [editor, 'b.md - Editor']])
   const exported = r.q<ObservationRow>(`SELECT * FROM observations`)
-  r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN)
-  r.storage.deleteSource('com.example.editor', { from_wall_ms: T0 + 10 * MIN, to_wall_ms: T0 + 15 * MIN })
+  await r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN).done
+  await r.storage.deleteSource('com.example.editor', { from_wall_ms: T0 + 10 * MIN, to_wall_ms: T0 + 15 * MIN }).done
   const res = r.storage.importObservations(exported)
   assert.deepEqual(containsAnywhere(r, 'Bilby'), [])
   assert.equal(r.q(`SELECT 1 FROM observations WHERE title = 'b.md - Editor'`).length, 0)
@@ -290,7 +290,7 @@ function obsRow(wall: number, appId: string, title: string, url: string): Observ
   }
 }
 
-test('deletion leaves nothing on disk even when the search index is large and the deleted entry sits in an old segment', () => {
+test('deletion leaves nothing on disk even when the search index is large and the deleted entry sits in an old segment', async () => {
   resetSeq()
   const r = rig()
   // The index keeps terms lowercased and prefix-compressed; a term sharing no prefix with its neighbours is stored whole.
@@ -306,13 +306,13 @@ test('deletion leaves nothing on disk even when the search index is large and th
   r.store.flush()
   r.store.database.pragma('wal_checkpoint(TRUNCATE)')
   assert.deepEqual(diskContains(r.dir, term), ['daylens-v2.sqlite'], 'the index term is on disk before deletion')
-  r.storage.deleteRange(T0, T0 + MIN)
+  await r.storage.deleteRange(T0, T0 + MIN).done
   assert.deepEqual(containsAnywhere(r, term), [])
   assert.deepEqual(diskContains(r.dir, term), [])
   r.close()
 })
 
-test('a range deletion reaches a zero-length row that starts exactly at the range start', () => {
+test('a range deletion reaches a zero-length row that starts exactly at the range start', async () => {
   resetSeq()
   const r = rig()
   r.feed(focus(editor, 'before.md - Editor', T0 - 10 * MIN))
@@ -320,26 +320,26 @@ test('a range deletion reaches a zero-length row that starts exactly at the rang
   r.store.flush()
   assert.deepEqual(r.q(`SELECT start_wall_ms - end_wall_ms AS d FROM intervals WHERE title LIKE 'Okapi%'`), [{ d: 0 }], 'the canary interval has no length')
   r.clock.t = T0 + 20 * MIN
-  r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN)
+  await r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN).done
   assert.deepEqual(containsAnywhere(r, 'Okapi'), [])
   r.close()
 })
 
-test('by the time a deletion or pause is announced, capture and import already refuse the material', () => {
+test('by the time a deletion or pause is announced, capture and import already refuse the material', async () => {
   resetSeq()
   const r = rig()
   day(r, T0, [[chat, 'Tapir canary'], [editor, 'x.md - Editor']])
   const exported = r.q<ObservationRow>(`SELECT * FROM observations`)
   const results: string[] = []
   r.storage.bus.on((c) => {
-    if (c.kind === 'deletion') results.push(`import:${JSON.stringify(r.storage.importObservations(exported.filter((o) => o.title === 'Tapir canary')))}`)
+    if (c.kind === 'deletion' && c.payload.state === 'started') results.push(`import:${JSON.stringify(r.storage.importObservations(exported.filter((o) => o.title === 'Tapir canary')))}`)
     if (c.kind === 'pause' && c.payload.until_wall_ms !== undefined) {
       r.feed(focus(chat, 'Tapir canary during pause', r.clock.t + 1000))
       results.push(`paused-rows:${r.q(`SELECT 1 FROM observations WHERE title LIKE '%during pause%'`).length}`)
     }
   })
   r.clock.t = T0 + 20 * MIN
-  r.storage.deleteSource('com.example.chat')
+  await r.storage.deleteSource('com.example.chat').done
   r.storage.pause(T0 + HOUR)
   assert.deepEqual(results, ['import:{"imported":0,"refused":1}', 'paused-rows:0'])
   assert.deepEqual(containsAnywhere(r, 'Tapir'), [])
@@ -436,12 +436,12 @@ test('a pause and its gap are written in one transaction', () => {
   reader.close()
 })
 
-test('a row cannot be extended across a deleted range or a pause; the next sighting after it starts a fresh row', () => {
+test('a row cannot be extended across a deleted range or a pause; the next sighting after it starts a fresh row', async () => {
   resetSeq()
   const r = rig()
   const at = (m: number) => T0 + m * MIN
   r.clock.t = at(30)
-  r.storage.deleteRange(at(10), at(20))
+  await r.storage.deleteRange(at(10), at(20)).done
   r.feed(focus(chat, 'Late chat', at(5)))
   r.feed(focus(chat, 'Late chat', at(15), 'reconcile'))
   r.feed(focus(chat, 'Late chat', at(25), 'reconcile'))
@@ -460,7 +460,7 @@ test('a row cannot be extended across a deleted range or a pause; the next sight
   r.close()
 })
 
-test('a bounded app deletion trims and splits rows that cross its edges, and a rebuild does not bring the middle back', () => {
+test('a bounded app deletion trims and splits rows that cross its edges, and a rebuild does not bring the middle back', async () => {
   resetSeq()
   const r = rig()
   const at = (m: number) => T0 + m * MIN
@@ -468,7 +468,7 @@ test('a bounded app deletion trims and splits rows that cross its edges, and a r
   for (let m = 1; m <= 20; m++) r.feed(focus(chat, 'Crossing chat', at(m), 'reconcile'))
   r.feed(focus(editor, 'next.md - Editor', at(20) + 1000))
   r.clock.t = at(30)
-  r.storage.deleteSource('com.example.chat', { from_wall_ms: at(10), to_wall_ms: at(15) })
+  await r.storage.deleteSource('com.example.chat', { from_wall_ms: at(10), to_wall_ms: at(15) }).done
   const cover = () =>
     r.q<{ s: number; e: number }>(`SELECT (event_wall_ms - ?) / 60000.0 AS s, (last_seen_wall_ms - ?) / 60000.0 AS e FROM observations WHERE app_id = 'com.example.chat' ORDER BY event_wall_ms`, T0, T0)
   assert.deepEqual(cover(), [{ s: 0, e: 10 }, { s: 15, e: 20 }], 'the row before and after the range survive; the middle is gone')
@@ -480,7 +480,7 @@ test('a bounded app deletion trims and splits rows that cross its edges, and a r
   r.close()
 })
 
-test('deletion reaches threads: orphaned threads go, shared ones lose a title that may describe the deleted material', () => {
+test('deletion reaches threads: orphaned threads go, shared ones lose a title that may describe the deleted material', async () => {
   const r = rig()
   const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0))
   const h2 = r.storage.writeHour({ start_wall_ms: T0 + 3 * HOUR, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0 + 3 * HOUR))
@@ -489,17 +489,17 @@ test('deletion reaches threads: orphaned threads go, shared ones lose a title th
   r.clock.t = T0 + 30 * MIN
   r.storage.createThread('Kakapo canary empty')
   r.clock.t = T0 + 2 * HOUR
-  r.storage.deleteRange(T0, T0 + 2 * HOUR)
+  await r.storage.deleteRange(T0, T0 + 2 * HOUR).done
   assert.deepEqual(containsAnywhere(r, 'Kakapo'), [])
   assert.deepEqual(r.q(`SELECT id, title, needs_rewrite FROM threads ORDER BY id`), [{ id: shared, title: '', needs_rewrite: 1 }])
   assert.ok(only < shared)
   r.clock.t = T0 + 5 * HOUR
-  r.storage.deleteEverything()
+  await r.storage.deleteEverything().done
   assert.deepEqual(r.q(`SELECT id FROM threads`), [])
   r.close()
 })
 
-test('deleting an app removes the assistant reads that touched it, by what they read, not by the words of the question', () => {
+test('deleting an app removes the assistant reads that touched it, by what they read, not by the words of the question', async () => {
   resetSeq()
   const r = rig()
   day(r, T0, [[chat, 'thread'], [editor, 'notes.md - Editor']])
@@ -509,7 +509,7 @@ test('deleting an app removes the assistant reads that touched it, by what they 
   const viaHour = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getDaySummary', ...span, query: 'summarise', hours: [h.id] })
   const unrelated = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getAppUsage', ...span, query: 'did I use Chat or the editor more?', sources: [{ app_id: 'com.example.editor' }] })
   r.clock.t = T0 + 2 * HOUR
-  r.storage.deleteSource('com.example.chat')
+  await r.storage.deleteSource('com.example.chat').done
   assert.deepEqual(r.q<{ id: number }>(`SELECT id FROM assistant_reads ORDER BY id`).map((x) => x.id), [unrelated])
   assert.ok(direct && viaHour)
   r.close()

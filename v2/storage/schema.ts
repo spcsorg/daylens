@@ -271,6 +271,12 @@ const deriveBackfill: Migration = {
              ON CONFLICT (key) DO UPDATE SET value = excluded.value`),
 }
 
+const deletionState: Migration = {
+  name: 'deletion_state',
+  // pending: in force, material still being removed in the background; done: removed; purged: also gone from disk.
+  up: (db) => db.exec(`ALTER TABLE deletions ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('pending', 'done', 'purged'))`),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -289,4 +295,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   threadsNeedRewrite,
   assistantReadItems,
   deriveBackfill,
+  deletionState,
 ]

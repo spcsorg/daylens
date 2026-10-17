@@ -57,7 +57,13 @@ export function diskContains(dir: string, needle: string): string[] {
   const variants = [Buffer.from(needle, 'utf8'), Buffer.from(needle, 'utf16le')]
   for (const f of readdirSync(dir)) {
     if (!f.startsWith('daylens-v2.sqlite')) continue
-    const bytes = readFileSync(path.join(dir, f))
+    let bytes: Buffer
+    try {
+      bytes = readFileSync(path.join(dir, f))
+    } catch {
+      // The deletion worker's connection may close (removing -wal and -shm) while this lists the directory.
+      continue
+    }
     if (variants.some((v) => bytes.includes(v))) hits.push(f)
   }
   return hits
