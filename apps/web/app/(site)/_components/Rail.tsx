@@ -102,7 +102,7 @@ export function Rail() {
                 <span className="ticket-time">{ticket.time}</span>
               </div>
               <h3 className="ticket-title">{ticket.live ? <span className="ticket-now">Now</span> : ticket.title}</h3>
-              <p className="ticket-summary">{ticket.summary}</p>
+              <p className="ticket-summary ruled">{ticket.summary}</p>
               {ticket.leftOff ? (
                 <p className="ticket-leftoff">
                   <span>Left off</span>

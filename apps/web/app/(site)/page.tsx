@@ -88,7 +88,7 @@ const PROMISES = [
 const AI_CHOICES = [
   { title: "Daylens AI", body: "Built in and on from the start." },
   { title: "Your own key", body: "Your account with an AI provider, billed by them." },
-  { title: "An AI tool on your computer", body: "A command-line assistant you already pay for." },
+  { title: "An AI app on your computer", body: "An AI app you already pay for, running on your computer." },
   { title: "No AI", body: "Hours stay as plain facts, and search still finds everything." },
 ];
 
@@ -149,6 +149,9 @@ export default function LandingPage() {
 
         <section className="section trust" id="privacy" aria-labelledby="trust-title">
           <div className="check">
+            <div className="check-head">
+              <span className="ticket-number">No. 6</span>
+            </div>
             <h2 id="trust-title">Your history is stored only on your computer. We never keep a copy.</h2>
             <dl className="check-lines">
               {PROMISES.map((promise) => (
@@ -166,12 +169,12 @@ export default function LandingPage() {
             </dl>
             <div className="check-foot">
               <h3>When AI writes your hours</h3>
-              <p>
+              <p className="ruled">
                 With Daylens AI, each hour passes through our service to the AI provider so it can be written. We
-                don&rsquo;t store it. With your own key or an AI tool on your computer, it goes straight from your
+                don&rsquo;t store it. With your own key or an AI app on your computer, it goes straight from your
                 computer to that provider and never touches our servers. With no AI, it never leaves your computer.
               </p>
-              <p>
+              <p className="ruled">
                 Anonymous usage counts are on by default, and you can turn them off in Settings. They never include
                 titles, addresses, prompts or answers.
               </p>
@@ -203,6 +206,9 @@ export default function LandingPage() {
 
         <section className="section join" id="join" aria-labelledby="join-title">
           <div className="join-inner">
+            <div className="check-head">
+              <span className="ticket-number">No. 7</span>
+            </div>
             <h2 id="join-title">Join the beta.</h2>
             <p>
               Email only. Invites go out in waves starting in November, on Windows and Mac, and people on this list
