@@ -375,3 +375,28 @@ test('exclusions apply to imports too: an excluded row leaves only an excluded g
   ])
   r.close()
 })
+
+test('a finished pause keeps refusing material stamped inside it: after resume, after expiry, and after a restart', () => {
+  resetSeq()
+  const r = rig()
+  r.clock.t = T0
+  r.storage.pause(T0 + HOUR)
+  r.clock.t = T0 + 10 * MIN
+  r.storage.resume()
+  r.feed(focus(chat, 'Ibex canary late after resume', T0 + 5 * MIN))
+  r.clock.t = T0 + 2 * HOUR
+  r.storage.pause(T0 + 3 * HOUR)
+  r.clock.t = T0 + 4 * HOUR
+  r.feed(focus(editor, 'after.md - Editor', T0 + 4 * HOUR))
+  r.feed(focus(chat, 'Ibex canary late after expiry', T0 + 2 * HOUR + 30 * MIN))
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = T0 + 5 * HOUR
+  r2.storage.start()
+  r2.feed(focus(chat, 'Ibex canary late after restart', T0 + 7 * MIN))
+  r2.feed(focus(chat, 'Ibex canary late after restart 2', T0 + 2 * HOUR + 40 * MIN))
+  r2.feed(focus(editor, 'between.md - Editor', T0 + HOUR))
+  assert.deepEqual(containsAnywhere(r2, 'Ibex'), [])
+  assert.equal(r2.q(`SELECT 1 FROM observations WHERE title = 'between.md - Editor'`).length, 1, 'time between pauses is still captured')
+  r2.close()
+})

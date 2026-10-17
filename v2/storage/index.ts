@@ -73,9 +73,27 @@ export interface DeletionResult {
 }
 
 export interface PauseState {
-  from_wall_ms: number
+  id: number
+  since_wall_ms: number
+  // null: until resumed.
   until_wall_ms: number | null
-  gap_id: number
+  // Set once the pause is over; while null the pause is active.
+  ended_wall_ms: number | null
+  gap_id: number | null
+}
+
+export type PauseFor = 'hour' | 'tomorrow' | 'until_resumed'
+
+// There is no start-of-day setting yet, so "until tomorrow" ends at the next local midnight (as on the browser branch).
+export function nextLocalMidnight(nowMs: number): number {
+  const d = new Date(nowMs)
+  d.setHours(24, 0, 0, 0)
+  return d.getTime()
+}
+
+/** Where a pause stops refusing material: when it ended, else when it was set to end, else never. */
+function pauseEnd(p: PauseState): number {
+  return p.ended_wall_ms ?? p.until_wall_ms ?? Number.POSITIVE_INFINITY
 }
 
 export interface UsageEntry {
@@ -150,7 +168,7 @@ export class Storage {
   private readonly now: () => number
   private capture: CaptureControl | null = null
   private tombstones: Tombstone[] = []
-  private pauseState: PauseState | null = null
+  private pauses: PauseState[] = []
   private retentionDays: number | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
@@ -176,7 +194,7 @@ export class Storage {
     })
     this.loadTombstones()
     this.privacy = new Privacy(store.exclusions())
-    this.pauseState = this.getSetting<PauseState>('pause')
+    this.loadPauses()
     this.retentionDays = this.getSetting<number>('retention_days')
     store.acceptObservation = (row) => this.admit(row)
     store.onFlushed = (ids) => {
@@ -195,8 +213,9 @@ export class Storage {
 
   /** Arms the pause and retention timers. */
   start(): void {
-    if (this.pauseState) {
-      if (this.pauseState.until_wall_ms !== null && this.now() >= this.pauseState.until_wall_ms) this.endPause('expired')
+    const p = this.paused()
+    if (p) {
+      if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.endPause('expired')
       else this.armPauseTimer()
     }
     this.scheduleRetention(60_000)
@@ -212,8 +231,7 @@ export class Storage {
 
   /** One rule for capture and import: paused, past retention, or deleted material is never written. */
   accepts(eventWallMs: number, appId: string | null, url: string | null): boolean {
-    const p = this.pauseState
-    if (p && eventWallMs >= p.from_wall_ms && (p.until_wall_ms === null || eventWallMs < p.until_wall_ms)) return false
+    for (const p of this.pauses) if (eventWallMs >= p.since_wall_ms && eventWallMs < pauseEnd(p)) return false
     if (this.retentionDays !== null && eventWallMs < this.now() - this.retentionDays * DAY_MS) return false
     if (this.tombstones.length === 0) return true
     const site = siteOf(url)
@@ -551,59 +569,76 @@ export class Storage {
 
   // --- pause -----------------------------------------------------------------
 
-  /** Pauses capture until the given time, or until resumed when null. Nothing with an event time inside is stored. */
-  pause(untilWallMs: number | null): PauseState {
+  /** Pauses capture for an hour, until tomorrow, until resumed, or until a given time. Nothing stamped inside is stored. */
+  pause(until: PauseFor | number | null): PauseState {
     this.flushOrThrow()
-    if (this.pauseState) this.endPause('replaced')
-    const from = this.now()
-    const state = this.bus.commit('pause', { from_wall_ms: from, until_wall_ms: untilWallMs }, () => {
-      const gap = this.store.openGap({ reason: 'paused', scope: 'all', run: null, start: this.point(from), detail: null })
-      if (untilWallMs !== null) this.store.closeGap(gap, this.point(untilWallMs))
-      const s: PauseState = { from_wall_ms: from, until_wall_ms: untilWallMs, gap_id: gap }
-      this.putSetting('pause', s)
-      return s
-    }, (s) => {
-      this.pauseState = s
-      this.store.flush()
-      this.capture?.interrupt()
-    })
+    if (this.paused()) this.endPause('replaced')
+    const since = this.now()
+    const untilWallMs =
+      typeof until === 'number' ? until : until === 'hour' ? since + HOUR_MS : until === 'tomorrow' ? nextLocalMidnight(since) : null
+    const state = this.bus.commit(
+      'pause',
+      { since_wall_ms: since, until_wall_ms: untilWallMs },
+      () => {
+        const gap = this.store.openGap({ reason: 'paused', scope: 'all', run: null, start: this.point(since), detail: null })
+        if (untilWallMs !== null) this.store.closeGap(gap, this.point(untilWallMs))
+        const id = Number(this.db.prepare('INSERT INTO pauses (since_wall_ms, until_wall_ms, gap_id) VALUES (?, ?, ?)').run(since, untilWallMs, gap).lastInsertRowid)
+        return { id, since_wall_ms: since, until_wall_ms: untilWallMs, ended_wall_ms: null, gap_id: gap }
+      },
+      () => {
+        this.loadPauses()
+        this.store.flush()
+        this.capture?.interrupt()
+      },
+    )
     this.armPauseTimer()
     return state
   }
 
   resume(): void {
-    if (this.pauseState) this.endPause('resumed')
+    if (this.paused()) this.endPause('resumed')
   }
 
+  /** The active pause, if any. */
   paused(): PauseState | null {
-    return this.pauseState
+    return this.pauses.find((p) => p.ended_wall_ms === null) ?? null
+  }
+
+  private loadPauses(): void {
+    this.pauses = this.db.prepare('SELECT id, since_wall_ms, until_wall_ms, ended_wall_ms, gap_id FROM pauses ORDER BY id').all() as PauseState[]
   }
 
   private endPause(reason: 'resumed' | 'expired' | 'replaced'): void {
-    const p = this.pauseState
+    const p = this.paused()
     if (!p) return
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     this.pauseTimer = null
-    const end = p.until_wall_ms !== null && reason === 'expired' ? p.until_wall_ms : this.now()
-    this.bus.commit('pause', { ended: reason, at_wall_ms: end }, () => {
-      this.store.closeGap(p.gap_id, this.point(end))
-      this.db.prepare(`DELETE FROM settings WHERE key = 'pause'`).run()
-    }, () => {
-      this.pauseState = null
-      this.store.flush()
-      if (reason !== 'replaced') this.capture?.interrupt()
-    })
+    const end = p.until_wall_ms !== null && reason === 'expired' ? p.until_wall_ms : Math.max(p.since_wall_ms, this.now())
+    this.bus.commit(
+      'pause',
+      { ended: reason, at_wall_ms: end },
+      () => {
+        if (p.gap_id !== null) this.store.closeGap(p.gap_id, this.point(end))
+        this.db.prepare('UPDATE pauses SET ended_wall_ms = ? WHERE id = ?').run(end, p.id)
+      },
+      () => {
+        this.loadPauses()
+        this.store.flush()
+        if (reason !== 'replaced') this.capture?.interrupt()
+      },
+    )
   }
 
   private armPauseTimer(): void {
-    const p = this.pauseState
+    const p = this.paused()
     if (!p || p.until_wall_ms === null) return
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     // Timers run on monotonic time and drift across sleep; re-arm until the wall clock reaches the end.
     const wait = Math.min(Math.max(0, p.until_wall_ms - this.now()), 3_600_000)
     this.pauseTimer = setTimeout(() => {
       this.pauseTimer = null
-      if (this.pauseState && this.pauseState.until_wall_ms !== null && this.now() >= this.pauseState.until_wall_ms) this.endPause('expired')
+      const active = this.paused()
+      if (active && active.until_wall_ms !== null && this.now() >= active.until_wall_ms) this.endPause('expired')
       else this.armPauseTimer()
     }, wait)
     this.pauseTimer.unref?.()

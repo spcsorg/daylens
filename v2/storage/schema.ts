@@ -217,6 +217,28 @@ const searchDocsByHour: Migration = {
   up: (db) => db.exec('CREATE INDEX search_docs_hour_start ON search_docs(hour_start_wall_ms)'),
 }
 
+const pauses: Migration = {
+  name: 'pauses',
+  // Every pause, finished ones included: a line stamped inside a pause but delivered later is still refused.
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE pauses (
+        id INTEGER PRIMARY KEY,
+        since_wall_ms INTEGER NOT NULL,
+        until_wall_ms INTEGER,
+        ended_wall_ms INTEGER,
+        gap_id INTEGER
+      );
+    `)
+    const old = db.prepare(`SELECT value FROM settings WHERE key = 'pause'`).get() as { value: string } | undefined
+    if (old) {
+      const p = JSON.parse(old.value) as { from_wall_ms: number; until_wall_ms: number | null; gap_id: number }
+      db.prepare('INSERT INTO pauses (since_wall_ms, until_wall_ms, gap_id) VALUES (?, ?, ?)').run(p.from_wall_ms, p.until_wall_ms, p.gap_id)
+      db.exec(`DELETE FROM settings WHERE key = 'pause'`)
+    }
+  },
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -231,4 +253,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   searchIndex,
   searchPlainDeletes,
   searchDocsByHour,
+  pauses,
 ]
