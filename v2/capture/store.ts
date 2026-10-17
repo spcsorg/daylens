@@ -357,6 +357,11 @@ export class Store implements Sink {
 
   // --- Sink -------------------------------------------------------------
 
+  /** The connection, for storage modules in the same process. Only this process writes the database. */
+  get database(): Database.Database {
+    return this.db
+  }
+
   insertObservation(row: ObservationRow): number {
     const id = this.nextObsId++
     this.enqueue(
