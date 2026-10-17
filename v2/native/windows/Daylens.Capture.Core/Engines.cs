@@ -41,7 +41,9 @@ public static class Engines
             {
                 var name = Path.GetFileName(e);
                 entries.Add(name);
-                if (!Directory.Exists(e)) continue;
+                // Directory.Exists answers false on errors too; asking for the attributes throws instead, so an
+                // entry that cannot be examined makes the scan uncertain rather than hiding what is inside it.
+                if ((File.GetAttributes(e) & FileAttributes.Directory) == 0) continue;
                 var sub = Directory.EnumerateFileSystemEntries(e).Take(limit + 1).ToList();
                 if (sub.Count > limit) return null;
                 foreach (var s in sub) entries.Add(name + "/" + Path.GetFileName(s));

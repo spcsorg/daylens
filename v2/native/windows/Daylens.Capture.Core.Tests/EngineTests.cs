@@ -93,4 +93,14 @@ public class EngineTests
         try { Assert.Equal(Engine.Unknown, Engines.Classify(Engines.Scan(dir))); }
         finally { File.SetUnixFileMode(nested, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
     }
+
+    [Fact]
+    public void AFolderThatCanBeListedButNotTraversedIsUncertainNotNone()
+    {
+        if (OperatingSystem.IsWindows()) return; // Windows ACLs are covered on the VM
+        var dir = TempDir("browser.exe", "131.0.1/chrome.dll");
+        File.SetUnixFileMode(dir, UnixFileMode.UserRead);
+        try { Assert.Equal(Engine.Unknown, Engines.Classify(Engines.Scan(dir))); }
+        finally { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
 }
