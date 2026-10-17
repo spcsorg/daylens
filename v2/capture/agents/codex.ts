@@ -296,7 +296,6 @@ export class CodexParser implements LineParser {
       case 'task_complete':
       case 'turn_aborted': {
         this.counts.recognized++
-        this.counts.turns++
         if (!t || (typeof p.turn_id === 'string' && p.turn_id !== t.key && !t.key.endsWith(`:${p.turn_id}`))) return []
         const completed = typeof p.completed_at === 'number' ? p.completed_at * 1000 : null
         const fromDuration = typeof p.duration_ms === 'number' ? t.start + p.duration_ms : null

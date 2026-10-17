@@ -316,7 +316,6 @@ export class ClaudeParser implements LineParser {
   private assistant(o: Record<string, unknown>): AgentRecord[] {
     const env = this.envelope(o)
     if (!env) return []
-    this.counts.turns++
     const out = this.meta(o, env.at)
     if (o.isSidechain === true && !this.subagentFile) return out.concat(this.activity(env.at))
     const message = o.message as { id?: unknown; stop_reason?: unknown; content?: unknown } | undefined
@@ -431,6 +430,7 @@ export class ClaudeParser implements LineParser {
   }
 
   private open(key: string, opener: TurnOpener, at: number, act: UserAct | null, basis: 'marked' | 'inferred', text: string | null): AgentRecord[] {
+    this.counts.turns++
     const out = this.close('missing', null)
     this.s.pending = null
     // Message uuids survive a resumed or forked copy, so a turn and its acts are keyed on them alone.

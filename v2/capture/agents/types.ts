@@ -61,7 +61,7 @@ export interface ParseCounts {
   unknown: number
   // Records the reader understood.
   recognized: number
-  // Records that start, end or carry a turn: without them, nothing the agent did can be placed.
+  // Turns actually created; a completion alone does not establish a turn.
   turns: number
   // Agent activity outside any turn. Some is normal (imported histories); activity with no turn records at all means
   // the records that mark turns are no longer recognized.

@@ -334,6 +334,29 @@ test('renamed turn events are reported as degraded, never as a healthy quiet log
   r.store.close()
 })
 
+test('a renamed start with a recognized completion is reported as degraded', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const renamed = (at: number, kind: string, turn: string) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: kind, turn_id: turn } })
+  writeFileSync(
+    codexFile(r.home, c),
+    lines(
+      codex.meta(c, sec(0)),
+      renamed(sec(1), 'turn_began', 't1'),
+      codex.userItem(sec(1), 'go', ['user.text']),
+      codex.assistant(sec(5)),
+      codex.complete(sec(9), 't1', sec(1), sec(9)),
+    ),
+  )
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 0)
+  const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
+  assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
+  r.store.close()
+})
+
 test('the first read runs as several children over slices of the history, cutting files at line boundaries', async () => {
   const build = (home: string) => {
     const c = claudeCtx({ session: '33333333-3333-4333-8333-333333333333' })

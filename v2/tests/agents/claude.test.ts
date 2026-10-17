@@ -302,3 +302,10 @@ test('a finished turn stays finished: injected context and later notices never e
   assert.equal(of(recs2, 'turn').length, 2)
   assert.equal(Math.max(...of(recs2, 'activity').filter((a) => a.key === 'q1').map((a) => a.at)), sec(5))
 })
+
+test('turn health counts created turns rather than assistant reply blocks', () => {
+  const c = claudeCtx()
+  const p = new ClaudeParser(c.session, null, null)
+  const recs = run(p, [claude.prompt(c, sec(0), 'go'), claude.assistant(c, sec(1), 'tool_use'), claude.assistant(c, sec(2), 'end_turn')])
+  assert.equal(p.counts.turns, of(recs, 'turn').length)
+})
