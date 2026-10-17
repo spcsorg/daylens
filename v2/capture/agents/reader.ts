@@ -192,7 +192,13 @@ export class AgentReader {
     await this.discoverRoots()
     if (this.backfill && !this.store.hasSources()) {
       const plain = this.roots.filter((r) => !r.root.available).map(({ root }) => ({ agent: root.agent, dir: root.dir, layout: root.layout, ...(root.poll ? { poll: true } : {}) }))
-      if (plain.length > 0 && !(await this.backfill(plain))) this.log('agent backfill unavailable; reading history in this process')
+      let merged = false
+      try {
+        merged = plain.length > 0 && (await this.backfill(plain))
+      } catch (err) {
+        this.log(`agent backfill failed code=${errCode(err)}`)
+      }
+      if (plain.length > 0 && !merged) this.log('agent backfill unavailable; reading history in this process')
     }
     for (const r of this.roots) await this.reconcile(r)
     await this.drain()

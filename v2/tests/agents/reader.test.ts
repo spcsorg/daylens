@@ -377,6 +377,30 @@ test('the first read runs as several children over slices of the history, cuttin
   b.store.close()
 })
 
+test('a first read with no logs at all starts the readers', async () => {
+  const r = rig()
+  const reader = r.reader({ backfill: async (roots) => (await backfill(r.store.database, r.data, roots, () => {})).merged })
+  await reader.start()
+  await reader.stop()
+  assert.deepEqual(r.agents.health().map((h) => h.state), ['not_found', 'not_found', 'not_found'])
+  r.store.close()
+})
+
+test('a failed backfill still starts the readers', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  writeFileSync(claudeFile(r.home, c), lines(claude.prompt(c, sec(0), 'go', { uuid: 'bf1' }), claude.assistant(c, sec(3), 'end_turn')))
+  const broken = r.reader({
+    backfill: async () => {
+      throw new Error('boom')
+    },
+  })
+  await broken.start()
+  await broken.stop()
+  assert.equal(r.count(`SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'bf1'`), 1)
+  r.store.close()
+})
+
 test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {
   const [cl, cx, ar] = homeRoots('/h', {}) as [AgentRoot, AgentRoot, AgentRoot]
   assert.ok(classifyFile(cl, '/h/.claude/projects/-p/abc.jsonl'))

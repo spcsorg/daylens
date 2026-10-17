@@ -121,6 +121,7 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
   clean()
   try {
     const files = await listLogs(roots)
+    if (files.length === 0) return { merged: true, children: 0, child: null, merge_ms: 0, peaks_mb: [] }
     const total: BackfillStats = { wall_ms: 0, cpu_ms: 0, peak_rss_mb: 0, files_read: 0, mb_read: 0, lines: 0, records: 0 }
     const counts = new Map<string, RootCounts>()
     const peaks: number[] = []
