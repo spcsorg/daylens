@@ -82,6 +82,23 @@ export class ChangeBus {
   }
 }
 
+// The highest sequence already pruned from the log; a reader that has not reached it must refresh everything.
+export function changeFloor(db: Database.Database): number {
+  const r = db.prepare(`SELECT value FROM meta WHERE key = 'change_log_floor'`).get() as { value: string } | undefined
+  return r ? Number(r.value) : 0
+}
+
+/** Removes announcements older than keepFromWallMs, at most `limit`, and raises the floor in the same transaction. */
+export function pruneChangeLog(db: Database.Database, keepFromWallMs: number, limit: number): number {
+  return db.transaction(() => {
+    const top = db.prepare('SELECT max(seq) AS m FROM (SELECT seq FROM change_log WHERE at_wall_ms < ? ORDER BY seq LIMIT ?)').get(keepFromWallMs, limit) as { m: number | null }
+    if (top.m === null) return 0
+    const n = db.prepare('DELETE FROM change_log WHERE seq <= ?').run(top.m).changes
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('change_log_floor', ?) ON CONFLICT (key) DO UPDATE SET value = max(CAST(value AS INTEGER), excluded.value)`).run(String(top.m))
+    return n
+  })()
+}
+
 export function changesSince(db: Database.Database, seq: number, limit = 1000): Change[] {
   return (db.prepare('SELECT seq, at_wall_ms AS at, kind, payload FROM change_log WHERE seq > ? ORDER BY seq LIMIT ?').all(seq, limit) as {
     seq: number
@@ -100,11 +117,14 @@ export class ChangeWatcher {
   private readonly db: Database.Database
   private readonly dir: string
   private readonly onChange: (c: Change) => void
+  private readonly onReset: () => void
 
-  constructor(db: Database.Database, dir: string, onChange: (c: Change) => void, from: number | 'now' = 'now') {
+  /** onReset: announcements this reader had not seen were pruned; reload everything, then follow changes again. */
+  constructor(db: Database.Database, dir: string, onChange: (c: Change) => void, from: number | 'now' = 'now', opts: { onReset?: () => void } = {}) {
     this.db = db
     this.dir = dir
     this.onChange = onChange
+    this.onReset = opts.onReset ?? (() => {})
     this.last = from === 'now' ? ((db.prepare('SELECT max(seq) AS m FROM change_log').get() as { m: number | null }).m ?? 0) : from
   }
 
@@ -129,7 +149,11 @@ export class ChangeWatcher {
   catchUp(): void {
     for (;;) {
       // Each page is read in its own transaction, so it sees everything committed before it began.
-      const batch = this.db.transaction(() => changesSince(this.db, this.last))()
+      const { floor, batch } = this.db.transaction(() => ({ floor: changeFloor(this.db), batch: changesSince(this.db, this.last) }))()
+      if (this.last < floor) {
+        this.last = floor
+        this.onReset()
+      }
       for (const c of batch) {
         this.last = c.seq
         this.onChange(c)

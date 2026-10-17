@@ -8,7 +8,7 @@ import { applyMigrations } from '../../storage/migrations.ts'
 import { ChangeWatcher, SIGNAL_FILE } from '../../storage/changes.ts'
 import { writeFileSync } from 'node:fs'
 import { DB_FILE } from '../../capture/store.ts'
-import { rig as open } from './support.ts'
+import { rig as open, T0 } from './support.ts'
 
 test('named migrations apply once and are recorded by name', () => {
   const db = new Database(':memory:')
@@ -79,6 +79,30 @@ test('a watcher reacts to the signal however the platform names the rename', () 
   s.storage.db.prepare(`INSERT INTO change_log (at_wall_ms, kind, payload) VALUES (1, 'setting', '{}')`).run()
   w.onFsEvent(`${SIGNAL_FILE}.tmp`)
   assert.deepEqual(seen, [1])
+  w.stop()
+  reader.close()
+  s.close()
+})
+
+test('retention announces what it removed, and a reader behind the pruned log is told to refresh fully', async () => {
+  const s = open()
+  const reader = new Database(path.join(s.dir, DB_FILE), { readonly: true })
+  const seen: { kind: string; payload: Record<string, unknown> }[] = []
+  let resets = 0
+  const w = new ChangeWatcher(reader, s.dir, (c) => seen.push(c), 0, { onReset: () => resets++ })
+  s.storage.setSetting('a', 1)
+  s.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' })
+  s.clock.t = T0 + 30 * 86_400_000
+  s.storage.setRetentionDays(7)
+  s.storage.stop()
+  const local: Record<string, unknown>[] = []
+  s.storage.bus.on((c) => local.push(c.payload))
+  await s.storage.prune()
+  assert.ok(local.some((p) => p.pruned === true), `the removal is announced: ${JSON.stringify(local)}`)
+  w.catchUp()
+  assert.equal(resets, 1, 'the reader learns it missed pruned announcements')
+  assert.ok(seen.some((c) => c.payload.pruned === true))
+  assert.ok(!seen.some((c) => c.kind === 'hour'), 'pruned announcements are not replayed')
   w.stop()
   reader.close()
   s.close()

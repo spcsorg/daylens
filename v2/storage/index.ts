@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
 import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
-import { ChangeBus, type ChangeKind } from './changes.ts'
+import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
 import { Derived, HOUR_MS, hoursOf, nfc, siteOf } from './derive.ts'
 import { applyMigrations } from './migrations.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
@@ -155,6 +155,7 @@ export class Storage {
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onError: (code: string) => void
+  private prunedData = 0
 
   constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void } = {}) {
     this.store = store
@@ -690,8 +691,9 @@ export class Storage {
   /** Removes one small batch of rows older than the retention window; returns how many went. Each statement is its own short transaction. */
   pruneBatch(batch = PRUNE_BATCH): number {
     const now = this.now()
-    let n = this.db.prepare('DELETE FROM change_log WHERE seq IN (SELECT seq FROM change_log WHERE at_wall_ms < ? ORDER BY seq LIMIT ?)').run(now - CHANGE_LOG_KEEP_MS, batch).changes
-    if (this.retentionDays === null) return n
+    const logRows = pruneChangeLog(this.db, now - CHANGE_LOG_KEEP_MS, batch)
+    let n = 0
+    if (this.retentionDays === null) return logRows
     const cutoff = now - this.retentionDays * DAY_MS
     const statements = [
       'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
@@ -710,18 +712,22 @@ export class Storage {
       n += this.db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT ?)').run(cutoff, Math.ceil(batch / 25)).changes
       this.db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
     })()
-    return n
+    this.prunedData += n
+    return n + logRows
   }
 
   /** Prunes in batches, yielding to capture between them; then moves old pages out of the write-ahead log. */
   async prune(): Promise<number> {
     let total = 0
+    this.prunedData = 0
     for (;;) {
       const n = this.pruneBatch()
       total += n
       if (n === 0) break
       await new Promise((r) => setImmediate(r))
     }
+    // Readers holding pruned hours, intervals or search results must drop them.
+    if (this.prunedData > 0 && this.retentionDays !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: this.now() - this.retentionDays * DAY_MS }, () => {})
     if (total > 0) this.db.pragma('wal_checkpoint(TRUNCATE)')
     return total
   }
