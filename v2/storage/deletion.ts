@@ -7,6 +7,7 @@ import { Worker } from 'node:worker_threads'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ObservationRow } from '../capture/normalize.ts'
+import { MAX_ROW_SPAN_MS } from '../capture/store.ts'
 import { Derived, HOUR_MS, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
@@ -151,6 +152,15 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
   const logRows = timed(() => pruneChangeLog(db, logKeepFrom, batch))
   if (cutoff === null) return { removed: logRows, data: 0 }
   let n = 0
+  // A row that began before the cutoff but still covers kept time is trimmed to the cutoff, not deleted: capture may
+  // still be extending it. Rows span at most MAX_ROW_SPAN_MS, which bounds the scan.
+  timed(() => {
+    db.prepare(
+      `UPDATE observations SET event_mono_us = event_mono_us + (? - event_wall_ms) * 1000, event_wall_ms = ?
+       WHERE event_wall_ms >= ? AND event_wall_ms < ? AND last_seen_wall_ms > ?`,
+    ).run(cutoff, cutoff, cutoff - MAX_ROW_SPAN_MS, cutoff, cutoff)
+    db.prepare('UPDATE intervals SET start_wall_ms = ? WHERE start_wall_ms >= ? AND start_wall_ms < ? AND end_wall_ms > ?').run(cutoff, cutoff - MAX_INTERVAL_MS, cutoff, cutoff)
+  })
   for (const sql of [
     'DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms < ? ORDER BY event_wall_ms LIMIT ?)',
     'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',

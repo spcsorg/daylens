@@ -182,3 +182,30 @@ test('results hidden by a pending deletion do not crowd out the visible ones', (
   assert.ok(hits.every((h) => h.app_id === 'com.example.editor'))
   r.close()
 })
+
+test('retention trims a row that still covers kept time, and capture keeps extending it', async () => {
+  const r = rig()
+  const day = 24 * HOUR
+  r.clock.t = T0 + 10 * day
+  const id = r.store.insertObservation({
+    run: 'r', seq: 0, boot: 'b', platform: 'macos', source: 's', kind: 'focus', event_wall_ms: T0 + 4 * day, event_mono_us: 0, tz: 'Africa/Kigali', tz_offset_min: 120,
+    app_id: 'com.example.editor', app_name: 'Editor', app_path: null, pid: 1, window: 'w', title: 'long-lived.md - Editor', title_raw: null, title_state: 'ok', state: 'ok', detail: null,
+  })
+  for (let h = 1; h <= 6 * 24; h++) r.store.extendObservation(id, T0 + 4 * day + h * HOUR)
+  r.store.flush()
+  r.storage.setRetentionDays(7)
+  r.storage.stop()
+  await r.storage.prune()
+  assert.deepEqual(r.q(`SELECT event_wall_ms FROM observations WHERE id = ?`, id), [{ event_wall_ms: T0 + 4 * day }], 'started after the cutoff: untouched')
+  r.clock.t = T0 + 12 * day
+  r.storage.setRetentionDays(7)
+  r.storage.stop()
+  await r.storage.prune()
+  const cut = T0 + 5 * day
+  assert.deepEqual(r.q(`SELECT event_wall_ms FROM observations WHERE id = ?`, id), [{ event_wall_ms: cut }], 'trimmed to the cutoff, not deleted')
+  assert.equal(r.store.extendObservation(id, T0 + 10 * day + HOUR), true)
+  r.store.flush()
+  assert.deepEqual(r.q(`SELECT last_seen_wall_ms FROM observations WHERE id = ?`, id), [{ last_seen_wall_ms: T0 + 10 * day + HOUR }])
+  assert.deepEqual(r.q(`SELECT start_wall_ms FROM intervals WHERE obs_id = ?`, id), [{ start_wall_ms: cut }])
+  r.close()
+})

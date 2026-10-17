@@ -716,7 +716,9 @@ export class Storage {
 
   /** One retention batch on this connection (tests and tools); scheduled retention runs in the worker instead. */
   pruneBatch(batch = PRUNE_BATCH): number {
-    return pruneStep(this.db, this.cutoff(), this.now() - CHANGE_LOG_KEEP_MS, batch).removed
+    const removed = pruneStep(this.db, this.cutoff(), this.now() - CHANGE_LOG_KEEP_MS, batch).removed
+    this.store.forgetOpenRows()
+    return removed
   }
 
   /**
@@ -725,7 +727,10 @@ export class Storage {
    */
   async prune(): Promise<PruneResult> {
     const cutoff = this.cutoff()
+    // As at a deletion's fence: rows the prune trims are re-read from the database before capture extends them.
+    this.store.forgetOpenRows()
     const r = await this.deletions.prune(cutoff, this.now() - CHANGE_LOG_KEEP_MS)
+    this.store.forgetOpenRows()
     // Readers holding pruned hours, intervals or search results must drop them.
     if (r.data > 0 && cutoff !== null) this.bus.commit('retention', { pruned: true, cutoff_wall_ms: cutoff }, () => {})
     return r
