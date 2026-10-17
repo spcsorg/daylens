@@ -24,6 +24,11 @@ export function siteOf(url: string | null): string | null {
 const FILE_NAME =
   /[\p{L}\p{N}_@+-][\p{L}\p{N}_@+.-]*\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|txt|py|rb|go|rs|swift|kt|java|cs|c|h|cpp|hpp|m|mm|sql|sh|zsh|yml|yaml|toml|xml|html|css|scss|vue|svelte|pdf|docx?|xlsx?|pptx?|csv|key|pages|numbers|png|jpe?g|gif|svg|fig|sketch|psd|ai|mp4|mov|ipynb|lock|env|log)\b/giu
 
+// The index tokenizer folds only composed accents; decomposed text (common in macOS file names) would split at each mark.
+export function nfc(s: string | null): string | null {
+  return s === null ? null : s.normalize('NFC')
+}
+
 export function filesOf(title: string | null): string {
   if (!title) return ''
   return [...new Set(title.match(FILE_NAME) ?? [])].join(' ')
@@ -146,7 +151,7 @@ export class Derived {
 
   private write(i: IntervalRow): void {
     this.upsertInterval.run(i)
-    if (i.title !== null || i.url !== null) this.upsertDoc.run({ ...i, hour: hourStart(i.start_wall_ms, i.tz_offset_min) })
+    if (i.title !== null || i.url !== null) this.upsertDoc.run({ ...i, title: nfc(i.title), files: nfc(i.files), hour: hourStart(i.start_wall_ms, i.tz_offset_min) })
   }
 
   /** After a flush: re-derive from the focus row before the earliest touched observation to the end. */
@@ -173,7 +178,7 @@ export class Derived {
       del.run(h)
       // An interval belongs to hour h only if it starts within an hour of h, whatever its offset; filter exactly.
       for (const i of rows.all(h - HOUR_MS, h + HOUR_MS) as IntervalRow[]) {
-        if (hourStart(i.start_wall_ms, i.tz_offset_min) === h && (i.title !== null || i.url !== null)) this.upsertDoc.run({ ...i, hour: h })
+        if (hourStart(i.start_wall_ms, i.tz_offset_min) === h && (i.title !== null || i.url !== null)) this.upsertDoc.run({ ...i, title: nfc(i.title), files: nfc(i.files), hour: h })
       }
     }
   }

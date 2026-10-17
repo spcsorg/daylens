@@ -5,7 +5,7 @@ import type { ExclusionRule } from '../capture/defaults.ts'
 import type { GapPoint, ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
-import { Derived, HOUR_MS, hourStart, siteOf } from './derive.ts'
+import { Derived, HOUR_MS, hourStart, nfc, siteOf } from './derive.ts'
 import { applyMigrations } from './migrations.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 
@@ -486,7 +486,7 @@ export class Storage {
     if (text) {
       this.db
         .prepare(`INSERT INTO search_docs (kind, hour_start_wall_ms, hour_id, hour_text, first_wall_ms, last_wall_ms) VALUES ('hour', ?, ?, ?, ?, ?)`)
-        .run(h.start_wall_ms, id, text, h.start_wall_ms, h.end_wall_ms)
+        .run(h.start_wall_ms, id, nfc(text), h.start_wall_ms, h.end_wall_ms)
     }
   }
 
@@ -669,7 +669,7 @@ export class Storage {
 
   /** Words match anywhere in titles, addresses, file names and hour text; the last word also matches as a prefix. */
   search(text: string, opts: { limit?: number; fromWallMs?: number; toWallMs?: number } = {}): SearchHit[] {
-    const words = text.match(/[\p{L}\p{N}]+/gu) ?? []
+    const words = text.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []
     if (words.length === 0) return []
     const q = words.map((w, i) => `"${w}"${i === words.length - 1 ? '*' : ''}`).join(' ')
     return this.db
