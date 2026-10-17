@@ -114,3 +114,9 @@ test('percent-encoded and control-prefixed addresses inside parameters are decod
   assert.equal(cleanAddress('https://www.google.com/search?q=how+to+fix+this%3F'), 'https://www.google.com/search?q=how+to+fix+this%3F')
 })
 
+
+test('a parent-relative destination keeps its path text exactly, or is dropped whole', () => {
+  assert.equal(cleanAddress('https://a.example.com/?next=..%2Fcallback%3Fdoc%3D7&q=1'), 'https://a.example.com/?next=..%2Fcallback%3Fdoc%3D7&q=1')
+  assert.equal(cleanAddress('https://a.example.com/?next=..%2Fcallback%3Ftoken%3Dsecret%26doc%3D7&q=1'), 'https://a.example.com/?q=1')
+  assert.equal(cleanAddress('https://a.example.com/?next=.%2Fa%2F..%2Fb%3Fdoc%3D7'), 'https://a.example.com/?next=.%2Fa%2F..%2Fb%3Fdoc%3D7')
+})
