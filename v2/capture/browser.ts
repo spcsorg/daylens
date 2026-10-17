@@ -186,6 +186,9 @@ export class BrowserPages {
 
   private recompute(at: GapPoint, why: EndReason, cause: Line | null): void {
     const w = this.winner()
+    // The winner owns the page now; earlier claims from other profiles are retired, so when the owner withdraws or
+    // goes away the page is unknown until someone makes a fresh claim.
+    if (w) for (const [id, c] of this.conns) if (id !== w.id) c.claim = null
     const url = w ? cleanAddress(w.claim.line.obs.url) : null
     if (!w || url === null) return this.setNone(at, w ? 'no_address' : why, cause)
     const title = w.claim.line.obs.title === null ? null : cleanTitle(w.claim.line.obs.title)

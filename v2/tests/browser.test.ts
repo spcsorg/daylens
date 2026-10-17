@@ -296,3 +296,24 @@ test('a snapshot reply counts only for the focus epoch that asked for it', async
   assert.deepEqual(pageRows().map((r) => r.url), ['https://example.com/w2'])
 })
 
+
+test('when ownership moves to another profile, the earlier profile cannot come back without a fresh claim', async () => {
+  for (const ending of ['b-withdraws', 'b-disconnects', 'a-withdraws-first'] as const) {
+    const { pages, norm, pageRows } = setup()
+    const a = new Host(pages, chrome)
+    const b = new Host(pages, chrome)
+    norm.handle(focus(chrome, null, 1000, 'app_changed'))
+    a.page('https://a.example.com/', 'A', 1010)
+    b.page('https://b.example.com/', 'B', 2000)
+    if (ending === 'b-withdraws') b.unknown('no_focused_window', 3000)
+    if (ending === 'b-disconnects') pages.disconnect(b.id)
+    if (ending === 'a-withdraws-first') {
+      a.unknown('no_focused_window', 2500)
+      assert.deepEqual(pageRows().at(-1)!.url, 'https://b.example.com/', 'a profile that no longer owns the page cannot end it')
+      b.unknown('no_focused_window', 3000)
+    }
+    assert.deepEqual(pageRows().map((r) => r.url ?? r.state), ['https://a.example.com/', 'https://b.example.com/', 'unknown'], ending)
+    a.page('https://a.example.com/', 'A', 4000)
+    assert.equal(pageRows().at(-1)!.url, 'https://a.example.com/', `${ending}: a fresh claim takes over again`)
+  }
+})
