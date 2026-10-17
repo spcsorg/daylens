@@ -1,5 +1,6 @@
 // Intervals and activity search documents, derived from observations. Both can be dropped and rebuilt.
 import type Database from 'better-sqlite3'
+import { MAX_ROW_SPAN_MS } from '../capture/store.ts'
 import { hasColumn } from './migrations.ts'
 
 export const HOUR_MS = 3_600_000
@@ -11,8 +12,9 @@ export function hourStart(wallMs: number, tzOffsetMin: number): number {
   return Math.floor((wallMs + off) / HOUR_MS) * HOUR_MS - off
 }
 
-// Locks, sleep and gaps end intervals long before this; it bounds the scan when an hour's documents are rebuilt.
-export const MAX_INTERVAL_MS = 7 * 86_400_000
+// No row spans more than MAX_ROW_SPAN_MS (the store enforces it) and an interval runs at most CONTINUITY_MS past its
+// row; together they bound the scans for rows crossing a time.
+export const MAX_INTERVAL_MS = MAX_ROW_SPAN_MS + CONTINUITY_MS
 
 /** Every local hour that [start, end] touches; a zero-length interval belongs to the hour it starts in. */
 export function hoursOf(startWallMs: number, endWallMs: number, tzOffsetMin: number): number[] {

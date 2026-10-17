@@ -9,6 +9,8 @@ import type { Line, LineOf } from './protocol.ts'
 export const DB_FILE = 'daylens-v2.sqlite'
 const SCHEMA_VERSION = 3
 const FLUSH_INTERVAL_MS = 1000
+// The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
+export const MAX_ROW_SPAN_MS = 7 * 86_400_000
 const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
 
@@ -415,6 +417,10 @@ export class Store implements Sink {
   extendObservation(id: number, lastSeenWallMs: number): boolean {
     if (id === Store.REFUSED) return false
     const open = this.openRows.get(id) ?? this.storedOpenRow(id)
+    if (open && lastSeenWallMs - open.row.event_wall_ms > MAX_ROW_SPAN_MS) {
+      this.openRows.delete(id)
+      return false
+    }
     if (open && lastSeenWallMs > open.lastSeen) {
       if (!this.acceptExtension(open.row, open.lastSeen, lastSeenWallMs)) {
         this.openRows.delete(id)

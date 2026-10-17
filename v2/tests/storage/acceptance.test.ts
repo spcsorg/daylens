@@ -582,3 +582,18 @@ test('a row trimmed by a deletion cannot be stretched back over the range from a
   assert.deepEqual(r.q(`SELECT id FROM observations WHERE event_wall_ms < ? AND last_seen_wall_ms > ?`, T0 + 10 * MIN, T0 + 5 * MIN), [])
   r.close()
 })
+
+test('no row spans more than the longest interval the edge scan covers, so a deletion late in a long sighting still trims it', async () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'server-console - Editor', T0))
+  for (let h = 1; h <= 8 * 24; h++) r.feed(focus(editor, 'server-console - Editor', T0 + h * HOUR, 'reconcile'))
+  r.store.flush()
+  const spans = r.q<{ s: number }>(`SELECT last_seen_wall_ms - event_wall_ms AS s FROM observations WHERE kind = 'focus'`)
+  assert.ok(spans.length >= 2 && spans.every((x) => x.s <= 7 * 24 * HOUR), JSON.stringify(spans))
+  const from = T0 + 7 * 24 * HOUR + 12 * HOUR
+  r.clock.t = T0 + 9 * 24 * HOUR
+  await r.storage.deleteRange(from, from + HOUR).done
+  assert.deepEqual(r.q(`SELECT id FROM observations WHERE event_wall_ms < ? AND last_seen_wall_ms > ?`, from + HOUR, from), [])
+  r.close()
+})
