@@ -5,6 +5,7 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import { HOUR, rig, T0 } from './support.ts'
+import { DeletionWorker } from '../../storage/deletion.ts'
 
 function row(t: number, app: string, title: string): ObservationRow {
   return {
@@ -70,4 +71,14 @@ test('a deletion left pending by a crash is still in force, and finishes at the 
   assert.deepEqual(r2.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
   assert.deepEqual(r2.storage.search('chat'), [])
   r2.close()
+})
+
+test('a job sent right after the worker is closed runs on a new worker; the old one exiting does not fail it', async () => {
+  const r = rig()
+  const w = new DeletionWorker(path.join(r.dir, DB_FILE))
+  await w.purge(0)
+  void w.close()
+  assert.equal(typeof (await w.purge(0)), 'boolean')
+  await w.close()
+  r.close()
 })

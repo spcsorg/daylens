@@ -372,7 +372,8 @@ export class Deleter {
 export class DeletionWorker {
   private worker: Worker | null = null
   private next = 1
-  private readonly pending = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>()
+  // Each job remembers its worker: a closed worker exiting fails only the jobs it was given.
+  private readonly pending = new Map<number, { worker: Worker; resolve: (r: unknown) => void; reject: (e: Error) => void }>()
   private readonly file: string
   private idle: ReturnType<typeof setTimeout> | null = null
 
@@ -402,7 +403,7 @@ export class DeletionWorker {
     const id = this.next++
     w.ref()
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      this.pending.set(id, { worker: w, resolve, reject })
       w.postMessage({ id, ...job })
     })
   }
@@ -415,7 +416,7 @@ export class DeletionWorker {
     w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)
-      if (this.pending.size === 0) {
+      if (![...this.pending.values()].some((p) => p.worker === w)) {
         w.unref()
         this.idle = setTimeout(() => void this.close(), DeletionWorker.IDLE_EXIT_MS)
         this.idle.unref()
@@ -424,18 +425,21 @@ export class DeletionWorker {
       if (m.error === undefined) p.resolve(m.result)
       else p.reject(new Error(m.error))
     })
-    w.on('error', (err) => this.failAll(err as Error))
+    w.on('error', (err) => this.failAll(w, err as Error))
     w.on('exit', () => {
       if (this.worker === w) this.worker = null
-      this.failAll(new Error('deletion worker stopped'))
+      this.failAll(w, new Error('deletion worker stopped'))
     })
     this.worker = w
     return w
   }
 
-  private failAll(err: Error): void {
-    for (const p of this.pending.values()) p.reject(err)
-    this.pending.clear()
+  private failAll(w: Worker, err: Error): void {
+    for (const [id, p] of this.pending) {
+      if (p.worker !== w) continue
+      this.pending.delete(id)
+      p.reject(err)
+    }
   }
 
   async close(): Promise<void> {
