@@ -58,7 +58,7 @@ test('every address from the earlier review rounds keeps only what the rule allo
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf&t=42s', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf&t=42s'],
     ['https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef?pvs=4', 'https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef'],
     ['https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef&pm=s', 'https://www.notion.so/acme'],
-    ['https://shop.example.com/s?k=iPhone15ProMaxCase2026&ref=nb_sb_noss', 'https://shop.example.com/s?k=iPhone15ProMaxCase2026'],
+    ['https://www.amazon.com/s?k=iphone+15+pro+max+case&ref=nb_sb_noss', 'https://www.amazon.com/s?k=iphone+15+pro+max+case'],
     ['https://x.example.com/dl?h=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', 'https://x.example.com/dl'],
   ]
   for (const [raw, want] of cases) assert.equal(cleanAddress(raw), want, raw)
@@ -223,3 +223,27 @@ test('the named search and identity parameters of common sites stay; calendar sr
   const tracking = '_ga _gl gclid gclsrc dclid gbraid wbraid fbclid msclkid ttclid twclid li_fat_id yclid ysclid igshid srsltid mc_cid mc_eid _hsenc _hsmi __hssc __hstc hsCtaTracking mkt_tok oly_enc_id oly_anon_id vero_id vero_conv rb_clickid s_kwcid ef_id _openstat trk trkCampaign cmpid campaignid campaign_id adgroupid adid ad_id creative keyword matchtype network device placement utm_source utm_medium utm_campaign utm_term utm_content utm_id ref ref_src ref_url si spm scm share_id feature pp sxsrf ved ei gs_lcrp sca_esv rlz oq aqs sourceid ie uact zx'
   for (const name of tracking.split(' ')) assert.equal(keptParam(name), null, name)
 })
+
+test('short search aliases keep only text; every search drops a JSON object or array', () => {
+  const lynx = '%7B%22u%22%3A%22ana%40example.com%22%2C%22c%22%3A%22CANARY_CRED_7f3a%22%7D'
+  const cases: [string, string][] = [
+    ['https://assets.imgix.net/photo.jpg?w=800&s=9f86d081884c7d659a2feaa0c55ad015', 'https://assets.imgix.net/photo.jpg'],
+    [`https://app.lynxlog.example/login?k=${lynx}`, 'https://app.lynxlog.example/login'],
+    ['https://app.lynxlog.example/login?k=eyJ1IjoiYW5hQGV4YW1wbGUuY29tIiwiYyI6IkNBTkFSWV9DUkVEXzdmM2EifQ', 'https://app.lynxlog.example/login'],
+    ['https://x.example.com/?s=q8Z2kP0vLm3NcT7aB1sD4fGh', 'https://x.example.com/'],
+    [`https://x.example.com/?q=${lynx}&hl=en`, 'https://x.example.com/?hl=en'],
+    [`https://x.example.com/?query=%5B%22CANARY%22%2C1%5D&hl=en`, 'https://x.example.com/?hl=en'],
+    [`https://x.example.com/?search=${encodeURIComponent(lynx)}&hl=en`, 'https://x.example.com/?hl=en'],
+  ]
+  for (const [raw, want] of cases) assert.equal(cleanAddress(raw), want, raw)
+  same('https://blog.example.com/?s=quarterly+report+2026')
+  same('https://www.amazon.com/s?k=iphone+15+pro+max+case')
+  same('https://www.amazon.com/s?k=Kraftfahrzeughaftpflichtversicherung')
+  same('https://www.amazon.de/s?k=Kinderwagenregenschutz')
+  same('https://blog.example.com/?s=SchwarzwaelderKirschtorte')
+  assert.equal(cleanAddress('https://www.amazon.com/s?k=iPhone15ProMaxCase2026'), 'https://www.amazon.com/s', 'one key-shaped token in a short alias goes')
+  same('https://www.google.com/search?q=iPhone15ProMaxCase2026')
+  same('https://www.google.com/search?q=q8Z2kP0vLm3NcT7aB1sD4fGh')
+  same('https://www.google.com/search?q=%7Bnot+json%7D')
+})
+

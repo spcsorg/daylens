@@ -7,8 +7,10 @@ export const MAX_ADDRESS_CHARS = 2048
 const KEPT_SCHEMES = new Set(['http:', 'https:', 'file:'])
 
 // Names are compared lowercased with separators removed, so node-id, nodeId and NODE_ID are the same name.
-// Searches hold typed text and identities are random by design, so neither gets a value-shape rule.
-const SEARCH_NAMES = new Set(['q', 'query', 'search', 's', 'k', 'searchquery', 'term', 'nkw'])
+// Searches hold typed text and identities are random by design, so neither gets the key-shape rule; the one-letter
+// aliases s and k also name signatures and login payloads on some sites, so they get it.
+const SEARCH_NAMES = new Set(['q', 'query', 'search', 'searchquery', 'term', 'nkw'])
+const ALIAS_NAMES = new Set(['s', 'k'])
 const IDENTITY_NAMES = new Set(['id', 'ids', 'v', 'list', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev', 'sourcedoc', 'th'])
 // Short generic names carry credentials on some sites, so they keep only the one shape they mean.
 const NUMBER_NAMES = new Set(['p', 'page'])
@@ -34,7 +36,7 @@ const SECRET_PARTS = [
   'authoriz', 'verifier', 'credential', 'authkey', 'resourcekey', 'sharekey', 'signingkey', 'secretkey', 'encryptionkey',
 ]
 
-type Kind = 'search' | 'identity' | 'number' | 'time' | 'view'
+type Kind = 'search' | 'alias' | 'identity' | 'number' | 'time' | 'view'
 
 function joinedName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -58,6 +60,7 @@ export function keptParam(name: string): Kind | null {
   const joined = joinedName(name)
   if (isSecretName(name) || TRACKING_NAME.test(joined)) return null
   if (SEARCH_NAMES.has(joined)) return 'search'
+  if (ALIAS_NAMES.has(joined)) return 'alias'
   if (IDENTITY_NAMES.has(joined)) return 'identity'
   if (NUMBER_NAMES.has(joined)) return 'number'
   if (TIME_NAMES.has(joined)) return 'time'
@@ -110,21 +113,35 @@ function entropy(s: string): number {
   return h
 }
 
-// Long hex, or 20+ characters of one base64 alphabet with few separators, two character classes and 3.5+ bits each.
+// 32+ hex mixing digits and letters, or 20+ characters of one base64 alphabet with few separators, two character
+// classes, 3.5+ bits each, and a digit or four capitals after the first letter (a capitalized compound word has neither).
 function looksGenerated(value: string): boolean {
   const s = value.replace(/=+$/, '')
   if (!/^[A-Za-z0-9+/_-]+$/.test(s)) return false
   if (/^[0-9a-f]+$/i.test(s)) return s.length >= 32 && /[0-9]/.test(s) && /[a-f]/i.test(s)
   if (s.length < 20 || (s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
   const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((r) => r.test(s)).length
-  return classes >= 2 && entropy(s) >= 3.5
+  const capitals = s.slice(1).match(/[A-Z]/g)?.length ?? 0
+  return classes >= 2 && entropy(s) >= 3.5 && (/[0-9]/.test(s) || capitals >= 4)
 }
 
 function fitsKind(form: string, kind: Kind): boolean {
   if (kind === 'number') return NUMBER_VALUE.test(form)
   if (kind === 'time') return TIME_VALUE.test(form)
   if (kind === 'view') return !UUID_VALUE.test(form) && !LONG_HEX.test(form) && !looksGenerated(form)
+  if (kind === 'alias') return !isJsonContainer(form) && !LONG_HEX.test(form) && !looksGenerated(form)
+  if (kind === 'search') return !isJsonContainer(form)
   return true
+}
+
+function isJsonContainer(form: string): boolean {
+  if (!/^[[{]/.test(form)) return false
+  try {
+    const v: unknown = JSON.parse(form)
+    return typeof v === 'object' && v !== null
+  } catch {
+    return false
+  }
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
@@ -147,6 +164,7 @@ function looksLikeAddress(f: string): boolean {
 // A kept value is never rewritten: it stays as written, or null drops it. Every control-stripped, percent-decoded form
 // is judged, and any credential, token, generated-looking view value, or address the rule would change drops it.
 function cleanValue(value: string, depth: number, kind: Kind): string | null {
+  const isAddress = looksLikeAddress
   let f = value.replace(CONTROLS, '').trim()
   const forms = [f]
   for (let i = 0; i < MAX_DECODES && /%[0-9a-f]{2}/i.test(f); i++) {
@@ -154,7 +172,7 @@ function cleanValue(value: string, depth: number, kind: Kind): string | null {
     try {
       d = decodeURIComponent(f)
     } catch {
-      if (forms.some(looksLikeAddress)) return null
+      if (forms.some(isAddress)) return null
       break
     }
     d = d.replace(CONTROLS, '').trim()
@@ -165,7 +183,7 @@ function cleanValue(value: string, depth: number, kind: Kind): string | null {
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
     if (isCredential(form) || isJwt(form) || !fitsKind(form, kind)) return null
-    if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
+    if (DROPPED_ADDRESS.test(form) || (isAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
 }
