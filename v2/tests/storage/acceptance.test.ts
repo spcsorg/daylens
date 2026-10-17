@@ -82,13 +82,13 @@ test('deletion reaches everything: one app, across days, and the hours that drew
   r.store.flush()
   const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Quokka chat', sources: [{ app_id: 'com.example.chat' }, { app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0))
   const h2 = r.storage.writeHour({ start_wall_ms: T0 + 2 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Editing only', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0 + 2 * HOUR))
-  r.storage.recordAssistantRead({ assistant: 'claude', tool: 'search', from_wall_ms: T0, to_wall_ms: T0 + 48 * HOUR, query: 'time in Chat this week' })
+  r.storage.recordAssistantRead({ assistant: 'claude', tool: 'search', from_wall_ms: T0, to_wall_ms: T0 + 48 * HOUR, query: 'time in Chat this week', sources: [{ app_id: 'com.example.chat' }] })
 
   r.storage.deleteSource('com.example.chat')
   assert.deepEqual(containsAnywhere(r, 'Quokka'), [])
   // The tombstone keeps the app id so a re-import can be refused; nothing else does.
   assert.deepEqual(containsAnywhere(r, 'com.example.chat').filter((w) => !w.startsWith('disk:')), [])
-  assert.equal(r.q(`SELECT 1 FROM assistant_reads`).length, 0, 'the read that asked about Chat by name is gone')
+  assert.equal(r.q(`SELECT 1 FROM assistant_reads`).length, 0, 'the read that returned Chat activity is gone')
   assert.equal(r.storage.hour(h1.id)!.needs_rewrite, true)
   assert.deepEqual(r.storage.hour(h1.id)!.sources, [{ app_id: 'com.example.editor' }])
   assert.equal(r.storage.hour(h2.id)!.title, 'Editing only', 'hours that never used the app keep their text')
@@ -496,5 +496,21 @@ test('deletion reaches threads: orphaned threads go, shared ones lose a title th
   r.clock.t = T0 + 5 * HOUR
   r.storage.deleteEverything()
   assert.deepEqual(r.q(`SELECT id FROM threads`), [])
+  r.close()
+})
+
+test('deleting an app removes the assistant reads that touched it, by what they read, not by the words of the question', () => {
+  resetSeq()
+  const r = rig()
+  day(r, T0, [[chat, 'thread'], [editor, 'notes.md - Editor']])
+  const h = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Talked', sources: [{ app_id: 'com.example.chat' }] }, r.storage.hourBasis(T0))
+  const span = { from_wall_ms: T0, to_wall_ms: T0 + HOUR }
+  const direct = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getAppUsage', ...span, query: 'show my messages', sources: [{ app_id: 'com.example.chat' }] })
+  const viaHour = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getDaySummary', ...span, query: 'summarise', hours: [h.id] })
+  const unrelated = r.storage.recordAssistantRead({ assistant: 'claude', tool: 'getAppUsage', ...span, query: 'did I use Chat or the editor more?', sources: [{ app_id: 'com.example.editor' }] })
+  r.clock.t = T0 + 2 * HOUR
+  r.storage.deleteSource('com.example.chat')
+  assert.deepEqual(r.q<{ id: number }>(`SELECT id FROM assistant_reads ORDER BY id`).map((x) => x.id), [unrelated])
+  assert.ok(direct && viaHour)
   r.close()
 })

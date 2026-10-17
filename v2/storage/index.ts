@@ -120,6 +120,9 @@ export interface AssistantRead {
   from_wall_ms: number
   to_wall_ms: number
   query?: string | null
+  // What the read returned: hours, and apps or sites whose activity it showed.
+  hours?: number[]
+  sources?: HourSource[]
 }
 
 export interface SearchHit {
@@ -392,7 +395,6 @@ export class Storage {
     const to = t.to_wall_ms ?? Number.MAX_SAFE_INTEGER
     const r: DeletionResult = { tombstone, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0 }
     const touchedHours = new Set<number>()
-    const appNames: string[] = []
     const hasUrl = (db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'url'`).get() as unknown) !== undefined
     const bounded = t.from_wall_ms !== null && t.to_wall_ms !== null
     const tomb = { ...t, id: tombstone } as Tombstone
@@ -402,11 +404,6 @@ export class Storage {
     const ivMatch = t.kind === 'range' ? '1' : t.kind === 'source' ? 'lower(app_id) = @app' : `(site = @site OR site LIKE '%.' || @site)`
     const args = { from, to, app: t.app_id, site: t.site, lo: from - MAX_INTERVAL_MS }
 
-    if (t.kind === 'source') {
-      for (const { n } of db.prepare('SELECT DISTINCT lower(app_name) AS n FROM intervals WHERE lower(app_id) = ? AND app_name IS NOT NULL').all(t.app_id) as { n: string }[]) {
-        if (n.length >= 3) appNames.push(n)
-      }
-    }
     // Hours whose search entries may change: every hour an affected interval touched, by start or by overlap.
     for (const row of db
       .prepare(`SELECT start_wall_ms, end_wall_ms, tz_offset_min FROM intervals WHERE ${ivMatch} AND ((start_wall_ms >= @from AND start_wall_ms < @to) OR (end_wall_ms > @from AND start_wall_ms < @to))`)
@@ -464,6 +461,9 @@ export class Storage {
       sources: string
     }[]
     const threadOf = db.prepare('SELECT thread_id AS id FROM thread_hours WHERE hour_id = ?')
+    // Reads that returned an affected hour saw its text; collected before the hour is removed or cleared.
+    const readsOfHour = db.prepare('SELECT read_id AS id FROM assistant_read_items WHERE hour_id = ?')
+    const touchedReads = new Set<number>()
     const touchedThreads = new Set<number>()
     for (const h of hours) {
       const sources = JSON.parse(h.sources) as HourSource[]
@@ -473,6 +473,7 @@ export class Storage {
         (t.kind === 'site' && sources.some((s) => matchesSite(s.site?.toLowerCase() ?? null, t.site!)))
       if (!affected) continue
       for (const { id } of threadOf.all(h.id) as { id: number }[]) touchedThreads.add(id)
+      for (const { id } of readsOfHour.all(h.id) as { id: number }[]) touchedReads.add(id)
       if (t.kind === 'range' && h.start_wall_ms >= from && h.end_wall_ms <= to) {
         db.prepare('DELETE FROM search_docs WHERE hour_id = ?').run(h.id)
         db.prepare('DELETE FROM hours WHERE id = ?').run(h.id)
@@ -494,13 +495,21 @@ export class Storage {
       db.prepare('DELETE FROM threads WHERE created_wall_ms >= ? AND created_wall_ms < ? AND id NOT IN (SELECT thread_id FROM thread_hours)').run(from, to)
     }
 
+    // Reads go by what they read: any read over a deleted range, a read that returned the deleted app or site within
+    // its span, and a read that returned an affected hour.
     if (t.kind === 'range') {
-      r.assistantReads = db.prepare('DELETE FROM assistant_reads WHERE to_wall_ms > ? AND from_wall_ms < ?').run(from, to).changes
+      for (const { id } of db.prepare('SELECT id FROM assistant_reads WHERE to_wall_ms > ? AND from_wall_ms < ?').all(from, to) as { id: number }[]) touchedReads.add(id)
     } else {
-      // A read is about the deleted material when its question names it: the app id, the app's name, or the site.
-      const del = db.prepare(`DELETE FROM assistant_reads WHERE to_wall_ms > ? AND from_wall_ms < ? AND instr(lower(coalesce(query, '')), ?) > 0`)
-      for (const needle of new Set([t.app_id ?? t.site!, ...appNames])) r.assistantReads += del.run(from, to, needle).changes
+      const items =
+        t.kind === 'source'
+          ? db.prepare('SELECT i.read_id AS id FROM assistant_read_items i JOIN assistant_reads a ON a.id = i.read_id WHERE i.app_id = ? AND a.to_wall_ms > ? AND a.from_wall_ms < ?').all(t.app_id, from, to)
+          : db
+              .prepare(`SELECT i.read_id AS id FROM assistant_read_items i JOIN assistant_reads a ON a.id = i.read_id WHERE (i.site = ? OR i.site LIKE '%.' || ?) AND a.to_wall_ms > ? AND a.from_wall_ms < ?`)
+              .all(t.site, t.site, from, to)
+      for (const { id } of items as { id: number }[]) touchedReads.add(id)
     }
+    const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
+    for (const id of touchedReads) r.assistantReads += delRead.run(id).changes
     return r
   }
 
@@ -817,11 +826,17 @@ export class Storage {
   }
 
   recordAssistantRead(r: AssistantRead): number {
-    return Number(
-      this.db
-        .prepare('INSERT INTO assistant_reads (assistant, at_wall_ms, tool, from_wall_ms, to_wall_ms, query) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(r.assistant, this.now(), r.tool, r.from_wall_ms, r.to_wall_ms, r.query ?? null).lastInsertRowid,
-    )
+    return this.db.transaction(() => {
+      const id = Number(
+        this.db
+          .prepare('INSERT INTO assistant_reads (assistant, at_wall_ms, tool, from_wall_ms, to_wall_ms, query) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(r.assistant, this.now(), r.tool, r.from_wall_ms, r.to_wall_ms, r.query ?? null).lastInsertRowid,
+      )
+      const item = this.db.prepare('INSERT INTO assistant_read_items (read_id, hour_id, app_id, site) VALUES (?, ?, ?, ?)')
+      for (const h of r.hours ?? []) item.run(id, h, null, null)
+      for (const s of r.sources ?? []) item.run(id, null, s.app_id?.toLowerCase() ?? null, s.site?.toLowerCase().replace(/^www\./, '') ?? null)
+      return id
+    })()
   }
 
   // --- search ----------------------------------------------------------------

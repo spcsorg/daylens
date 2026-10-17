@@ -245,6 +245,24 @@ const threadsNeedRewrite: Migration = {
   up: (db) => db.exec('ALTER TABLE threads ADD COLUMN needs_rewrite INTEGER NOT NULL DEFAULT 0'),
 }
 
+const assistantReadItems: Migration = {
+  name: 'assistant_read_items',
+  // What each read touched (hours, apps, sites), so a deletion removes exactly the reads that saw the material.
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE assistant_read_items (
+        read_id INTEGER NOT NULL REFERENCES assistant_reads(id) ON DELETE CASCADE,
+        hour_id INTEGER,
+        app_id TEXT,
+        site TEXT
+      );
+      CREATE INDEX assistant_read_items_read ON assistant_read_items(read_id);
+      CREATE INDEX assistant_read_items_hour ON assistant_read_items(hour_id);
+      CREATE INDEX assistant_read_items_app ON assistant_read_items(app_id);
+      CREATE INDEX assistant_read_items_site ON assistant_read_items(site);
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -261,4 +279,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   searchDocsByHour,
   pauses,
   threadsNeedRewrite,
+  assistantReadItems,
 ]
