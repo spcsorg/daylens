@@ -49,6 +49,9 @@ notice when you switch tabs or windows. Daylens shows those pages in your day an
 **nativeMessaging**: To hand that page to the Daylens app on your own computer. This is the only place the extension
 sends anything. Nothing goes to a server.
 
+**alarms**: To try connecting to the Daylens app again after it was closed or restarted, at most every five minutes,
+even after the browser has put the extension's background to sleep. It shows no install warning and reads nothing.
+
 **Host permissions**: None. The extension has no content scripts and can't read or change any page.
 
 **Local connection (Windows)**: Where the browser can't reach the Daylens app through native messaging (the Microsoft

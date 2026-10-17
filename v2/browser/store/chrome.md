@@ -10,6 +10,7 @@ Package: `dist/daylens-chromium-<version>.zip`. Arc and Dia install the same ite
 | Single purpose | [listing.md, Single purpose](listing.md#single-purpose) |
 | Permission justification: `tabs` | [listing.md](listing.md#permission-justifications) |
 | Permission justification: `nativeMessaging` | [listing.md](listing.md#permission-justifications) |
+| Permission justification: `alarms` | [listing.md](listing.md#permission-justifications) |
 | Host permissions | None requested |
 | Remote code | No |
 | Data usage: categories | Web history |

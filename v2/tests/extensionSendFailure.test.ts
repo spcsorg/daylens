@@ -29,6 +29,7 @@ const fake = {
     onStartup: event(),
     onInstalled: event(),
   },
+  alarms: { create: () => {}, clear: async () => true, onAlarm: event() },
   windows: { getAll: async () => [], onFocusChanged: event(), onRemoved: event() },
   tabs: { query: async () => [], create: async () => ({}), remove: async () => {}, onActivated: event(), onUpdated: event(), onRemoved: event(), onReplaced: event() },
 }

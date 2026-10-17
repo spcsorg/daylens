@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Lets Daylens on this computer see which page you're on, so you can find it again. Never in private windows.",
   "minimum_chrome_version": "120",
-  "permissions": ["tabs", "nativeMessaging"],
+  "permissions": ["tabs", "nativeMessaging", "alarms"],
   "incognito": "not_allowed",
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {

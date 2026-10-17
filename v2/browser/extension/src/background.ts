@@ -33,6 +33,11 @@ interface Ext {
     onStartup: Event<() => void>
     onInstalled: Event<() => void>
   }
+  alarms: {
+    create(name: string, info: { when: number }): void
+    clear(name: string): Promise<boolean>
+    onAlarm: Event<(alarm: { name: string }) => void>
+  }
   windows: {
     getAll(opts?: { windowTypes?: string[] }): Promise<Win[]>
     onFocusChanged: Event<(windowId: number) => void>
@@ -72,6 +77,10 @@ let pairPending = false
 let awaitingAllow = false
 let pairTab: number | null = null
 let pairRetry: ReturnType<typeof setTimeout> | null = null
+// Chrome stops an idle service worker after 30 s and its timers with it; a longer wait is an alarm, which wakes it.
+const ALARM_AFTER_MS = 25_000
+const ALARM_RECONNECT = 'daylens-reconnect'
+const ALARM_PAIR = 'daylens-pair'
 let browserPause: { until: number | null } | null = null
 let pauseTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = RETRY_MIN_MS
@@ -233,17 +242,20 @@ async function connectLocalNow(): Promise<void> {
 // After a failed connect or a lost connection, try again on a timer: 1 s, doubling to 5 minutes.
 function backOff(): void {
   nextAttemptAt = Date.now() + retryMs
-  if (reconnectTimer) clearTimeout(reconnectTimer)
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    ensureLink()
-  }, retryMs)
+  cancelReconnect()
+  if (retryMs <= ALARM_AFTER_MS) {
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      ensureLink()
+    }, retryMs)
+  } else ext.alarms.create(ALARM_RECONNECT, { when: nextAttemptAt })
   retryMs = Math.min(retryMs * 2, RETRY_MAX_MS)
 }
 
 function cancelReconnect(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   reconnectTimer = null
+  void ext.alarms.clear(ALARM_RECONNECT).catch(() => {})
 }
 
 function onDaylensMessage(msg: Record<string, unknown>): void {
@@ -299,17 +311,20 @@ function schedulePairRetry(): void {
     pairPending = false
     return
   }
+  const wait = Math.max(0, nextAttemptAt - Date.now()) || retryMs
+  if (wait > ALARM_AFTER_MS) return ext.alarms.create(ALARM_PAIR, { when: Date.now() + wait })
   pairRetry = setTimeout(() => {
     pairRetry = null
     nextAttemptAt = 0
     ensureLink()
-  }, Math.max(0, nextAttemptAt - Date.now()) || retryMs)
+  }, wait)
 }
 
 function finishPairing(): void {
   pairPending = false
   if (pairRetry) clearTimeout(pairRetry)
   pairRetry = null
+  void ext.alarms.clear(ALARM_PAIR).catch(() => {})
   if (pairTab !== null) void ext.tabs.remove(pairTab).catch(() => {})
   pairTab = null
 }
@@ -381,6 +396,12 @@ ext.tabs.onRemoved.addListener(() => void tracker.removed())
 ext.tabs.onReplaced.addListener(() => void tracker.activated())
 ext.runtime.onStartup.addListener(() => void tracker.startup())
 ext.runtime.onInstalled.addListener(() => void tracker.startup())
+// Registered at the top level so a worker woken by the alarm hears it.
+ext.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== ALARM_RECONNECT && alarm.name !== ALARM_PAIR) return
+  nextAttemptAt = 0
+  ensureLink()
+})
 
 ext.runtime.onMessage.addListener((req, _sender, reply) => {
   const answer = (extra: Partial<PopupState> = {}) => reply({ ...popupState(), ...extra })
