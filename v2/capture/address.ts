@@ -22,7 +22,7 @@ const SECRET_PARTS = [
 ]
 
 // An HTTP credential pasted into a parameter, whatever the parameter is called.
-const CREDENTIAL_VALUE = /^(bearer|basic)\s/i
+const CREDENTIAL_VALUE = /^(bearer|basic)\s+[A-Za-z0-9\-._~+/]+=*$/i
 // Parameter values that are addresses in their own right (returnUrl, next, redirect) get the same rule; addresses
 // that can run code or carry content are dropped. A plain "site:example.com" is not an address and stays.
 const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
@@ -78,7 +78,11 @@ function cleanValue(value: string, depth: number): string | null {
   }
   // Still carrying encoded URL syntax after the last decode: what it hides cannot be judged.
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
-  for (const form of forms) if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
+  for (const form of forms) {
+    // A credential can hide behind encoding or a control prefix as well as an address can.
+    if (CREDENTIAL_VALUE.test(form) || JWT_VALUE.test(form)) return null
+    if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
+  }
   return value
 }
 

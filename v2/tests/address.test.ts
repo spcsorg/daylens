@@ -130,3 +130,18 @@ test('shared-document access keys go whatever their case or separators, and the 
   for (const name of ['authkey', 'AUTHKEY', 'authKey', 'auth_key', 'auth-key', 'resourcekey', 'resourceKey', 'resource_key', 'RESOURCE-KEY', 'sharekey', 'share_key'])
     assert.ok(isSecretParam(name, 'v'), name)
 })
+
+test('a credential hidden by encoding or a control prefix is still a credential', () => {
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJDQU5BUlkifQ.c2lnbmF0dXJl'
+  for (const raw of [
+    'h=Bearer%2520CANARY',
+    'h=%00Basic+Q0FOQVJZOnBhc3M%3D',
+    'h=' + encodeURIComponent(encodeURIComponent(jwt)),
+    'h=%01%1fBearer+CANARY',
+    'h=bearer%252520CANARY',
+  ]) {
+    const out = cleanAddress('https://x.example.com/?' + raw + '&q=1')!
+    assert.equal(out, 'https://x.example.com/?q=1', raw)
+  }
+  assert.equal(cleanAddress('https://x.example.com/?q=bearer+market+2026'), 'https://x.example.com/?q=bearer+market+2026', 'the word alone is not a credential')
+})
