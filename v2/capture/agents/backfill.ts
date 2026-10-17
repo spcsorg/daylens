@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
 import { AgentStore } from './store.ts'
-import type { ParseCounts } from './types.ts'
+import { addCounts } from './types.ts'
 
 export interface BackfillStats {
   wall_ms: number
@@ -86,10 +86,6 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
     }
   }
   return files
-}
-
-function addCounts(a: ParseCounts, b: ParseCounts): ParseCounts {
-  return { lines: a.lines + b.lines, bad: a.bad + b.bad, unknown: a.unknown + b.unknown, recognized: a.recognized + b.recognized }
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.

@@ -8,7 +8,7 @@ import { ClaudeParser } from './claude.ts'
 import { CodexParser } from './codex.ts'
 import { readAppended, readCompressed } from './tail.ts'
 import type { AgentStore, HealthState, SourceRow } from './store.ts'
-import { emptyCounts, type Agent, type AgentRecord, type LineParser, type ParseCounts } from './types.ts'
+import { addCounts, emptyCounts, subCounts, type Agent, type AgentRecord, type LineParser, type ParseCounts } from './types.ts'
 
 export type Layout = 'claude' | 'codex_sessions' | 'codex_archive'
 
@@ -87,8 +87,8 @@ export interface RootCounts {
 
 // What a batch of reads says about a folder: degraded when lines could not be read, or when none of them were understood.
 export function healthFromCounts(c: ParseCounts): { state: HealthState; reason: string | null; detail: Record<string, number> | null } {
-  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : null
-  return reason === null ? { state: 'ok', reason, detail: null } : { state: 'degraded', reason, detail: { lines: c.lines, bad: c.bad, unknown: c.unknown, recognized: c.recognized } }
+  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : c.orphan > 0 && c.turns === 0 ? 'turns_unrecognized' : null
+  return reason === null ? { state: 'ok', reason, detail: null } : { state: 'degraded', reason, detail: { ...c } }
 }
 
 export interface ReaderStats {
@@ -386,15 +386,12 @@ export class AgentReader {
     let flushed = emptyCounts()
     const flush = (offset: number) => {
       const c = parser.counts
-      const delta: ParseCounts = { lines: c.lines - flushed.lines, bad: c.bad - flushed.bad, unknown: c.unknown - flushed.unknown, recognized: c.recognized - flushed.recognized }
+      const delta = subCounts(c, flushed)
       flushed = { ...c }
       this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: parser.state(), counts: delta })
       this.stats.records += records.length
       records = []
-      r.counts.lines += delta.lines
-      r.counts.bad += delta.bad
-      r.counts.unknown += delta.unknown
-      r.counts.recognized += delta.recognized
+      r.counts = addCounts(r.counts, delta)
     }
     const sink = (text: (() => string | null) | null, head: string, tail: string) => {
       for (const rec of parser.line(text, head, tail)) records.push(rec)

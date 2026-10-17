@@ -37,6 +37,8 @@ const BULK_TYPES = new Set(['token_usage_record', 'world_state', 'compacted', 'i
 // Bookkeeping Codex writes even while a request is stuck or failing (a usage count arrives with the error), so it
 // is not evidence the agent was doing anything.
 const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state', 'thread_settings_applied'])
+const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
+const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message'])
 
 const TRIGGER_OPENER: Record<string, TurnOpener> = {
   composer: 'user',
@@ -145,6 +147,7 @@ export class CodexParser implements LineParser {
     const type = m[2]!
     const sub = m[3]
     const t = this.s.turn
+    if (!t && (type === 'response_item' || (type === 'event_msg' && sub !== undefined && OUTPUT_EVENTS.has(sub)))) this.counts.orphan++
 
     // A reply or an instruction to the model is never the person's message; its role is in the line's first bytes.
     const notUser = type === 'response_item' && sub === 'message' && NOT_USER_ROLE.test(head)
@@ -256,6 +259,7 @@ export class CodexParser implements LineParser {
           return []
         }
         this.counts.recognized++
+        this.counts.turns++
         const out = this.close('missing', null)
         const startedS = typeof p.started_at === 'number' ? p.started_at : null
         // Written as it happened, the line carries the turn's own start second (to clock rounding).
@@ -278,6 +282,7 @@ export class CodexParser implements LineParser {
       case 'task_complete':
       case 'turn_aborted': {
         this.counts.recognized++
+        this.counts.turns++
         if (!t || (typeof p.turn_id === 'string' && p.turn_id !== t.key && !t.key.endsWith(`:${p.turn_id}`))) return []
         const completed = typeof p.completed_at === 'number' ? p.completed_at * 1000 : null
         const fromDuration = typeof p.duration_ms === 'number' ? t.start + p.duration_ms : null
@@ -297,7 +302,9 @@ export class CodexParser implements LineParser {
         return (t?.live ? this.activity(at) : []).concat(this.message(words, null, t?.live ? at : null))
       }
       default:
-        this.counts.recognized++
+        // An event type the reader does not know may be a renamed one it relies on; it is never counted as understood.
+        if (sub !== undefined && KNOWN_EVENTS.has(sub)) this.counts.recognized++
+        else this.counts.unknown++
         return t?.live && !(sub !== undefined && NOT_ACTIVITY.has(sub)) ? this.activity(at) : []
     }
   }

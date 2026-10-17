@@ -61,10 +61,23 @@ export interface ParseCounts {
   unknown: number
   // Records the reader understood.
   recognized: number
+  // Records that start, end or carry a turn: without them, nothing the agent did can be placed.
+  turns: number
+  // Agent activity outside any turn. Some is normal (imported histories); activity with no turn records at all means
+  // the records that mark turns are no longer recognized.
+  orphan: number
 }
 
 export function emptyCounts(): ParseCounts {
-  return { lines: 0, bad: 0, unknown: 0, recognized: 0 }
+  return { lines: 0, bad: 0, unknown: 0, recognized: 0, turns: 0, orphan: 0 }
+}
+
+export function addCounts(a: ParseCounts, b: ParseCounts): ParseCounts {
+  return { lines: a.lines + b.lines, bad: a.bad + b.bad, unknown: a.unknown + b.unknown, recognized: a.recognized + b.recognized, turns: a.turns + b.turns, orphan: a.orphan + b.orphan }
+}
+
+export function subCounts(a: ParseCounts, b: ParseCounts): ParseCounts {
+  return { lines: a.lines - b.lines, bad: a.bad - b.bad, unknown: a.unknown - b.unknown, recognized: a.recognized - b.recognized, turns: a.turns - b.turns, orphan: a.orphan - b.orphan }
 }
 
 export interface LineParser {

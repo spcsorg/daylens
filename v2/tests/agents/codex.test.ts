@@ -243,3 +243,12 @@ test('items copied into an import or a fork never add activity, whatever times t
   assert.equal(of(recs, 'activity').length, 0)
   assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: U('old'), state: 'completed', at: sec(60) }])
 })
+
+test('an event type the reader does not know is never counted as understood', () => {
+  const c = codexCtx()
+  const p = parser(c)
+  run(p, [codex.meta(c, sec(0)), JSON.stringify({ timestamp: new Date(sec(1)).toISOString(), type: 'event_msg', payload: { type: 'turn_began', turn_id: 'x' } })])
+  assert.equal(p.counts.unknown, 1)
+  assert.equal(p.counts.recognized, 1)
+  assert.equal(p.counts.turns, 0)
+})

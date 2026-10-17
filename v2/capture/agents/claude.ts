@@ -189,6 +189,8 @@ export class ClaudeParser implements LineParser {
         return []
       default:
         this.counts.unknown++
+        // A conversation record of a type the reader does not know may be a renamed reply.
+        if (typeof o.uuid === 'string' && typeof o.timestamp === 'string') this.counts.orphan++
         return []
     }
   }
@@ -314,6 +316,7 @@ export class ClaudeParser implements LineParser {
   private assistant(o: Record<string, unknown>): AgentRecord[] {
     const env = this.envelope(o)
     if (!env) return []
+    this.counts.turns++
     const out = this.meta(o, env.at)
     if (o.isSidechain === true && !this.subagentFile) return out.concat(this.activity(env.at))
     const message = o.message as { id?: unknown; stop_reason?: unknown; content?: unknown } | undefined
