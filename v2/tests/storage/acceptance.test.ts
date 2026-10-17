@@ -539,3 +539,33 @@ test('deletion reports purged from disk separately, retrying until a reader hold
   reader.close()
   r.close()
 })
+
+test('stopping storage never reports a deletion purged; the purge resumes at the next start', async () => {
+  resetSeq()
+  const r = rig()
+  day(r, T0, [[chat, 'Dingo canary'], [editor, 'x.md - Editor']])
+  r.store.flush()
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) AS n FROM observations').get()
+  r.clock.t = T0 + HOUR
+  const handle = r.storage.deleteSource('com.example.chat')
+  await handle.done
+  let purged = false
+  void handle.purged.then(() => (purged = true))
+  r.close()
+  await new Promise((res) => setTimeout(res, 600))
+  assert.equal(purged, false, 'not purged: a reader still held the old pages when storage stopped')
+  const check = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  assert.deepEqual(check.prepare(`SELECT state FROM deletions`).all(), [{ state: 'done' }])
+  check.close()
+  reader.prepare('COMMIT').run()
+  reader.close()
+  const r2 = rig(r.dir)
+  r2.storage.start()
+  const t0 = Date.now()
+  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 3000) await new Promise((res) => setTimeout(res, 50))
+  assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(diskContains(r2.dir, 'Dingo'), [])
+  r2.close()
+})

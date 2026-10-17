@@ -330,9 +330,19 @@ export class Storage {
   private purgeWhenFree(tombstone: number): Promise<void> {
     let p = this.purges.get(tombstone)
     if (p) return p
+    // Stopping leaves it unsettled and the tombstone 'done': the next start resumes the purge.
+    const never = () => new Promise<void>(() => {})
     p = (async () => {
-      for (let wait = 250; !this.stopped; wait = Math.min(wait * 2, 30_000)) {
-        if (await this.deletions.purge(tombstone)) {
+      for (let wait = 250; ; wait = Math.min(wait * 2, 30_000)) {
+        if (this.stopped) return never()
+        let ok = false
+        try {
+          ok = await this.deletions.purge(tombstone)
+        } catch (err) {
+          if (this.stopped) return never()
+          this.onError(`purge_${(err as Error).message}`)
+        }
+        if (ok) {
           this.announcePurged(tombstone)
           return
         }
