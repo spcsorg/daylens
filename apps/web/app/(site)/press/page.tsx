@@ -48,12 +48,10 @@ export default function PressPage() {
             <p>The app icon, 256 by 256 pixels, transparent PNG. Please don&rsquo;t recolor or crop it.</p>
             <div className="press-logos">
               <div className="press-logo">
-                {/* eslint-disable-next-line @next/next/no-img-element -- shown at its exact size for download */}
                 <img src={assetPath("/app-icon.png")} alt="Daylens app icon" width={96} height={96} loading="lazy" />
                 <span>On light</span>
               </div>
               <div className="press-logo is-dark">
-                {/* eslint-disable-next-line @next/next/no-img-element -- shown at its exact size for download */}
                 <img src={assetPath("/app-icon.png")} alt="Daylens app icon on a dark background" width={96} height={96} loading="lazy" />
                 <span>On dark</span>
               </div>

@@ -6,7 +6,6 @@ import { CONTACT_EMAIL, GITHUB_URL } from "../_lib/site";
 export function Logo() {
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-img-element -- pre-sized 2x WebP; next/image would add a loader round trip */}
       <img src={assetPath("/app-icon-56.webp")} alt="" width={28} height={28} className="logo-icon" />
       <span className="logo-word">Daylens</span>
     </>
