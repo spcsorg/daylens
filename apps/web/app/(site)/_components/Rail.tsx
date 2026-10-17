@@ -30,6 +30,7 @@ export function Rail() {
 
   return (
     <div className="rail-block">
+      <h2 className="visually-hidden">An example morning</h2>
       <form
         className="rail-search"
         role="search"
@@ -46,7 +47,7 @@ export function Rail() {
             id="rail-query"
             type="search"
             value={query}
-            placeholder="that bread pricing video i watched"
+            placeholder="Describe what you saw"
             autoComplete="off"
             onChange={(event) => {
               setQuery(event.target.value);

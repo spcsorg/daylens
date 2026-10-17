@@ -115,7 +115,7 @@ export function WaitlistForm({ source }: { source: "hero" | "closing" }) {
         </button>
       </div>
       <fieldset className="waitlist-platform" disabled={sending}>
-        <legend>Your computer, if you want to say</legend>
+        <legend>Your computer (optional)</legend>
         <label>
           <input type="radio" name="platform" value="windows" />
           Windows

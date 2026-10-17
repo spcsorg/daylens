@@ -9,7 +9,7 @@
   --steel-dark: #6b757b;
   --ink: #17233a;
   --ink-soft: #46526a;
-  --ink-faint: #6a7487;
+  --ink-faint: #5a6477;
   --red: #b8302a;
   --line: #cfd6d3;
   --white: #ffffff;
@@ -168,8 +168,8 @@ body.site {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: color-mix(in srgb, var(--ground) 94%, transparent);
-  border-bottom: 1px solid transparent;
+  background: var(--ground);
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .site-header-inner {
@@ -251,23 +251,46 @@ body.site {
   max-width: 880px;
 }
 
+@media (min-width: 1000px) {
+  .hero-copy {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    column-gap: clamp(32px, 4vw, 64px);
+    align-items: end;
+    max-width: none;
+  }
+
+  .hero-copy h1 {
+    grid-row: 1 / span 3;
+  }
+
+  .hero-copy .hero-lede {
+    margin-top: 0;
+  }
+}
+
 .hero h1 {
-  font-size: clamp(2.5rem, 6vw, 4.75rem);
-  font-variation-settings: "wdth" 72;
+  font-size: clamp(2.5rem, 5.6vw, 4.25rem);
+  font-variation-settings: "wdth" 74;
   font-weight: 760;
   line-height: 0.98;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.012em;
 }
 
 .hero-lede {
-  margin-top: 1.25rem;
+  margin-top: 1.75rem;
   max-width: 34em;
-  font-size: clamp(1.1rem, 1.6vw, 1.3rem);
+  font-size: clamp(1.1rem, 1.5vw, 1.25rem);
   color: var(--ink-soft);
 }
 
-.hero .waitlist {
+.hero .waitlist,
+.hero .waitlist-done {
   margin-top: 1.75rem;
+}
+
+.hero .waitlist-done + .hero-meta {
+  display: none;
 }
 
 .hero-meta {
@@ -365,6 +388,10 @@ body.site {
   box-shadow: 0 1px 0 var(--paper-edge), 0 10px 24px -14px rgba(23, 35, 58, 0.35);
 }
 
+.waitlist-done strong {
+  overflow-wrap: anywhere;
+}
+
 .waitlist-done-title {
   font-weight: 750;
   font-size: 1.35rem;
@@ -390,7 +417,7 @@ body.site {
 /* The rail */
 
 .rail-block {
-  margin-top: clamp(32px, 6vh, 56px);
+  margin-top: clamp(32px, 5vh, 48px);
 }
 
 .rail-search-label {
@@ -507,14 +534,6 @@ body.site {
   padding: 26px 16px 16px;
   border-radius: 2px 2px 6px 6px;
   background-color: var(--paper);
-  background-image: repeating-linear-gradient(
-    180deg,
-    transparent 0,
-    transparent 25px,
-    var(--paper-rule) 25px,
-    var(--paper-rule) 26px
-  );
-  background-position: 0 66px;
   box-shadow: 0 1px 0 var(--paper-edge), 0 12px 22px -16px rgba(23, 35, 58, 0.55);
   transform: rotate(var(--tilt));
   transform-origin: 50% 0;
@@ -639,7 +658,6 @@ body.site {
 }
 
 .ticket[data-live="true"] {
-  background-image: none;
   background-color: var(--white);
   outline: 1.5px dashed var(--steel);
   outline-offset: -6px;
@@ -687,6 +705,7 @@ body.site {
   font-size: clamp(2rem, 4.2vw, 3.25rem);
   font-variation-settings: "wdth" 76;
   font-weight: 740;
+  letter-spacing: -0.012em;
 }
 
 .beliefs {
@@ -718,7 +737,7 @@ body.site {
 
 .belief-detail {
   color: var(--ink-soft);
-  max-width: 40em;
+  max-width: 34em;
 }
 
 @media (min-width: 900px) {
@@ -741,24 +760,11 @@ body.site {
   margin: 2.5rem 0 0;
   padding: 0;
   list-style: none;
-  counter-reset: step;
 }
 
 .steps li {
-  counter-increment: step;
   padding-top: 1.1rem;
   border-top: 1.5px dashed var(--steel-dark);
-}
-
-.steps li::before {
-  content: "No. " counter(step);
-  display: block;
-  margin-bottom: 0.6rem;
-  color: var(--red);
-  font-weight: 700;
-  font-size: 0.9rem;
-  font-variation-settings: "wdth" 80;
-  letter-spacing: 0.02em;
 }
 
 .steps h3 {
@@ -826,7 +832,7 @@ body.site {
 .check-foot {
   display: grid;
   gap: 0.85rem;
-  max-width: 46em;
+  max-width: 34em;
   margin-top: 2rem;
   padding-top: 1.75rem;
   border-top: 2px dashed var(--paper-edge);
@@ -888,7 +894,7 @@ body.site {
 }
 
 .ai-assistants {
-  max-width: 44em;
+  max-width: 36em;
   margin-top: 1.75rem;
   font-size: 1.1rem;
 }
@@ -927,7 +933,8 @@ body.site {
   color: #c9d3c3;
 }
 
-.join .waitlist {
+.join .waitlist,
+.join .waitlist-done {
   margin-top: 1.75rem;
 }
 
@@ -1032,7 +1039,9 @@ body.site {
 }
 
 .site-footer nav a {
-  padding: 0.3rem 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
   color: var(--ink-soft);
   text-decoration: none;
 }
@@ -1076,6 +1085,7 @@ body.site {
 }
 
 .page-head p {
+  max-width: 34em;
   margin-top: 1rem;
   font-size: 1.2rem;
   color: var(--ink-soft);
@@ -1087,7 +1097,7 @@ body.site {
 }
 
 .prose {
-  max-width: 44rem;
+  max-width: 34em;
   margin-top: 2.5rem;
 }
 

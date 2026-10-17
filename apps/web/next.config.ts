@@ -15,6 +15,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/:icon(app-icon(?:-56)?\\.(?:png|webp))",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           {
