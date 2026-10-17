@@ -27,6 +27,7 @@ function containsAnywhere(r: R, needle: string): string[] {
     ['corrections', `SELECT count(*) AS n FROM corrections WHERE text LIKE ? OR text LIKE ? OR text LIKE ? OR text LIKE ?`],
     ['assistant_reads', `SELECT count(*) AS n FROM assistant_reads WHERE query LIKE ? OR query LIKE ? OR query LIKE ? OR query LIKE ?`],
     ['change_log', `SELECT count(*) AS n FROM change_log WHERE payload LIKE ? OR payload LIKE ? OR payload LIKE ? OR payload LIKE ?`],
+    ['threads', `SELECT count(*) AS n FROM threads WHERE title LIKE ? OR title LIKE ? OR title LIKE ? OR title LIKE ?`],
   ]
   for (const [table, sql] of checks) if (r.q<{ n: number }>(sql, like, like, like, like)[0]!.n > 0) where.push(table)
   if (r.storage.search(needle).length > 0) where.push('search')
@@ -476,5 +477,24 @@ test('a bounded app deletion trims and splits rows that cross its edges, and a r
   r.storage.derived.rebuild()
   assert.deepEqual(middle(), [], 'still gone after a rebuild')
   assert.equal(r.q(`SELECT 1 FROM intervals WHERE app_id = 'com.example.chat'`).length, 2)
+  r.close()
+})
+
+test('deletion reaches threads: orphaned threads go, shared ones lose a title that may describe the deleted material', () => {
+  const r = rig()
+  const h1 = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0))
+  const h2 = r.storage.writeHour({ start_wall_ms: T0 + 3 * HOUR, tz: 'Africa/Kigali', status: 'facts' }, r.storage.hourBasis(T0 + 3 * HOUR))
+  const only = r.storage.createThread('Kakapo canary only', [h1.id])
+  const shared = r.storage.createThread('Kakapo canary shared', [h1.id, h2.id])
+  r.clock.t = T0 + 30 * MIN
+  r.storage.createThread('Kakapo canary empty')
+  r.clock.t = T0 + 2 * HOUR
+  r.storage.deleteRange(T0, T0 + 2 * HOUR)
+  assert.deepEqual(containsAnywhere(r, 'Kakapo'), [])
+  assert.deepEqual(r.q(`SELECT id, title, needs_rewrite FROM threads ORDER BY id`), [{ id: shared, title: '', needs_rewrite: 1 }])
+  assert.ok(only < shared)
+  r.clock.t = T0 + 5 * HOUR
+  r.storage.deleteEverything()
+  assert.deepEqual(r.q(`SELECT id FROM threads`), [])
   r.close()
 })

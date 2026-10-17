@@ -239,6 +239,12 @@ const pauses: Migration = {
   },
 }
 
+const threadsNeedRewrite: Migration = {
+  name: 'threads_needs_rewrite',
+  // A thread that outlives a deletion keeps its id but loses a title that may describe the deleted material.
+  up: (db) => db.exec('ALTER TABLE threads ADD COLUMN needs_rewrite INTEGER NOT NULL DEFAULT 0'),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -254,4 +260,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   searchPlainDeletes,
   searchDocsByHour,
   pauses,
+  threadsNeedRewrite,
 ]

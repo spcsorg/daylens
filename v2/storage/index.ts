@@ -463,6 +463,8 @@ export class Storage {
       end_wall_ms: number
       sources: string
     }[]
+    const threadOf = db.prepare('SELECT thread_id AS id FROM thread_hours WHERE hour_id = ?')
+    const touchedThreads = new Set<number>()
     for (const h of hours) {
       const sources = JSON.parse(h.sources) as HourSource[]
       const affected =
@@ -470,6 +472,7 @@ export class Storage {
         (t.kind === 'source' && sources.some((s) => s.app_id?.toLowerCase() === t.app_id)) ||
         (t.kind === 'site' && sources.some((s) => matchesSite(s.site?.toLowerCase() ?? null, t.site!)))
       if (!affected) continue
+      for (const { id } of threadOf.all(h.id) as { id: number }[]) touchedThreads.add(id)
       if (t.kind === 'range' && h.start_wall_ms >= from && h.end_wall_ms <= to) {
         db.prepare('DELETE FROM search_docs WHERE hour_id = ?').run(h.id)
         db.prepare('DELETE FROM hours WHERE id = ?').run(h.id)
@@ -478,6 +481,17 @@ export class Storage {
         this.clearHour(h.id, sources, t)
         r.hoursCleared++
       }
+    }
+
+    // Threads: one left with no hours goes; one still linked elsewhere keeps its id and waits for a new title.
+    // A thread created inside a deleted range with no hours at all goes too.
+    for (const id of touchedThreads) {
+      const left = (db.prepare('SELECT count(*) AS n FROM thread_hours WHERE thread_id = ?').get(id) as { n: number }).n
+      if (left === 0) db.prepare('DELETE FROM threads WHERE id = ?').run(id)
+      else db.prepare(`UPDATE threads SET title = '', needs_rewrite = 1, updated_wall_ms = ? WHERE id = ?`).run(this.now(), id)
+    }
+    if (t.kind === 'range') {
+      db.prepare('DELETE FROM threads WHERE created_wall_ms >= ? AND created_wall_ms < ? AND id NOT IN (SELECT thread_id FROM thread_hours)').run(from, to)
     }
 
     if (t.kind === 'range') {
