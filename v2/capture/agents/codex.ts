@@ -13,6 +13,9 @@ interface OpenTurn {
   last: number
   opener: TurnOpener
   users: number
+  // Copied in from another agent's history (Codex numbers these external-import-turn-N); the person's acts in it are
+  // already recorded from that agent's own logs.
+  external?: boolean
 }
 
 interface CodexState {
@@ -43,6 +46,7 @@ const BULK_TYPES = new Set(['token_usage_record', 'world_state', 'compacted', 'i
 // is not evidence the agent was doing anything.
 const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state', 'thread_settings_applied'])
 const FAR = 1_000_000
+const EXTERNAL_IMPORT = /^external-import-turn-\d+$/
 const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
 const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message'])
 
@@ -283,7 +287,7 @@ export class CodexParser implements LineParser {
         // A UUID names one turn everywhere, so a fork's copy merges with the original. Any other id (imports number
         // their turns from 1 in every session) only names a turn within the session it came from.
         const key = UUID.test(p.turn_id) ? p.turn_id : `${(live ? null : this.s.source) ?? this.session}:${p.turn_id}`
-        this.s.turn = { key, live, start, last: start, opener, users: 0 }
+        this.s.turn = { key, live, start, last: start, opener, users: 0, ...(!live && EXTERNAL_IMPORT.test(p.turn_id) ? { external: true } : {}) }
         this.seen.clear()
         out.push({ t: 'turn', key, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
         if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${key}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
@@ -300,7 +304,7 @@ export class CodexParser implements LineParser {
         const out: AgentRecord[] = []
         if (sub === 'turn_aborted') {
           // Stopping a turn from the app or the terminal; an app that quits mid-turn reads the same.
-          if (p.reason === 'interrupted' && this.s.origin === 'interactive' && end !== null) out.push(this.act(`${t.key}:interrupt`, 'interrupt', 'inferred', end))
+          if (p.reason === 'interrupted' && this.s.origin === 'interactive' && end !== null && !t.external) out.push(this.act(`${t.key}:interrupt`, 'interrupt', 'inferred', end))
           out.push(...this.close('aborted', end))
         } else out.push(...this.close(p.error ? 'failed' : 'completed', end))
         return out
@@ -324,7 +328,7 @@ export class CodexParser implements LineParser {
   // `basis` is 'marked' when the record itself says a person sent it; null means only the text's shape can tell.
   private message(text: string, basis: Basis | null, at: number | null): AgentRecord[] {
     const t = this.s.turn
-    if (!t || this.s.origin !== 'interactive') return []
+    if (!t || this.s.origin !== 'interactive' || t.external) return []
     const d = digest(text)
     if (this.seen.has(d)) return []
     if (basis === null && looksInjected(text)) return []

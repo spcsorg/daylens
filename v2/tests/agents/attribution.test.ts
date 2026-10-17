@@ -110,3 +110,11 @@ test('presence comes from the capture tables: locks, sleep, idle, helper runs an
   assert.deepEqual(presenceFromCapture(store.database, sec(1500), sec(1800)).locked, [{ start: sec(1000), end: sec(1800) }])
   store.close()
 })
+
+test('an imported or copied turn adds neither working nor waiting time', () => {
+  const p = presenceTimeline(sec(0), sec(7200), covered(sec(0), sec(7200)))
+  const t = turn('imp', sec(0), sec(0), sec(1800), { replayed: 1 })
+  const s = summarize(agentSegments([t], [], p), [], sec(0), sec(7200))
+  assert.equal(s.working.present, 0)
+  assert.equal(s.waiting, 0)
+})

@@ -273,3 +273,18 @@ test('a message and its copy split across two reads still count once', () => {
   const y = run(l2, [codex.userItem(sec(6), 'and that', null, null), codex.assistant(sec(8))])
   assert.equal([...of(x, 'user'), ...of(y, 'user')].length, 2)
 })
+
+test('a Claude Code session imported into Codex adds no acts: they are recorded from the Claude Code log itself', () => {
+  const c = codexCtx()
+  const importedAt = sec(90_000)
+  const recs = run(parser(c), [
+    codex.meta(c, importedAt),
+    codex.started(importedAt, 'external-import-turn-1', undefined, sec(0)),
+    codex.userEvent(importedAt, 'a prompt typed in Claude Code'),
+    codex.userItem(importedAt, 'a prompt typed in Claude Code', null, null),
+    codex.aborted(importedAt, 'external-import-turn-1', sec(0)),
+  ])
+  assert.equal(of(recs, 'turn').length, 1)
+  assert.equal(of(recs, 'user').length, 0)
+  assert.equal(of(recs, 'activity').length, 0)
+})

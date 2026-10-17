@@ -98,6 +98,8 @@ export function agentSegments(turns: readonly TurnRow[], events: readonly EventR
   }
   const out: WorkSegment[] = []
   for (const t of turns) {
+    // A turn copied in from elsewhere proves when it started and ended, not that anything happened in between.
+    if (t.replayed) continue
     const span = turnSpan(t) ?? { start: t.start_wall_ms, end: t.start_wall_ms }
     const pieces: { start: number; end: number; activity: 'working' | 'waiting' }[] = []
     let cursor = span.start
