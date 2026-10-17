@@ -31,7 +31,7 @@ export type UserAct = 'prompt' | 'queued' | 'steer' | 'answer' | 'command' | 'sh
 // marked: the log says a person did it. inferred: an older format without that marker, read from its shape.
 export type Basis = 'marked' | 'inferred'
 
-export type WaitReason = 'usage_limit' | 'question'
+export type WaitReason = 'usage_limit' | 'question' | 'api_error'
 
 export type AgentRecord =
   | {

@@ -1,0 +1,277 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import zlib from 'node:zlib'
+import { backfill } from '../../capture/agents/backfill.ts'
+import { AgentReader, classifyFile, homeRoots, type AgentRoot } from '../../capture/agents/reader.ts'
+import { AgentStore } from '../../capture/agents/store.ts'
+import { Store } from '../../capture/store.ts'
+import { claude, claudeCtx, codex, codexCtx, sec, tmp } from './fixtures.ts'
+
+interface Rig {
+  home: string
+  data: string
+  store: Store
+  agents: AgentStore
+  roots: AgentRoot[]
+  reader: (opts?: ConstructorParameters<typeof AgentReader>[2]) => AgentReader
+  count: (sql: string, ...p: unknown[]) => number
+}
+
+function rig(): Rig {
+  const home = tmp()
+  const data = tmp()
+  const store = new Store(data)
+  const agents = new AgentStore(store.database)
+  const roots = homeRoots(home, {})
+  return {
+    home,
+    data,
+    store,
+    agents,
+    roots,
+    reader: (opts = {}) => new AgentReader(agents, roots, { reconcileMs: 3_600_000, coalesceMs: 20, ...opts }),
+    count: (sql, ...p) => (store.query<{ n: number }>(sql, ...p)[0]?.n ?? 0),
+  }
+}
+
+function claudeFile(home: string, c: { session: string }, project = '-home-me-code-project-alpha'): string {
+  const dir = path.join(home, '.claude', 'projects', project)
+  mkdirSync(dir, { recursive: true })
+  return path.join(dir, `${c.session}.jsonl`)
+}
+
+function codexFile(home: string, c: { id: string }): string {
+  const dir = path.join(home, '.codex', 'sessions', '2026', '10', '14')
+  mkdirSync(dir, { recursive: true })
+  return path.join(dir, `rollout-2026-10-14T20-00-00-${c.id}.jsonl`)
+}
+
+const lines = (...ls: string[]) => ls.map((l) => `${l}\n`).join('')
+
+async function waitFor(cond: () => boolean, ms = 5000): Promise<void> {
+  const until = Date.now() + ms
+  while (!cond()) {
+    if (Date.now() > until) throw new Error('timed out waiting for the reader')
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+test('only complete lines are read, and each later read starts where the last one stopped', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  const first = lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 't', name: 'Bash' }] }))
+  const finish = claude.assistant(c, sec(40), 'end_turn')
+  writeFileSync(file, first + finish.slice(0, 50))
+  // A short reconcile interval: the first file watcher in a process can miss a write made as it starts.
+  const reader = r.reader({ reconcileMs: 100 })
+  await reader.start()
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns WHERE end_state IS NULL'), 1)
+  assert.equal(r.agents.source(file)!.offset, Buffer.byteLength(first))
+  const before = reader.stats.bytesRead
+  appendFileSync(file, `${finish.slice(50)}\n${claude.system(c, sec(41), 'turn_duration')}\n`)
+  await waitFor(() => r.count(`SELECT count(*) AS n FROM agent_turns WHERE end_state = 'completed'`) === 1)
+  // The second read covers the partial line and what followed it, nothing earlier.
+  assert.equal(reader.stats.bytesRead - before, readFileSync(file).length - Buffer.byteLength(first))
+  await reader.stop()
+  assert.equal(r.store.query<{ last_activity_wall_ms: number }>('SELECT last_activity_wall_ms FROM agent_turns')[0]!.last_activity_wall_ms, sec(40))
+  r.store.close()
+})
+
+test('reading is driven by file events, not by rescanning folders', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const file = codexFile(r.home, c)
+  writeFileSync(file, lines(codex.meta(c, sec(0))))
+  const reader = r.reader({ reconcileMs: 3_600_000 })
+  await reader.start()
+  // File events start flowing shortly after the watcher is created.
+  await new Promise((res) => setTimeout(res, 300))
+  const reads = reader.stats.filesRead
+  appendFileSync(file, lines(codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text'])))
+  await waitFor(() => r.count('SELECT count(*) AS n FROM agent_events') === 1)
+  assert.equal(reader.stats.filesRead, reads + 1)
+  // A new session file appearing is noticed the same way.
+  const c2 = codexCtx()
+  writeFileSync(codexFile(r.home, c2), lines(codex.meta(c2, sec(10))))
+  await waitFor(() => r.count('SELECT count(*) AS n FROM agent_sessions') === 2)
+  await reader.stop()
+  r.store.close()
+})
+
+test('a session Codex archives keeps its read position, and its compressed copy is not read again', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const file = codexFile(r.home, c)
+  const body = lines(codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text']), codex.complete(sec(9), 't', sec(1), sec(9)))
+  writeFileSync(file, body)
+  const reader = r.reader()
+  await reader.start()
+  const archive = path.join(r.home, '.codex', 'archived_sessions')
+  mkdirSync(archive, { recursive: true })
+  const moved = path.join(archive, path.basename(file))
+  renameSync(file, moved)
+  await reader.stop()
+  const again = r.reader()
+  await again.start()
+  assert.equal(again.stats.bytesRead, 0)
+  assert.equal(r.agents.source(moved)!.offset, Buffer.byteLength(body))
+  // Later the archive is compressed and the plain file removed: nothing new to read.
+  writeFileSync(`${moved}.zst`, zlib.zstdCompressSync(Buffer.from(body)))
+  rmSync(moved)
+  await again.stop()
+  const third = r.reader()
+  await third.start()
+  assert.equal(third.stats.bytesRead, 0)
+  // A compressed session never seen before is read once.
+  const old = codexCtx()
+  const oldBody = lines(codex.meta(old, sec(-9000)), codex.started(sec(-8999), 'old', 'composer'), codex.userItem(sec(-8999), 'older work', ['user.text']), codex.complete(sec(-8000), 'old', sec(-8999), sec(-8000)))
+  writeFileSync(path.join(archive, `rollout-2026-04-01T10-00-00-${old.id}.jsonl.zst`), zlib.zstdCompressSync(Buffer.from(oldBody)))
+  await third.stop()
+  const fourth = r.reader()
+  await fourth.start()
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 2)
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_events'), 2)
+  await fourth.stop()
+  r.store.close()
+})
+
+test('a rewritten or truncated log is read again without duplicating anything', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  const body = lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(3), 'end_turn'), claude.prompt(c, sec(10), 'more', { uuid: 'p2' }), claude.assistant(c, sec(12), 'end_turn'))
+  writeFileSync(file, body)
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(3), 'end_turn')))
+  const again = r.reader()
+  await again.start()
+  await again.stop()
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 2)
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_events'), 2)
+  r.store.close()
+})
+
+test('a restart in the middle of a turn continues that turn', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 't', name: 'Bash' }] })))
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  appendFileSync(file, lines(claude.toolResult(c, sec(300), 't', 'ok'), claude.assistant(c, sec(310), 'end_turn'), claude.system(c, sec(311), 'turn_duration')))
+  const again = r.reader()
+  await again.start()
+  await again.stop()
+  assert.deepEqual(r.store.query('SELECT turn_key, start_wall_ms, last_activity_wall_ms, end_state FROM agent_turns'), [
+    { turn_key: 'p1', start_wall_ms: sec(0), last_activity_wall_ms: sec(310), end_state: 'completed' },
+  ])
+  r.store.close()
+})
+
+test('the same turn in two files (a resumed copy, an import read first) is one row, and the live copy wins', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const fork = codexCtx()
+  // The fork's file is read first; it carries a replayed copy of the parent's turn.
+  writeFileSync(
+    codexFile(r.home, fork),
+    lines(codex.meta(fork, sec(100), { forkedFrom: c.id }), codex.meta(c, sec(100)), codex.started(sec(100), 'pt', 'composer', sec(0)), codex.complete(sec(100), 'pt', sec(0), sec(50))),
+  )
+  const reader = r.reader()
+  await reader.start()
+  writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), codex.started(sec(0), 'pt', 'composer'), codex.userItem(sec(0), 'go', ['user.text']), codex.assistant(sec(40)), codex.complete(sec(50), 'pt', sec(0), sec(50))))
+  await waitFor(() => r.count('SELECT count(*) AS n FROM agent_turns WHERE replayed = 0') === 1)
+  await reader.stop()
+  assert.deepEqual(r.store.query('SELECT session_id, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms FROM agent_turns'), [
+    { session_id: c.id, replayed: 0, start_wall_ms: sec(0), last_activity_wall_ms: sec(40), end_wall_ms: sec(50) },
+  ])
+  r.store.close()
+})
+
+test('health says when logs are missing, unreadable, or no longer understood, and when they recover', async () => {
+  const r = rig()
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  assert.deepEqual(r.agents.health().map((h) => h.state), ['not_found', 'not_found', 'not_found'])
+
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go'), '{"type":"user","message":{"role":"us'))
+  const second = r.reader()
+  await second.start()
+  const health = () => r.agents.health().find((h) => h.agent === 'claude_code')!
+  assert.equal(health().state, 'degraded')
+  assert.equal(health().reason, 'unreadable_lines')
+  appendFileSync(file, lines(claude.assistant(c, sec(3), 'end_turn')))
+  await waitFor(() => health().state === 'ok')
+
+  // A format that changed completely: valid lines, none of them recognized.
+  appendFileSync(file, lines(JSON.stringify({ type: 'v99-record', at: 1 }), JSON.stringify({ type: 'v99-turn', at: 2 })))
+  await waitFor(() => health().state === 'degraded')
+  assert.equal(health().reason, 'unrecognized_format')
+  await second.stop()
+
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    const codexRoot = path.join(r.home, '.codex', 'sessions')
+    mkdirSync(codexRoot, { recursive: true })
+    chmodSync(codexRoot, 0o000)
+    const third = r.reader()
+    await third.start()
+    await third.stop()
+    chmodSync(codexRoot, 0o755)
+    assert.equal(r.agents.health().find((h) => h.root === codexRoot)!.state, 'unreadable')
+  }
+  r.store.close()
+})
+
+test('the first read of a history runs in a child process and lands exactly as an in-process read would', async () => {
+  const build = (home: string) => {
+    const c = claudeCtx({ session: '11111111-1111-4111-8111-111111111111' })
+    writeFileSync(claudeFile(home, c), lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(9), 'end_turn')))
+    const x = codexCtx({ id: '22222222-2222-4222-8222-222222222222' })
+    writeFileSync(codexFile(home, x), lines(codex.meta(x, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text']), codex.complete(sec(5), 't', sec(1), sec(5))))
+  }
+  const a = rig()
+  build(a.home)
+  let merged = false
+  const viaChild = a.reader({ backfill: async (roots) => (merged = (await backfill(a.store.database, a.data, roots, () => {})).merged) })
+  await viaChild.start()
+  await viaChild.stop()
+  assert.equal(merged, true)
+  assert.equal(viaChild.stats.bytesRead, 0, 'the service itself read nothing')
+  assert.ok(!readdirSync(a.data).some((f) => f.startsWith('agent-backfill')), 'the staging database is removed')
+
+  const b = rig()
+  build(b.home)
+  const inProcess = b.reader()
+  await inProcess.start()
+  await inProcess.stop()
+  const rows = (s: Store) => s.query('SELECT agent, turn_key, start_wall_ms, last_activity_wall_ms, end_state FROM agent_turns ORDER BY turn_key')
+  assert.deepEqual(rows(a.store), rows(b.store))
+  assert.equal(a.count('SELECT count(*) AS n FROM agent_sources'), 2)
+  a.store.close()
+  b.store.close()
+})
+
+test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {
+  const [cl, cx, ar] = homeRoots('/h', {}) as [AgentRoot, AgentRoot, AgentRoot]
+  assert.ok(classifyFile(cl, '/h/.claude/projects/-p/abc.jsonl'))
+  assert.deepEqual(classifyFile(cl, '/h/.claude/projects/-p/abc/subagents/agent-1.jsonl'), { session: 'agent-1', parent: 'abc', compressed: false })
+  assert.equal(classifyFile(cl, '/h/.claude/projects/-p/abc/subagents/agent-1.meta.json'), null)
+  assert.equal(classifyFile(cl, '/h/.claude/projects/-p/abc/tool-results/x.txt'), null)
+  assert.equal(classifyFile(cl, '/h/.claude/projects/-p/image.png'), null)
+  assert.ok(classifyFile(cx, '/h/.codex/sessions/2026/10/14/rollout-2026-10-14T20-00-00-01a13b95-3a52-7413-be52-f44fba42510c.jsonl'))
+  assert.equal(classifyFile(cx, '/h/.codex/sessions/2026/10/14/rollout-x.jsonl.zst'), null)
+  assert.equal(classifyFile(ar, '/h/.codex/archived_sessions/rollout-2026-04-01T23-39-00-019d4afc-48c7-7583-bedf-f54e83744001.jsonl.zst')!.session, '019d4afc-48c7-7583-bedf-f54e83744001')
+  assert.deepEqual(
+    homeRoots('/h', { CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x' }).map((r) => r.dir),
+    [path.join('/c', 'projects'), path.join('/x', 'sessions'), path.join('/x', 'archived_sessions')],
+  )
+})

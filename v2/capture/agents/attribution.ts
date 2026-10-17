@@ -77,10 +77,15 @@ export interface WorkSegment extends Interval {
   why?: 'locked' | 'idle'
 }
 
-// A turn covers its start to its end, or to its last recorded activity when no end was written; never longer.
+// The agent was working from the turn's start to its last recorded activity; never longer.
 export function turnSpan(t: TurnRow): Interval | null {
-  const end = t.end_wall_ms ?? t.last_activity_wall_ms
-  return end > t.start_wall_ms ? { start: t.start_wall_ms, end } : null
+  return t.last_activity_wall_ms > t.start_wall_ms ? { start: t.start_wall_ms, end: t.last_activity_wall_ms } : null
+}
+
+// From the last activity to a later end the agent did nothing on record: a stalled or failing request, or a stop.
+export function turnTail(t: TurnRow): Interval | null {
+  const from = Math.max(t.start_wall_ms, t.last_activity_wall_ms)
+  return t.end_wall_ms !== null && t.end_wall_ms > from ? { start: from, end: t.end_wall_ms } : null
 }
 
 export function agentSegments(turns: readonly TurnRow[], events: readonly EventRow[], presence: readonly PresenceSpan[]): WorkSegment[] {
@@ -93,8 +98,7 @@ export function agentSegments(turns: readonly TurnRow[], events: readonly EventR
   }
   const out: WorkSegment[] = []
   for (const t of turns) {
-    const span = turnSpan(t)
-    if (!span) continue
+    const span = turnSpan(t) ?? { start: t.start_wall_ms, end: t.start_wall_ms }
     const pieces: { start: number; end: number; activity: 'working' | 'waiting' }[] = []
     let cursor = span.start
     for (const w of (waits.get(t.turn_key) ?? []).sort((a, b) => a.start - b.start)) {
@@ -106,6 +110,8 @@ export function agentSegments(turns: readonly TurnRow[], events: readonly EventR
       cursor = we
     }
     if (cursor < span.end) pieces.push({ start: cursor, end: span.end, activity: 'working' })
+    const tail = turnTail(t)
+    if (tail) pieces.push({ ...tail, activity: 'waiting' })
     for (const p of pieces) {
       for (const s of presence) {
         const a = Math.max(p.start, s.start)

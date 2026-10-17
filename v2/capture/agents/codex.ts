@@ -29,6 +29,9 @@ const COMPLETED_MS = /"completed_at_ms":(\d+)/
 // Record kinds whose payload never holds anything the reader needs beyond the line's own time.
 const BULK = new Set(['reasoning', 'function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output', 'agent_message', 'token_count', 'web_search_call', 'local_shell_call', 'agent_reasoning', 'exec_command_end', 'exec_command_begin', 'mcp_tool_call_end', 'patch_apply_end'])
 const BULK_TYPES = new Set(['token_usage_record', 'world_state', 'compacted', 'inter_agent_communication_metadata', 'realtime_item'])
+// Bookkeeping Codex writes even while a request is stuck or failing (a usage count arrives with the error), so it
+// is not evidence the agent was doing anything.
+const NOT_ACTIVITY = new Set(['token_count', 'token_usage_record', 'world_state', 'thread_settings_applied'])
 
 const TRIGGER_OPENER: Record<string, TurnOpener> = {
   composer: 'user',
@@ -137,7 +140,7 @@ export class CodexParser implements LineParser {
 
     if (BULK_TYPES.has(type) || (sub !== undefined && BULK.has(sub))) {
       this.counts.recognized++
-      return t?.live ? this.activity(at) : []
+      return t?.live && !NOT_ACTIVITY.has(type) && !(sub !== undefined && NOT_ACTIVITY.has(sub)) ? this.activity(at) : []
     }
     if (type === 'event_msg' && sub === 'item_completed') {
       this.counts.recognized++
@@ -279,7 +282,7 @@ export class CodexParser implements LineParser {
       }
       default:
         this.counts.recognized++
-        return t?.live ? this.activity(at) : []
+        return t?.live && !(sub !== undefined && NOT_ACTIVITY.has(sub)) ? this.activity(at) : []
     }
   }
 

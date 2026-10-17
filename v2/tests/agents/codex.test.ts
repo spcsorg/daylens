@@ -1,0 +1,210 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { CodexParser } from '../../capture/agents/codex.ts'
+import { codex, codexCtx, of, run, sec } from './fixtures.ts'
+
+const parser = (c = codexCtx()) => new CodexParser(c.id, null)
+const TYPED = ['user.text']
+const CONTEXT = ['agents_md.instructions', 'environments.environment_context']
+
+test('a composer turn: context Codex adds is skipped, the person\'s message is the act, the end is the completion', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0)),
+    codex.started(sec(1), 'turn-1', 'composer'),
+    codex.userItem(sec(2), '# AGENTS.md instructions\n\n<INSTRUCTIONS>…</INSTRUCTIONS>', CONTEXT),
+    codex.context(sec(2), 'turn-1', '/home/me/code/project-gamma'),
+    codex.userItem(sec(2), '<external_codex_apps_open_page>{}</external_codex_apps_open_page>', ['additional_content.codex_apps_open_page']),
+    codex.userItem(sec(2), 'rename the config loader', TYPED),
+    codex.userCompleted(sec(2), 'turn-1', 'rename the config loader', 'client-1'),
+    codex.assistant(sec(30)),
+    codex.tokens(sec(31)),
+    codex.complete(sec(31), 'turn-1', sec(1), sec(31)),
+  ])
+  assert.equal(of(recs, 'session')[0]!.origin, 'interactive')
+  assert.deepEqual(of(recs, 'turn').map((t) => [t.key, t.opener, t.start, t.replayed]), [['turn-1', 'user', sec(1), false]])
+  assert.deepEqual(of(recs, 'turn_dir'), [{ t: 'turn_dir', key: 'turn-1', dir: '/home/me/code/project-gamma' }])
+  assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis, u.at]), [['prompt', 'marked', sec(1)]])
+  assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: 'turn-1', state: 'completed', at: sec(31) }])
+  // Usage counts are bookkeeping, not work.
+  assert.equal(Math.max(...of(recs, 'activity').map((a) => a.at)), sec(30))
+})
+
+test('messages sent mid-turn and answers to the agent\'s questions are acts at their own time', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0)),
+    codex.started(sec(1), 'turn-1', 'composer'),
+    codex.userItem(sec(1), 'start the migration', TYPED),
+    codex.assistant(sec(20)),
+    codex.userItem(sec(40), 'skip the tests for now', TYPED),
+    codex.userCompleted(sec(40), 'turn-1', 'skip the tests for now', 'client-2'),
+    codex.userItem(sec(55), '<send_user_message_question_reply>\n[{"questionItemId":"q"}]', TYPED),
+    codex.userCompleted(sec(55), 'turn-1', '<send_user_message_question_reply>\n[{"questionItemId":"q"}]', 'client-3'),
+    codex.complete(sec(80), 'turn-1', sec(1), sec(80)),
+  ])
+  assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.at]), [
+    ['prompt', sec(1)],
+    ['steer', sec(40)],
+    ['answer', sec(55)],
+  ])
+})
+
+test('who started a turn comes from its trigger', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0)),
+    codex.started(sec(1), 'q', 'queue'),
+    codex.userItem(sec(1), 'queued while it worked', TYPED),
+    codex.complete(sec(9), 'q', sec(1), sec(9)),
+    codex.started(sec(10), 'r', 'resume_interrupted_task'),
+    codex.assistant(sec(12)),
+    codex.complete(sec(13), 'r', sec(10), sec(13)),
+    codex.started(sec(20), 'a', 'capacity_retry_automatic'),
+    codex.complete(sec(21), 'a', sec(20), sec(21)),
+    codex.started(sec(30), 'm', 'capacity_retry_manual'),
+    codex.complete(sec(31), 'm', sec(30), sec(31)),
+    codex.started(sec(40), 'x', 'send_user_message_async_question'),
+    codex.userItem(sec(40), '<send_user_message_question_reply>\n[]', TYPED),
+    codex.complete(sec(41), 'x', sec(40), sec(41)),
+  ])
+  assert.deepEqual(of(recs, 'turn').map((t) => [t.key, t.opener]), [
+    ['q', 'user_queued'],
+    ['r', 'resume'],
+    ['a', 'retry'],
+    ['m', 'user_retry'],
+    ['x', 'user_answer'],
+  ])
+  assert.deepEqual(of(recs, 'user').map((u) => [u.turn, u.act, u.at]), [
+    ['q', 'queued', sec(1)],
+    ['m', 'prompt', sec(30)],
+    ['x', 'answer', sec(40)],
+  ])
+})
+
+test('an interrupted turn is aborted at its completion time', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', TYPED), codex.assistant(sec(5)), codex.aborted(sec(9), 't', sec(1))])
+  assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: 't', state: 'aborted', at: sec(9) }])
+  assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis]), [
+    ['prompt', 'marked'],
+    ['interrupt', 'inferred'],
+  ])
+})
+
+test('a turn that fails after a stalled request ends late, but its activity stops when the agent stopped', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0)),
+    codex.started(sec(1), 't', 'composer'),
+    codex.userItem(sec(1), 'go', TYPED),
+    codex.toolCall(sec(600), 'ok'),
+    codex.tokens(sec(2400)),
+    codex.complete(sec(2400), 't', sec(1), sec(2400), { message: 'Selected model is at capacity.' }),
+  ])
+  assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: 't', state: 'failed', at: sec(2400) }])
+  assert.equal(Math.max(...of(recs, 'activity').map((a) => a.at)), sec(600))
+})
+
+test('an imported history keeps each turn\'s own times; the import time is never activity', () => {
+  const c = codexCtx()
+  const importedAt = sec(86_400)
+  const recs = run(parser(c), [
+    codex.meta(c, importedAt),
+    codex.started(importedAt, 'old-1', undefined, sec(0)),
+    codex.userEvent(importedAt, 'from before the import'),
+    codex.userItem(importedAt, 'from before the import', null, null),
+    codex.assistant(importedAt),
+    codex.complete(importedAt, 'old-1', sec(0), sec(120)),
+    codex.started(importedAt, 'old-2', undefined, sec(500)),
+    codex.complete(importedAt, 'old-2', sec(500), null),
+  ])
+  assert.deepEqual(of(recs, 'turn').map((t) => [t.key, t.start, t.replayed]), [
+    ['old-1', sec(0), true],
+    ['old-2', sec(500), true],
+  ])
+  assert.deepEqual(of(recs, 'end'), [
+    { t: 'end', key: 'old-1', state: 'completed', at: sec(120) },
+    // No completion time and no duration: the end is unknown, not invented.
+    { t: 'end', key: 'old-2', state: 'completed', at: null },
+  ])
+  assert.equal(of(recs, 'activity').length, 0)
+  assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis, u.at]), [['prompt', 'inferred', sec(0)]])
+})
+
+test('a fork repeats its parent\'s metadata and turns; the copies keep the parent\'s keys', () => {
+  const parent = codexCtx()
+  const child = codexCtx()
+  const lines = [
+    codex.meta(child, sec(100), { forkedFrom: parent.id }),
+    codex.meta(parent, sec(100)),
+    codex.started(sec(100), 'parent-turn', 'composer', sec(0)),
+    codex.userItem(sec(100), 'parent prompt', TYPED, sec(0)),
+    codex.complete(sec(100), 'parent-turn', sec(0), sec(50)),
+    codex.started(sec(101), 'child-turn', 'composer'),
+    codex.userItem(sec(101), 'child prompt', TYPED),
+    codex.complete(sec(120), 'child-turn', sec(101), sec(120)),
+  ]
+  const recs = run(parser(child), lines)
+  assert.deepEqual(of(recs, 'session').map((s) => s.session), [child.id])
+  assert.deepEqual(of(recs, 'turn').map((t) => [t.key, t.replayed]), [
+    ['parent-turn', true],
+    ['child-turn', false],
+  ])
+  assert.deepEqual(of(recs, 'user').map((u) => u.key), ['parent-turn:u1', 'child-turn:u1'])
+})
+
+test('sessions driven by a script or another agent, and subagents, have no acts of the person', () => {
+  for (const opts of [{ source: 'exec', originator: 'codex_exec' }, { originator: 'Claude Code' }]) {
+    const c = codexCtx()
+    const recs = run(parser(c), [codex.meta(c, sec(0), opts), codex.started(sec(1), 't', 'exec'), codex.userItem(sec(1), 'review this diff', TYPED), codex.complete(sec(9), 't', sec(1), sec(9))])
+    assert.equal(of(recs, 'session')[0]!.origin, 'automated')
+    assert.deepEqual(of(recs, 'turn').map((t) => t.opener), ['automation'])
+    assert.equal(of(recs, 'user').length, 0)
+  }
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0), { source: { subagent: { thread_spawn: { parent_thread_id: 'parent-thread', depth: 1, agent_path: '/root/x' } } }, threadSource: 'subagent' }),
+    codex.started(sec(1), 't', null),
+    codex.userItem(sec(1), 'audit the routes', TYPED),
+    codex.complete(sec(9), 't', sec(1), sec(9)),
+  ])
+  assert.equal(of(recs, 'session')[0]!.origin, 'subagent')
+  assert.equal(of(recs, 'session')[0]!.parent, 'parent-thread')
+  assert.equal(of(recs, 'user').length, 0)
+})
+
+test('an older log without triggers or content kinds is read from its messages\' shape', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [
+    codex.meta(c, sec(0), { originator: 'codex-tui', source: 'cli' }),
+    codex.started(sec(1), 't', undefined),
+    codex.userItem(sec(2), '<environment_context>\n  <cwd>/x</cwd>\n</environment_context>', null, null),
+    codex.userItem(sec(3), 'explain this stack trace', null, null),
+    codex.userEvent(sec(3), 'explain this stack trace'),
+    codex.assistant(sec(10)),
+    codex.userItem(sec(15), '<turn_aborted>\nThe user interrupted the previous turn.\n</turn_aborted>', null, null),
+    codex.aborted(sec(15), 't', sec(1)),
+  ])
+  assert.deepEqual(of(recs, 'turn_opener'), [{ t: 'turn_opener', key: 't', opener: 'user' }])
+  assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis, u.at]), [
+    ['prompt', 'inferred', sec(1)],
+    ['interrupt', 'inferred', sec(15)],
+  ])
+})
+
+test('a turn that never ended is closed as missing when the next one starts', () => {
+  const c = codexCtx()
+  const recs = run(parser(c), [codex.meta(c, sec(0)), codex.started(sec(1), 'a', 'composer'), codex.assistant(sec(5)), codex.started(sec(3600), 'b', 'composer')])
+  assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: 'a', state: 'missing', at: null }])
+  assert.equal(Math.max(...of(recs, 'activity').filter((a) => a.key === 'a').map((a) => a.at)), sec(5))
+})
+
+test('a line that no longer starts the usual way is still parsed, and garbage is counted', () => {
+  const c = codexCtx()
+  const p = parser(c)
+  const reordered = JSON.stringify({ type: 'event_msg', timestamp: new Date(sec(1)).toISOString(), payload: { type: 'task_started', turn_id: 't', started_at: Math.floor(sec(1) / 1000) } })
+  const recs = run(p, [codex.meta(c, sec(0)), reordered, 'not json at all'])
+  assert.deepEqual(of(recs, 'turn').map((t) => t.key), ['t'])
+  assert.equal(p.counts.bad, 1)
+})

@@ -164,10 +164,11 @@ export class AgentReader {
     while (this.dirty.size > 0 || this.draining) await this.drain()
   }
 
-  // Missing folders and folders without file events are looked at on this timer; watched folders are not.
+  // The slow check for missed file events: sizes are compared with the stored read positions, and only a file that
+  // grew or appeared is read. Folders without file events (WSL) rely on it entirely.
   private async tick(): Promise<void> {
     await this.discoverRoots()
-    for (const r of this.roots) if (!r.present || r.polling || r.watcher === null) await this.reconcile(r)
+    for (const r of this.roots) await this.reconcile(r)
     await this.drain()
   }
 
@@ -201,7 +202,6 @@ export class AgentReader {
       const row = known.get(file)
       if (appeared || !row) this.dirty.set(file, r)
       else {
-        // Polled folders: only a file whose size moved is read.
         try {
           const st = await stat(file)
           if (st.size !== row.size) this.dirty.set(file, r)

@@ -187,8 +187,8 @@ const SQL = {
   turnOpener: `UPDATE agent_turns SET opened_by = @opener WHERE agent = @agent AND turn_key = @key AND opened_by = 'unknown'`,
   activity: 'UPDATE agent_turns SET last_activity_wall_ms = max(last_activity_wall_ms, @at) WHERE agent = @agent AND turn_key = @key',
   // The first real end wins; 'missing' only ever gives way to a real one.
-  end: `UPDATE agent_turns SET end_state = @state, end_wall_ms = CASE WHEN @at IS NULL THEN NULL ELSE max(@at, start_wall_ms) END,
-      last_activity_wall_ms = CASE WHEN @at IS NULL THEN last_activity_wall_ms ELSE max(last_activity_wall_ms, @at) END
+  // The end is kept apart from the last activity: a turn that fails after a stalled request ended late but did nothing since.
+  end: `UPDATE agent_turns SET end_state = @state, end_wall_ms = CASE WHEN @at IS NULL THEN NULL ELSE max(@at, start_wall_ms) END
     WHERE agent = @agent AND turn_key = @key AND (end_state IS NULL OR (end_state = 'missing' AND @state != 'missing'))`,
   user: `INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, recorded_wall_ms)
     VALUES (@agent, @key, @session, @turn, 'user', @act, @basis, @at, @now) ON CONFLICT (agent, event_key) DO NOTHING`,

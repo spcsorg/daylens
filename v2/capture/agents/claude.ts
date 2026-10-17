@@ -18,9 +18,11 @@ interface ClaudeState {
   automated: boolean
   turn: OpenTurn | null
   pending: { opener: TurnOpener; at: number; key: string } | null
-  queued: Record<string, number>
+  // Typed messages waiting for delivery: when they were typed, and whether the agent was busy then.
+  queued: Record<string, [number, boolean]>
   questions: Record<string, number>
   limitSince: number | null
+  retrySince?: number | null
 }
 
 const TOOL_RESULT_HEAD = /"type":"user","message":\{"role":"user","content":\[\{"(?:tool_use_id|type":"tool_result)"/
@@ -50,6 +52,8 @@ const INJECTED_PREFIXES = [
 ]
 
 const INTERRUPT = '[Request interrupted by user'
+// Queued messages that were never delivered are forgotten oldest first, so the saved state stays small.
+const MAX_QUEUED = 64
 
 function firstText(content: unknown): string | null {
   if (typeof content === 'string') return content
@@ -64,7 +68,7 @@ function firstText(content: unknown): string | null {
   return content.some((c) => c && typeof c === 'object' && (c as { type?: unknown }).type === 'image') ? '' : null
 }
 
-const TAIL_KEYS = ['requestId', 'uuid', 'type']
+const TAIL_KEYS = ['requestId', 'isMeta', 'isCompactSummary', 'uuid', 'type']
 // The record type when it comes before any nested object, as it does for user and system records.
 const LEADING_TYPE = /^\{(?:"[^"]+":(?:"[^"]*"|true|false|null|-?\d+),)*?"type":"([a-z_-]+)"/
 const ASK_IDS = /"type":"tool_use","id":"([^"]+)","name":"AskUserQuestion"/g
@@ -297,9 +301,16 @@ export class ClaudeParser implements LineParser {
     if (!env) return []
     const out = this.meta(o, env.at)
     if (o.isSidechain === true && !this.subagentFile) return out.concat(this.activity(env.at))
+    // A reply after a finished turn and a new instruction (a command, a skill, an automatic continue) is a new turn.
+    const done = this.s.turn !== null && (this.s.turn.stop === 'end_turn' || this.s.turn.stop === 'stop_sequence')
+    if (done && this.s.pending !== null) out.push(...this.close('missing', null))
     if (!this.s.turn) {
       const p = this.s.pending
       out.push(...this.open(p?.key ?? env.uuid, p?.opener ?? (this.subagentFile ? 'agent' : 'unknown'), p?.at ?? env.at, null, 'marked', null))
+    }
+    if (this.s.retrySince != null) {
+      out.push({ t: 'wait', key: `${this.session}:retry:${this.s.retrySince}`, session: this.session, turn: this.s.turn?.key ?? null, reason: 'api_error', start: this.s.retrySince, end: env.at })
+      this.s.retrySince = null
     }
     const message = o.message as { stop_reason?: unknown; content?: unknown } | undefined
     if (this.s.turn) this.s.turn.stop = o.isApiErrorMessage === true ? 'error' : typeof message?.stop_reason === 'string' ? message.stop_reason : this.s.turn.stop
@@ -317,7 +328,12 @@ export class ClaudeParser implements LineParser {
     const out = this.meta(o, env.at)
     const sub = o.subtype
     if (sub === 'turn_duration' || sub === 'stop_hook_summary') {
-      if (this.s.turn) out.push(...this.activity(env.at), ...this.close(this.s.turn.stop === 'error' ? 'failed' : 'completed', env.at))
+      if (this.s.turn) out.push(...this.close(this.s.turn.stop === 'error' ? 'failed' : 'completed', env.at))
+      return out
+    }
+    // A failed request is retried after a pause; until the next reply arrives the agent is waiting, not working.
+    if (sub === 'api_error') {
+      if (this.s.turn) this.s.retrySince ??= env.at
       return out
     }
     if (sub === 'informational' && typeof o.content === 'string') {
@@ -344,7 +360,7 @@ export class ClaudeParser implements LineParser {
     if (prompt === null || isInjected(prompt)) return out
     // Typed while the agent worked and delivered into the running turn; it counts once, at the time it was typed.
     const typed = this.takeQueued(prompt)
-    out.push(...this.act(env.uuid, 'steer', kind === 'human' ? 'marked' : 'inferred', typed ?? env.at, this.s.turn?.key ?? null))
+    out.push(...this.act(env.uuid, 'steer', kind === 'human' ? 'marked' : 'inferred', typed?.[0] ?? env.at, this.s.turn?.key ?? null))
     return out
   }
 
@@ -357,22 +373,24 @@ export class ClaudeParser implements LineParser {
     this.counts.recognized++
     if (this.subagentFile || this.s.automated) return []
     const content = typeof o.content === 'string' ? o.content : null
+    // The time a message was typed into the queue; it is counted when it is delivered, as part of the turn it starts.
     if (o.operation === 'enqueue' && content !== null && !isInjected(content)) {
-      this.s.queued[digest(content)] = at
-      return this.act(`${this.session}:enqueue:${at}`, 'queued', 'inferred', at, this.s.turn?.key ?? null)
+      const t = this.s.turn
+      this.s.queued[digest(content)] = [at, t !== null && t.stop !== 'end_turn' && t.stop !== 'stop_sequence']
+      const keys = Object.keys(this.s.queued)
+      if (keys.length > MAX_QUEUED) delete this.s.queued[keys[0]!]
     }
-    if (o.operation === 'remove' && content !== null) delete this.s.queued[digest(content)]
     return []
   }
 
   // --- turns ---------------------------------------------------------------
 
-  private takeQueued(text: string): number | null {
+  private takeQueued(text: string): [number, boolean] | null {
     const d = digest(text)
-    const at = this.s.queued[d]
-    if (at === undefined) return null
+    const q = this.s.queued[d]
+    if (q === undefined) return null
     delete this.s.queued[d]
-    return at
+    return q
   }
 
   private open(key: string, opener: TurnOpener, at: number, act: UserAct | null, basis: 'marked' | 'inferred', text: string | null): AgentRecord[] {
@@ -383,9 +401,9 @@ export class ClaudeParser implements LineParser {
     this.s.turn = { key: turn, last: at, stop: null }
     out.push({ t: 'turn', key: turn, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start: at, replayed: false })
     if (act !== null) {
-      // A prompt that was queued was already counted when it was typed.
+      // Every prompt passes through the queue; one typed while the agent was busy waited there, and was sent when typed.
       const typed = text !== null ? this.takeQueued(text) : null
-      if (typed === null) out.push(...this.act(key, act, basis, at, turn))
+      out.push(...this.act(key, typed?.[1] ? 'queued' : act, basis, typed?.[0] ?? at, turn))
     }
     return out
   }
@@ -396,6 +414,7 @@ export class ClaudeParser implements LineParser {
     if (!t) return []
     this.s.turn = null
     this.s.questions = {}
+    this.s.retrySince = null
     if (state === 'missing' && (t.stop === 'end_turn' || t.stop === 'stop_sequence')) return [{ t: 'end', key: t.key, state: 'completed', at: t.last }]
     return [{ t: 'end', key: t.key, state, at: state === 'missing' ? null : at }]
   }
