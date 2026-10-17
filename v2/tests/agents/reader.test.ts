@@ -295,6 +295,22 @@ test('settling with nothing to read returns at once, with empty session folders 
   r.store.close()
 })
 
+test('a project folder moved into the watched folder is read', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  mkdirSync(path.join(r.home, '.claude', 'projects'), { recursive: true })
+  const outside = path.join(r.home, 'elsewhere', '-home-me-code-moved')
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(path.join(outside, `${c.session}.jsonl`), lines(claude.prompt(c, sec(0), 'go', { uuid: 'mv1' }), claude.assistant(c, sec(5), 'end_turn')))
+  const reader = r.reader()
+  await reader.start()
+  await new Promise((res) => setTimeout(res, 300))
+  renameSync(outside, path.join(r.home, '.claude', 'projects', '-home-me-code-moved'))
+  await waitFor(() => r.count(`SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'mv1'`) === 1)
+  await reader.stop()
+  r.store.close()
+})
+
 test('renamed turn events are reported as degraded, never as a healthy quiet log', async () => {
   const r = rig()
   const c = codexCtx()

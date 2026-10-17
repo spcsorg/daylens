@@ -94,6 +94,8 @@ export function healthFromCounts(c: ParseCounts): { state: HealthState; reason: 
 export interface ReaderStats {
   // Folder listings: once per folder at start, then only for folders without working file events.
   listings: number
+  // New folders under a watched root, each listed once when its event arrives.
+  dirScans: number
   filesRead: number
   bytesRead: number
   lines: number
@@ -119,7 +121,7 @@ function errCode(err: unknown): string {
 }
 
 export class AgentReader {
-  readonly stats: ReaderStats = { listings: 0, filesRead: 0, bytesRead: 0, lines: 0, records: 0 }
+  readonly stats: ReaderStats = { listings: 0, dirScans: 0, filesRead: 0, bytesRead: 0, lines: 0, records: 0 }
   private readonly store: AgentStore
   private readonly roots: RootState[]
   private readonly reconcileMs: number
@@ -276,7 +278,10 @@ export class AgentReader {
       r.watcher = watch(r.root.dir, { recursive: r.root.layout !== 'codex_archive', persistent: false }, (_event, name) => {
         if (this.stopped || !name) return
         const file = path.join(r.root.dir, name.toString())
-        if (!classifyFile(r.root, file)) return
+        if (!classifyFile(r.root, file)) {
+          void this.scanDir(r, file)
+          return
+        }
         this.dirty.set(file, r)
         this.schedule()
       })
@@ -294,6 +299,28 @@ export class AgentReader {
       r.polling = true
       this.log(`agent watch unavailable agent=${r.root.agent} code=${errCode(err)}`)
     }
+  }
+
+  // A folder that appears under a watched root (a project folder moved or copied in) is listed once, by itself; its logs
+  // were written before the watcher could see them.
+  private async scanDir(r: RootState, dir: string): Promise<void> {
+    if (r.root.layout === 'codex_archive' || this.stopped) return
+    let names: string[]
+    try {
+      if (!(await stat(dir)).isDirectory()) return
+      names = (await readdir(dir, { recursive: true })) as string[]
+    } catch {
+      return
+    }
+    this.stats.dirScans++
+    let found = false
+    for (const name of names) {
+      const file = path.join(dir, name)
+      if (!classifyFile(r.root, file)) continue
+      this.dirty.set(file, r)
+      found = true
+    }
+    if (found) this.schedule()
   }
 
   private schedule(): void {
