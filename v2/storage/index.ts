@@ -577,8 +577,9 @@ export class Storage {
 
   /** null keeps everything. Applies to capture and import at once; older rows are pruned in the background. */
   setRetentionDays(days: number | null): void {
-    this.setSetting('retention_days', days, 'retention')
-    this.rules.retentionDays = days
+    this.bus.commit('retention', { key: 'retention_days' }, () => this.putSetting('retention_days', days), () => {
+      this.rules.retentionDays = days
+    })
     this.scheduleRetention(0)
   }
 

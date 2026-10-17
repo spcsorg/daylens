@@ -156,3 +156,14 @@ test('an hour computed before a deletion inside it cannot be written back', asyn
   assert.equal(fresh.needs_rewrite, false)
   r.close()
 })
+
+test('a retention change is in force by the time it is announced', () => {
+  const r = rig()
+  r.clock.t = T0 + 30 * 24 * HOUR
+  const seen: boolean[] = []
+  r.storage.bus.on((c) => c.kind === 'retention' && seen.push(r.storage.accepts(T0, 'com.example.editor', null)))
+  r.storage.setRetentionDays(7)
+  r.storage.stop()
+  assert.deepEqual(seen, [false], 'material older than the new window is already refused')
+  r.close()
+})
