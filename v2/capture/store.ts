@@ -535,7 +535,21 @@ export class Store implements Sink {
     return s
   }
 
+  // Around each flush, including the derivation it triggers: storage tells its deletion worker to stand back.
+  onWriteStart: () => void = () => {}
+  onWriteEnd: () => void = () => {}
+  private flushDepth = 0
+
   flush(): boolean {
+    if (this.flushDepth++ === 0) this.onWriteStart()
+    try {
+      return this.flushNow()
+    } finally {
+      if (--this.flushDepth === 0) this.onWriteEnd()
+    }
+  }
+
+  private flushNow(): boolean {
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null

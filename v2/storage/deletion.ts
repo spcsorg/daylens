@@ -221,6 +221,23 @@ export class Deleter {
     this.db = db
   }
 
+  /**
+   * Runs `step(limit)` in transactions until it removes nothing, sizing `limit` so each transaction takes about
+   * FTS_STEP_MS: capture's flush never waits long behind one.
+   */
+  private adaptive(step: (limit: number) => number): number {
+    let total = 0
+    for (let limit = 200; ; ) {
+      const t = performance.now()
+      const n = immediateRetrying(this.db, () => step(limit))
+      const ms = performance.now() - t
+      total += n
+      if (n === 0) return total
+      if (ms > FTS_STEP_MS) limit = Math.max(10, Math.floor(limit / 2))
+      else if (ms < FTS_STEP_MS / 2) limit = Math.min(5000, Math.ceil(limit * 1.5))
+    }
+  }
+
   private withSecureFts<T>(fn: () => T): T {
     return immediateRetrying(this.db, () => secureFts(this.db, fn))
   }
@@ -302,17 +319,20 @@ export class Deleter {
         after = rows[rows.length - 1]!.id
       }
     } else {
-      const step = db.prepare(`DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre} LIMIT ${ROWS_PER_STEP})`)
-      for (let n = -1; n !== 0; ) r.observations += n = immediateRetrying(db, () => step.run(args).changes)
+      const step = db.prepare(`DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre} LIMIT @limit)`)
+      r.observations += this.adaptive((limit) => step.run({ ...args, limit }).changes)
     }
     stop('observations')
-    const ivStep = db.prepare(`DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP})`)
-    for (let n = -1; n !== 0; ) r.intervals += n = immediateRetrying(db, () => ivStep.run(args).changes)
+    const ivStep = db.prepare(`DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT @limit)`)
+    r.intervals += this.adaptive((limit) => ivStep.run({ ...args, limit }).changes)
     if (bounded) {
       // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
-      for (let at: number | null = from; at !== null; ) {
+      for (let at: number | null = from, rows = 200; at !== null; ) {
         const s: number = at
-        at = immediateRetrying(db, () => derived.rederiveStep(s, to))
+        const t0 = performance.now()
+        at = immediateRetrying(db, () => derived.rederiveStep(s, to, rows))
+        const ms = performance.now() - t0
+        rows = ms > FTS_STEP_MS ? Math.max(20, Math.floor(rows / 2)) : ms < FTS_STEP_MS / 2 ? Math.min(5000, Math.ceil(rows * 1.5)) : rows
       }
     }
     stop('intervals')
@@ -334,8 +354,8 @@ export class Deleter {
       const batch = hours
       r.searchDocs += this.withSecureFts(() => {
         const before = (docCount.get() as { n: number }).n
-        derived.rebuildDocs(batch)
-        this.done(tombstoneId, 'doc_hour', batch)
+        const ran = timeBoxed(batch, (h) => derived.rebuildDocs([h]))
+        this.done(tombstoneId, 'doc_hour', batch.slice(0, ran))
         return Math.max(0, before - (docCount.get() as { n: number }).n)
       })
     }
@@ -374,21 +394,27 @@ export class Deleter {
     for (let ids = this.work(tombstoneId, 'thread', HOURS_PER_STEP); ids.length > 0; ids = this.work(tombstoneId, 'thread', HOURS_PER_STEP)) {
       const batch = ids
       immediateRetrying(db, () => {
-        for (const id of batch) {
+        const ran = timeBoxed(batch, (id) => {
           const left = (db.prepare('SELECT count(*) AS n FROM thread_hours WHERE thread_id = ?').get(id) as { n: number }).n
           if (left === 0) db.prepare('DELETE FROM threads WHERE id = ?').run(id)
           else db.prepare(`UPDATE threads SET title = '', needs_rewrite = 1, updated_wall_ms = ? WHERE id = ?`).run(nowWallMs, id)
-        }
-        this.done(tombstoneId, 'thread', batch)
+        })
+        this.done(tombstoneId, 'thread', batch.slice(0, ran))
       })
     }
     stop('threads')
+    // Reads go as planned: over the range, of the app or site, or of an affected hour.
+    const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
+    for (let ids = this.work(tombstoneId, 'read', HOURS_PER_STEP); ids.length > 0; ids = this.work(tombstoneId, 'read', HOURS_PER_STEP)) {
+      const batch = ids
+      immediateRetrying(db, () => {
+        const ran = timeBoxed(batch, (id) => (r.assistantReads += delRead.run(id).changes))
+        this.done(tombstoneId, 'read', batch.slice(0, ran))
+      })
+    }
     immediateRetrying(db, () => {
       // A thread created inside a deleted range with no hours at all goes too.
       if (t.kind === 'range') db.prepare('DELETE FROM threads WHERE created_wall_ms >= ? AND created_wall_ms < ? AND id NOT IN (SELECT thread_id FROM thread_hours)').run(from, to)
-      // Reads go as planned: over the range, of the app or site, or of an affected hour.
-      const delRead = db.prepare('DELETE FROM assistant_reads WHERE id = ?')
-      for (const id of this.work(tombstoneId, 'read', Number.MAX_SAFE_INTEGER)) r.assistantReads += delRead.run(id).changes
       db.prepare(`DELETE FROM deletion_work WHERE tombstone_id = ?`).run(tombstoneId)
       db.prepare(`DELETE FROM deletion_fence WHERE tombstone_id = ?`).run(tombstoneId)
       db.prepare(`UPDATE deletions SET state = 'done' WHERE id = ? AND state = 'pending'`).run(tombstoneId)
@@ -415,9 +441,20 @@ export class DeletionWorker {
   private readonly pending = new Map<number, { worker: Worker; resolve: (r: unknown) => void; reject: (e: Error) => void }>()
   private readonly file: string
   private idle: ReturnType<typeof setTimeout> | null = null
+  // Shared with the worker: non-zero while capture is writing.
+  private readonly want = new Int32Array(new SharedArrayBuffer(4))
 
   constructor(file: string) {
     this.file = file
+  }
+
+  /** Capture is about to write (true) or done (false); the worker starts no write transaction in between. */
+  captureWriting(on: boolean): void {
+    if (on) Atomics.add(this.want, 0, 1)
+    else {
+      Atomics.sub(this.want, 0, 1)
+      Atomics.notify(this.want, 0)
+    }
   }
 
   // An idle worker holds about 22 MB, so it exits a while after its last job and starts again on the next.
@@ -455,7 +492,7 @@ export class DeletionWorker {
     if (this.worker) return this.worker
     // The worker is a sibling module: .ts when run from source, .js when built.
     const ext = path.extname(fileURLToPath(import.meta.url))
-    const w = new Worker(new URL(`./deletionWorker${ext}`, import.meta.url), { workerData: { file: this.file } })
+    const w = new Worker(new URL(`./deletionWorker${ext}`, import.meta.url), { workerData: { file: this.file, want: this.want } })
     w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)

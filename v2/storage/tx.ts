@@ -14,6 +14,12 @@ export function immediate<T>(db: Database.Database, fn: () => T): T {
 }
 
 const parked = new Int32Array(new SharedArrayBuffer(4))
+let beforeWrite: () => void = () => {}
+
+/** Called before every retrying write transaction: the deletion worker waits there while capture wants the lock. */
+export function setBeforeWrite(fn: () => void): void {
+  beforeWrite = fn
+}
 
 /**
  * For the deletion worker, which may block: retries the whole transaction while another connection holds the lock,
@@ -21,6 +27,7 @@ const parked = new Int32Array(new SharedArrayBuffer(4))
  */
 export function immediateRetrying<T>(db: Database.Database, fn: () => T): T {
   for (let wait = 10; ; wait = Math.min(wait * 2, 1000)) {
+    beforeWrite()
     try {
       return immediate(db, fn)
     } catch (err) {

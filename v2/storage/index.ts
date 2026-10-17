@@ -149,6 +149,8 @@ export class Storage {
       admit: (row) => this.rules.accepts(row.event_wall_ms, row.app_id, row.url),
     })
     this.deletions = new DeletionWorker(store.file)
+    store.onWriteStart = () => this.deletions.captureWriting(true)
+    store.onWriteEnd = () => this.deletions.captureWriting(false)
     store.acceptObservation = (row) => this.admit(row)
     store.acceptExtension = (row, from, to) => this.rules.mayCover(row.app_id, (row as { url?: string | null }).url ?? null, from, to)
     store.onFlushed = () => {

@@ -68,3 +68,35 @@ test('a worker transaction retries while another connection holds the lock longe
   db.close()
   r.close()
 })
+
+test('capture flushes stay under 100 ms while a large deletion runs, with capture writing every second and two readers', async () => {
+  const r = rig()
+  for (let i = 0; i < 60_000; i++) r.store.insertObservation(row(T0 + i * 20_000, i % 3 ? 'com.example.editor' : 'com.example.chat', `item ${i % 4000} plan canary${i % 500}`))
+  r.store.flush()
+  const end = T0 + 60_000 * 20_000
+  r.clock.t = end + HOUR
+  const readers = [0, 1].map(() => {
+    const w = new Worker(new URL('./reader.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 60_000 } })
+    return w
+  })
+  await new Promise((res) => setTimeout(res, 200))
+  const flushes: number[] = []
+  let t = end + HOUR
+  let open = r.store.insertObservation(row(t, 'com.example.editor', 'live.md'))
+  const capture = setInterval(() => {
+    t += 1000
+    r.clock.t = t
+    if (t % 10_000 === 0) open = r.store.insertObservation(row(t, 'com.example.editor', `live ${t}.md`))
+    else r.store.extendObservation(open, t)
+    const s = performance.now()
+    r.store.flush()
+    flushes.push(performance.now() - s)
+  }, 1000)
+  const result = await r.storage.deleteSource('com.example.chat').done
+  clearInterval(capture)
+  for (const w of readers) await w.terminate()
+  assert.equal(result.observations, 20_000)
+  assert.ok(flushes.length >= 2, `${flushes.length} capture flushes during the deletion`)
+  assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(0)} ms: ${flushes.map((f) => f.toFixed(0)).join(', ')}`)
+  r.close()
+})
