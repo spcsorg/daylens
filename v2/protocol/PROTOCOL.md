@@ -138,7 +138,9 @@ Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
   an earlier version moves to secure storage at start, and the database is then checkpointed and vacuumed so no older
   copy of the row is left in the files. Another open reader can hold that up: the database keeps a `scrub_pending`
   marker, store health reports `scrubPending`, and the scrub is retried at every start and every minute until a
-  checkpoint reports it complete. A pairing whose key is missing from secure storage is removed
+  checkpoint reports it complete and neither the `browser_pairings` row nor any database file still holds a
+  `"key":"<43 characters>"` value. The rewritten row and the marker are never the writes dropped when the write queue
+  is full. A pairing whose key is missing from secure storage is removed
   and the browser shows Connect again; unpairing or replacing a pairing deletes its key.
 - A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own
   pairing. A new Firefox pairing therefore waits for the person: once proven, the service holds the connection in a

@@ -73,7 +73,7 @@ export interface ClockPoint {
 
 export interface PairingStore {
   meta(key: string): string | null
-  setMeta(key: string, value: string | null): void
+  setMeta(key: string, value: string | null, opts?: { keep?: boolean }): void
   // Clears old copies of rewritten rows from the database files; false while that is still pending.
   scrub?(): boolean
 }
@@ -241,7 +241,8 @@ export class BrowserLocal {
   }
 
   private save(): void {
-    this.store.setMeta(META_KEY, this.paired.length ? JSON.stringify(this.paired) : null)
+    // Kept through a full queue: the scrub after a key migration relies on this write.
+    this.store.setMeta(META_KEY, this.paired.length ? JSON.stringify(this.paired) : null, { keep: true })
   }
 
   private async migrateLegacyKeys(): Promise<void> {

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, DEFAULT_SITE_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
@@ -13,6 +13,9 @@ const FLUSH_AT_OPS = 256
 const MAX_RETRY_MS = 30_000
 const SCRUB_KEY = 'scrub_pending'
 const SCRUB_RETRY_MS = 60_000
+// How a pairing secret was stored before it moved to the system's secret store: found without knowing the key.
+const LEGACY_KEY = /"key":"[A-Za-z0-9_-]{43}"/
+const SCAN_CHUNK = 1 << 20
 
 export function defaultDataDir(): string {
   if (process.env.DAYLENS_V2_DATA_DIR) return process.env.DAYLENS_V2_DATA_DIR
@@ -153,7 +156,8 @@ CREATE TABLE IF NOT EXISTS exclusions (
 );
 `
 
-type Op = { sql: string; params: unknown[] }
+// A kept op is never the one dropped when the queue is full: the scrub depends on it.
+type Op = { sql: string; params: unknown[]; keep?: boolean }
 
 export interface StoreHealth {
   committedWallMs: number | null
@@ -315,15 +319,15 @@ export class Store implements Sink {
     return r?.value ?? null
   }
 
-  setMeta(key: string, value: string | null): void {
-    if (value === null) this.enqueue('DELETE FROM meta WHERE key = ?', [key])
-    else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value])
+  setMeta(key: string, value: string | null, opts: { keep?: boolean } = {}): void {
+    if (value === null) this.enqueue('DELETE FROM meta WHERE key = ?', [key], opts.keep)
+    else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value], opts.keep)
   }
 
   // Removes every older copy of rewritten rows from the files (WAL frames and free pages) after a secret is moved out
   // of the database. Pending until a checkpoint reports it completed; an open reader elsewhere can hold it up.
   scrub(): boolean {
-    this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [])
+    this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [], true)
     return this.retryScrub()
   }
 
@@ -336,6 +340,10 @@ export class Store implements Sink {
       this.db.exec('VACUUM')
       const second = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
       if (first[0]?.busy !== 0 || second[0]?.busy !== 0) return this.scrubPending()
+      if (this.holdsLegacyKey()) {
+        this.onError('scrub_key_remains')
+        return this.scrubPending()
+      }
       this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
       this.db.pragma('wal_checkpoint(TRUNCATE)')
     } catch (err) {
@@ -343,6 +351,34 @@ export class Store implements Sink {
       return this.scrubPending()
     }
     return this.scrubDone()
+  }
+
+  // Whether a pairing row or any of the database's files still holds a key in the legacy shape.
+  private holdsLegacyKey(): boolean {
+    const row = this.meta('browser_pairings')
+    if (row !== null && LEGACY_KEY.test(row)) return true
+    for (const f of [this.file, `${this.file}-wal`, `${this.file}-shm`]) {
+      if (!existsSync(f)) continue
+      const fd = openSync(f, 'r')
+      try {
+        const buf = Buffer.alloc(SCAN_CHUNK + 64)
+        let carry = 0
+        let pos = 0
+        for (;;) {
+          const n = readSync(fd, buf, carry, SCAN_CHUNK, pos)
+          if (n === 0) break
+          if (LEGACY_KEY.test(buf.toString('latin1', 0, carry + n))) return true
+          pos += n
+          // Keeps the tail so a match split across two reads is still seen.
+          const total = carry + n
+          carry = Math.min(64, total)
+          buf.copy(buf, 0, total - carry, total)
+        }
+      } finally {
+        closeSync(fd)
+      }
+    }
+    return false
   }
 
   private scrubPending(): boolean {
@@ -453,17 +489,20 @@ export class Store implements Sink {
 
   // --- batching ---------------------------------------------------------
 
-  private enqueue(sql: string, params: unknown[]): void {
+  private enqueue(sql: string, params: unknown[], keep = false): void {
     if (this.pending.length >= this.maxPendingOps) {
-      this.pending.shift()
-      this.health.droppedOps++
-      this.droppedSinceFailure++
-      if (!this.overflowing) {
-        this.overflowing = true
-        this.onOverflow()
+      const oldest = this.pending.findIndex((op) => !op.keep)
+      if (oldest >= 0) {
+        this.pending.splice(oldest, 1)
+        this.health.droppedOps++
+        this.droppedSinceFailure++
+        if (!this.overflowing) {
+          this.overflowing = true
+          this.onOverflow()
+        }
       }
     }
-    this.pending.push({ sql, params })
+    this.pending.push(keep ? { sql, params, keep } : { sql, params })
     if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null) this.flush()
     else this.schedule()
   }
