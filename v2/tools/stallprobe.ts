@@ -7,9 +7,13 @@ const store = new Store(dir)
 let last = (store.database.prepare('SELECT max(last_seen_wall_ms) AS t FROM observations').get() as { t: number }).t
 const storage = new Storage(store, dir, { now: () => clock.t + 1000 })
 console.log('open ms', (performance.now() - t0).toFixed(1))
+if (process.argv.includes('search')) {
+  // As the benchmark does first: hundreds of searches on this connection.
+  for (let i = 0; i < 40; i++) for (const q of ['billing', 'onboarding funnel', 'mig', 'notes', 'acme', 'mortgage dentist']) storage.search(q)
+}
 let lt = last + 60_000
 const clock = { t: lt }
-if (process.argv[3] === 'live') {
+if (process.argv.includes('live')) {
   // As the benchmark does before deleting: a minute of live capture, one flush a second.
   let id = -1
   for (let i = 0; i < 60; i++) {

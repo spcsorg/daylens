@@ -241,8 +241,9 @@ async function timedDelete(f: () => DeletionHandle) {
   clearInterval(tick)
   return { respond_ms: round(respond), done_ms: round(total), worst_stall_ms: round(Math.max(0, ...lags)), ...r }
 }
-// With --expose-gc: collect the ingest's garbage first, so a collection pause is not counted as a deletion stall.
-;(globalThis as { gc?: () => void }).gc?.()
+// Let the ingest's background work settle (a year written in seconds, then 600 back-to-back flushes): measured
+// right after that burst, the first deletion's capture-thread stall is that work, not the deletion.
+await new Promise((r) => setTimeout(r, 2000))
 clock.t = END + HOUR_MS + 700_000
 const delLast = await timedDelete(() => storage.deleteLast(10 * 60_000))
 clock.t = END + 2 * HOUR_MS
@@ -255,19 +256,22 @@ const timed = <T>(f: () => T): [T, number] => {
 }
 const [, rebuildMs] = timed(() => storage.derived.rebuild())
 
-// Retention: drop the oldest month, batch by batch.
+// Retention: drop the oldest month in the worker, as scheduled retention does, watching this (the capture) thread.
 storage.stop()
 const sizeBeforePrune = fileBytes() / 1048576
-storage.setRetentionDays(DAYS - 30)
+await storage.setRetentionDays(DAYS - 30)
 storage.stop()
-// Each batch is a few short transactions; the longest batch is the longest capture can wait.
-const batches: number[] = []
-for (;;) {
-  const t = performance.now()
-  const n = storage.pruneBatch()
-  batches.push(performance.now() - t)
-  if (n === 0) break
-}
+const pruneLags: number[] = []
+let pruneLast = performance.now()
+const pruneTick = setInterval(() => {
+  const n = performance.now()
+  pruneLags.push(n - pruneLast - 5)
+  pruneLast = n
+}, 5)
+const pruneStart = performance.now()
+const pruned = await storage.prune()
+const pruneMs = performance.now() - pruneStart
+clearInterval(pruneTick)
 
 const result = {
   days: DAYS,
@@ -280,12 +284,14 @@ const result = {
   deletion: { last_ten_minutes: delLast, one_app_all_year: delSource, one_site_all_year: delSite },
   rebuild_intervals_and_docs_ms: rebuildMs,
   retention_drop_one_month: {
-    batches: batches.length,
-    max_batch_ms: round(Math.max(...batches)),
-    p95_batch_ms: round(pct(batches, 95)),
-    total_s: round(batches.reduce((a, b) => a + b, 0) / 1000),
+    batches: pruned.batches,
+    removed: pruned.removed,
+    max_worker_transaction_ms: round(pruned.maxTransactionMs),
+    total_s: round(pruneMs / 1000),
+    worst_capture_thread_stall_ms: round(Math.max(0, ...pruneLags)),
     size_before_mb: round(sizeBeforePrune),
   },
+
 }
 store2.close()
 writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result, null, 2))
