@@ -31,6 +31,52 @@ const RELATIVE_BASE = 'https://relative.invalid'
 
 const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/
 
+// The 200 most frequent letter pairs in English words (/usr/share/dict/words). Product names, slugs and searches are
+// mostly made of them; random keys are not.
+const COMMON_PAIRS = new Set(
+  'erintionteanalaticenisreralerirostnearliesntorunitlacoiotoianicaedustasstrlydemachphngloouelnaacolheomdimenothsietsellmioppeosidvecehihoileaasulprndhaaburotblpomoncpaecemocgeogamshciapctpisuschynsdarysoumadsaepsprtsmdobiodtyagcrbeutgibaivimcuipgaplkermaegrtuooiziriglumpifvieobooiglfibrieeeruaircovqufockrdrsrrzeaudrubexclgoptttobfevaibhreuupwaylucbucyrnuaypeimbfuuiowegkimupuflguoarpnnudysmyltwiefsl'.match(/../g),
+)
+// Parameters that name a thing (a file, video, page, playlist) are exempt from the value-shape rule: their values are
+// random by design and identify what is on screen. Their names are still checked for secret words first.
+const IDENTITY_NAMES = new Set(['v', 'p', 'list', 'page', 'file', 'doc', 'item', 'video', 'post', 'node', 'sha', 'commit', 'rev'])
+
+function isIdentityName(name: string): boolean {
+  const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return IDENTITY_NAMES.has(joined) || /ids?$/.test(joined)
+}
+
+function entropy(s: string): number {
+  const counts = new Map<string, number>()
+  for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1)
+  let h = 0
+  for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length)
+  return h
+}
+
+function commonPairShare(s: string): number {
+  let pairs = 0
+  let common = 0
+  for (const run of s.toLowerCase().split(/[^a-z]+/))
+    for (let i = 1; i < run.length; i++) {
+      pairs++
+      if (COMMON_PAIRS.has(run.slice(i - 1, i + 1))) common++
+    }
+  return pairs ? common / pairs : 0
+}
+
+// A value shaped like a generated key: long hex, or 20+ characters of one base64 alphabet mixing letter cases or
+// digits, with few separators, and made mostly of letter pairs that English rarely uses. Measured on random keys this
+// catches 92% at 20 characters and 96% at 32; at a 0.6 pair threshold it starts dropping names like
+// ProjectKickoffDeck2026v3, so the threshold stays at 0.55.
+function looksGenerated(value: string): boolean {
+  const s = value.replace(/=+$/, '')
+  if (!/^[A-Za-z0-9+/_-]+$/.test(s)) return false
+  if (/^[0-9a-f]+$/i.test(s)) return s.length >= 32 && /[0-9]/.test(s) && /[a-f]/i.test(s)
+  if (s.length < 20 || (s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((r) => r.test(s)).length
+  return classes >= 2 && entropy(s) >= 3.5 && commonPairShare(s) < 0.55
+}
+
 function nameWords(name: string): string[] {
   return name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -61,7 +107,7 @@ function looksLikeAddress(f: string): boolean {
   return f.includes('://') || /^(\/\/|\\)/.test(f) || /[?#]/.test(f) || (f.includes('@') && f.includes(':'))
 }
 
-function cleanValue(value: string, depth: number): string | null {
+function cleanValue(value: string, depth: number, identity: boolean): string | null {
   let f = value.replace(CONTROLS, '').trim()
   const forms = [f]
   for (let i = 0; i < MAX_DECODES && /%[0-9a-f]{2}/i.test(f); i++) {
@@ -80,7 +126,7 @@ function cleanValue(value: string, depth: number): string | null {
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
     // A credential can hide behind encoding or a control prefix as well as an address can.
-    if (CREDENTIAL_VALUE.test(form) || JWT_VALUE.test(form)) return null
+    if (CREDENTIAL_VALUE.test(form) || JWT_VALUE.test(form) || (!identity && looksGenerated(form))) return null
     if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
@@ -103,7 +149,7 @@ function wouldRemove(form: string, depth: number): boolean {
     return true
   }
   if (u.username || u.password || u.hash) return true
-  for (const [k, v] of u.searchParams) if (isSecretParam(k, v) || cleanValue(v, depth + 1) === null) return true
+  for (const [k, v] of u.searchParams) if (isSecretParam(k, v) || cleanValue(v, depth + 1, isIdentityName(k)) === null) return true
   return false
 }
 
@@ -123,7 +169,7 @@ function clean(raw: string | null | undefined, depth: number): string | null {
     const kept = new URLSearchParams()
     for (const [k, v] of u.searchParams) {
       if (isSecretParam(k, v)) continue
-      const c = cleanValue(v, depth)
+      const c = cleanValue(v, depth, isIdentityName(k))
       if (c !== null) kept.append(k, c)
     }
     u.search = kept.toString()

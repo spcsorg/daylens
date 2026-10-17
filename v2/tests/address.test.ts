@@ -145,3 +145,24 @@ test('a credential hidden by encoding or a control prefix is still a credential'
   }
   assert.equal(cleanAddress('https://x.example.com/?q=bearer+market+2026'), 'https://x.example.com/?q=bearer+market+2026', 'the word alone is not a credential')
 })
+
+test('values shaped like credentials go whatever they are called; identities and ordinary values stay', () => {
+  const sweep: [string, string][] = [
+    ['https://www.dropbox.com/scl/fi/x1y2z3/report.pdf?rlkey=k3x9d0n4q8y2b7m1v5c6z0a2f&dl=0', 'https://www.dropbox.com/scl/fi/x1y2z3/report.pdf?dl=0'],
+    [
+      'https://calendar.google.com/calendar/event?eid=NWg3ZzhqOWsxMGZkc2FfMjAyNjEwMTZUMDkwMDAwWiBhbmFAZXhhbXBsZS5jb20&tok=MTMjYW5hQGV4YW1wbGUuY29tNGE1YjZjN2Q4ZTlmMGExYjJjM2Q0ZTVm&ctz=Africa%2FKigali',
+      'https://calendar.google.com/calendar/event?eid=NWg3ZzhqOWsxMGZkc2FfMjAyNjEwMTZUMDkwMDAwWiBhbmFAZXhhbXBsZS5jb20&ctz=Africa%2FKigali',
+    ],
+    ['https://onedrive.live.com/redir?resid=ABC123%21456&cid=0f1e2d3c4b5a6978', 'https://onedrive.live.com/redir?resid=ABC123%21456&cid=0f1e2d3c4b5a6978'],
+    ['https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing', 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing'],
+    ['https://www.figma.com/design/AbC123dEf456GhI789jKl/Plan?node-id=12-345&m=dev', 'https://www.figma.com/design/AbC123dEf456GhI789jKl/Plan?node-id=12-345&m=dev'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf'],
+    ['https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef?pvs=4', 'https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef?pvs=4'],
+    ['https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef&pm=s', 'https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef&pm=s'],
+    ['https://shop.example.com/s?k=iPhone15ProMaxCase2026&ref=nb_sb_noss', 'https://shop.example.com/s?k=iPhone15ProMaxCase2026&ref=nb_sb_noss'],
+    ['https://www.google.com/search?q=quarterly+report+2026', 'https://www.google.com/search?q=quarterly+report+2026'],
+    ['https://x.example.com/share?x=q8Z2kP0vLm3NcT7aB1sD4fGh&page=2', 'https://x.example.com/share?page=2'],
+    ['https://x.example.com/dl?h=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', 'https://x.example.com/dl'],
+  ]
+  for (const [raw, want] of sweep) assert.equal(cleanAddress(raw), want, raw)
+})
