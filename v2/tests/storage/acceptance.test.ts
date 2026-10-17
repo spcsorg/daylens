@@ -569,3 +569,16 @@ test('stopping storage never reports a deletion purged; the purge resumes at the
   assert.deepEqual(diskContains(r2.dir, 'Dingo'), [])
   r2.close()
 })
+
+test('a row trimmed by a deletion cannot be stretched back over the range from a stale cached sighting', async () => {
+  const r = rig()
+  const id = r.store.insertObservation(obsRow(T0, 'com.example.chat', 'Long chat', 'https://x.example/') as unknown as ObservationRow)
+  assert.equal(r.store.extendObservation(id, T0 + 20 * MIN), true)
+  r.store.flush()
+  r.clock.t = T0 + 30 * MIN
+  await r.storage.deleteRange(T0 + 5 * MIN, T0 + 10 * MIN).done
+  r.store.extendObservation(id, T0 + 25 * MIN)
+  r.store.flush()
+  assert.deepEqual(r.q(`SELECT id FROM observations WHERE event_wall_ms < ? AND last_seen_wall_ms > ?`, T0 + 10 * MIN, T0 + 5 * MIN), [])
+  r.close()
+})

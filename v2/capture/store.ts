@@ -373,6 +373,11 @@ export class Store implements Sink {
     return this.db
   }
 
+  /** Rows were changed outside the queue (a deletion trimmed them): later extensions re-read them from the database. */
+  forgetOpenRows(): void {
+    this.openRows.clear()
+  }
+
   /** An id for a row written directly by storage (a row split by a deletion); queued writes are flushed first. */
   allocateObservationId(): number {
     return this.nextObsId++

@@ -288,6 +288,7 @@ export class Storage {
         },
         () => {
           this.rules.loadTombstones()
+          this.store.forgetOpenRows()
           this.capture?.interrupt()
         },
       )
