@@ -179,3 +179,10 @@ test('a JSON web token is known by its structure, not by how its header happens 
   }
   for (const kept of ['1.2.3', 'www.example.com', 'e30.e30.e30', 'eyJmb28iOiJiYXIifQ.e30.']) assert.equal(cleanAddress(`https://app.example.com/?q=${kept}`), `https://app.example.com/?q=${kept}`, kept)
 })
+
+test('Basic is a credential only when its token is base64 of text with a colon; Bearer keeps its single-token rule', () => {
+  const page = (q: string) => `https://www.google.com/search?q=${q}&hl=en`
+  for (const kept of ['basic+income', 'Basic+Instinct', 'basic+math', 'basic+dXNlcnBhc3M']) assert.equal(cleanAddress(page(kept)), page(kept), kept)
+  for (const dropped of ['Basic+dXNlcjpwYXNz', 'basic%20YW5hOmh1bnRlcjI%3D', 'Bearer+abc.def', 'bearer%20income'])
+    assert.equal(cleanAddress(page(dropped)), 'https://www.google.com/search?hl=en', dropped)
+})

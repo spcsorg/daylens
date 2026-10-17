@@ -30,10 +30,11 @@ What it never does:
 - It never sends anything to a server. Pages go only to the Daylens app on the same computer.
 - Before an address leaves the browser, it keeps only web (`http`, `https`) and `file` addresses, and removes: any user
   name and password; the part after `#`; every query parameter whose name contains a word for a token, code, key,
-  session, password, secret, signature, authorization or credential; and every parameter whose value is a login token
-  (`Bearer …`, `Basic …`, or a JSON web token) or is shaped like a generated key, unless the parameter names a file,
-  page or video. An address carried inside a parameter, such as a return link, even when
-  percent-encoded, is kept only if none of this applies to it; otherwise that whole parameter is dropped. Secrets written into the address path itself are not removed.
+  session, password, secret, signature, authorization or credential; every parameter whose value is a login token
+  (`Bearer …`, a `Basic …` user name and password, or a JSON web token); and every parameter whose value is shaped
+  like a generated key, unless the parameter names a file, page or video. An address carried inside a parameter, such
+  as a return link, even when percent-encoded, is kept only if none of this applies to it; otherwise that whole
+  parameter is dropped. Secrets written into the address path itself are not removed.
 
 You need the Daylens app installed on this computer. Without it, the extension does nothing.
 

@@ -21,8 +21,25 @@ const SECRET_PARTS = [
   'authoriz', 'verifier', 'credential', 'authkey', 'resourcekey', 'sharekey', 'signingkey', 'secretkey', 'encryptionkey',
 ]
 
-// An HTTP credential pasted into a parameter, whatever the parameter is called.
-const CREDENTIAL_VALUE = /^(bearer|basic)\s+[A-Za-z0-9\-._~+/]+=*$/i
+// An HTTP credential pasted into a parameter, whatever the parameter is called. Basic counts only when its token is
+// base64 of text with a colon (user:password), so a search for "basic income" stays.
+const BEARER_VALUE = /^bearer\s+[A-Za-z0-9\-._~+/]+=*$/i
+const BASIC_VALUE = /^basic\s+([A-Za-z0-9+/]+={0,2})$/i
+
+function decodeBase64(s: string): string | null {
+  try {
+    const bytes = Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return null
+  }
+}
+
+function isCredential(value: string): boolean {
+  if (BEARER_VALUE.test(value)) return true
+  const token = BASIC_VALUE.exec(value)?.[1]
+  return token !== undefined && (decodeBase64(token)?.includes(':') ?? false)
+}
 // Parameter values that are addresses in their own right (returnUrl, next, redirect) get the same rule; addresses
 // that can run code or carry content are dropped. A plain "site:example.com" is not an address and stays.
 const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
@@ -38,9 +55,10 @@ function isJwt(value: string): boolean {
   if ((parts.length !== 3 && parts.length !== 5) || !parts.slice(0, -1).every((p) => B64URL_PART.test(p))) return false
   const last = parts[parts.length - 1] ?? ''
   if (last !== '' && !B64URL_PART.test(last)) return false
+  const text = decodeBase64((parts[0] ?? '').replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/'))
+  if (text === null) return false
   try {
-    const bytes = Uint8Array.from(atob((parts[0] ?? '').replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
-    const header: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    const header: unknown = JSON.parse(text)
     return !!header && typeof header === 'object' && !Array.isArray(header) && 'alg' in header
   } catch {
     return false
@@ -103,7 +121,7 @@ function nameWords(name: string): string[] {
 
 export function isSecretParam(name: string, value: string): boolean {
   const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || isJwt(value) || CREDENTIAL_VALUE.test(value)
+  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || isJwt(value) || isCredential(value)
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
@@ -142,7 +160,7 @@ function cleanValue(value: string, depth: number, identity: boolean): string | n
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
     // A credential can hide behind encoding or a control prefix as well as an address can.
-    if (CREDENTIAL_VALUE.test(form) || isJwt(form) || (!identity && looksGenerated(form))) return null
+    if (isCredential(form) || isJwt(form) || (!identity && looksGenerated(form))) return null
     if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
