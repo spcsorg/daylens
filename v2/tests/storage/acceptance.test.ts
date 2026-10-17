@@ -723,3 +723,32 @@ test('while a deletion is pending, new threads, links, corrections and assistant
   assert.deepEqual(containsAnywhere(r2, 'Marmot canary'), [])
   r2.close()
 })
+
+test('a restart never reuses a deleted observation id, so no interval can carry the deleted row onto a new one', async () => {
+  resetSeq()
+  const r = rig(tmpDir(), { holdDeletions: true })
+  r.feed(focus(editor, 'early.md - Editor', T0))
+  r.feed(focus(chat, 'Lynx canary private', T0 + 10 * MIN))
+  r.store.flush()
+  const maxBefore = r.q<{ m: number }>(`SELECT max(id) AS m FROM observations`)[0]!.m
+  r.clock.t = T0 + HOUR
+  const { tombstone } = r.storage.deleteSource('com.example.chat')
+  const conn = new Database(path.join(r.dir, DB_FILE))
+  conn.pragma('foreign_keys = ON')
+  assert.throws(() => new Deleter(conn).run(tombstone, r.clock.t, { stopAfter: 'observations' }), /stopped after/)
+  conn.close()
+  r.close()
+  const r2 = rig(r.dir, { holdDeletions: true })
+  r2.clock.t = T0 + 2 * HOUR
+  r2.feed(focus(editor, 'later.md - Editor', T0 + 2 * HOUR))
+  r2.store.flush()
+  assert.ok(r2.q<{ m: number }>(`SELECT max(id) AS m FROM observations`)[0]!.m > maxBefore, 'the new row has a new id')
+  r2.close()
+  const r3 = rig(r.dir)
+  r3.clock.t = T0 + 2 * HOUR
+  r3.storage.start()
+  await r3.storage.deletionsSettled()
+  assert.deepEqual(containsAnywhere(r3, 'Lynx'), [])
+  assert.deepEqual(r3.q(`SELECT title FROM intervals ORDER BY start_wall_ms`), [{ title: 'early.md - Editor' }, { title: 'later.md - Editor' }])
+  r3.close()
+})

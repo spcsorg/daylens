@@ -205,6 +205,7 @@ export class Store implements Sink {
   private heartbeatOps = new Map<string, Op>()
   private timer: ReturnType<typeof setTimeout> | null = null
   private nextObsId: number
+  private persistedNextObsId = 0
   private nextGapId: number
   private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, droppedOps: 0, pendingOps: 0 }
   private droppedSinceFailure = 0
@@ -252,7 +253,11 @@ export class Store implements Sink {
       if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
     }
     this.seedExclusions()
-    this.nextObsId = ((this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0) + 1
+    // Ids are never reused, even after the rows with the highest ids are deleted: derived rows are keyed by them.
+    const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'next_observation_id'`).get() as { value: string } | undefined
+    const maxId = (this.db.prepare('SELECT max(id) AS m FROM observations').get() as { m: number | null }).m ?? 0
+    this.nextObsId = Math.max(maxId + 1, mark ? Number(mark.value) : 0)
+    this.persistedNextObsId = this.nextObsId
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
   }
 
@@ -382,7 +387,17 @@ export class Store implements Sink {
 
   /** An id for a row written directly by storage (a row split by a deletion); queued writes are flushed first. */
   allocateObservationId(): number {
-    return this.nextObsId++
+    const id = this.nextObsId++
+    this.persistNextObsId()
+    return id
+  }
+
+  private static readonly NEXT_ID_SQL = `INSERT INTO meta (key, value) VALUES ('next_observation_id', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+
+  // Written at once, inside the caller's transaction (storage's fence writes rows directly).
+  private persistNextObsId(): void {
+    this.db.prepare(Store.NEXT_ID_SQL).run(String(this.nextObsId))
+    this.persistedNextObsId = this.nextObsId
   }
 
   // A row that fell out of the in-memory window is read back; one still queued is in the window by construction.
@@ -526,6 +541,9 @@ export class Store implements Sink {
       this.timer = null
     }
     const ops = this.pending.concat([...this.heartbeatOps.values()])
+    // The id mark commits with the rows that used the ids.
+    const nextId = this.nextObsId
+    if (nextId !== this.persistedNextObsId) ops.push({ sql: Store.NEXT_ID_SQL, params: [String(nextId)] })
     // Committed with the rows: where derived state (intervals, search) must be brought up to date from. Whoever
     // derives clears it in the same transaction as the derivation, so a crash in between loses nothing.
     if (this.touched.size > 0 && Number.isFinite(this.touchedFromWallMs)) {
@@ -566,6 +584,7 @@ export class Store implements Sink {
     }
     this.retryMs = FLUSH_INTERVAL_MS
     this.pending = []
+    this.persistedNextObsId = nextId
     this.heartbeatOps.clear()
     const committed = this.now()
     if (this.failingStart !== null) {

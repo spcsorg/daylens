@@ -138,3 +138,16 @@ test('derivation reads observations through the time index, not by scanning the 
   assert.ok(!plan.some((d) => d.startsWith('SCAN observations')), plan.join('; '))
   r.close()
 })
+
+test('re-deriving a row rewrites every field of its interval, not just its times', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(chat, 'old private title', T0))
+  r.store.flush()
+  const id = r.q<{ id: number }>(`SELECT id FROM observations WHERE kind = 'focus'`)[0]!.id
+  r.store.database.prepare(`UPDATE observations SET app_id = 'com.example.editor', app_name = 'Editor', title = 'new.md - Editor' WHERE id = ?`).run(id)
+  r.store.database.prepare(`INSERT INTO meta (key, value) VALUES ('derive_from', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`).run(String(T0))
+  r.storage.derived.refreshFromMark()
+  assert.deepEqual(r.q(`SELECT app_id, app_name, title, files FROM intervals WHERE obs_id = ?`, id), [{ app_id: 'com.example.editor', app_name: 'Editor', title: 'new.md - Editor', files: 'new.md' }])
+  r.close()
+})

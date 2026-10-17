@@ -160,7 +160,9 @@ export class Derived {
     this.upsertInterval = db.prepare(`
       INSERT INTO intervals (obs_id, start_wall_ms, end_wall_ms, tz_offset_min, app_id, app_name, title, title_state, url, site, files)
       VALUES (@obs_id, @start_wall_ms, @end_wall_ms, @tz_offset_min, @app_id, @app_name, @title, @title_state, @url, @site, @files)
-      ON CONFLICT (obs_id) DO UPDATE SET start_wall_ms = excluded.start_wall_ms, end_wall_ms = excluded.end_wall_ms`)
+      ON CONFLICT (obs_id) DO UPDATE SET start_wall_ms = excluded.start_wall_ms, end_wall_ms = excluded.end_wall_ms,
+        tz_offset_min = excluded.tz_offset_min, app_id = excluded.app_id, app_name = excluded.app_name, title = excluded.title,
+        title_state = excluded.title_state, url = excluded.url, site = excluded.site, files = excluded.files`)
     this.upsertDoc = db.prepare(`
       INSERT INTO search_docs (kind, hour_start_wall_ms, app_id, app_name, title, url, site, files, first_wall_ms, last_wall_ms)
       VALUES ('activity', @hour, coalesce(@app_id, ''), @app_name, coalesce(@title, ''), coalesce(@url, ''), @site, @files, @start_wall_ms, @end_wall_ms)
