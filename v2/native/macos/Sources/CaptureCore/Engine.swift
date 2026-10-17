@@ -74,3 +74,37 @@ public func scanBundle(at url: URL, fileManager fm: FileManager = .default) -> B
   }
   return BundleListing(resources: resources, frameworks: frameworks, geckoBrowserResources: gecko, frameworkHelpers: helpers)
 }
+
+/// Engine verdicts, one per running process. Files can change under a launcher that stays the same (a staged
+/// update adds a browser library), so a verdict never outlives the process it was made for: each launch scans once.
+public final class EngineRegistry {
+  private struct Key: Hashable {
+    var process: ProcessKey
+    var bundle: BundleStamp?
+  }
+
+  private let lock = NSLock()
+  private var cache: [Key: Engine] = [:]
+  private let scan: (URL) -> BundleListing?
+
+  public init(scan: @escaping (URL) -> BundleListing? = { scanBundle(at: $0) }) { self.scan = scan }
+
+  public func engine(bundleURL: URL?, process: ProcessKey?) -> Engine {
+    guard let url = bundleURL else { return .unknown }
+    let key = process.map { Key(process: $0, bundle: BundleStamp.of(url)) }
+    if let key {
+      lock.lock()
+      if let e = cache[key] { lock.unlock(); return e }
+      lock.unlock()
+    }
+    let e = classifyBundle(scan(url))
+    // An uncertain scan, or a lookup with no process to tie it to, is not remembered.
+    if e != .unknown, let key {
+      lock.lock()
+      if cache.count > 512 { cache.removeAll() }
+      cache[key] = e
+      lock.unlock()
+    }
+    return e
+  }
+}

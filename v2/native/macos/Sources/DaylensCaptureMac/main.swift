@@ -28,7 +28,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--signer") {
   exit(0)
 }
 if let i = CommandLine.arguments.firstIndex(of: "--classify") {
-  for path in CommandLine.arguments[(i + 1)...] { print("\(engines.engine(bundleURL: URL(fileURLWithPath: path)).rawValue)\t\(path)") }
+  for path in CommandLine.arguments[(i + 1)...] { print("\(engines.engine(bundleURL: URL(fileURLWithPath: path), process: nil).rawValue)\t\(path)") }
   exit(0)
 }
 

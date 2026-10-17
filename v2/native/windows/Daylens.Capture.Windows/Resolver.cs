@@ -120,7 +120,7 @@ internal sealed unsafe class Resolver
             }
             // A creation time of 0 means it could not be read; then a reused pid could hit a stale entry.
             if (p.Created != 0 && _identities.TryGetValue((pid, p.Created), out var cached)) return cached;
-            var app = Describe(p.Handle, pid, p.Path!);
+            var app = Describe(p.Handle, pid, p.Path!, p.Created);
             if (_identities.Count > 512) _identities.Clear();
             if (p.Created != 0) _identities[(pid, p.Created)] = app;
             return app;
@@ -152,7 +152,7 @@ internal sealed unsafe class Resolver
         return new(IdentityState.Ok, h, new string(buf, 0, (int)size), created);
     }
 
-    AppInfo Describe(nint h, int pid, string path)
+    AppInfo Describe(nint h, int pid, string path, long created)
     {
         string? aumid = null, package = null;
         var buf = stackalloc char[512];
@@ -166,9 +166,9 @@ internal sealed unsafe class Resolver
             var name = package is null ? null : PackageDisplayName(aumid, package);
             bool? web = package is not null && _webPackages.TryGetValue(package, out var w) ? w : null;
             browser |= web == true;
-            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, EngineOf(path)), SignerOf(path), VersionOf(path));
+            return new AppInfo(aumid, name ?? ExeName(path), path, pid, browser, IdentityState.Ok, new StoreIdentity(aumid, package), Engines.ForPackage(web, _engineCache.Get(pid, created, path)), SignerOf(path), VersionOf(path));
         }
-        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, EngineOf(path), SignerOf(path), VersionOf(path));
+        return new AppInfo(path, ExeName(path), path, pid, browser, IdentityState.Ok, null, _engineCache.Get(pid, created, path), SignerOf(path), VersionOf(path));
     }
 
     string? ExeName(string path)
@@ -227,7 +227,6 @@ internal sealed unsafe class Resolver
     }
 
     // Keyed on the executable's current file, so an update that changes what the app is is never answered from cache.
-    readonly Dictionary<FileStamp, Engine> _engines = new();
     readonly Dictionary<FileStamp, string?> _signers = new();
     readonly Dictionary<FileStamp, VersionInfo?> _versions = new();
 
@@ -301,20 +300,12 @@ internal sealed unsafe class Resolver
         }
     }
 
-    Engine EngineOf(string exePath)
+    readonly EngineCache _engineCache = new(dir =>
     {
-        var dir = Path.GetDirectoryName(exePath);
-        if (dir is null) return Engine.Unknown;
-        var stamp = FileStamp.Of(exePath);
-        if (stamp is { } s && _engines.TryGetValue(s, out var cached)) return cached;
         var listing = Engines.Scan(dir);
         if (listing is null) Diag.Write("engine_scan_uncertain");
-        var engine = Engines.Classify(listing);
-        if (_engines.Count > 512) _engines.Clear();
-        // An uncertain scan, or an executable that could not be stamped, is looked at again next time.
-        if (engine != Engine.Unknown && stamp is { } key) _engines[key] = engine;
-        return engine;
-    }
+        return listing;
+    });
 
     bool IsRegisteredBrowser(string exePath)
     {

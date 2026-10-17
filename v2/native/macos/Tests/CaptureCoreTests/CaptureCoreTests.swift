@@ -264,6 +264,32 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertNil(ProcessKey.of(-1))
   }
 
+  func testAStagedUpdateUnderAnUnchangedLauncherIsSeenByTheNextLaunch() throws {
+    let app = try makeBundle(["Contents/Resources/x.icns", "Contents/MacOS/Thing"])
+    try (["CFBundleExecutable": "Thing"] as NSDictionary).write(to: app.appendingPathComponent("Contents/Info.plist"))
+    let registry = EngineRegistry()
+    let launch1 = ProcessKey(pid: 4242, startSec: 1000, startUsec: 0)
+    XCTAssertEqual(registry.engine(bundleURL: app, process: launch1), .none)
+    // A staged update adds a Chromium browser framework; Info.plist and the launcher are untouched.
+    try FileManager.default.createDirectory(
+      at: app.appendingPathComponent("Contents/Frameworks/New Framework.framework/Versions/Current/Helpers/New Helper (Renderer).app"),
+      withIntermediateDirectories: true)
+    XCTAssertEqual(registry.engine(bundleURL: app, process: launch1), .none, "the running process is what it was when it started")
+    let launch2 = ProcessKey(pid: 4242, startSec: 2000, startUsec: 0)
+    XCTAssertEqual(registry.engine(bundleURL: app, process: launch2), .browser, "the next launch, even with a reused PID, sees the update")
+  }
+
+  func testEachLaunchScansOnceAndRepeatsAreFree() throws {
+    let app = try makeBundle(["Contents/Resources/x.icns"])
+    var scans = 0
+    let registry = EngineRegistry(scan: { scans += 1; return scanBundle(at: $0) })
+    let launch = ProcessKey(pid: 77, startSec: 5, startUsec: 0)
+    for _ in 0..<100 { _ = registry.engine(bundleURL: app, process: launch) }
+    XCTAssertEqual(scans, 1)
+    _ = registry.engine(bundleURL: app, process: ProcessKey(pid: 78, startSec: 6, startUsec: 0))
+    XCTAssertEqual(scans, 2)
+  }
+
   func testActiveChecksNeverSpinFasterThanHalfASecond() {
     var s = IdleScheduler(thresholdS: 120)
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)

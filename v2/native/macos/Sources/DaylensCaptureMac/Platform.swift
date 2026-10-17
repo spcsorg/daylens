@@ -81,31 +81,6 @@ final class BrowserRegistry {
 
 let browsers = BrowserRegistry()
 
-/// Reads a bundle's own files to tell a browser from an app built on a web runtime; cached per bundle contents.
-final class EngineRegistry {
-  private let lock = NSLock()
-  private var cache: [BundleStamp: Engine] = [:]
-
-  func engine(bundleURL: URL?) -> Engine {
-    guard let url = bundleURL else { return .unknown }
-    let stamp = BundleStamp.of(url)
-    if let stamp {
-      lock.lock()
-      if let e = cache[stamp] { lock.unlock(); return e }
-      lock.unlock()
-    }
-    let e = classifyBundle(scanBundle(at: url))
-    // An uncertain scan, or a bundle whose files could not be stamped, is looked at again next time.
-    if e != .unknown, let stamp {
-      lock.lock()
-      if cache.count > 512 { cache.removeAll() }
-      cache[stamp] = e
-      lock.unlock()
-    }
-    return e
-  }
-}
-
 let engines = EngineRegistry()
 
 /// The Team ID of a running app, taken from its code signature only after the system confirms that signature
@@ -154,7 +129,7 @@ func appInfo(_ app: NSRunningApplication?) -> AppInfo {
     path: app.bundleURL?.path ?? app.executableURL?.path,
     pid: Int(app.processIdentifier),
     registeredBrowser: browsers.isRegisteredBrowser(bundleURL: app.bundleURL, bundleId: app.bundleIdentifier),
-    engine: engines.engine(bundleURL: app.bundleURL),
+    engine: engines.engine(bundleURL: app.bundleURL, process: ProcessKey.of(app.processIdentifier)),
     signer: signers.teamId(pid: app.processIdentifier),
     identityState: .ok)
 }
