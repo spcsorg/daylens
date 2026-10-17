@@ -183,11 +183,12 @@ test('Windows boot identity: with the kernel boot counter, a clock set back an h
   assert.ok(runs.every((r) => r.boot_identity === 'kernel'))
 })
 
-test('Windows boot identity fallback: health says degraded and the outage is still measured from the checkpoint, not zero', async () => {
+test('Windows boot identity fallback: health says degraded and the outage is recorded as uncertain, never zero', async () => {
   const { down, runs } = await rollbackOutage('clock')
-  const span = down.end_wall_ms! - down.start_wall_ms
-  assert.ok(span >= 1900 && span < 6000, `outage ${span} ms`)
-  assert.equal(JSON.parse(down.detail!).measured, 'monotonic_across_renamed_boot')
+  assert.ok(down.end_wall_ms! - down.start_wall_ms >= 1)
+  const d = JSON.parse(down.detail!)
+  assert.equal(d.measured, 'uncertain_boot')
+  assert.equal(d.uncertain, true)
   assert.ok(runs.every((r) => r.boot_identity === 'clock'), 'each run records that its boot identity was degraded')
 })
 

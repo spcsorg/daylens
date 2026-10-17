@@ -67,6 +67,50 @@ export function wireStorageRecovery(store: Store, normalizer: Normalizer, at: ()
   }
 }
 
+export interface Downtime {
+  startWallMs: number
+  startMonoUs: number | null
+  startBoot: string | null
+  detail: Record<string, string | boolean>
+}
+
+// How long the service was down. Exact only when both readings share a boot the OS named; otherwise the
+// largest bound that can be proven, marked uncertain. Never zero.
+export function measureDowntime(
+  prev: PreviousCoverage,
+  hello: { wallMs: number; monoUs: number; boot: string; bootIdentity: 'kernel' | 'clock' },
+): Downtime {
+  const wallDelta = hello.wallMs - prev.endWallMs
+  const newUptimeMs = Math.round(hello.monoUs / 1000)
+  const bounded = (boundMs: number, measured: string, extra: Record<string, string | boolean> = {}): Downtime => ({
+    startWallMs: hello.wallMs - Math.max(1, Math.round(boundMs)),
+    startMonoUs: null,
+    startBoot: null,
+    detail: { measured, uncertain: true, ...extra },
+  })
+  if (prev.monoUs !== null && prev.boot === hello.boot && hello.monoUs >= prev.monoUs) {
+    return {
+      startWallMs: hello.wallMs - Math.round((hello.monoUs - prev.monoUs) / 1000),
+      startMonoUs: prev.monoUs,
+      startBoot: prev.boot,
+      detail: { measured: 'monotonic' },
+    }
+  }
+  if (prev.monoUs !== null && hello.bootIdentity === 'clock') {
+    // A clock-derived boot name cannot say whether a reboot happened. Bounds: the wall time that passed, and, if the
+    // uptime went down, the new boot's uptime. A larger uptime proves nothing.
+    const uptimeFell = newUptimeMs < prev.monoUs / 1000
+    return bounded(Math.max(wallDelta, uptimeFell ? newUptimeMs : 0), 'uncertain_boot')
+  }
+  if (prev.monoUs !== null && prev.boot === hello.boot) {
+    // Same boot name but the monotonic clock went backwards: something is off, so only the wall interval is known.
+    return bounded(wallDelta, 'uncertain_monotonic')
+  }
+  // The OS says this is a new boot: at least its uptime, or the wall interval if that is larger.
+  if (wallDelta >= newUptimeMs) return { startWallMs: prev.endWallMs, startMonoUs: null, startBoot: null, detail: { measured: 'wall' } }
+  return bounded(newUptimeMs, 'lower_bound_new_boot', { wall_clock_moved_back: wallDelta <= 0 })
+}
+
 export class Supervisor {
   private readonly o: Required<SupervisorOptions>
   private readonly store: Store
@@ -499,24 +543,11 @@ export class Supervisor {
     }
   }
 
-  // How long the service was down, from the stored checkpoint. Never recorded as zero because the wall clock moved.
+  // How long the service was down, from the stored checkpoint.
   private refineDowntime(down: { id: number; prev: PreviousCoverage }, line: LineOf<'hello'>): void {
-    const prev = down.prev
-    const detail = (extra: Record<string, number | boolean | string | null>) => this.store.updateGap(down.id, { detail: { clean_stop: prev.clean, ...extra } })
-    const continues = prev.monoUs !== null && line.t.mono_us >= prev.monoUs
-    // Same boot, or a fallback boot identity that a clock change may have renamed while the monotonic clock ran on.
-    if (continues && (prev.boot === line.boot || line.obs.boot_identity === 'clock')) {
-      const startWall = line.t.wall_ms - Math.round((line.t.mono_us - prev.monoUs!) / 1000)
-      this.store.setGapStart(down.id, { wall_ms: startWall, mono_us: prev.monoUs, boot: prev.boot })
-      detail({ measured: prev.boot === line.boot ? 'monotonic' : 'monotonic_across_renamed_boot' })
-      return
-    }
-    // A new boot: the downtime is at least the new boot's uptime, even if the wall clock went backwards meanwhile.
-    const uptimeMs = Math.max(1, Math.round(line.t.mono_us / 1000))
-    if (line.t.wall_ms - prev.endWallMs < uptimeMs) {
-      this.store.setGapStart(down.id, { wall_ms: line.t.wall_ms - uptimeMs, mono_us: null, boot: null })
-      detail({ measured: 'lower_bound_new_boot', wall_clock_moved_back: line.t.wall_ms <= prev.endWallMs })
-    }
+    const m = measureDowntime(down.prev, { wallMs: line.t.wall_ms, monoUs: line.t.mono_us, boot: line.boot, bootIdentity: line.obs.boot_identity })
+    this.store.setGapStart(down.id, { wall_ms: m.startWallMs, mono_us: m.startMonoUs, boot: m.startBoot })
+    this.store.updateGap(down.id, { detail: { clean_stop: down.prev.clean, ...m.detail } })
   }
 
   // The helper's monotonic clock, carried forward by this process's own elapsed time since the last heartbeat.
