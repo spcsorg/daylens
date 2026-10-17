@@ -2,7 +2,7 @@
 // Tool results are recognized from the start of the line and never parsed, so command output is never read.
 
 import { fieldsFromTail, stringAfter } from './edges.ts'
-import { digest, emptyCounts, parseTime, type AgentRecord, type LineParser, type TurnOpener, type UserAct } from './types.ts'
+import { digest, emptyCounts, lineText, parseTime, type AgentRecord, type LineParser, type LineText, type TurnOpener, type UserAct } from './types.ts'
 
 interface OpenTurn {
   key: string
@@ -145,13 +145,14 @@ export class ClaudeParser implements LineParser {
     return JSON.stringify(this.s)
   }
 
-  line(text: string | null, head: string, tail: string): AgentRecord[] {
+  line(full: LineText, head: string, tail: string): AgentRecord[] {
     this.counts.lines++
     if (SKIPPED_HEAD.test(head)) {
       this.counts.recognized++
       return []
     }
-    if (TOOL_RESULT_HEAD.test(head)) return this.toolResult(text, head, tail)
+    if (TOOL_RESULT_HEAD.test(head)) return this.toolResult(full, head, tail)
+    const text = lineText(full)
     let o: Record<string, unknown> | null
     if (text === null) o = fromEdges(head, tail)
     else {
@@ -281,12 +282,14 @@ export class ClaudeParser implements LineParser {
     return out.concat(this.open(env.uuid, 'user', env.at, 'prompt', 'inferred', text))
   }
 
-  private toolResult(text: string | null, head: string, tail: string): AgentRecord[] {
+  private toolResult(full: LineText, head: string, tail: string): AgentRecord[] {
     this.counts.recognized++
     const id = TOOL_USE_ID.exec(head)?.[1]
     const asked = id !== undefined ? this.s.questions[id] : undefined
     const approved = USER_APPROVAL_TAIL.test(tail)
     if (asked === undefined && !approved) return []
+    // Only an answer or an approval is decoded, and only for its envelope and error flag.
+    const text = lineText(full)
     // Only the envelope is read: the uuid and timestamp sit between the message and the tool output.
     const m = TOP_TIME.exec(text ?? head + tail)
     const at = m ? parseTime(m[2]) : null

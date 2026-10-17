@@ -68,11 +68,16 @@ export function emptyCounts(): ParseCounts {
 }
 
 export interface LineParser {
-  // `head` and `tail` are set instead of `text` for a line too long to buffer whole.
-  line(text: string | null, head: string, tail: string): AgentRecord[]
+  // `text` is the whole line, or a function that decodes it on demand (valid only during the call), or null for a
+  // line too long to buffer whole. `head` and `tail` are always set.
+  line(text: LineText, head: string, tail: string): AgentRecord[]
   counts: ParseCounts
   state(): string
 }
+
+export type LineText = string | null | (() => string | null)
+
+export const lineText = (t: LineText): string | null => (typeof t === 'function' ? t() : t)
 
 export function parseTime(v: unknown): number | null {
   if (typeof v !== 'string') return null

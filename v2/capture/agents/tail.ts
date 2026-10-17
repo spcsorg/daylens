@@ -11,7 +11,8 @@ const EDGE = 8192
 // fields that sit at the line's edges, so past this size only the head and tail are kept.
 export const MAX_LINE = 1 << 20
 
-export type LineSink = (text: string | null, head: string, tail: string) => void
+// `text` decodes the whole line; it is valid only while the sink runs, since the bytes behind it are reused.
+export type LineSink = (text: (() => string | null) | null, head: string, tail: string) => void
 
 class Splitter {
   private parts: Buffer[] = []
@@ -21,9 +22,12 @@ class Splitter {
   consumed = 0
   committed = 0
   private readonly sink: LineSink
+  // Whether the caller reuses each buffer it pushes, so a line continuing past it must be copied out.
+  private readonly reused: boolean
 
-  constructor(sink: LineSink) {
+  constructor(sink: LineSink, reused: boolean) {
     this.sink = sink
+    this.reused = reused
   }
 
   push(buf: Buffer): void {
@@ -31,8 +35,7 @@ class Splitter {
     for (;;) {
       const nl = buf.indexOf(0x0a, start)
       if (nl === -1) {
-        // The caller reuses its read buffer, so a line that continues into the next read is copied out first.
-        this.keep(Buffer.from(buf.subarray(start)))
+        this.keep(this.reused ? Buffer.from(buf.subarray(start)) : buf.subarray(start))
         break
       }
       this.keep(buf.subarray(start, nl))
@@ -69,12 +72,16 @@ class Splitter {
       return
     }
     if (this.size === 0) return
-    let text = (this.parts.length === 1 ? this.parts[0]! : Buffer.concat(this.parts)).toString('utf8')
+    // Most bytes in these logs are tool output and bulk records that parsers classify from a line's first bytes, so a
+    // line is decoded whole only when a parser asks for it.
+    let line = this.parts.length === 1 ? this.parts[0]! : Buffer.concat(this.parts)
     this.parts = []
     this.size = 0
-    if (text.endsWith('\r')) text = text.slice(0, -1)
-    if (text.length === 0) return
-    this.sink(text, text.length > EDGE ? text.slice(0, EDGE) : text, text.length > EDGE ? text.slice(-EDGE) : text)
+    if (line[line.length - 1] === 0x0d) line = line.subarray(0, -1)
+    if (line.length === 0) return
+    const head = line.subarray(0, EDGE).toString('utf8')
+    const tail = line.length > EDGE ? line.subarray(-EDGE).toString('utf8') : head
+    this.sink(() => line.toString('utf8'), head, tail)
   }
 }
 
@@ -92,7 +99,7 @@ export interface ReadResult {
 export async function readAppended(file: string, from: number, size: number, sink: LineSink, checkpoint: (offset: number) => void): Promise<ReadResult> {
   const fh = await open(file, 'r')
   try {
-    const splitter = new Splitter(sink)
+    const splitter = new Splitter(sink, true)
     const buf = spare ?? Buffer.allocUnsafe(CHUNK)
     spare = null
     let pos = from
@@ -112,21 +119,28 @@ export async function readAppended(file: string, from: number, size: number, sin
 
 // An archived Codex log compressed with zstd is immutable: it is read once, whole.
 export async function readCompressed(file: string, sink: LineSink, checkpoint: () => void): Promise<number> {
-  const splitter = new Splitter(sink)
+  const splitter = new Splitter(sink, false)
   let bytes = 0
-  await new Promise<void>((resolve, reject) => {
-    const input = createReadStream(file)
-    const z = zlib.createZstdDecompress()
-    input.on('error', reject)
-    z.on('error', reject)
-    z.on('data', (chunk: Buffer) => {
-      bytes += chunk.length
-      splitter.push(chunk)
-      checkpoint()
+  const input = createReadStream(file)
+  const z = zlib.createZstdDecompress()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      input.on('error', reject)
+      z.on('error', reject)
+      z.on('data', (chunk: Buffer) => {
+        bytes += chunk.length
+        splitter.push(chunk)
+        checkpoint()
+      })
+      z.on('end', () => resolve())
+      input.pipe(z)
     })
-    z.on('end', () => resolve())
-    input.pipe(z)
-  })
+  } finally {
+    // A decompressor's native state is freed by the garbage collector only when it gets round to it; dozens of small
+    // archives in a row would otherwise hold dozens of them at once.
+    input.destroy()
+    z.close()
+  }
   splitter.push(Buffer.from('\n'))
   return bytes
 }

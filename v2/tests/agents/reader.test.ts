@@ -295,6 +295,49 @@ test('settling with nothing to read returns at once, with empty session folders 
   r.store.close()
 })
 
+test('the first read runs as several children over slices of the history, cutting files at line boundaries', async () => {
+  const build = (home: string) => {
+    const c = claudeCtx({ session: '33333333-3333-4333-8333-333333333333' })
+    const ls: string[] = []
+    for (let i = 0; i < 40; i++) {
+      ls.push(claude.prompt(c, sec(i * 100), `prompt ${i}`, { uuid: `p${i}` }))
+      ls.push(claude.assistant(c, sec(i * 100 + 5), 'tool_use', { tools: [{ id: `t${i}`, name: 'Bash' }] }))
+      ls.push(claude.toolResult(c, sec(i * 100 + 9), `t${i}`, 'x'.repeat(4000)))
+      ls.push(claude.assistant(c, sec(i * 100 + 20), 'end_turn'))
+    }
+    writeFileSync(claudeFile(home, c), lines(...ls))
+    const x = codexCtx({ id: '44444444-4444-4444-8444-444444444444' })
+    writeFileSync(codexFile(home, x), lines(codex.meta(x, sec(0)), codex.started(sec(1), x.id.replace(/4/g, '5'), 'composer'), codex.userItem(sec(1), 'go', ['user.text']), codex.complete(sec(5), x.id.replace(/4/g, '5'), sec(1), sec(5))))
+  }
+  const a = rig()
+  build(a.home)
+  let children = 0
+  const viaChildren = a.reader({
+    backfill: async (roots) => {
+      const res = await backfill(a.store.database, a.data, roots, () => {}, 20_000)
+      children = res.children
+      return res.merged
+    },
+  })
+  await viaChildren.start()
+  await viaChildren.stop()
+  assert.ok(children > 3, `the history was read by several children (${children})`)
+  const b = rig()
+  build(b.home)
+  const inProcess = b.reader()
+  await inProcess.start()
+  await inProcess.stop()
+  const rows = (s: Store) => [
+    s.query('SELECT agent, turn_key, opened_by, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state FROM agent_turns ORDER BY turn_key'),
+    s.query('SELECT agent, event_key, detail, wall_ms FROM agent_events ORDER BY event_key'),
+    s.query<{ path: string; offset: number; size: number }>('SELECT path, offset, size FROM agent_sources ORDER BY path').map((r) => [path.basename(r.path), r.offset, r.size]),
+  ]
+  assert.deepEqual(rows(a.store), rows(b.store))
+  assert.equal(a.count('SELECT count(*) AS n FROM agent_turns'), 41)
+  a.store.close()
+  b.store.close()
+})
+
 test('only session logs are read: images, tool output files and metadata beside them are ignored', () => {
   const [cl, cx, ar] = homeRoots('/h', {}) as [AgentRoot, AgentRoot, AgentRoot]
   assert.ok(classifyFile(cl, '/h/.claude/projects/-p/abc.jsonl'))

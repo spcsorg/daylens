@@ -100,4 +100,10 @@ test('tool output is never parsed: tool result lines are recognized from their f
     JSON.parse = parse
   }
   assert.equal(seen.some((s) => s.includes(CANARIES.codexOutput)), false)
+
+  // A reply is classified from its first bytes too: its text is never decoded or parsed.
+  const reply = codex.assistant(sec(2), CANARIES.reply)
+  let decoded = false
+  x.line(() => ((decoded = true), reply), reply.slice(0, 8192), reply.slice(-8192))
+  assert.equal(decoded, false)
 })

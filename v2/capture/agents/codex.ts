@@ -2,7 +2,7 @@
 // Every line starts with its timestamp and type, so bulk records are classified from that prefix and never parsed.
 
 import { stringAfter } from './edges.ts'
-import { digest, emptyCounts, parseTime, type AgentRecord, type Basis, type LineParser, type SessionOrigin, type TurnOpener, type UserAct } from './types.ts'
+import { digest, emptyCounts, lineText, parseTime, type AgentRecord, type Basis, type LineParser, type LineText, type SessionOrigin, type TurnOpener, type UserAct } from './types.ts'
 
 interface OpenTurn {
   key: string
@@ -29,6 +29,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const PREFIX = /^\{"timestamp":"([^"]+)",(?:"ordinal":\d+,)?"type":"([a-z_]+)"(?:,"payload":\{"type":"([A-Za-z_]+)")?/
 const ITEM_KIND = /"item":\{"type":"([A-Za-z]+)"/
+const NOT_USER_ROLE = /^\{"timestamp":"[^"]+",(?:"ordinal":\d+,)?"type":"response_item","payload":\{"type":"message",(?:"id":"[^"]*",)?"role":"(?:assistant|developer|system)"/
 const COMPLETED_MS = /"completed_at_ms":(\d+)/
 // Record kinds whose payload never holds anything the reader needs beyond the line's own time.
 const BULK = new Set(['reasoning', 'function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output', 'agent_message', 'token_count', 'web_search_call', 'local_shell_call', 'agent_reasoning', 'exec_command_end', 'exec_command_begin', 'mcp_tool_call_end', 'patch_apply_end'])
@@ -110,12 +111,15 @@ export class CodexParser implements LineParser {
     return this.s.session ?? this.fileSession
   }
 
-  line(text: string | null, head: string, tail: string): AgentRecord[] {
+  line(full: LineText, head: string, tail: string): AgentRecord[] {
+    let decoded: string | null | undefined
+    const textOf = () => (decoded === undefined ? (decoded = lineText(full)) : decoded)
     this.counts.lines++
     let m = PREFIX.exec(head)
     let parsed: Record<string, unknown> | null = null
     if (!m) {
       // A line that does not start the usual way is parsed in full; the format may have moved.
+      const text = textOf()
       if (text === null) {
         this.counts.bad++
         return []
@@ -142,7 +146,9 @@ export class CodexParser implements LineParser {
     const sub = m[3]
     const t = this.s.turn
 
-    if (BULK_TYPES.has(type) || (sub !== undefined && BULK.has(sub))) {
+    // A reply or an instruction to the model is never the person's message; its role is in the line's first bytes.
+    const notUser = type === 'response_item' && sub === 'message' && NOT_USER_ROLE.test(head)
+    if (BULK_TYPES.has(type) || (sub !== undefined && BULK.has(sub)) || notUser) {
       this.counts.recognized++
       return t?.live && !NOT_ACTIVITY.has(type) && !(sub !== undefined && NOT_ACTIVITY.has(sub)) ? this.activity(at) : []
     }
@@ -154,7 +160,7 @@ export class CodexParser implements LineParser {
       const out = t?.live ? this.activity(done !== undefined ? Number(done) : at) : []
       if (kind !== 'UserMessage') return out
       if (this.counts.lines - this.lastMessageLine <= 2) return out
-      const o = this.parse(text, parsed, head, tail, type, 'UserMessage')
+      const o = this.parse(textOf(), parsed, head, tail, type, 'UserMessage')
       if (!o) return out
       const item = (o.payload as { item?: { content?: unknown; client_id?: unknown } }).item
       const words = userText(item?.content)
@@ -163,7 +169,7 @@ export class CodexParser implements LineParser {
       return out.concat(this.message(words, typeof item?.client_id === 'string' ? 'marked' : null, t?.live ? at : null))
     }
 
-    const o = this.parse(text, parsed, head, tail, type, sub)
+    const o = this.parse(textOf(), parsed, head, tail, type, sub)
     if (!o) return []
     const p = (o.payload ?? {}) as Record<string, unknown>
     switch (type) {

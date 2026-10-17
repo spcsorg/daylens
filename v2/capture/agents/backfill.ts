@@ -1,27 +1,36 @@
-// The first read of a whole log history runs in a short-lived child process that writes a staging database.
-// Decoding gigabytes of history leaves memory the allocator does not hand back; a process that exits returns all of it,
-// so the long-running capture service only ever reads what is appended afterwards.
+// The first read of a whole log history runs in short-lived child processes that write a staging database, each over a
+// bounded slice of the files. Decoding gigabytes of logs leaves memory the allocator does not hand back; a process that
+// exits returns all of it, so neither the children nor the long-running capture service grow with the history.
 
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
-import type { AgentRoot } from './reader.ts'
+import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
+import { AgentStore } from './store.ts'
+import type { ParseCounts } from './types.ts'
 
 export interface BackfillStats {
   wall_ms: number
   cpu_ms: number
   peak_rss_mb: number
+  peak_mb?: Record<string, number>
   files_read: number
   mb_read: number
   lines: number
   records: number
+  roots?: RootCounts[]
+  remaining?: boolean
 }
 
 export interface BackfillResult {
   merged: boolean
+  children: number
+  // Totals over the children; peak_rss_mb is the largest single child.
   child: BackfillStats | null
+  peaks_mb: number[]
   merge_ms: number
 }
 
@@ -30,13 +39,19 @@ export type PlainRoot = Omit<AgentRoot, 'available'>
 
 const MAIN = fileURLToPath(new URL(`./backfillMain${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url))
 
-export function runChild(staging: string, roots: PlainRoot[], log: (msg: string) => void): Promise<BackfillStats | null> {
+// Bytes of log one child reads before it hands over to the next; a compressed archive counts at its decoded size.
+// It bounds how much a child decodes, and so its memory, not how much of the history is read.
+const SLICE_BYTES = 32 << 20
+// A small young generation keeps the children's short-lived line strings from inflating their footprint.
+const CHILD_FLAGS = ['--max-semi-space-size=1']
+
+export function runChild(staging: string, roots: PlainRoot[], files: string[], budget: number, log: (msg: string) => void): Promise<BackfillStats | null> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, MAIN, staging], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
+    const child = spawn(process.execPath, [...process.execArgv, ...CHILD_FLAGS, MAIN, staging], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
     let out = ''
     child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d))
     child.stderr.setEncoding('utf8').on('data', () => {})
-    child.stdin.end(JSON.stringify(roots))
+    child.stdin.end(JSON.stringify({ roots, files, budget }))
     child.on('error', (err) => {
       log(`agent backfill could not start code=${(err as { code?: unknown }).code ?? 'unknown'}`)
       resolve(null)
@@ -53,6 +68,28 @@ export function runChild(staging: string, roots: PlainRoot[], log: (msg: string)
       }
     })
   })
+}
+
+// Every session log under the roots, in root order, so a session read plain is known before its compressed archive.
+export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
+  const files: string[] = []
+  for (const root of roots) {
+    let names: string[]
+    try {
+      names = (await readdir(root.dir, { recursive: root.layout !== 'codex_archive' })) as string[]
+    } catch {
+      continue
+    }
+    for (const name of names.sort()) {
+      const file = path.join(root.dir, name)
+      if (classifyFile(root, file)) files.push(file)
+    }
+  }
+  return files
+}
+
+function addCounts(a: ParseCounts, b: ParseCounts): ParseCounts {
+  return { lines: a.lines + b.lines, bad: a.bad + b.bad, unknown: a.unknown + b.unknown, recognized: a.recognized + b.recognized }
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
@@ -73,10 +110,6 @@ export function mergeStaging(db: Database.Database, staging: string): void {
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, lines, bad_lines, unknown_records, updated_wall_ms)
           SELECT path, agent, root, session_id, dev, ino, offset, size, state, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources WHERE true
           ON CONFLICT (path) DO NOTHING;
-        INSERT INTO agent_health (agent, root, state, reason, since_wall_ms, checked_wall_ms, detail)
-          SELECT agent, root, state, reason, since_wall_ms, checked_wall_ms, detail FROM staging.agent_health WHERE true
-          ON CONFLICT (agent, root) DO UPDATE SET state = excluded.state, reason = excluded.reason, since_wall_ms = excluded.since_wall_ms,
-            checked_wall_ms = excluded.checked_wall_ms, detail = excluded.detail;
       `)
     })()
   } finally {
@@ -84,18 +117,46 @@ export function mergeStaging(db: Database.Database, staging: string): void {
   }
 }
 
-export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void): Promise<BackfillResult> {
+export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void, sliceBytes = SLICE_BYTES): Promise<BackfillResult> {
   const staging = path.join(dataDir, 'agent-backfill.sqlite')
   const clean = () => {
     for (const f of [staging, `${staging}-wal`, `${staging}-shm`, `${staging}-journal`]) rmSync(f, { force: true })
   }
   clean()
   try {
-    const child = await runChild(staging, roots, log)
-    if (!child) return { merged: false, child: null, merge_ms: 0 }
+    const files = await listLogs(roots)
+    const total: BackfillStats = { wall_ms: 0, cpu_ms: 0, peak_rss_mb: 0, files_read: 0, mb_read: 0, lines: 0, records: 0 }
+    const counts = new Map<string, RootCounts>()
+    const peaks: number[] = []
+    for (let remaining = files.length > 0; remaining; ) {
+      const child = await runChild(staging, roots, files, sliceBytes, log)
+      if (!child) return { merged: false, children: 0, child: null, merge_ms: 0, peaks_mb: [] }
+      peaks.push(child.peak_rss_mb)
+      total.wall_ms += child.wall_ms
+      total.cpu_ms += child.cpu_ms
+      total.peak_rss_mb = Math.max(total.peak_rss_mb, child.peak_rss_mb)
+      total.files_read += child.files_read
+      total.mb_read += child.mb_read
+      total.lines += child.lines
+      total.records += child.records
+      remaining = child.remaining === true
+      for (const r of child.roots ?? []) {
+        const prev = counts.get(r.dir)
+        counts.set(r.dir, prev ? { ...prev, counts: addCounts(prev.counts, r.counts), unreadable: prev.unreadable || r.unreadable } : r)
+      }
+    }
     const t0 = performance.now()
     mergeStaging(db, staging)
-    return { merged: true, child, merge_ms: Math.round(performance.now() - t0) }
+    // Health is decided once over every slice, so a clean last slice cannot hide a problem in an earlier one.
+    const store = new AgentStore(db)
+    for (const r of counts.values()) {
+      if (r.unreadable) store.setHealth(r.agent, r.dir, 'unreadable', 'file_unreadable', null)
+      else if (r.counts.lines > 0) {
+        const h = healthFromCounts(r.counts)
+        store.setHealth(r.agent, r.dir, h.state, h.reason, h.detail)
+      }
+    }
+    return { merged: true, children: peaks.length, child: total, merge_ms: Math.round(performance.now() - t0), peaks_mb: peaks }
   } finally {
     clean()
   }

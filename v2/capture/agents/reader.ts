@@ -74,6 +74,21 @@ export interface ReaderOptions {
   discover?: () => Promise<AgentRoot[]>
   // Reads the whole history of unguarded folders elsewhere and merges it, the first time this database sees agent logs.
   backfill?: (roots: Omit<AgentRoot, 'available'>[]) => Promise<boolean>
+  // False when health is decided by the caller from the counts of several readers (the backfill children).
+  recordHealth?: boolean
+}
+
+export interface RootCounts {
+  agent: Agent
+  dir: string
+  counts: ParseCounts
+  unreadable: boolean
+}
+
+// What a batch of reads says about a folder: degraded when lines could not be read, or when none of them were understood.
+export function healthFromCounts(c: ParseCounts): { state: HealthState; reason: string | null; detail: Record<string, number> | null } {
+  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : null
+  return reason === null ? { state: 'ok', reason, detail: null } : { state: 'degraded', reason, detail: { lines: c.lines, bad: c.bad, unknown: c.unknown, recognized: c.recognized } }
 }
 
 export interface ReaderStats {
@@ -95,6 +110,8 @@ interface RootState {
 }
 
 const FLUSH_RECORDS = 2000
+// Codex archives decode to about one to three times their size; the larger figure keeps a slice from overshooting.
+const DECODED_PER_COMPRESSED_BYTE = 3
 
 function errCode(err: unknown): string {
   const c = (err as { code?: unknown })?.code
@@ -127,6 +144,32 @@ export class AgentReader {
     this.log = opts.log ?? (() => {})
     this.discover = opts.discover ?? null
     this.backfill = opts.backfill ?? null
+    this.healthOn = opts.recordHealth ?? true
+  }
+
+  private readonly healthOn: boolean
+
+  private budget: number | null = null
+  private budgetStart = 0
+  private leftOver = false
+
+  // One slice of a first read: these files, in order, with no listing or watching, until about `budget` bytes are read.
+  // A file is cut at a line boundary and resumes from its saved position in the next slice. Returns whether any is left.
+  async readOnly(files: readonly string[], budget: number): Promise<boolean> {
+    this.budget = budget
+    this.budgetStart = budget
+    this.leftOver = false
+    for (const file of files) {
+      const r = this.roots.find((x) => classifyFile(x.root, file) !== null)
+      if (r) this.dirty.set(file, r)
+    }
+    await this.drain()
+    this.budget = null
+    return this.leftOver
+  }
+
+  rootCounts(): RootCounts[] {
+    return this.roots.map((r) => ({ agent: r.root.agent, dir: r.root.dir, counts: { ...r.counts }, unreadable: r.unreadable }))
   }
 
   private async discoverRoots(): Promise<void> {
@@ -284,6 +327,7 @@ export class AgentReader {
   }
 
   private recordHealth(r: RootState): void {
+    if (!this.healthOn) return
     const c = r.counts
     if (r.unreadable) {
       this.store.setHealth(r.root.agent, r.root.dir, 'unreadable', 'file_unreadable', null)
@@ -292,16 +336,8 @@ export class AgentReader {
     }
     if (c.lines === 0) return
     r.counts = emptyCounts()
-    let state: HealthState = 'ok'
-    let reason: string | null = null
-    if (c.bad > 0) {
-      state = 'degraded'
-      reason = 'unreadable_lines'
-    } else if (c.recognized === 0) {
-      state = 'degraded'
-      reason = 'unrecognized_format'
-    }
-    this.store.setHealth(r.root.agent, r.root.dir, state, reason, state === 'ok' ? null : { lines: c.lines, bad: c.bad, unknown: c.unknown, recognized: c.recognized })
+    const h = healthFromCounts(c)
+    this.store.setHealth(r.root.agent, r.root.dir, h.state, h.reason, h.detail)
   }
 
   private async readFile(r: RootState, file: string): Promise<void> {
@@ -338,6 +374,12 @@ export class AgentReader {
     if (row && (row.dev !== dev || row.ino !== ino || st.size < row.offset)) row = null
     const from = row?.offset ?? 0
     if (from >= st.size) return
+    // A compressed archive cannot be cut, so one that may not fit what is left waits for a fresh slice.
+    const estimate = info.compressed ? st.size * DECODED_PER_COMPRESSED_BYTE : 1
+    if (this.budget !== null && (this.budget <= 0 || (estimate > this.budget && this.budget < this.budgetStart))) {
+      this.leftOver = true
+      return
+    }
     // A compressed archive is always read from its start, so it never resumes from a saved mid-file state.
     const parser = makeParser(root, info, info.compressed ? null : (row?.state ?? null))
     let records: AgentRecord[] = []
@@ -354,7 +396,7 @@ export class AgentReader {
       r.counts.unknown += delta.unknown
       r.counts.recognized += delta.recognized
     }
-    const sink = (text: string | null, head: string, tail: string) => {
+    const sink = (text: (() => string | null) | null, head: string, tail: string) => {
       for (const rec of parser.line(text, head, tail)) records.push(rec)
     }
     try {
@@ -364,12 +406,22 @@ export class AgentReader {
         })
         flush(st.size)
         this.stats.bytesRead += bytes
+        if (this.budget !== null) this.budget -= bytes
       } else {
-        const res = await readAppended(file, from, st.size, sink, (offset) => {
-          if (records.length >= FLUSH_RECORDS) flush(offset)
-        })
+        const read = (until: number) =>
+          readAppended(file, from, until, sink, (offset) => {
+            if (records.length >= FLUSH_RECORDS) flush(offset)
+          })
+        const until = this.budget !== null ? Math.min(st.size, from + this.budget) : st.size
+        let res = await read(until)
+        // A single line longer than the budget is read whole, or the next slice would start at the same place.
+        if (res.next === from && until < st.size) res = await read(st.size)
         flush(res.next)
         this.stats.bytesRead += res.bytes
+        if (this.budget !== null) {
+          this.budget -= res.bytes
+          if (res.next < st.size) this.leftOver = true
+        }
       }
       this.stats.filesRead++
       this.stats.lines += parser.counts.lines
