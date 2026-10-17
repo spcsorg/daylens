@@ -229,3 +229,17 @@ test('turn ids that are not unique (imports number turns from 1) never merge tur
   const forked = of(run(parser(b), [codex.meta(b, sec(500), { forkedFrom: a.id }), codex.started(sec(500), 'external-import-turn-2', undefined, sec(1))]), 'turn')[0]!.key
   assert.equal(orig, forked)
 })
+
+test('items copied into an import or a fork never add activity, whatever times they carry', () => {
+  const c = codexCtx()
+  const copiedAt = sec(86_400 * 2)
+  const recs = run(parser(c), [
+    codex.meta(c, copiedAt),
+    codex.started(copiedAt, U('old'), 'composer', sec(0)),
+    codex.itemDone(copiedAt, U('old'), copiedAt - 1000, copiedAt),
+    codex.itemDone(copiedAt, U('old'), sec(30), sec(40)),
+    codex.complete(copiedAt, U('old'), sec(0), sec(60)),
+  ])
+  assert.equal(of(recs, 'activity').length, 0)
+  assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: U('old'), state: 'completed', at: sec(60) }])
+})

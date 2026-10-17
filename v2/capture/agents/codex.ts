@@ -149,8 +149,9 @@ export class CodexParser implements LineParser {
     if (type === 'event_msg' && sub === 'item_completed') {
       this.counts.recognized++
       const kind = ITEM_KIND.exec(head)?.[1]
+      // A replayed turn gets no activity at all: copied items carry the copy's times, not the work's.
       const done = COMPLETED_MS.exec(tail)?.[1]
-      const out = done !== undefined ? this.activity(Number(done)) : t?.live ? this.activity(at) : []
+      const out = t?.live ? this.activity(done !== undefined ? Number(done) : at) : []
       if (kind !== 'UserMessage') return out
       if (this.counts.lines - this.lastMessageLine <= 2) return out
       const o = this.parse(text, parsed, head, tail, type, 'UserMessage')
