@@ -32,7 +32,7 @@ What it never does:
   name and password; the part after `#`; every query parameter whose name contains a word for a token, code, key,
   session, password, secret, signature, authorization or credential; and every parameter whose value is a login token
   (`Bearer …`, `Basic …`, or a JSON web token). An address carried inside a parameter, such as a return link, gets the
-  same treatment. Secrets written into the address path itself are not removed.
+  same treatment, and one that can't be cleaned is dropped. Secrets written into the address path itself are not removed.
 
 You need the Daylens app installed on this computer. Without it, the extension does nothing.
 

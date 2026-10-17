@@ -49,18 +49,31 @@ export function cleanAddress(raw: string | null | undefined): string | null {
 }
 
 // A parameter value after the rule: unchanged, cleaned as an address, or null to drop the parameter.
+// Values are judged the way a URL parser reads them (tabs and newlines removed, ends trimmed); when unsure, drop.
 function cleanValue(value: string, depth: number): string | null {
-  if (DROPPED_ADDRESS.test(value)) return null
-  if (NESTED_ADDRESS.test(value)) {
+  const t = value.replace(/[\t\n\r]/g, '').trim()
+  if (DROPPED_ADDRESS.test(t)) return null
+  if (NESTED_ADDRESS.test(t)) {
     if (depth >= MAX_NESTING) return null
-    return clean(value.startsWith('//') ? 'https:' + value : value, depth + 1)
+    return clean(t.startsWith('//') ? 'https:' + t : t, depth + 1)
   }
-  if (value.startsWith('/') && /[?#]/.test(value)) {
-    if (depth >= MAX_NESTING) return null
-    const c = clean(RELATIVE_BASE + value, depth + 1)
-    return c === null ? null : c.slice(RELATIVE_BASE.length)
+  const looksAddressed = /[?#]/.test(t)
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return looksAddressed || t.includes('@') ? null : value
+  if (!looksAddressed && !t.includes('\\')) return value
+  if (depth >= MAX_NESTING) return null
+  // A relative address: read against a placeholder base; one that escapes the base (\\host, //host) is dropped.
+  let u: URL
+  try {
+    u = new URL(t, RELATIVE_BASE + '/')
+  } catch {
+    return null
   }
-  return value
+  if (u.origin !== RELATIVE_BASE) return null
+  const cleaned = clean(u.href, depth + 1)
+  if (cleaned === null) return null
+  // Nothing removed: keep the text as written (a search such as "how to fix this?" is not an address).
+  if (cleaned === u.href) return value
+  return t.startsWith('/') ? cleaned.slice(RELATIVE_BASE.length) : cleaned.slice(RELATIVE_BASE.length + 1)
 }
 
 function clean(raw: string | null | undefined, depth: number): string | null {

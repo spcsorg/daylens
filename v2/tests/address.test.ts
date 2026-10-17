@@ -77,3 +77,21 @@ test('URL-valued parameters are cleaned by the same rule, nested or relative', (
   assert.equal(cleanAddress('https://a.example.com/?u=https%3A%2F%2Fme%3Apw%40b.example.com%2F'), 'https://a.example.com/?u=https%3A%2F%2Fb.example.com%2F')
   assert.equal(cleanAddress('https://a.example.com/?u=javascript%3Aalert(1)&q=1'), 'https://a.example.com/?q=1', 'a URL value with a scheme the rule does not keep is dropped')
 })
+
+test('nested addresses are found after normalizing, relative or absolute, and cleaned or dropped', () => {
+  const canary = (v: string) => cleanAddress('https://login.example.com/?next=' + encodeURIComponent(v) + '&q=1')!
+  for (const v of [
+    ' https://u:CANARY_PASSWORD@app.example/cb?access_token=CANARY_TOKEN#CANARY_FRAGMENT',
+    '\thttps://app.example/cb?access_token=CANARY_TOKEN#CANARY_FRAGMENT\n',
+    'callback?access_token=CANARY_TOKEN#CANARY_FRAGMENT',
+    'cb/next?x=1&session=CANARY_TOKEN',
+    'mailto:CANARY_PASSWORD@example.com?subject=CANARY_TOKEN',
+    '\\\\evil.example?token=CANARY_TOKEN',
+  ]) {
+    const out = canary(v)
+    assert.ok(!/CANARY/.test(decodeURIComponent(decodeURIComponent(out))), `${JSON.stringify(v)} -> ${out}`)
+    assert.ok(out.endsWith('q=1'), 'the other parameters stay')
+  }
+  assert.equal(cleanAddress('https://www.google.com/search?q=how+to+fix+this%3F'), 'https://www.google.com/search?q=how+to+fix+this%3F', 'a question is not an address')
+  assert.equal(cleanAddress('https://www.google.com/search?q=site%3Aexample.com+budget'), 'https://www.google.com/search?q=site%3Aexample.com+budget')
+})
