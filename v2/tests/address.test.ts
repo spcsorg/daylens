@@ -19,7 +19,7 @@ test('only search and page-identity parameters stay; every other parameter goes'
   )
   assert.equal(cleanAddress('https://x.example.com/p?SAMLResponse=PHNhbWw&RelayState=r&page=3'), 'https://x.example.com/p?page=3')
   assert.equal(cleanAddress('https://shop.example.com/item?utm_source=news&fbclid=IwAR0&gclid=Cj0&ref=nb&sort=price&item=42'), 'https://shop.example.com/item?sort=price&item=42')
-  for (const name of ['q', 'Query', 'search', 's', 'k', 'hl', 'lang', 'v', 'list', 't', 'page', 'p', 'id', 'ids', 'fileId', 'video_id', 'node-id', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'm', 'sha', 'commit', 'rev', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
+  for (const name of ['q', 'Query', 'search', 's', 'k', 'hl', 'lang', 'v', 'list', 't', 'page', 'p', 'id', 'ids', 'node-id', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'm', 'sha', 'commit', 'rev', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
     assert.notEqual(keptParam(name), null, name)
   for (const name of ['state', 'next', 'returnUrl', 'redirect', 'h', 'x', 'rlkey', 'tok', 'authkey', 'resourcekey', 'utm_source', 'utm_id', 'ref', 'oobCode', 'mode', 'sv', 'se', 'sp', 'fbclid', 'gclid', 'msclkid', 'ttclid', 'mc_cid', 'mc_eid', 'igshid', 'srsltid', '_hsenc'])
     assert.equal(keptParam(name), null, name)
@@ -57,7 +57,7 @@ test('every address from the earlier review rounds keeps only what the rule allo
     ['https://www.figma.com/design/AbC123dEf456GhI789jKl/Plan?node-id=12-345&m=dev', 'https://www.figma.com/design/AbC123dEf456GhI789jKl/Plan?node-id=12-345&m=dev'],
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf&t=42s', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf&t=42s'],
     ['https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef?pvs=4', 'https://www.notion.so/acme/Plan-0123456789abcdef0123456789abcdef'],
-    ['https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef&pm=s', 'https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef'],
+    ['https://www.notion.so/acme?p=0123456789abcdef0123456789abcdef&pm=s', 'https://www.notion.so/acme'],
     ['https://shop.example.com/s?k=iPhone15ProMaxCase2026&ref=nb_sb_noss', 'https://shop.example.com/s?k=iPhone15ProMaxCase2026'],
     ['https://x.example.com/dl?h=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', 'https://x.example.com/dl'],
   ]
@@ -181,5 +181,24 @@ test('a site rule never excludes an app by executable name', () => {
   const p = new Privacy([{ match: 'site', value: 'chrome.exe', label: 'x' }])
   const app = { app_id: 'C:\\x\\chrome.exe', name: 'Chrome', path: 'C:\\x\\chrome.exe', pid: 1, registered_browser: true, identity_state: 'ok' as const, store: null }
   assert.equal(p.classify(app).excluded, false)
+})
+
+
+test('generic names keep only their own shape of value, and the ends-in-id catch-all is gone', () => {
+  const cases: [string, string][] = [
+    ['https://secure.na1.adobesign.com/public/esignWidget?wid=CBFCIBAA3AAABLblqZhB&pid=CBFCIBAA3AAABLblqZhA9x&tsid=CBFCIBAA3AAABLblqZhC7y', 'https://secure.na1.adobesign.com/public/esignWidget'],
+    ['https://teams.microsoft.com/meet/2468013579?p=AbCdEfGh1234567', 'https://teams.microsoft.com/meet/2468013579'],
+    ['https://na3.docusign.net/Signing/EmailStart.aspx?a=7c1e&acct=9d2f&er=3a4b&t=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f', 'https://na3.docusign.net/Signing/EmailStart.aspx'],
+    ['https://forum.example.com/thread?p=3&page=12', 'https://forum.example.com/thread?p=3&page=12'],
+    ['https://forum.example.com/thread?page=abc&p=12a', 'https://forum.example.com/thread'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m30s', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m30s'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=2m', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=2m'],
+    ['https://x.example.com/?t=abc&id=1', 'https://x.example.com/?id=1'],
+    ['https://x.example.com/?t=s&id=1', 'https://x.example.com/?id=1'],
+  ]
+  for (const [raw, want] of cases) assert.equal(cleanAddress(raw), want, raw)
+  for (const name of ['pid', 'tsid', 'wid', 'fileId', 'video_id', 'userid', 'clientid', 'uid', 'src'])
+    assert.equal(keptParam(name), null, name)
 })
 

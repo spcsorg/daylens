@@ -7,15 +7,21 @@ export const MAX_ADDRESS_CHARS = 2048
 const KEPT_SCHEMES = new Set(['http:', 'https:', 'file:'])
 
 // Names are compared lowercased with separators removed, so node-id, nodeId and NODE_ID are the same name.
-// Searches hold typed text and identities are random by design, so only view settings get the value-shape rule.
+// Searches hold typed text and identities are random by design, so neither gets a value-shape rule.
 const SEARCH_NAMES = new Set(['q', 'query', 'search', 's', 'k'])
-const IDENTITY_NAMES = new Set(['v', 'list', 'page', 'p', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev'])
-const VIEW_NAMES = new Set(['hl', 'lang', 't', 'm', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
+const IDENTITY_NAMES = new Set(['id', 'ids', 'v', 'list', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev'])
+// Short generic names carry credentials on some sites, so they keep only the one shape they mean.
+const NUMBER_NAMES = new Set(['p', 'page'])
+const TIME_NAMES = new Set(['t'])
+const VIEW_NAMES = new Set(['hl', 'lang', 'm', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
 
-// Click and campaign tracking IDs end in id too, but name the visit, not the page.
+const NUMBER_VALUE = /^\d+$/
+const TIME_VALUE = /^(\d+|(?=\d)(\d+h)?(\d+m)?(\d+s)?)$/
+
+// Click and campaign tracking IDs name the visit, not the page.
 const TRACKING_NAME = /^(utm|mc|hs)|clk?id$|^(igshid|lifatid|srsltid|mkteid)$/
 
-// Vetoes a listed name: sid and sessionid end in id.
+// Vetoes a listed name, whatever the list holds.
 const SECRET_WORDS = new Set([
   'token', 'tokens', 'code', 'codes', 'key', 'keys', 'apikey', 'session', 'sessions', 'sessionid', 'sid', 'jsessionid', 'phpsessid',
   'password', 'passwd', 'pwd', 'pass', 'passcode', 'secret', 'signature', 'sig', 'signed', 'hmac', 'jwt', 'otp', 'auth', 'credential',
@@ -26,7 +32,7 @@ const SECRET_PARTS = [
   'authoriz', 'verifier', 'credential', 'authkey', 'resourcekey', 'sharekey', 'signingkey', 'secretkey', 'encryptionkey',
 ]
 
-type Kind = 'search' | 'identity' | 'view'
+type Kind = 'search' | 'identity' | 'number' | 'time' | 'view'
 
 function joinedName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -50,7 +56,9 @@ export function keptParam(name: string): Kind | null {
   const joined = joinedName(name)
   if (isSecretName(name) || TRACKING_NAME.test(joined)) return null
   if (SEARCH_NAMES.has(joined)) return 'search'
-  if (IDENTITY_NAMES.has(joined) || /ids?$/.test(joined)) return 'identity'
+  if (IDENTITY_NAMES.has(joined)) return 'identity'
+  if (NUMBER_NAMES.has(joined)) return 'number'
+  if (TIME_NAMES.has(joined)) return 'time'
   if (VIEW_NAMES.has(joined)) return 'view'
   return null
 }
@@ -110,6 +118,13 @@ function looksGenerated(value: string): boolean {
   return classes >= 2 && entropy(s) >= 3.5
 }
 
+function fitsKind(form: string, kind: Kind): boolean {
+  if (kind === 'number') return NUMBER_VALUE.test(form)
+  if (kind === 'time') return TIME_VALUE.test(form)
+  if (kind === 'view') return !looksGenerated(form)
+  return true
+}
+
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
 export function cleanAddress(raw: string | null | undefined): string | null {
   return clean(raw, 0)
@@ -147,7 +162,7 @@ function cleanValue(value: string, depth: number, kind: Kind): string | null {
   // Still carrying encoded URL syntax after the last decode: what it hides cannot be judged.
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
-    if (isCredential(form) || isJwt(form) || (kind === 'view' && looksGenerated(form))) return null
+    if (isCredential(form) || isJwt(form) || !fitsKind(form, kind)) return null
     if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
