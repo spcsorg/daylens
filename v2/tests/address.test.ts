@@ -120,3 +120,13 @@ test('a parent-relative destination keeps its path text exactly, or is dropped w
   assert.equal(cleanAddress('https://a.example.com/?next=..%2Fcallback%3Ftoken%3Dsecret%26doc%3D7&q=1'), 'https://a.example.com/?q=1')
   assert.equal(cleanAddress('https://a.example.com/?next=.%2Fa%2F..%2Fb%3Fdoc%3D7'), 'https://a.example.com/?next=.%2Fa%2F..%2Fb%3Fdoc%3D7')
 })
+
+test('shared-document access keys go whatever their case or separators, and the document stays', () => {
+  assert.equal(cleanAddress('https://onedrive.live.com/redir?resid=ABC123%21456&authkey=%21AbCdEfGh'), 'https://onedrive.live.com/redir?resid=ABC123%21456')
+  assert.equal(
+    cleanAddress('https://drive.google.com/file/d/1AbCdEf/view?resourcekey=0-xYz123&usp=sharing'),
+    'https://drive.google.com/file/d/1AbCdEf/view?usp=sharing',
+  )
+  for (const name of ['authkey', 'AUTHKEY', 'authKey', 'auth_key', 'auth-key', 'resourcekey', 'resourceKey', 'resource_key', 'RESOURCE-KEY', 'sharekey', 'share_key'])
+    assert.ok(isSecretParam(name, 'v'), name)
+})

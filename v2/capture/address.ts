@@ -13,11 +13,12 @@ const SECRET_WORDS = new Set([
   'credentials', 'ticket', 'samlresponse', 'samlrequest', 'assertion',
 ])
 
-// Names written as one lowercase word (accesstoken, sessionkey) still carry these; short words like key or code are
-// matched as whole words only, so keyboard and codec stay.
+// Matched anywhere in the name once it is lowercased and stripped of separators, so authkey, authKey, auth_key and
+// AUTH-KEY are the same name. Short words like key or code are matched as whole words only (above), so keyboard and
+// codec stay.
 const SECRET_PARTS = [
   'token', 'secret', 'password', 'passwd', 'signature', 'apikey', 'accesskey', 'privatekey', 'sessionid', 'sessionkey', 'authcode',
-  'authoriz', 'verifier', 'credential',
+  'authoriz', 'verifier', 'credential', 'authkey', 'resourcekey', 'sharekey', 'signingkey', 'secretkey', 'encryptionkey',
 ]
 
 // An HTTP credential pasted into a parameter, whatever the parameter is called.
@@ -39,7 +40,8 @@ function nameWords(name: string): string[] {
 }
 
 export function isSecretParam(name: string, value: string): boolean {
-  return nameWords(name).some((w) => SECRET_WORDS.has(w) || SECRET_PARTS.some((p) => w.includes(p))) || JWT_VALUE.test(value) || CREDENTIAL_VALUE.test(value)
+  const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || JWT_VALUE.test(value) || CREDENTIAL_VALUE.test(value)
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
