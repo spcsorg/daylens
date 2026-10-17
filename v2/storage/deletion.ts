@@ -19,6 +19,9 @@ export interface DeletionResult {
   hoursRemoved: number
   hoursCleared: number
   assistantReads: number
+  // Whether the old pages were also moved out of the write-ahead log when the removal finished; if not, storage
+  // keeps retrying and announces when they are gone.
+  purged: boolean
 }
 
 type Obs = ObservationRow & { id: number; last_seen_wall_ms: number; url?: string | null }
@@ -89,7 +92,7 @@ export class Deleter {
   run(tombstoneId: number, nowWallMs: number): DeletionResult {
     const db = this.db
     const t = db.prepare('SELECT id, kind, from_wall_ms, to_wall_ms, app_id, site, state FROM deletions WHERE id = ?').get(tombstoneId) as Tombstone | undefined
-    const r: DeletionResult = { tombstone: tombstoneId, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0 }
+    const r: DeletionResult = { tombstone: tombstoneId, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0, purged: false }
     if (!t) return r
     const rules = new Rules(db, () => nowWallMs)
     const derived = new Derived(db, { cut: (s, e, row) => rules.cut(s, e, row), admit: (row) => rules.accepts(row.event_wall_ms, row.app_id, row.url) })
@@ -204,10 +207,21 @@ export class Deleter {
     return r
   }
 
-  /** Moves old pages out of the write-ahead log; false while a reader's snapshot still holds them. */
-  purge(): boolean {
-    const [res] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[]
-    return res !== undefined && res.busy === 0
+  /**
+   * Moves old pages out of the write-ahead log and marks the tombstone purged; false while a reader's snapshot still
+   * holds them (the caller retries). Waits only briefly, since a reader may hold its snapshot for a long time.
+   */
+  purge(tombstoneId: number): boolean {
+    const wait = this.db.pragma('busy_timeout', { simple: true }) as number
+    this.db.pragma('busy_timeout = 100')
+    try {
+      const [res] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[]
+      if (res === undefined || res.busy !== 0 || res.log !== 0) return false
+    } finally {
+      this.db.pragma(`busy_timeout = ${wait}`)
+    }
+    this.db.prepare(`UPDATE deletions SET state = 'purged' WHERE id = ? AND state = 'done'`).run(tombstoneId)
+    return true
   }
 }
 
@@ -215,7 +229,7 @@ export class Deleter {
 export class DeletionWorker {
   private worker: Worker | null = null
   private next = 1
-  private readonly pending = new Map<number, { resolve: (r: DeletionResult) => void; reject: (e: Error) => void }>()
+  private readonly pending = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>()
   private readonly file: string
 
   constructor(file: string) {
@@ -223,12 +237,20 @@ export class DeletionWorker {
   }
 
   run(tombstone: number, nowWallMs: number): Promise<DeletionResult> {
+    return this.send({ op: 'delete', tombstone, now: nowWallMs }) as Promise<DeletionResult>
+  }
+
+  purge(tombstone: number): Promise<boolean> {
+    return this.send({ op: 'purge', tombstone }) as Promise<boolean>
+  }
+
+  private send(job: Record<string, unknown>): Promise<unknown> {
     const w = this.ensure()
     const id = this.next++
     w.ref()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      w.postMessage({ id, tombstone, now: nowWallMs })
+      w.postMessage({ id, ...job })
     })
   }
 
@@ -237,13 +259,13 @@ export class DeletionWorker {
     // The worker is a sibling module: .ts when run from source, .js when built.
     const ext = path.extname(fileURLToPath(import.meta.url))
     const w = new Worker(new URL(`./deletionWorker${ext}`, import.meta.url), { workerData: { file: this.file } })
-    w.on('message', (m: { id: number; result?: DeletionResult; error?: string }) => {
+    w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)
       if (this.pending.size === 0) w.unref()
       if (!p) return
-      if (m.result) p.resolve(m.result)
-      else p.reject(new Error(m.error ?? 'deletion failed'))
+      if (m.error === undefined) p.resolve(m.result)
+      else p.reject(new Error(m.error))
     })
     w.on('error', (err) => this.failAll(err as Error))
     w.on('exit', () => {

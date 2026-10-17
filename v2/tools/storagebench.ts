@@ -6,7 +6,7 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import type { ObservationRow } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
-import { Storage } from '../storage/index.ts'
+import { Storage, type DeletionHandle } from '../storage/index.ts'
 
 const { values } = parseArgs({ options: { out: { type: 'string' }, days: { type: 'string', default: '365' }, 'switch-s': { type: 'string', default: '30' } } })
 if (!values.out) throw new Error('--out <dir>')
@@ -221,17 +221,35 @@ for (let i = 0; i < 600; i++) {
   live.push(performance.now() - t)
 }
 
-// Deletion at a year's size.
+// Deletion at a year's size: how fast the call responds, how long the worker takes, and the worst stall of this
+// (the capture) thread meanwhile.
+async function timedDelete(f: () => DeletionHandle) {
+  const lags: number[] = []
+  let last = performance.now()
+  const tick = setInterval(() => {
+    const now = performance.now()
+    lags.push(now - last - 5)
+    last = now
+  }, 5)
+  const t = performance.now()
+  const h = f()
+  const respond = performance.now() - t
+  const r = await h.done
+  const total = performance.now() - t
+  await h.purged
+  clearInterval(tick)
+  return { respond_ms: round(respond), done_ms: round(total), worst_stall_ms: round(Math.max(0, ...lags)), ...r }
+}
+clock.t = END - 6 * HOUR_MS + 700_000
+const delLast = await timedDelete(() => storage.deleteLast(10 * 60_000))
+clock.t = END
+const delSource = await timedDelete(() => storage.deleteSource(APPS[6]!.id))
+const delSite = await timedDelete(() => storage.deleteSite(SITES[1]!))
 const timed = <T>(f: () => T): [T, number] => {
   const t = performance.now()
   const r = f()
   return [r, round(performance.now() - t)]
 }
-clock.t = END - 6 * HOUR_MS + 700_000
-const [delLast, delLastMs] = timed(() => storage.deleteLast(10 * 60_000))
-clock.t = END
-const [delSource, delSourceMs] = timed(() => storage.deleteSource(APPS[6]!.id))
-const [delSite, delSiteMs] = timed(() => storage.deleteSite(SITES[1]!))
 const [, rebuildMs] = timed(() => storage.derived.rebuild())
 
 // Retention: drop the oldest month, batch by batch.
@@ -256,11 +274,7 @@ const result = {
   size: { total_mb: round(sizeMb), per_month_mb: round((sizeMb / DAYS) * 30.44), by_table_mb: byTable },
   live_flush_ms: { p50: round(pct(live, 50)), p95: round(pct(live, 95)), p99: round(pct(live, 99)), max: round(Math.max(...live)) },
   search,
-  deletion: {
-    last_ten_minutes: { ms: delLastMs, ...delLast },
-    one_app_all_year: { ms: delSourceMs, ...delSource },
-    one_site_all_year: { ms: delSiteMs, ...delSite },
-  },
+  deletion: { last_ten_minutes: delLast, one_app_all_year: delSource, one_site_all_year: delSite },
   rebuild_intervals_and_docs_ms: rebuildMs,
   retention_drop_one_month: {
     batches: batches.length,

@@ -11,10 +11,14 @@ db.pragma('secure_delete = ON')
 db.pragma('journal_size_limit = 16777216')
 const deleter = new Deleter(db)
 
-parentPort!.on('message', (job: { id: number; tombstone: number; now: number }) => {
+parentPort!.on('message', (job: { id: number; op: 'delete' | 'purge'; tombstone: number; now: number }) => {
   try {
+    if (job.op === 'purge') {
+      parentPort!.postMessage({ id: job.id, result: deleter.purge(job.tombstone) })
+      return
+    }
     const result = deleter.run(job.tombstone, job.now)
-    deleter.purge()
+    result.purged = deleter.purge(job.tombstone)
     parentPort!.postMessage({ id: job.id, result })
   } catch (err) {
     parentPort!.postMessage({ id: job.id, error: `${(err as { code?: string }).code ?? 'error'}: ${(err as Error).message}` })

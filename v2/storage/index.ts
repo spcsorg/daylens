@@ -92,7 +92,10 @@ export interface CaptureControl {
 /** A deletion is in force (capture and import refuse the material) when this returns; `done` settles once it is removed. */
 export interface DeletionHandle {
   tombstone: number
+  // Removed from every table and the search index.
   done: Promise<DeletionResult>
+  // Also gone from the files on disk (the write-ahead log can hold old pages while a reader uses them).
+  purged: Promise<void>
 }
 
 export class DeletedMaterialError extends Error {}
@@ -164,7 +167,12 @@ export class Storage {
     this.db.exec(`DELETE FROM meta WHERE key = 'derive_from'`)
     this.backfill = this.runBackfill()
     for (const t of this.rules.tombstones) {
-      if (t.state === 'pending') this.track(this.finishDeletion(t.id)).catch((err: Error) => this.onError(`deletion_resume_${err.message}`))
+      if (t.state === 'pending') {
+        this.track(this.finishDeletion(t.id))
+          .then((r) => (r.purged ? undefined : this.purgeWhenFree(t.id)))
+          .catch((err: Error) => this.onError(`deletion_resume_${err.message}`))
+      }
+      if (t.state === 'done') this.purgeWhenFree(t.id).catch((err: Error) => this.onError(`purge_${err.message}`))
     }
     const p = this.paused()
     if (p) {
@@ -287,7 +295,8 @@ export class Storage {
       this.rules.loadTombstones()
       throw err
     }
-    return { tombstone, done: this.track(this.finishDeletion(tombstone)) }
+    const done = this.track(this.finishDeletion(tombstone))
+    return { tombstone, done, purged: done.then((r) => (r.purged ? undefined : this.purgeWhenFree(tombstone))) }
   }
 
   private readonly inFlight = new Set<Promise<unknown>>()
@@ -307,7 +316,31 @@ export class Storage {
   private async finishDeletion(tombstone: number): Promise<DeletionResult> {
     const result = await this.deletions.run(tombstone, this.now())
     this.bus.commit('deletion', { state: 'done', tombstone }, () => {}, () => this.rules.loadTombstones())
+    if (result.purged) this.announcePurged(tombstone)
     return result
+  }
+
+  private announcePurged(tombstone: number): void {
+    this.bus.commit('deletion', { state: 'purged', tombstone }, () => {}, () => this.rules.loadTombstones())
+  }
+
+  private readonly purges = new Map<number, Promise<void>>()
+
+  /** Retries moving deleted pages out of the log, with backoff, until no reader holds them. */
+  private purgeWhenFree(tombstone: number): Promise<void> {
+    let p = this.purges.get(tombstone)
+    if (p) return p
+    p = (async () => {
+      for (let wait = 250; !this.stopped; wait = Math.min(wait * 2, 30_000)) {
+        if (await this.deletions.purge(tombstone)) {
+          this.announcePurged(tombstone)
+          return
+        }
+        await new Promise<void>((r) => setTimeout(r, wait).unref())
+      }
+    })()
+    this.purges.set(tombstone, p)
+    return p
   }
 
   // --- hours, corrections, threads ----------------------------------------

@@ -66,7 +66,7 @@ test('a deletion left pending by a crash is still in force, and finishes at the 
   assert.equal(r2.storage.accepts(T0, 'com.example.chat', null), false, 'refused before the work is done')
   r2.storage.start()
   await r2.storage.deletionsSettled()
-  assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'done' }])
+  assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
   assert.deepEqual(r2.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
   assert.deepEqual(r2.storage.search('chat'), [])
   r2.close()

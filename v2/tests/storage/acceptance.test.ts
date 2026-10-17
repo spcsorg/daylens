@@ -514,3 +514,28 @@ test('deleting an app removes the assistant reads that touched it, by what they 
   assert.ok(direct && viaHour)
   r.close()
 })
+
+test('deletion reports purged from disk separately, retrying until a reader holding the old pages lets go', async () => {
+  resetSeq()
+  const r = rig()
+  day(r, T0, [[chat, 'Wallaby canary'], [editor, 'x.md - Editor']])
+  r.store.flush()
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) AS n FROM observations').get()
+  r.clock.t = T0 + HOUR
+  const seen: string[] = []
+  r.storage.bus.on((c) => c.kind === 'deletion' && seen.push(String(c.payload.state)))
+  const handle = r.storage.deleteSource('com.example.chat')
+  const result = await handle.done
+  assert.equal(result.purged, false, 'deleted, but the old pages are still in the log while the reader holds them')
+  assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'done' }])
+  assert.ok(diskContains(r.dir, 'Wallaby').length > 0)
+  reader.prepare('COMMIT').run()
+  await handle.purged
+  assert.deepEqual(diskContains(r.dir, 'Wallaby'), [])
+  assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(seen, ['started', 'done', 'purged'])
+  reader.close()
+  r.close()
+})
