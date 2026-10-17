@@ -28,13 +28,13 @@ What it never does:
 - It never runs in private or incognito windows.
 - It never reads page content, form fields, passwords or anything you type.
 - It never sends anything to a server. Pages go only to the Daylens app on the same computer.
-- Before an address leaves the browser, it keeps only web (`http`, `https`) and `file` addresses, and removes: any user
-  name and password; the part after `#`; every query parameter whose name contains a word for a token, code, key,
-  session, password, secret, signature, authorization or credential; every parameter whose value is a login token
-  (`Bearer …`, a `Basic …` user name and password, or a JSON web token); and every parameter whose value is shaped
-  like a generated key, unless the parameter names a file, page or video. An address carried inside a parameter, such
-  as a return link, even when percent-encoded, is kept only if none of this applies to it; otherwise that whole
-  parameter is dropped. Secrets written into the address path itself are not removed.
+- Before an address leaves the browser, it keeps only web (`http`, `https`) and `file` addresses. It keeps the page
+  address and a short list of search and page-identity parameters; everything else is removed. That means it removes
+  any user name and password, the part after `#`, and every query parameter except searches (such as `q`), names of
+  the item on the page (such as `id`, `v`, `list`, `file` or `doc`) and display settings (such as `lang`, `sort` or
+  `tab`). A kept parameter is removed too when its value is a login token (`Bearer …`, a `Basic …` user name and
+  password, or a JSON web token), when a display setting is shaped like a generated key, or when it holds an address
+  this rule would change. Secrets written into the address path itself are not removed.
 
 You need the Daylens app installed on this computer. Without it, the extension does nothing.
 

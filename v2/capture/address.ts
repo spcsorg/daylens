@@ -1,114 +1,35 @@
 // The one rule for page addresses, used by the browser extension and the history readers alike.
-// Keeps the query (searches, document IDs) but never credentials, fragments, or parameters that carry secrets.
-// Runs in Node and in the extension, so it depends only on the URL standard.
+// Keeps the page address and a short list of search and page-identity parameters; everything else is removed.
+// Secrets written into the path itself stay. Runs in Node and in the extension, so it depends only on the URL standard.
 
 export const MAX_ADDRESS_CHARS = 2048
 
 const KEPT_SCHEMES = new Set(['http:', 'https:', 'file:'])
 
-// A parameter is dropped when any word of its name is one of these.
+// Names are compared lowercased with separators removed, so node-id, nodeId and NODE_ID are the same name.
+// Searches hold typed text and identities are random by design, so only view settings get the value-shape rule.
+const SEARCH_NAMES = new Set(['q', 'query', 'search', 's', 'k'])
+const IDENTITY_NAMES = new Set(['v', 'list', 'page', 'p', 'resid', 'cid', 'eid', 'file', 'doc', 'item', 'video', 'post', 'node', 'nodeid', 'sha', 'commit', 'rev'])
+const VIEW_NAMES = new Set(['hl', 'lang', 't', 'm', 'tab', 'view', 'usp', 'dl', 'sort', 'filter', 'category', 'cat'])
+
+// Click and campaign tracking IDs end in id too, but name the visit, not the page.
+const TRACKING_NAME = /^(utm|mc|hs)|clk?id$|^(igshid|lifatid|srsltid|mkteid)$/
+
+// Vetoes a listed name: sid and sessionid end in id.
 const SECRET_WORDS = new Set([
   'token', 'tokens', 'code', 'codes', 'key', 'keys', 'apikey', 'session', 'sessions', 'sessionid', 'sid', 'jsessionid', 'phpsessid',
   'password', 'passwd', 'pwd', 'pass', 'passcode', 'secret', 'signature', 'sig', 'signed', 'hmac', 'jwt', 'otp', 'auth', 'credential',
   'credentials', 'ticket', 'samlresponse', 'samlrequest', 'assertion',
 ])
-
-// Matched anywhere in the name once it is lowercased and stripped of separators, so authkey, authKey, auth_key and
-// AUTH-KEY are the same name. Short words like key or code are matched as whole words only (above), so keyboard and
-// codec stay.
 const SECRET_PARTS = [
   'token', 'secret', 'password', 'passwd', 'signature', 'apikey', 'accesskey', 'privatekey', 'sessionid', 'sessionkey', 'authcode',
   'authoriz', 'verifier', 'credential', 'authkey', 'resourcekey', 'sharekey', 'signingkey', 'secretkey', 'encryptionkey',
 ]
 
-// An HTTP credential pasted into a parameter, whatever the parameter is called. Basic counts only when its token is
-// base64 of text with a colon (user:password), so a search for "basic income" stays.
-const BEARER_VALUE = /^bearer\s+[A-Za-z0-9\-._~+/]+=*$/i
-const BASIC_VALUE = /^basic\s+([A-Za-z0-9+/]+={0,2})$/i
+type Kind = 'search' | 'identity' | 'view'
 
-function decodeBase64(s: string): string | null {
-  try {
-    const bytes = Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch {
-    return null
-  }
-}
-
-function isCredential(value: string): boolean {
-  if (BEARER_VALUE.test(value)) return true
-  const token = BASIC_VALUE.exec(value)?.[1]
-  return token !== undefined && (decodeBase64(token)?.includes(':') ?? false)
-}
-// Parameter values that are addresses in their own right (returnUrl, next, redirect) get the same rule; addresses
-// that can run code or carry content are dropped. A plain "site:example.com" is not an address and stays.
-const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
-const MAX_NESTING = 4
-const RELATIVE_BASE = 'https://relative.invalid'
-
-// A JSON web token (three parts) or an encrypted one (five): base64url parts whose first decodes to a JSON object with
-// an alg, however that header is spaced and however short the payload ({} is e30).
-const B64URL_PART = /^[A-Za-z0-9_-]+=*$/
-
-function isJwt(value: string): boolean {
-  const parts = value.trim().split('.')
-  if ((parts.length !== 3 && parts.length !== 5) || !parts.slice(0, -1).every((p) => B64URL_PART.test(p))) return false
-  const last = parts[parts.length - 1] ?? ''
-  if (last !== '' && !B64URL_PART.test(last)) return false
-  const text = decodeBase64((parts[0] ?? '').replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/'))
-  if (text === null) return false
-  try {
-    const header: unknown = JSON.parse(text)
-    return !!header && typeof header === 'object' && !Array.isArray(header) && 'alg' in header
-  } catch {
-    return false
-  }
-}
-
-// The 200 most frequent letter pairs in English words (/usr/share/dict/words). Product names, slugs and searches are
-// mostly made of them; random keys are not.
-const COMMON_PAIRS = new Set(
-  'erintionteanalaticenisreralerirostnearliesntorunitlacoiotoianicaedustasstrlydemachphngloouelnaacolheomdimenothsietsellmioppeosidvecehihoileaasulprndhaaburotblpomoncpaecemocgeogamshciapctpisuschynsdarysoumadsaepsprtsmdobiodtyagcrbeutgibaivimcuipgaplkermaegrtuooiziriglumpifvieobooiglfibrieeeruaircovqufockrdrsrrzeaudrubexclgoptttobfevaibhreuupwaylucbucyrnuaypeimbfuuiowegkimupuflguoarpnnudysmyltwiefsl'.match(/../g),
-)
-// Parameters that name a thing (a file, video, page, playlist) are exempt from the value-shape rule: their values are
-// random by design and identify what is on screen. Their names are still checked for secret words first.
-const IDENTITY_NAMES = new Set(['v', 'p', 'list', 'page', 'file', 'doc', 'item', 'video', 'post', 'node', 'sha', 'commit', 'rev'])
-
-function isIdentityName(name: string): boolean {
-  const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-  return IDENTITY_NAMES.has(joined) || /ids?$/.test(joined)
-}
-
-function entropy(s: string): number {
-  const counts = new Map<string, number>()
-  for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1)
-  let h = 0
-  for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length)
-  return h
-}
-
-function commonPairShare(s: string): number {
-  let pairs = 0
-  let common = 0
-  for (const run of s.toLowerCase().split(/[^a-z]+/))
-    for (let i = 1; i < run.length; i++) {
-      pairs++
-      if (COMMON_PAIRS.has(run.slice(i - 1, i + 1))) common++
-    }
-  return pairs ? common / pairs : 0
-}
-
-// A value shaped like a generated key: long hex, or 20+ characters of one base64 alphabet mixing letter cases or
-// digits, with few separators, and made mostly of letter pairs that English rarely uses. Measured on random keys this
-// catches 92% at 20 characters and 96% at 32; at a 0.6 pair threshold it starts dropping names like
-// ProjectKickoffDeck2026v3, so the threshold stays at 0.55.
-function looksGenerated(value: string): boolean {
-  const s = value.replace(/=+$/, '')
-  if (!/^[A-Za-z0-9+/_-]+$/.test(s)) return false
-  if (/^[0-9a-f]+$/i.test(s)) return s.length >= 32 && /[0-9]/.test(s) && /[a-f]/i.test(s)
-  if (s.length < 20 || (s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
-  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((r) => r.test(s)).length
-  return classes >= 2 && entropy(s) >= 3.5 && commonPairShare(s) < 0.55
+function joinedName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
 function nameWords(name: string): string[] {
@@ -119,9 +40,74 @@ function nameWords(name: string): string[] {
     .filter(Boolean)
 }
 
-export function isSecretParam(name: string, value: string): boolean {
-  const joined = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p)) || isJwt(value) || isCredential(value)
+function isSecretName(name: string): boolean {
+  const joined = joinedName(name)
+  return nameWords(name).some((w) => SECRET_WORDS.has(w)) || SECRET_PARTS.some((p) => joined.includes(p))
+}
+
+// The kind of a kept parameter, or null for one that is removed.
+export function keptParam(name: string): Kind | null {
+  const joined = joinedName(name)
+  if (isSecretName(name) || TRACKING_NAME.test(joined)) return null
+  if (SEARCH_NAMES.has(joined)) return 'search'
+  if (IDENTITY_NAMES.has(joined) || /ids?$/.test(joined)) return 'identity'
+  if (VIEW_NAMES.has(joined)) return 'view'
+  return null
+}
+
+function base64Bytes(s: string): Uint8Array | null {
+  try {
+    return Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+  } catch {
+    return null
+  }
+}
+
+// Basic counts when its token is base64 of anything with a colon byte: user:password in UTF-8, Latin-1 or UTF-16.
+const BEARER_VALUE = /^bearer\s+[A-Za-z0-9\-._~+/]+=*$/i
+const BASIC_VALUE = /^basic\s+([A-Za-z0-9+/]+={0,2})$/i
+
+function isCredential(value: string): boolean {
+  if (BEARER_VALUE.test(value)) return true
+  const token = BASIC_VALUE.exec(value)?.[1]
+  return token !== undefined && (base64Bytes(token)?.includes(0x3a) ?? false)
+}
+
+// A JWT (three parts, empty signature allowed) or JWE (five, empty key part for direct encryption) whose header is a
+// JSON object with an alg.
+const B64URL_PART = /^[A-Za-z0-9_-]*=*$/
+
+function isJwt(value: string): boolean {
+  const parts = value.trim().split('.')
+  if ((parts.length !== 3 && parts.length !== 5) || !parts.every((p) => B64URL_PART.test(p))) return false
+  const required = parts.length === 3 ? [0, 1] : [0, 2, 3]
+  if (required.some((i) => !parts[i])) return false
+  const bytes = base64Bytes((parts[0] ?? '').replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/'))
+  if (bytes === null) return false
+  try {
+    const header: unknown = JSON.parse(new TextDecoder().decode(bytes))
+    return !!header && typeof header === 'object' && !Array.isArray(header) && 'alg' in header
+  } catch {
+    return false
+  }
+}
+
+function entropy(s: string): number {
+  const counts = new Map<string, number>()
+  for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1)
+  let h = 0
+  for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length)
+  return h
+}
+
+// Long hex, or 20+ characters of one base64 alphabet with few separators, two character classes and 3.5+ bits each.
+function looksGenerated(value: string): boolean {
+  const s = value.replace(/=+$/, '')
+  if (!/^[A-Za-z0-9+/_-]+$/.test(s)) return false
+  if (/^[0-9a-f]+$/i.test(s)) return s.length >= 32 && /[0-9]/.test(s) && /[a-f]/i.test(s)
+  if (s.length < 20 || (s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((r) => r.test(s)).length
+  return classes >= 2 && entropy(s) >= 3.5
 }
 
 // Returns null when the page has no address worth keeping (new tab, settings, data: and the like).
@@ -129,10 +115,10 @@ export function cleanAddress(raw: string | null | undefined): string | null {
   return clean(raw, 0)
 }
 
-// A parameter value after the rule: kept exactly as written, or null to drop it. A value is never rewritten.
-// It is read the way a URL parser would (C0 controls removed) and percent-decoded up to three times; if any form of
-// it looks like an address and the rule would remove anything from that address, or the decoding is ambiguous, the
-// whole value is dropped. Plain text such as "how to fix this?" stays.
+// A plain "site:example.com" is not an address and stays.
+const DROPPED_ADDRESS = /^(javascript|data|vbscript|blob):/i
+const MAX_NESTING = 4
+const RELATIVE_BASE = 'https://relative.invalid'
 const MAX_DECODES = 3
 const CONTROLS = /[\u0000-\u001f\u007f]/g
 const ENCODED_SYNTAX = /%(3a|2f|3f|23|40|25|5c)/i
@@ -141,7 +127,9 @@ function looksLikeAddress(f: string): boolean {
   return f.includes('://') || /^(\/\/|\\)/.test(f) || /[?#]/.test(f) || (f.includes('@') && f.includes(':'))
 }
 
-function cleanValue(value: string, depth: number, identity: boolean): string | null {
+// A kept value is never rewritten: it stays as written, or null drops it. Every control-stripped, percent-decoded form
+// is judged, and any credential, token, generated-looking view value, or address the rule would change drops it.
+function cleanValue(value: string, depth: number, kind: Kind): string | null {
   let f = value.replace(CONTROLS, '').trim()
   const forms = [f]
   for (let i = 0; i < MAX_DECODES && /%[0-9a-f]{2}/i.test(f); i++) {
@@ -159,8 +147,7 @@ function cleanValue(value: string, depth: number, identity: boolean): string | n
   // Still carrying encoded URL syntax after the last decode: what it hides cannot be judged.
   if (forms.length > MAX_DECODES && ENCODED_SYNTAX.test(f)) return null
   for (const form of forms) {
-    // A credential can hide behind encoding or a control prefix as well as an address can.
-    if (isCredential(form) || isJwt(form) || (!identity && looksGenerated(form))) return null
+    if (isCredential(form) || isJwt(form) || (kind === 'view' && looksGenerated(form))) return null
     if (DROPPED_ADDRESS.test(form) || (looksLikeAddress(form) && wouldRemove(form, depth))) return null
   }
   return value
@@ -183,7 +170,10 @@ function wouldRemove(form: string, depth: number): boolean {
     return true
   }
   if (u.username || u.password || u.hash) return true
-  for (const [k, v] of u.searchParams) if (isSecretParam(k, v) || cleanValue(v, depth + 1, isIdentityName(k)) === null) return true
+  for (const [k, v] of u.searchParams) {
+    const kind = keptParam(k)
+    if (kind === null || cleanValue(v, depth + 1, kind) === null) return true
+  }
   return false
 }
 
@@ -202,8 +192,9 @@ function clean(raw: string | null | undefined, depth: number): string | null {
   if (u.search) {
     const kept = new URLSearchParams()
     for (const [k, v] of u.searchParams) {
-      if (isSecretParam(k, v)) continue
-      const c = cleanValue(v, depth, isIdentityName(k))
+      const kind = keptParam(k)
+      if (kind === null) continue
+      const c = cleanValue(v, depth, kind)
       if (c !== null) kept.append(k, c)
     }
     u.search = kept.toString()

@@ -95,7 +95,7 @@ The Daylens browser extension talks to a native messaging host: the capture help
 | `browser` | The process that started the host, found by the host from its own parent (on Windows, the parent of `cmd.exe` when Chromium puts it in between), in the same shape as `app`. Never reported by the extension. `registered_browser` is not read for tab lines. |
 | `extension` | The extension ID: 32 letters `a`–`p` for Chromium, the add-on ID for Firefox. |
 | `window`, `tab` | The browser's own IDs, as strings; only meaningful within one browser run. |
-| `url` | The page address after the shared address rule (`capture/address.ts`): no user name or password, no fragment, no query parameters that carry secrets, at most 2048 characters. Present exactly when `state` is `page`. |
+| `url` | The page address after the shared address rule (`capture/address.ts`): it keeps the page address and a short list of search and page-identity parameters; everything else is removed (user name and password, fragment, every other query parameter, and a kept parameter whose value is a credential, a token, a key-shaped display setting or an address the rule would change). Path text is kept as written. At most 2048 characters. Present exactly when `state` is `page`. |
 | `title` | The tab title, at most 1024 UTF-16 code units, or `null`. Only with `page`. |
 | `epoch` | Optional. Present only on an answer to a snapshot request: the focus epoch that request named. |
 
