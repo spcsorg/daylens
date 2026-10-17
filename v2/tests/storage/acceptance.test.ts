@@ -597,3 +597,28 @@ test('no row spans more than the longest interval the edge scan covers, so a del
   assert.deepEqual(r.q(`SELECT id FROM observations WHERE event_wall_ms < ? AND last_seen_wall_ms > ?`, from + HOUR, from), [])
   r.close()
 })
+
+test('while a deletion is pending, every reader already sees the hours and threads it covers as gone', () => {
+  const r = rig()
+  const whole = r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Emu canary hour' }, r.storage.hourBasis(T0))
+  const part = r.storage.writeHour({ start_wall_ms: T0 + HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Emu canary partly' }, r.storage.hourBasis(T0 + HOUR))
+  const viaApp = r.storage.writeHour({ start_wall_ms: T0 + 3 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Emu canary chat', sources: [{ app_id: 'com.example.chat' }] }, r.storage.hourBasis(T0 + 3 * HOUR))
+  const kept = r.storage.writeHour({ start_wall_ms: T0 + 4 * HOUR, tz: 'Africa/Kigali', status: 'written', title: 'Untouched' }, r.storage.hourBasis(T0 + 4 * HOUR))
+  const thread = r.storage.createThread('Emu canary thread', [part.id, kept.id])
+  // Fenced but not yet removed.
+  const pend = r.storage.db.prepare(`INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, app_id, created_wall_ms, state) VALUES (?, ?, ?, ?, ?, 'pending')`)
+  pend.run('range', T0, T0 + HOUR + 10 * MIN, null, T0)
+  pend.run('source', null, null, 'com.example.chat', T0)
+  r.storage.rules.loadTombstones()
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  for (const read of [(id: number) => readHour(reader, id), (id: number) => r.storage.hour(id)]) {
+    assert.equal(read(whole.id), null)
+    assert.equal(read(part.id)!.title, null)
+    assert.equal(read(part.id)!.needs_rewrite, true)
+    assert.equal(read(viaApp.id)!.title, null)
+    assert.equal(read(kept.id)!.title, 'Untouched')
+  }
+  assert.deepEqual(r.storage.threadsForHour(kept.id), [{ id: thread, title: '' }])
+  reader.close()
+  r.close()
+})

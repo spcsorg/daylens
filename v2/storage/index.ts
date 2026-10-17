@@ -7,7 +7,7 @@ import { Store } from '../capture/store.ts'
 import { ChangeBus, pruneChangeLog, type ChangeKind } from './changes.ts'
 import { DeletionWorker, fenceEdges, type DeletionResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
-import { indexHour, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
+import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
 import { DAY_MS, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
@@ -459,8 +459,18 @@ export class Storage {
     this.bus.commit('hour', { thread: threadId, deleted: true }, () => this.db.prepare('DELETE FROM threads WHERE id = ?').run(threadId))
   }
 
+  /** A thread linked to an hour that a pending deletion covers shows no title until the deletion has run. */
   threadsForHour(hourId: number): { id: number; title: string }[] {
-    return this.db.prepare('SELECT t.id, t.title FROM threads t JOIN thread_hours th ON th.thread_id = t.id WHERE th.hour_id = ? ORDER BY t.id').all(hourId) as { id: number; title: string }[]
+    const threads = this.db.prepare('SELECT t.id, t.title FROM threads t JOIN thread_hours th ON th.thread_id = t.id WHERE th.hour_id = ? ORDER BY t.id').all(hourId) as { id: number; title: string }[]
+    const pending = this.rules.tombstones.filter((t) => t.state === 'pending')
+    if (pending.length === 0) return threads
+    const hoursOf = this.db.prepare('SELECT h.start_wall_ms, h.end_wall_ms, h.sources FROM hours h JOIN thread_hours th ON th.hour_id = h.id WHERE th.thread_id = ?')
+    return threads.map((t) => {
+      const fenced = (hoursOf.all(t.id) as { start_wall_ms: number; end_wall_ms: number; sources: string }[]).some(
+        (h) => pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null,
+      )
+      return fenced ? { ...t, title: '' } : t
+    })
   }
 
   // --- pause -----------------------------------------------------------------

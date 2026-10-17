@@ -1,7 +1,7 @@
 // Hours as every reader sees them, and the writes both the main thread and the deletion worker make to them.
 import type Database from 'better-sqlite3'
 import { nfc } from './derive.ts'
-import { matchesSite, type Tombstone } from './rules.ts'
+import { matchesSite, pendingTombstones, type Tombstone } from './rules.ts'
 
 export type HourField = 'title' | 'summary' | 'detail' | 'outcome' | 'suggestion'
 export const HOUR_FIELDS: readonly HourField[] = ['title', 'summary', 'detail', 'outcome', 'suggestion']
@@ -30,11 +30,37 @@ export interface Hour {
   corrected: HourField[]
 }
 
-/** For every reader (screens, Ask, the MCP server): the user's latest correction of a field wins over the written text. */
+/** What a pending deletion will do to an hour: remove it, clear its text, or nothing. Readers apply it at once. */
+export function pendingVerdict(h: { start_wall_ms: number; end_wall_ms: number; sources: HourSource[] }, pending: readonly Tombstone[]): { verdict: 'removed' | 'cleared' | null; by: Tombstone[] } {
+  let verdict: 'removed' | 'cleared' | null = null
+  const by: Tombstone[] = []
+  for (const t of pending) {
+    const from = t.from_wall_ms ?? Number.NEGATIVE_INFINITY
+    const to = t.to_wall_ms ?? Number.POSITIVE_INFINITY
+    if (!(h.end_wall_ms > from && h.start_wall_ms < to)) continue
+    if (t.kind === 'range' && h.start_wall_ms >= from && h.end_wall_ms <= to) return { verdict: 'removed', by: [t] }
+    if (t.kind === 'range' || h.sources.some((s) => sourceMatches(t, s))) {
+      verdict = 'cleared'
+      by.push(t)
+    }
+  }
+  return { verdict, by }
+}
+
+/**
+ * For every reader (screens, Ask, the MCP server): the user's latest correction of a field wins over the written text,
+ * and a deletion still being carried out already applies.
+ */
 export function readHour(db: Database.Database, id: number): Hour | null {
   const h = db.prepare('SELECT * FROM hours WHERE id = ?').get(id) as (Omit<Hour, 'sources' | 'needs_rewrite' | 'corrected'> & { sources: string; needs_rewrite: number }) | undefined
   if (!h) return null
   const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }
+  const fence = pendingVerdict(out, pendingTombstones(db))
+  if (fence.verdict === 'removed') return null
+  if (fence.verdict === 'cleared') {
+    for (const f of HOUR_FIELDS) out[f] = null
+    return { ...out, status: 'facts', writer: null, needs_rewrite: true, sources: out.sources.filter((s) => !fence.by.some((t) => sourceMatches(t, s))) }
+  }
   const active = db.prepare('SELECT field, text FROM corrections WHERE hour_id = ? AND undone_wall_ms IS NULL ORDER BY id').all(id) as { field: HourField; text: string }[]
   for (const c of active) {
     out[c.field] = c.text
