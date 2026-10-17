@@ -432,22 +432,22 @@ export class Store implements Sink {
   extendObservation(id: number, lastSeenWallMs: number): boolean {
     if (id === Store.REFUSED) return false
     const open = this.openRows.get(id) ?? this.storedOpenRow(id)
-    if (open && lastSeenWallMs - open.row.event_wall_ms > MAX_ROW_SPAN_MS) {
+    // Pruned or deleted underneath capture: the caller starts a new row.
+    if (!open) return false
+    if (lastSeenWallMs - open.row.event_wall_ms > MAX_ROW_SPAN_MS) {
       this.openRows.delete(id)
       return false
     }
-    if (open && lastSeenWallMs > open.lastSeen) {
+    if (lastSeenWallMs > open.lastSeen) {
       if (!this.acceptExtension(open.row, open.lastSeen, lastSeenWallMs)) {
         this.openRows.delete(id)
         return false
       }
       open.lastSeen = lastSeenWallMs
     }
-    if (open) {
-      this.openRows.delete(id)
-      this.openRows.set(id, open)
-      this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
-    }
+    this.openRows.delete(id)
+    this.openRows.set(id, open)
+    this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
     this.touched.add(id)
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
     return true

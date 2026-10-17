@@ -240,3 +240,18 @@ test('a retention purge blocked by a reader is retried until the pruned text is 
   assert.deepEqual(r2.q(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`), [])
   r2.close()
 })
+
+test('extending a row that no longer exists reports it, so capture starts a new one', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'gone.md - Editor', T0))
+  r.store.flush()
+  const id = r.q<{ id: number }>(`SELECT id FROM observations`)[0]!.id
+  r.store.database.prepare('DELETE FROM observations WHERE id = ?').run(id)
+  r.store.forgetOpenRows()
+  assert.equal(r.store.extendObservation(id, T0 + MIN), false)
+  r.feed(focus(editor, 'gone.md - Editor', T0 + 2 * MIN, 'reconcile'))
+  r.store.flush()
+  assert.deepEqual(r.q(`SELECT event_wall_ms FROM observations`), [{ event_wall_ms: T0 + 2 * MIN }], 'the next sighting starts a new row')
+  r.close()
+})
