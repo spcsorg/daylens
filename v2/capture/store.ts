@@ -212,6 +212,9 @@ export class Store implements Sink {
   private readonly releaseLock: () => void
   onOverflow: () => void = () => {}
   onRecovered: () => void = () => {}
+  // Storage decides what may be written (pause, tombstones); a refused observation is never queued.
+  acceptObservation: (row: ObservationRow) => boolean = () => true
+  acceptExtension: (lastSeenWallMs: number) => boolean = () => true
   private readonly maxPendingOps: number
 
   constructor(dir: string, opts: StoreOptions = {}) {
@@ -357,7 +360,16 @@ export class Store implements Sink {
 
   // --- Sink -------------------------------------------------------------
 
+  /** The connection, for storage modules in the same process. Only this process writes the database. */
+  get database(): Database.Database {
+    return this.db
+  }
+
+  /** Ids handed out for refused observations; extending them does nothing. */
+  static readonly REFUSED = -1
+
   insertObservation(row: ObservationRow): number {
+    if (!this.acceptObservation(row)) return Store.REFUSED
     const id = this.nextObsId++
     this.enqueue(
       `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
@@ -373,6 +385,7 @@ export class Store implements Sink {
   }
 
   extendObservation(id: number, lastSeenWallMs: number): void {
+    if (id === Store.REFUSED || !this.acceptExtension(lastSeenWallMs)) return
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
   }
 
