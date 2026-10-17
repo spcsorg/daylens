@@ -22,6 +22,8 @@ export interface BackfillStats {
   lines: number
   records: number
   roots?: RootCounts[]
+  progressed?: boolean
+  deferred_files?: string[]
   remaining?: boolean
 }
 
@@ -120,7 +122,7 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
   }
   clean()
   try {
-    const files = await listLogs(roots)
+    let files = await listLogs(roots)
     if (files.length === 0) return { merged: true, children: 0, child: null, merge_ms: 0, peaks_mb: [] }
     const total: BackfillStats = { wall_ms: 0, cpu_ms: 0, peak_rss_mb: 0, files_read: 0, mb_read: 0, lines: 0, records: 0 }
     const counts = new Map<string, RootCounts>()
@@ -137,9 +139,15 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
       total.lines += child.lines
       total.records += child.records
       remaining = child.remaining === true
+      const deferred = new Set(child.deferred_files)
+      files = files.filter((f) => !deferred.has(f))
       for (const r of child.roots ?? []) {
         const prev = counts.get(r.dir)
         counts.set(r.dir, prev ? { ...prev, counts: addCounts(prev.counts, r.counts), unreadable: prev.unreadable || r.unreadable } : r)
+      }
+      if (remaining && !child.progressed) {
+        log('agent backfill made no committed progress; live reader takes over remaining logs')
+        break
       }
     }
     const t0 = performance.now()

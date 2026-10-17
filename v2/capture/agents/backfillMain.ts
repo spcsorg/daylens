@@ -43,5 +43,7 @@ process.stdout.write(
     records: reader.stats.records,
     roots: reader.rootCounts(),
     remaining,
+    progressed: reader.progressed,
+    deferred_files: reader.deferredFiles,
   })}\n`,
 )

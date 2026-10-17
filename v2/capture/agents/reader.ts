@@ -154,6 +154,8 @@ export class AgentReader {
   private budget: number | null = null
   private budgetStart = 0
   private leftOver = false
+  readonly deferredFiles: string[] = []
+  progressed = false
 
   // One slice of a first read: these files, in order, with no listing or watching, until about `budget` bytes are read.
   // A file is cut at a line boundary and resumes from its saved position in the next slice. Returns whether any is left.
@@ -161,6 +163,8 @@ export class AgentReader {
     this.budget = budget
     this.budgetStart = budget
     this.leftOver = false
+    this.deferredFiles.length = 0
+    this.progressed = false
     for (const file of files) {
       const r = this.roots.find((x) => classifyFile(x.root, file) !== null)
       if (r) this.dirty.set(file, r)
@@ -435,6 +439,7 @@ export class AgentReader {
           if (records.length >= FLUSH_RECORDS) flush(0)
         })
         flush(st.size)
+        this.progressed = true
         this.stats.bytesRead += bytes
         if (this.budget !== null) this.budget -= bytes
       } else {
@@ -446,10 +451,12 @@ export class AgentReader {
           this.budget ?? Infinity,
         )
         flush(res.next)
+        if (res.next > from) this.progressed = true
         this.stats.bytesRead += res.bytes
         if (this.budget !== null) {
           this.budget -= res.bytes
           // An unfinished EOF line waits for its writer, not another backfill slice.
+          if (res.bytes >= st.size - from && res.next < st.size) this.deferredFiles.push(file)
           if (res.bytes < st.size - from && res.next < st.size) this.leftOver = true
         }
       }

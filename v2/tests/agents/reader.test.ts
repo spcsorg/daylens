@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { appendFileSync, chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { backfill } from '../../capture/agents/backfill.ts'
+import { backfill, listLogs, runChild } from '../../capture/agents/backfill.ts'
 import { AgentReader, classifyFile, homeRoots, type AgentRoot } from '../../capture/agents/reader.ts'
 import { AgentStore, summarizeHealth } from '../../capture/agents/store.ts'
 import { Store } from '../../capture/store.ts'
@@ -500,4 +500,64 @@ test('only session logs are read: images, tool output files and metadata beside 
     homeRoots('/h', { CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x' }).map((r) => r.dir),
     [path.join('/c', 'projects'), path.join('/x', 'sessions'), path.join('/x', 'archived_sessions')],
   )
+})
+
+
+test('an over-slice unfinished tail is deferred so later logs finish in bounded children', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const early = claudeFile(r.home, c, '-a')
+  const prefix = lines(claude.prompt(c, sec(0), 'go', { uuid: 'tail-prefix' }))
+  writeFileSync(early, prefix + 'x'.repeat(4_194_404))
+  const later = claudeCtx()
+  const last = claudeFile(r.home, later, '-z')
+  writeFileSync(last, lines(claude.prompt(later, sec(10), 'later', { uuid: 'later' })))
+  const files = await listLogs(r.roots)
+  const stage = path.join(r.data, 'probe.sqlite')
+  let pending = files
+  let remaining = true
+  let children = 0
+  for (; remaining && children < 5; children++) {
+    const slice = await runChild(stage, r.roots, pending, 4 << 20, () => {})
+    assert.ok(slice)
+    pending = pending.filter((f) => !slice.deferred_files?.includes(f))
+    remaining = slice.remaining === true
+  }
+  assert.equal(remaining, false, 'later logs must finish within five children')
+  let backfillChildren = 0
+  const reader = r.reader({ backfill: async (roots) => {
+    const result = await backfill(r.store.database, r.data, roots, () => {})
+    backfillChildren = result.children
+    return result.merged
+  } })
+  await reader.start()
+  await reader.stop()
+  assert.ok(backfillChildren <= 3, `children: ${backfillChildren}`)
+  assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'later'"), 1)
+  assert.equal(r.agents.source(early)!.offset, Buffer.byteLength(prefix))
+  r.store.close()
+})
+
+test('a slice with no committed progress stops backfill and logs the live-reader handoff', async () => {
+  const r = rig()
+  const early = claudeFile(r.home, claudeCtx(), '-a')
+  writeFileSync(early, 'x'.repeat(4_194_404))
+  const later = claudeFile(r.home, claudeCtx(), '-z')
+  const c = claudeCtx()
+  writeFileSync(later, lines(claude.prompt(c, sec(10), 'later', { uuid: 'handoff' })))
+  const probe = await runChild(path.join(r.data, 'probe.sqlite'), r.roots, await listLogs(r.roots), 4 << 20, () => {})
+  assert.equal(probe?.progressed, false, 'child reports committed-offset progress explicitly')
+  const logs: string[] = []
+  let children = 0
+  const reader = r.reader({ backfill: async (roots) => {
+    const result = await backfill(r.store.database, r.data, roots, (s) => logs.push(s))
+    children = result.children
+    return result.merged
+  } })
+  await reader.start()
+  await reader.stop()
+  assert.equal(children, 1)
+  assert.ok(logs.some((s) => s.includes('no committed progress') && s.includes('live reader')))
+  assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'handoff'"), 1)
+  r.store.close()
 })
