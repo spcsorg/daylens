@@ -150,7 +150,11 @@ CREATE TABLE IF NOT EXISTS exclusions (
 );
 `
 
-type Op = { sql: string; params: unknown[] }
+type Op = {
+  sql: string
+  params: unknown[]
+  extension?: { sourceId: number; sighting: ObservationRow; replacementId?: number; missing?: boolean }
+}
 
 export interface StoreHealth {
   committedWallMs: number | null
@@ -416,17 +420,22 @@ export class Store implements Sink {
     this.touchedFromWallMs = Math.min(this.touchedFromWallMs, row.event_wall_ms)
     this.openRows.set(id, { row, lastSeen: row.event_wall_ms })
     if (this.openRows.size > 64) this.openRows.delete(this.openRows.keys().next().value!)
-    this.enqueue(
-      `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
+    const op = this.observationInsert(id, row)
+    this.enqueue(op.sql, op.params)
+    return id
+  }
+
+  private observationInsert(id: number, row: ObservationRow): Op {
+    return {
+      sql: `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
          recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+      params: [
         id, row.run, row.seq, row.boot, row.platform, row.source, row.kind, row.event_wall_ms, row.event_mono_us, row.tz, row.tz_offset_min,
         this.now(), row.event_wall_ms, row.app_id, row.app_name, row.app_path, row.pid, row.window, row.title, row.title_raw, row.title_state,
         row.state, row.detail,
       ],
-    )
-    return id
+    }
   }
 
   extendObservation(id: number, lastSeenWallMs: number): boolean {
@@ -449,7 +458,14 @@ export class Store implements Sink {
     this.openRows.set(id, open)
     this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
     this.touched.add(id)
-    this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
+    this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id], {
+      sourceId: id,
+      sighting: {
+        ...open.row,
+        event_wall_ms: lastSeenWallMs,
+        event_mono_us: open.row.event_mono_us + (lastSeenWallMs - open.row.event_wall_ms) * 1000,
+      },
+    })
     return true
   }
 
@@ -503,7 +519,7 @@ export class Store implements Sink {
 
   // --- batching ---------------------------------------------------------
 
-  private enqueue(sql: string, params: unknown[]): void {
+  private enqueue(sql: string, params: unknown[], extension?: Op['extension']): void {
     if (this.pending.length >= this.maxPendingOps) {
       this.pending.shift()
       this.health.droppedOps++
@@ -513,7 +529,7 @@ export class Store implements Sink {
         this.onOverflow()
       }
     }
-    this.pending.push({ sql, params })
+    this.pending.push({ sql, params, extension })
     if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null) this.flush()
     else this.schedule()
   }
@@ -533,6 +549,23 @@ export class Store implements Sink {
       this.stmts.set(sql, s)
     }
     return s
+  }
+
+  private runOp(op: Op): void {
+    const result = this.stmt(op.sql).run(...op.params)
+    const extension = op.extension
+    if (!extension || result.changes !== 0) return
+    extension.missing = true
+    // Retention may remove the row after enqueue; preserve only this sighting under the current admission rules.
+    if (!this.acceptObservation(extension.sighting)) return
+    const id = extension.replacementId ??= this.nextObsId++
+    const insert = this.observationInsert(id, extension.sighting)
+    this.stmt(insert.sql).run(...insert.params)
+    this.touched.add(id)
+  }
+
+  private writeIdMark(): void {
+    if (this.nextObsId !== this.persistedNextObsId) this.stmt(Store.NEXT_ID_SQL).run(String(this.nextObsId))
   }
 
   // Around each flush, including the derivation it triggers: storage tells its deletion worker to stand back.
@@ -555,9 +588,6 @@ export class Store implements Sink {
       this.timer = null
     }
     const ops = this.pending.concat([...this.heartbeatOps.values()])
-    // The id mark commits with the rows that used the ids.
-    const nextId = this.nextObsId
-    if (nextId !== this.persistedNextObsId) ops.push({ sql: Store.NEXT_ID_SQL, params: [String(nextId)] })
     // Committed with the rows: where derived state (intervals, search) must be brought up to date from. Whoever
     // derives clears it in the same transaction as the derivation, so a crash in between loses nothing.
     if (this.touched.size > 0 && Number.isFinite(this.touchedFromWallMs)) {
@@ -566,12 +596,13 @@ export class Store implements Sink {
         params: [String(this.touchedFromWallMs)],
       })
     }
-    if (ops.length === 0) return true
+    if (ops.length === 0 && this.nextObsId === this.persistedNextObsId) return true
     try {
       // Immediate: storage's deletion worker writes on its own connection, and a deferred transaction that read
       // first could not commit after it.
       this.db.transaction(() => {
-        for (const op of ops) this.stmt(op.sql).run(...(op.params as unknown[]))
+        for (const op of ops) this.runOp(op)
+        this.writeIdMark()
       }).immediate()
     } catch (err) {
       const code = errorCode(err)
@@ -598,7 +629,8 @@ export class Store implements Sink {
     }
     this.retryMs = FLUSH_INTERVAL_MS
     this.pending = []
-    this.persistedNextObsId = nextId
+    this.persistedNextObsId = this.nextObsId
+    for (const op of ops) if (op.extension?.missing) this.openRows.delete(op.extension.sourceId)
     this.heartbeatOps.clear()
     const committed = this.now()
     if (this.failingStart !== null) {
@@ -632,7 +664,7 @@ export class Store implements Sink {
     this.db.transaction(() => {
       for (const op of ops) {
         try {
-          this.stmt(op.sql).run(...(op.params as unknown[]))
+          this.runOp(op)
         } catch (err) {
           const code = errorCode(err)
           // Only a statement that can never succeed is dropped; anything else fails the batch for a retry.
@@ -641,6 +673,7 @@ export class Store implements Sink {
           this.health.droppedOps++
         }
       }
+      this.writeIdMark()
     }).immediate()
   }
 
