@@ -207,7 +207,8 @@ for (const [k, q] of Object.entries(queries)) {
 
 // Live writes at a year's size: one second of capture per flush, the way the service runs.
 const live: number[] = []
-let lt = END - 6 * HOUR_MS
+// Live capture happens at the end of the timeline, after the year of history.
+let lt = END + HOUR_MS
 let liveId = store2.insertObservation(row('focus', lt, { app_id: APPS[0]!.id, app_name: 'Cursor', title: 'live.ts — bench', title_state: 'ok', state: 'ok' }))
 store2.flush()
 flushTimes.length = 0
@@ -240,9 +241,11 @@ async function timedDelete(f: () => DeletionHandle) {
   clearInterval(tick)
   return { respond_ms: round(respond), done_ms: round(total), worst_stall_ms: round(Math.max(0, ...lags)), ...r }
 }
-clock.t = END - 6 * HOUR_MS + 700_000
+// With --expose-gc: collect the ingest's garbage first, so a collection pause is not counted as a deletion stall.
+;(globalThis as { gc?: () => void }).gc?.()
+clock.t = END + HOUR_MS + 700_000
 const delLast = await timedDelete(() => storage.deleteLast(10 * 60_000))
-clock.t = END
+clock.t = END + 2 * HOUR_MS
 const delSource = await timedDelete(() => storage.deleteSource(APPS[6]!.id))
 const delSite = await timedDelete(() => storage.deleteSite(SITES[1]!))
 const timed = <T>(f: () => T): [T, number] => {
