@@ -197,6 +197,7 @@ export class Storage {
     this.loadPauses()
     this.retentionDays = this.getSetting<number>('retention_days')
     store.acceptObservation = (row) => this.admit(row)
+    store.acceptExtension = (row, from, to) => this.mayCover(row, from, to)
     store.onFlushed = (ids) => {
       try {
         this.derived.refresh(ids)
@@ -267,6 +268,21 @@ export class Storage {
       return false
     }
     return this.accepts(row.event_wall_ms, row.app_id, row.url ?? null)
+  }
+
+  /** Whether a row seen at fromWallMs may be taken to cover (from, to]: no pause or deletion for it falls in between. */
+  private mayCover(row: ObservationRow & { url?: string | null }, fromWallMs: number, toWallMs: number): boolean {
+    const overlaps = (s: number, e: number) => s <= toWallMs && e > fromWallMs
+    for (const p of this.pauses) if (overlaps(p.since_wall_ms, pauseEnd(p))) return false
+    const app = row.app_id?.toLowerCase() ?? null
+    const site = siteOf(row.url ?? null)
+    for (const t of this.tombstones) {
+      if (!overlaps(t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY)) continue
+      if (t.kind === 'range') return false
+      if (t.kind === 'source' && app !== null && app === t.app_id) return false
+      if (t.kind === 'site' && matchesSite(site, t.site!)) return false
+    }
+    return true
   }
 
   /** Re-import (a backup, an older Daylens): the same rules as capture, so deleted material stays deleted. */

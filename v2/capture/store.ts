@@ -214,6 +214,10 @@ export class Store implements Sink {
   onRecovered: () => void = () => {}
   // Storage decides what may be written (pause, tombstones); a refused observation is never queued.
   acceptObservation: (row: ObservationRow) => boolean = () => true
+  // Whether a row may be extended from its current last sighting to a later one (nothing forbidden in between).
+  acceptExtension: (row: ObservationRow, fromWallMs: number, toWallMs: number) => boolean = () => true
+  // Rows still open for extension: the normalizer keeps only the newest few, so a short window is enough.
+  private readonly openRows = new Map<number, { row: ObservationRow; lastSeen: number }>()
   // Observation ids written by each committed flush, for state derived from observations (intervals, search).
   onFlushed: (observationIds: number[]) => void = () => {}
   private touched = new Set<number>()
@@ -368,6 +372,12 @@ export class Store implements Sink {
     return this.db
   }
 
+  // A row that fell out of the in-memory window is read back; one still queued is in the window by construction.
+  private storedOpenRow(id: number): { row: ObservationRow; lastSeen: number } | undefined {
+    const r = this.db.prepare('SELECT * FROM observations WHERE id = ?').get(id) as (ObservationRow & { last_seen_wall_ms: number }) | undefined
+    return r ? { row: r, lastSeen: r.last_seen_wall_ms } : undefined
+  }
+
   /** Ids handed out for refused observations; extending them does nothing. */
   static readonly REFUSED = -1
 
@@ -375,6 +385,8 @@ export class Store implements Sink {
     if (!this.acceptObservation(row)) return Store.REFUSED
     const id = this.nextObsId++
     this.touched.add(id)
+    this.openRows.set(id, { row, lastSeen: row.event_wall_ms })
+    if (this.openRows.size > 64) this.openRows.delete(this.openRows.keys().next().value!)
     this.enqueue(
       `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
          recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail)
@@ -388,10 +400,23 @@ export class Store implements Sink {
     return id
   }
 
-  extendObservation(id: number, lastSeenWallMs: number): void {
-    if (id === Store.REFUSED) return
+  extendObservation(id: number, lastSeenWallMs: number): boolean {
+    if (id === Store.REFUSED) return false
+    const open = this.openRows.get(id) ?? this.storedOpenRow(id)
+    if (open && lastSeenWallMs > open.lastSeen) {
+      if (!this.acceptExtension(open.row, open.lastSeen, lastSeenWallMs)) {
+        this.openRows.delete(id)
+        return false
+      }
+      open.lastSeen = lastSeenWallMs
+    }
+    if (open) {
+      this.openRows.delete(id)
+      this.openRows.set(id, open)
+    }
     this.touched.add(id)
     this.enqueue('UPDATE observations SET last_seen_wall_ms = max(last_seen_wall_ms, ?), repeat_count = repeat_count + 1 WHERE id = ?', [lastSeenWallMs, id])
+    return true
   }
 
   flagObservation(id: number, _flag: 'possibly_stale', wallMs: number): void {

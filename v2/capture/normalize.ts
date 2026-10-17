@@ -83,7 +83,8 @@ export interface GapStart {
 
 export interface Sink {
   insertObservation(row: ObservationRow): number
-  extendObservation(id: number, lastSeenWallMs: number): void
+  // false: the extension was refused (it would cover paused or deleted time); the row is no longer open.
+  extendObservation(id: number, lastSeenWallMs: number): boolean | void
   flagObservation(id: number, flag: 'possibly_stale', wallMs: number): void
   openGap(gap: GapStart): number
   updateGap(id: number, patch: { reason?: GapReason; detail?: GapDetail }): void
@@ -362,8 +363,8 @@ export class Normalizer {
     // A fresh read after the title channel recovers starts a new row, even with the same title.
     const freshAfterStale = this.focus?.stale === true && this.titleChannel === 'ok'
     if (this.focus && this.focus.key === key && !freshAfterStale) {
-      this.sink.extendObservation(this.focus.id, line.t.wall_ms)
-      return
+      if (this.sink.extendObservation(this.focus.id, line.t.wall_ms) !== false) return
+      this.focus = null
     }
     const row = envelopeRow(line, 'focus')
     row.app_id = known ? app.app_id : null
@@ -388,8 +389,8 @@ export class Normalizer {
   private onState(line: Line, kind: 'input' | 'session' | 'power', state: string, detail: string | null): void {
     const open = this.lastState.get(kind)
     if (open && open.key === state) {
-      this.sink.extendObservation(open.id, line.t.wall_ms)
-      return
+      if (this.sink.extendObservation(open.id, line.t.wall_ms) !== false) return
+      this.lastState.delete(kind)
     }
     const row = envelopeRow(line, kind)
     row.state = state

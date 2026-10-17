@@ -434,3 +434,27 @@ test('a pause and its gap are written in one transaction', () => {
   assert.deepEqual(rows, [{ gap_id: rows[0] && (rows[0] as { gap_id: number }).gap_id, reason: 'paused' }])
   reader.close()
 })
+
+test('a row cannot be extended across a deleted range or a pause; the next sighting after it starts a fresh row', () => {
+  resetSeq()
+  const r = rig()
+  const at = (m: number) => T0 + m * MIN
+  r.clock.t = at(30)
+  r.storage.deleteRange(at(10), at(20))
+  r.feed(focus(chat, 'Late chat', at(5)))
+  r.feed(focus(chat, 'Late chat', at(15), 'reconcile'))
+  r.feed(focus(chat, 'Late chat', at(25), 'reconcile'))
+  r.storage.pause(at(50))
+  r.clock.t = at(40)
+  r.feed(focus(editor, 'pre.md - Editor', at(31)))
+  r.storage.resume()
+  r.feed(focus(editor, 'pre.md - Editor', at(35), 'reconcile'))
+  r.store.flush()
+  const rows = r.q<{ title: string; event_wall_ms: number; last_seen_wall_ms: number }>(`SELECT title, event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
+  assert.deepEqual(rows.map((o) => [o.title, (o.event_wall_ms - T0) / MIN, (o.last_seen_wall_ms - T0) / MIN]), [
+    ['Late chat', 5, 5],
+    ['Late chat', 25, 25],
+  ], 'nothing covers 10–20 or the pause from 30 to 40')
+  assert.deepEqual(r.q(`SELECT 1 FROM intervals WHERE end_wall_ms > ? AND start_wall_ms < ?`, at(10), at(20)), [])
+  r.close()
+})
