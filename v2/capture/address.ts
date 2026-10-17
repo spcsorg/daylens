@@ -113,13 +113,13 @@ function entropy(s: string): number {
   return h
 }
 
-// 32+ hex mixing digits and letters, or 20+ characters of one base64 alphabet with few separators, two character
+// 20+ hex mixing digits and letters, or 20+ characters of one base64 alphabet with few separators, two character
 // classes, 3.5+ bits each, and a digit or four capitals after the first letter (a capitalized compound word has neither).
 function looksGenerated(value: string): boolean {
   const s = value.replace(/=+$/, '')
-  if (!/^[A-Za-z0-9+/_-]+$/.test(s)) return false
-  if (/^[0-9a-f]+$/i.test(s)) return s.length >= 32 && /[0-9]/.test(s) && /[a-f]/i.test(s)
-  if (s.length < 20 || (s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
+  if (s.length < 20 || !/^[A-Za-z0-9+/_-]+$/.test(s)) return false
+  if (/^[0-9a-f]+$/i.test(s) && /[0-9]/.test(s) && /[a-f]/i.test(s)) return true
+  if ((s.match(/[+/_-]/g)?.length ?? 0) > s.length * 0.1) return false
   const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((r) => r.test(s)).length
   const capitals = s.slice(1).match(/[A-Z]/g)?.length ?? 0
   return classes >= 2 && entropy(s) >= 3.5 && (/[0-9]/.test(s) || capitals >= 4)

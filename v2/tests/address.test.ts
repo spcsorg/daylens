@@ -171,6 +171,7 @@ test('short search aliases keep only text; every search drops a JSON object or a
     [`https://app.lynxlog.example/login?k=${lynx}`, 'https://app.lynxlog.example/login'],
     ['https://app.lynxlog.example/login?k=eyJ1IjoiYW5hQGV4YW1wbGUuY29tIiwiYyI6IkNBTkFSWV9DUkVEXzdmM2EifQ', 'https://app.lynxlog.example/login'],
     ['https://x.example.com/?s=q8Z2kP0vLm3NcT7aB1sD4fGh', 'https://x.example.com/'],
+    ['https://x.example.com/?s=0123456789abcdef01234567', 'https://x.example.com/'],
     [`https://x.example.com/?q=${lynx}&hl=en`, 'https://x.example.com/?hl=en'],
     [`https://x.example.com/?query=%5B%22CANARY%22%2C1%5D&hl=en`, 'https://x.example.com/?hl=en'],
     [`https://x.example.com/?search=${encodeURIComponent(lynx)}&hl=en`, 'https://x.example.com/?hl=en'],
@@ -187,3 +188,82 @@ test('short search aliases keep only text; every search drops a JSON object or a
   same('https://www.google.com/search?q=%7Bnot+json%7D')
 })
 
+test('hex of 20 to 31 characters in a display setting falls through to the key-shape rule', () => {
+  assert.equal(cleanAddress('https://x.example.com/?view=0123456789abcdef01234567&id=1'), 'https://x.example.com/?id=1')
+  assert.equal(cleanAddress('https://x.example.com/?tab=a1b2c3d4e5f60718293a4b5c&id=1'), 'https://x.example.com/?id=1')
+  for (let i = 0; i < 200; i++) {
+    const hex = Array.from({ length: 20 + (i % 12) }, (_, j) => '0123456789abcdef'[(i * 7 + j * 11 + (j * j) % 5) % 16]).join('')
+    if (/[0-9]/.test(hex) && /[a-f]/.test(hex)) assert.equal(cleanAddress(`https://x.example.com/?view=${hex}&id=1`), 'https://x.example.com/?id=1', hex)
+  }
+  same('https://x.example.com/?view=grid&tab=0a1b&id=1')
+})
+
+test('pages without a real address have none', () => {
+  for (const raw of ['chrome://newtab/', 'about:blank', 'edge://settings', 'data:text/html,<h1>x</h1>', 'blob:https://x.com/1', 'javascript:alert(1)', 'chrome-extension://abc/popup.html', 'moz-extension://x/y', 'view-source:https://x.com', '', 'not a url', null])
+    assert.equal(cleanAddress(raw), null, String(raw))
+  assert.equal(cleanAddress('file:///Users/ana/Notes/plan.html#top'), 'file:///Users/ana/Notes/plan.html')
+})
+
+test('overlong addresses lose the query first, then the path', () => {
+  const longQuery = 'https://example.com/a?q=' + 'x'.repeat(MAX_ADDRESS_CHARS)
+  assert.equal(cleanAddress(longQuery), 'https://example.com/a')
+  const longPath = 'https://example.com/' + 'p'.repeat(MAX_ADDRESS_CHARS)
+  assert.equal(cleanAddress(longPath), 'https://example.com/')
+})
+
+test('site exclusions match the host and its subdomains only', () => {
+  const p = new Privacy([{ match: 'site', value: '1password.com', label: '1Password' }])
+  assert.ok(p.siteExcluded(addressHost('https://my.1password.com/vaults')))
+  assert.ok(p.siteExcluded(addressHost('https://1PASSWORD.com/')))
+  assert.ok(p.siteExcluded(addressHost('https://1password.com./')))
+  assert.ok(!p.siteExcluded(addressHost('https://not1password.com/')))
+  assert.ok(!p.siteExcluded(addressHost('https://1password.com.evil.example/')))
+  assert.ok(!p.siteExcluded(addressHost('file:///tmp/x')))
+})
+
+test('a site rule never excludes an app by executable name', () => {
+  const p = new Privacy([{ match: 'site', value: 'chrome.exe', label: 'x' }])
+  const app = { app_id: 'C:\\x\\chrome.exe', name: 'Chrome', path: 'C:\\x\\chrome.exe', pid: 1, registered_browser: true, identity_state: 'ok' as const, store: null }
+  assert.equal(p.classify(app).excluded, false)
+})
+
+
+test('generic names keep only their own shape of value, and the ends-in-id catch-all is gone', () => {
+  const cases: [string, string][] = [
+    ['https://secure.na1.adobesign.com/public/esignWidget?wid=CBFCIBAA3AAABLblqZhB&pid=CBFCIBAA3AAABLblqZhA9x&tsid=CBFCIBAA3AAABLblqZhC7y', 'https://secure.na1.adobesign.com/public/esignWidget'],
+    ['https://teams.microsoft.com/meet/2468013579?p=AbCdEfGh1234567', 'https://teams.microsoft.com/meet/2468013579'],
+    ['https://na3.docusign.net/Signing/EmailStart.aspx?a=7c1e&acct=9d2f&er=3a4b&t=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f', 'https://na3.docusign.net/Signing/EmailStart.aspx'],
+    ['https://forum.example.com/thread?p=3&page=12', 'https://forum.example.com/thread?p=3&page=12'],
+    ['https://forum.example.com/thread?page=abc&p=12a', 'https://forum.example.com/thread'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m30s', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m30s'],
+    ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=2m', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=2m'],
+    ['https://x.example.com/?t=abc&id=1', 'https://x.example.com/?id=1'],
+    ['https://x.example.com/?t=s&id=1', 'https://x.example.com/?id=1'],
+  ]
+  for (const [raw, want] of cases) assert.equal(cleanAddress(raw), want, raw)
+  for (const name of ['pid', 'tsid', 'wid', 'fileId', 'video_id', 'userid', 'clientid', 'uid', 'src'])
+    assert.equal(keptParam(name), null, name)
+})
+
+test('a display setting that is a UUID or long hex goes', () => {
+  assert.equal(cleanAddress('https://x.example.com/?view=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f&id=1'), 'https://x.example.com/?id=1')
+  assert.equal(cleanAddress('https://x.example.com/?tab={3F2C1D4E-5B6A-4C7D-8E9F-0A1B2C3D4E5F}&id=1'), 'https://x.example.com/?id=1')
+  assert.equal(cleanAddress('https://x.example.com/?filter=abcdefabcdefabcdefabcdefabcdefab&id=1'), 'https://x.example.com/?id=1')
+  same('https://x.example.com/?sort=price&tab=files&view=grid&id=3f2c1d4e-5b6a-4c7d-8e9f-0a1b2c3d4e5f')
+})
+
+test('the named search and identity parameters of common sites stay; calendar src and new tracking IDs go', () => {
+  same('https://www.youtube.com/results?search_query=lofi+beats')
+  same('https://pubmed.ncbi.nlm.nih.gov/?term=crispr+off-target')
+  assert.equal(cleanAddress('https://www.ebay.com/sch/i.html?_nkw=lego+technic&_sacat=0'), 'https://www.ebay.com/sch/i.html?_nkw=lego+technic')
+  assert.equal(
+    cleanAddress('https://acme.sharepoint.com/:w:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc=%7B12345678-1234-1234-1234-123456789ABC%7D&file=Plan.docx&action=default'),
+    'https://acme.sharepoint.com/:w:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc=%7B12345678-1234-1234-1234-123456789ABC%7D&file=Plan.docx',
+  )
+  same('https://mail.google.com/mail/u/0/?th=18c2f3a4b5d6e7f8')
+  assert.equal(cleanAddress('https://calendar.google.com/calendar/embed?src=ana%40example.com&ctz=UTC'), 'https://calendar.google.com/calendar/embed')
+  assert.equal(cleanAddress('https://shop.example.com/p?gbraid=0AAAAAo&wbraid=CjkKCQ&q=shoes'), 'https://shop.example.com/p?q=shoes')
+  const tracking = '_ga _gl gclid gclsrc dclid gbraid wbraid fbclid msclkid ttclid twclid li_fat_id yclid ysclid igshid srsltid mc_cid mc_eid _hsenc _hsmi __hssc __hstc hsCtaTracking mkt_tok oly_enc_id oly_anon_id vero_id vero_conv rb_clickid s_kwcid ef_id _openstat trk trkCampaign cmpid campaignid campaign_id adgroupid adid ad_id creative keyword matchtype network device placement utm_source utm_medium utm_campaign utm_term utm_content utm_id ref ref_src ref_url si spm scm share_id feature pp sxsrf ved ei gs_lcrp sca_esv rlz oq aqs sourceid ie uact zx'
+  for (const name of tracking.split(' ')) assert.equal(keptParam(name), null, name)
+})
