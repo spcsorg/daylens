@@ -547,18 +547,21 @@ export class Storage {
 
   /** A thread linked to an hour that a pending deletion covers shows no title until the deletion has run. */
   threadsForHour(hourId: number): { id: number; title: string }[] {
-    const threads = this.db.prepare('SELECT t.id, t.title FROM threads t JOIN thread_hours th ON th.thread_id = t.id WHERE th.hour_id = ? ORDER BY t.id').all(hourId) as { id: number; title: string }[]
-    const pending = this.rules.tombstones.filter((t) => t.state === 'pending')
-    if (pending.length === 0) return threads
-    const hoursOf = this.db.prepare('SELECT h.start_wall_ms, h.end_wall_ms, h.sources FROM hours h JOIN thread_hours th ON th.hour_id = h.id WHERE th.thread_id = ?')
-    return threads.map((t) => {
-      const fenced =
-        fencedBy(this.db, 'thread', t.id).length > 0 ||
-        (hoursOf.all(t.id) as { start_wall_ms: number; end_wall_ms: number; sources: string }[]).some(
-          (h) => pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null,
-        )
-      return fenced ? { ...t, title: '' } : t
-    })
+    // Titles and their fences must come from one snapshot, even if cleanup finishes between reads.
+    return this.db.transaction(() => {
+      const threads = this.db.prepare('SELECT t.id, t.title FROM threads t JOIN thread_hours th ON th.thread_id = t.id WHERE th.hour_id = ? ORDER BY t.id').all(hourId) as { id: number; title: string }[]
+      const pending = pendingTombstones(this.db)
+      if (pending.length === 0) return threads
+      const hoursOf = this.db.prepare('SELECT h.start_wall_ms, h.end_wall_ms, h.sources FROM hours h JOIN thread_hours th ON th.hour_id = h.id WHERE th.thread_id = ?')
+      return threads.map((t) => {
+        const fenced =
+          fencedBy(this.db, 'thread', t.id).length > 0 ||
+          (hoursOf.all(t.id) as { start_wall_ms: number; end_wall_ms: number; sources: string }[]).some(
+            (h) => pendingVerdict({ ...h, sources: JSON.parse(h.sources) as HourSource[] }, pending).verdict !== null,
+          )
+        return fenced ? { ...t, title: '' } : t
+      })
+    })()
   }
 
   // --- pause -----------------------------------------------------------------
