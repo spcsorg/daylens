@@ -63,7 +63,10 @@ function makeParser(root: AgentRoot, info: FileInfo, saved: string | null): Line
 }
 
 export interface ReaderOptions {
+  // How often folders without working file events (missing, polled, or a watcher that failed) are looked at.
   reconcileMs?: number
+  // One check of watched folders this long after start: a file watcher can miss writes made while it is starting.
+  followUpMs?: number
   // File events arriving together are read together: a busy log is read at most this often.
   coalesceMs?: number
   log?: (msg: string) => void
@@ -74,6 +77,8 @@ export interface ReaderOptions {
 }
 
 export interface ReaderStats {
+  // Folder listings: once per folder at start, then only for folders without working file events.
+  listings: number
   filesRead: number
   bytesRead: number
   lines: number
@@ -97,7 +102,7 @@ function errCode(err: unknown): string {
 }
 
 export class AgentReader {
-  readonly stats: ReaderStats = { filesRead: 0, bytesRead: 0, lines: 0, records: 0 }
+  readonly stats: ReaderStats = { listings: 0, filesRead: 0, bytesRead: 0, lines: 0, records: 0 }
   private readonly store: AgentStore
   private readonly roots: RootState[]
   private readonly reconcileMs: number
@@ -108,6 +113,8 @@ export class AgentReader {
   private readonly dirty = new Map<string, RootState>()
   private timer: ReturnType<typeof setTimeout> | null = null
   private reconcileTimer: ReturnType<typeof setInterval> | null = null
+  private followUpTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly followUpMs: number
   private draining: Promise<void> | null = null
   private stopped = false
 
@@ -115,6 +122,7 @@ export class AgentReader {
     this.store = store
     this.roots = roots.map((root) => ({ root, watcher: null, present: false, polling: root.poll === true, counts: emptyCounts(), unreadable: false }))
     this.reconcileMs = opts.reconcileMs ?? 60_000
+    this.followUpMs = opts.followUpMs ?? 5_000
     this.coalesceMs = opts.coalesceMs ?? 1000
     this.log = opts.log ?? (() => {})
     this.discover = opts.discover ?? null
@@ -145,12 +153,20 @@ export class AgentReader {
     await this.drain()
     this.reconcileTimer = setInterval(() => void this.tick(), this.reconcileMs)
     this.reconcileTimer.unref()
+    this.followUpTimer = setTimeout(() => void this.followUp(), this.followUpMs)
+    this.followUpTimer.unref()
+  }
+
+  private async followUp(): Promise<void> {
+    for (const r of this.roots) if (r.present && r.watcher !== null) await this.reconcile(r)
+    await this.drain()
   }
 
   async stop(): Promise<void> {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+    if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
     await this.draining
   }
@@ -164,20 +180,23 @@ export class AgentReader {
     while (this.dirty.size > 0 || this.draining) await this.drain()
   }
 
-  // The slow check for missed file events: sizes are compared with the stored read positions, and only a file that
-  // grew or appeared is read. Folders without file events (WSL) rely on it entirely.
+  // Watched folders are never listed again; only folders without working file events are, and only a file that
+  // appeared or whose size differs from its stored read position is read.
   private async tick(): Promise<void> {
     await this.discoverRoots()
-    for (const r of this.roots) await this.reconcile(r)
+    for (const r of this.roots) if (!r.present || r.polling || r.watcher === null) await this.reconcile(r)
     await this.drain()
   }
 
   private async reconcile(r: RootState): Promise<void> {
     const { root } = r
     if (root.available && !root.available()) return
+    // Watching starts before listing, so nothing written in between is missed.
+    if (!r.polling && r.watcher === null) this.watch(r)
     let names: string[]
     try {
       names = (await readdir(root.dir, { recursive: root.layout !== 'codex_archive' })) as string[]
+      this.stats.listings++
     } catch (err) {
       const code = errCode(err)
       r.present = false
@@ -194,7 +213,6 @@ export class AgentReader {
       const prev = this.store.healthFor(root.agent, root.dir)
       if (!prev || prev.state === 'not_found' || prev.state === 'unreadable') this.store.setHealth(root.agent, root.dir, 'ok', null, null)
     }
-    if (!r.polling && r.watcher === null) this.watch(r)
     const known = new Map(this.store.sourcesUnder(root.dir).map((s) => [s.path, s]))
     for (const name of names) {
       const file = path.join(root.dir, name)
@@ -228,6 +246,8 @@ export class AgentReader {
       })
     } catch (err) {
       r.watcher = null
+      // A folder that does not exist yet is looked for on the reconcile timer; one that cannot be watched is polled.
+      if (errCode(err) === 'ENOENT') return
       r.polling = true
       this.log(`agent watch unavailable agent=${r.root.agent} code=${errCode(err)}`)
     }

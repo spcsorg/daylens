@@ -31,7 +31,7 @@ function rig(): Rig {
     store,
     agents,
     roots,
-    reader: (opts = {}) => new AgentReader(agents, roots, { reconcileMs: 3_600_000, coalesceMs: 20, ...opts }),
+    reader: (opts = {}) => new AgentReader(agents, roots, { reconcileMs: 3_600_000, followUpMs: 3_600_000, coalesceMs: 20, ...opts }),
     count: (sql, ...p) => (store.query<{ n: number }>(sql, ...p)[0]?.n ?? 0),
   }
 }
@@ -65,8 +65,8 @@ test('only complete lines are read, and each later read starts where the last on
   const first = lines(claude.prompt(c, sec(0), 'go', { uuid: 'p1' }), claude.assistant(c, sec(5), 'tool_use', { tools: [{ id: 't', name: 'Bash' }] }))
   const finish = claude.assistant(c, sec(40), 'end_turn')
   writeFileSync(file, first + finish.slice(0, 50))
-  // A short reconcile interval: the first file watcher in a process can miss a write made as it starts.
-  const reader = r.reader({ reconcileMs: 100 })
+  // A file watcher can miss a write made while it starts; the one follow-up check catches it.
+  const reader = r.reader({ followUpMs: 200 })
   await reader.start()
   assert.equal(r.count('SELECT count(*) AS n FROM agent_turns WHERE end_state IS NULL'), 1)
   assert.equal(r.agents.source(file)!.offset, Buffer.byteLength(first))
@@ -77,6 +77,22 @@ test('only complete lines are read, and each later read starts where the last on
   assert.equal(reader.stats.bytesRead - before, readFileSync(file).length - Buffer.byteLength(first))
   await reader.stop()
   assert.equal(r.store.query<{ last_activity_wall_ms: number }>('SELECT last_activity_wall_ms FROM agent_turns')[0]!.last_activity_wall_ms, sec(40))
+  r.store.close()
+})
+
+test('a watched folder is never listed again; only the follow-up check after start looks at it', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const file = codexFile(r.home, c)
+  writeFileSync(file, lines(codex.meta(c, sec(0))))
+  const reader = r.reader({ reconcileMs: 50, followUpMs: 3_600_000 })
+  await reader.start()
+  // The Claude Code and archive folders do not exist, so the timer keeps looking for them; the watched one is left alone.
+  const listed = reader.stats.listings
+  assert.equal(listed, 1)
+  await new Promise((res) => setTimeout(res, 400))
+  assert.equal(reader.stats.listings, listed)
+  await reader.stop()
   r.store.close()
 })
 

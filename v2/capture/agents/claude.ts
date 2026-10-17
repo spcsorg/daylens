@@ -150,10 +150,6 @@ export class ClaudeParser implements LineParser {
         o = null
       }
     }
-    if (o === null) {
-      this.counts.bad++
-      return []
-    }
     if (!o || typeof o !== 'object' || typeof o.type !== 'string') {
       this.counts.bad++
       return []
