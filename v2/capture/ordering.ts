@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import type { OrderingPoint } from './normalize.ts'
 
 export function readOrderingPoint(helper: string, args: readonly string[], onError: (code: string) => void): OrderingPoint | null {
-  const result = spawnSync(helper, [...args, '--ordering-point'], { encoding: 'utf8', windowsHide: true })
+  const result = spawnSync(helper, [...args, '--ordering-point'], { encoding: 'utf8', windowsHide: true, timeout: 100, killSignal: 'SIGKILL' })
   try {
     if (result.error || result.status !== 0) throw new Error('clock unavailable')
     const p = JSON.parse(result.stdout) as OrderingPoint
