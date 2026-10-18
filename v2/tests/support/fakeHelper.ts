@@ -43,7 +43,8 @@ function snapshot(): void {
   focus('snapshot')
   emit('input', { state: 'active', last_input_wall_ms: Date.now(), threshold_s: 120, snapshot: true })
   emit('session', { state: 'unlocked', snapshot: true })
-  if (process.env.FAKE_SNAPFILE) appendFileSync(process.env.FAKE_SNAPFILE, 'snapshot\n')
+  // Lines emitted through this snapshot: the file is written before the supervisor has read them.
+  if (process.env.FAKE_SNAPFILE) appendFileSync(process.env.FAKE_SNAPFILE, `snapshot ${seq}\n`)
 }
 
 emit('hello', { helper: 'fake', boot_identity: process.env.FAKE_BOOT?.startsWith('clock') ? 'clock' : 'kernel', version: '0', pid: process.pid, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 1, idle_threshold_s: 120, reconcile_s: 60 } })

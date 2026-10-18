@@ -229,7 +229,10 @@ test('when the title channel recovers, a forced snapshot replaces the possibly s
   const h = harness({ FAKE_MODE: 'titles_recover', FAKE_AFTER_MS: '600', FAKE_SNAPFILE: snapfile, FAKE_FOCUS_MS: '100000' })
   h.sup.start()
   await waitFor(() => h.gaps().some((g) => g.reason === 'titles_unavailable' && g.end_wall_ms !== null))
-  await waitFor(() => readFileSync(snapfile, 'utf8').split('\n').filter(Boolean).length >= 2)
+  let snaps: string[] = []
+  await waitFor(() => (snaps = readFileSync(snapfile, 'utf8').split('\n').filter(Boolean)).length >= 2)
+  const linesThroughRecoverySnapshot = Number(snaps[1]!.split(' ')[1])
+  await waitFor(() => h.sup.stats.lines >= linesThroughRecoverySnapshot)
   h.store.flush()
   const rows = h.store.query<{ title: string; possibly_stale_since_wall_ms: number | null }>(`SELECT title, possibly_stale_since_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
   assert.ok(rows[0]!.possibly_stale_since_wall_ms !== null, 'the title read before the stall was flagged')
