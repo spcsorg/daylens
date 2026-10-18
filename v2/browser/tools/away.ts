@@ -26,3 +26,50 @@ export function gate(s: Signals, idleS = AWAY_IDLE_S): Gate {
   if (s.displayAsleep() || s.idleSeconds() >= idleS) return 'away'
   return 'present'
 }
+
+// Why a run that holds the screen must give it back, or null. Input shows as idle time below what has passed since the
+// run took the screen.
+export function stopReason(s: Signals, idleAtStart: number, heldS: number): string | null {
+  if (!s.marker()) return 'the away marker was removed'
+  if (s.locked()) return 'the screen locked'
+  if (s.idleSeconds() < idleAtStart + heldS - 1) return 'someone is using the Mac'
+  return null
+}
+
+export interface Clock {
+  now(): number
+  every(fn: () => void, ms: number): () => void
+}
+
+// Checks every tick from the moment the run takes the screen and calls onStop once, with the first reason found.
+export function watch(s: Signals, clock: Clock, onStop: (reason: string) => void, intervalMs = 250): () => void {
+  const start = clock.now()
+  const idleAtStart = s.idleSeconds()
+  let done = false
+  const cancel = clock.every(() => {
+    if (done) return
+    const reason = stopReason(s, idleAtStart, (clock.now() - start) / 1000)
+    if (reason === null) return
+    done = true
+    cancel()
+    onStop(reason)
+  }, intervalMs)
+  return () => {
+    done = true
+    cancel()
+  }
+}
+
+export interface Killer {
+  kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void
+  alive(pid: number): boolean
+  sleep(ms: number): Promise<void>
+}
+
+// Ends every process the run launched: TERM first, then KILL for any still running after the grace period.
+export async function endAll(pids: Iterable<number>, k: Killer, graceMs = 1500): Promise<void> {
+  const list = [...pids]
+  for (const p of list) if (k.alive(p)) k.kill(p, 'SIGTERM')
+  for (let waited = 0; waited < graceMs && list.some((p) => k.alive(p)); waited += 100) await k.sleep(100)
+  for (const p of list) if (k.alive(p)) k.kill(p, 'SIGKILL')
+}

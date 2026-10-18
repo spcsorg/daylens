@@ -20,7 +20,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { cleanAddress } from '../../capture/address.ts'
-import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, gate, type Signals } from './away.ts'
+import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, watch, type Signals } from './away.ts'
 import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -131,6 +131,7 @@ class Service {
       env: { ...process.env, DAYLENS_V2_BROWSER_SOCKET: socketPath(), ...(LOCAL ? { DAYLENS_V2_BROWSER_LOCAL: '1' } : {}) },
       stdio: [LOCAL ? 'pipe' : 'ignore', LOCAL ? 'pipe' : 'ignore', 'pipe'],
     })
+    if (this.proc.pid) launched.add(this.proc.pid)
     // Plays the app's part: a Firefox pairing asks Allow / Don't allow, and the runner allows it.
     if (LOCAL) {
       let buf = ''
@@ -338,6 +339,7 @@ class ChromiumDriver implements Driver {
     this.proc.stdout!.pipe(logStream)
     this.proc.stderr!.pipe(logStream)
     activatePid = this.proc.pid ?? null
+    if (this.proc.pid) launched.add(this.proc.pid)
     const portFile = path.join(this.dataDir, 'DevToolsActivePort')
     const start = Date.now()
     while (!existsSync(portFile)) {
@@ -521,6 +523,7 @@ class FirefoxDriver implements Driver {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     activatePid = this.proc.pid ?? null
+    if (this.proc.pid) launched.add(this.proc.pid)
     this.proc.stdout!.pipe(logStream)
     this.proc.stderr!.pipe(logStream)
     const start = Date.now()
@@ -680,6 +683,54 @@ function displayAsleep(): boolean {
 }
 const signals: Signals = { marker: () => existsSync(values['away-marker']!), locked, displayAsleep, idleSeconds }
 
+// Everything a run starts, so a stop can end all of it at once.
+const launched = new Set<number>()
+const openedApps = new Set<string>()
+function openApp(name: string): void {
+  openedApps.add(name)
+  execFileSync('/usr/bin/open', ['-a', name])
+}
+let stopping = false
+// The first input, a lock, or the marker going away ends the whole run: its browsers are quit by pid, nothing is
+// brought back to the front, and the runner exits 75 so a queue stops too.
+async function stopRun(reason: string): Promise<void> {
+  if (stopping) return
+  stopping = true
+  log(`stopped: ${reason}`)
+  await endAll(launched, {
+    kill: (pid, sig) => {
+      try {
+        process.kill(pid, sig)
+      } catch {}
+    },
+    alive: (pid) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    },
+    sleep: async (ms) => {
+      await sleep(ms)
+    },
+  })
+  for (const app of openedApps) {
+    try {
+      execFileSync('/usr/bin/killall', [app], { stdio: 'ignore' })
+    } catch {}
+  }
+  process.exit(NOT_AWAY_EXIT)
+}
+const realClock = {
+  now: () => Date.now(),
+  every: (fn: () => void, ms: number) => {
+    const t = setInterval(fn, ms)
+    t.unref()
+    return () => clearInterval(t)
+  },
+}
+
 // Waits until nobody has touched the Mac for a while, tells them the screen is about to be taken over, and starts
 // only if the countdown passes untouched.
 async function announce(what: string, seconds: number): Promise<void> {
@@ -691,32 +742,25 @@ async function announce(what: string, seconds: number): Promise<void> {
       log(`${what}: not started: no away marker at ${values['away-marker']}`)
       process.exit(NOT_AWAY_EXIT)
     }
-    if (g !== 'away') {
-      if (!said) log(`${what}: waiting for an unlocked Mac with ${need} s without keyboard or mouse input`)
-      said = true
-      await sleep(10_000)
-      continue
-    }
-    try {
-      execFileSync('/usr/bin/osascript', ['-e', `display notification "${what} starts in ${seconds} seconds and takes over the screen. Touch the keyboard or mouse to hold it off." with title "Daylens browser test"`])
-    } catch {}
-    log(`${what}: starting in ${seconds} s`)
-    const start = Date.now()
-    let touched = false
-    while (Date.now() - start < seconds * 1000) {
-      await sleep(1000)
-      if (idleSeconds() < (Date.now() - start) / 1000 - 0.5) touched = true
-      if (touched) break
-    }
-    if (!touched) return
-    log(`${what}: input during the countdown; waiting again`)
+    if (g === 'away') break
+    if (!said) log(`${what}: waiting for an unlocked Mac with ${need} s without keyboard or mouse input`)
+    said = true
+    await sleep(10_000)
   }
+  // From here on the run holds the screen: the first input, during the countdown or later, ends it.
+  watch(signals, realClock, (reason) => void stopRun(reason))
+  try {
+    execFileSync('/usr/bin/osascript', ['-e', `display notification "${what} starts in ${seconds} seconds and takes over the screen. Touch the keyboard or mouse to stop it." with title "Daylens browser test"`])
+  } catch {}
+  log(`${what}: starting in ${seconds} s`)
+  await sleep(seconds * 1000)
 }
 
 // The browser the runner launched is brought forward by pid, never by name: `open -a` does not see a browser started
 // with its own profile as that app, so it launches another copy on the default profile.
 let activatePid: number | null = null
 function activateApp(_app: string): void {
+  if (stopping) return
   if (activatePid === null) throw new Error('no browser launched to bring forward')
   if (!values.activate) throw new Error('--activate <binary> is required to bring the test browser forward')
   execFileSync(values.activate, [String(activatePid)])
@@ -836,31 +880,28 @@ async function canary(): Promise<void> {
   let interruptions = 0
   // Runs one step and holds it; if anything but the expected process came to the front, the step is redone.
   const step = async (label: string, page: string | null, isPrivate: boolean, act: () => Promise<void>, front: 'browser' | 'calculator' = 'browser') => {
-    for (let attempt = 1; ; ) {
+    for (let attempt = 1; ; attempt++) {
       await act()
       mark(label, page, isPrivate)
       const want = () => (front === 'browser' ? d.mainPid() : pidOfApp('Calculator'))
       let foreign: number | null = null
-      let touched = false
-      const started = Date.now()
-      const until = started + HOLD
+      const until = Date.now() + HOLD
       while (Date.now() < until) {
         await sleep(250)
         const f = frontPid()
         if (f !== null && f !== want()) foreign = f
-        if (idleSeconds() < (Date.now() - started) / 1000 - 0.5) touched = true
       }
-      if (foreign === null && !touched) return
+      if (foreign === null) return
+      // Input ends the run through the watch; this is something else coming to the front with nobody at the keyboard.
       interruptions++
       markers.at(-1)!.expect = undefined
-      markers.at(-1)!.label += ` (interrupted${foreign === null ? '' : ` by pid ${foreign}`}${touched ? ' with input' : ''}, redone)`
-      log(`  interrupted${foreign === null ? '' : ` by pid ${foreign}`}${touched ? ' with keyboard or mouse input' : ''}`)
-      // Someone using the Mac only delays the step; four interruptions with nobody at the keyboard end the run.
-      if (touched || locked()) await announce('The canary test, continuing', 15)
-      else if (++attempt > 4) throw new Error(`step kept being interrupted: ${label}`)
+      markers.at(-1)!.label += ` (interrupted by pid ${foreign}, redone)`
+      log(`  interrupted by pid ${foreign}`)
+      if (attempt >= 4) throw new Error(`step kept being interrupted: ${label}`)
       if (front === 'browser') activateApp(values.app!)
     }
   }
+
   try {
     await announce(`The ${kind} canary test`, 30)
     // Keeps the display awake, and so the screen unlocked, only while this run lasts.
@@ -893,7 +934,7 @@ async function canary(): Promise<void> {
       await d.activate(privTab)
     })
     await step('another app in front', null, false, async () => {
-      execFileSync('/usr/bin/open', ['-a', 'Calculator'])
+      openApp('Calculator')
       await sleep(300)
     }, 'calculator')
     await step('back to the browser, straight into the private window', null, true, async () => {
@@ -1111,7 +1152,7 @@ async function soak(): Promise<void> {
           await d.activate(pick(rand() < 0.5 ? tabsA : tabsB))
           actions.switch_window = (actions.switch_window ?? 0) + 1
         } else if (r < 0.8) {
-          execFileSync('/usr/bin/open', ['-a', pick(['Calculator', 'TextEdit'])])
+          openApp(pick(['Calculator', 'TextEdit']))
           await sleep(3000 + rand() * 20_000)
           activateApp(values.app!)
           await d.activate(pick(tabs))
