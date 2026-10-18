@@ -7,6 +7,7 @@ import { DB_FILE, Store } from '../../capture/store.ts'
 import { HOUR, rig, T0, tmpDir } from './support.ts'
 import Database from 'better-sqlite3'
 import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
+import { app } from '../support/lines.ts'
 
 function row(t: number, app: string, title: string): ObservationRow {
   return {
@@ -125,3 +126,48 @@ test('capture flushes yield a contended writer lock within 100 ms and retry ever
     r.close()
   }
 })
+
+const notes = app('com.example.notes', { engine: 'app_runtime', signer: 'TEAMNOTES1' })
+const exclusion = { match: 'app_id' as const, value: 'com.example.blocked', label: 'Blocked', is_default: false }
+const privacyActions = {
+  pause: (r: ReturnType<typeof rig>) => r.storage.pause('hour'),
+  delete: (r: ReturnType<typeof rig>) => r.storage.deleteLast(HOUR),
+  addExclusion: (r: ReturnType<typeof rig>) => r.storage.addExclusion(exclusion),
+  removeExclusion: (r: ReturnType<typeof rig>) => r.storage.removeExclusion('app_id', exclusion.value),
+  keepTitles: (r: ReturnType<typeof rig>) => r.storage.keepTitles(notes),
+  stopKeepingTitles: (r: ReturnType<typeof rig>) => r.storage.stopKeepingTitles(r.storage.keptTitleApps()[0]!.id),
+}
+
+for (const [name, action] of Object.entries(privacyActions)) {
+  for (const ms of [50, 1300]) test(`user ${name} ${ms === 50 ? 'waits for a contended lock' : 'fails without a privacy change beyond the existing timeout'}`, async () => {
+    const r = rig()
+    if (name === 'removeExclusion') r.storage.addExclusion(exclusion)
+    if (name === 'stopKeepingTitles') r.storage.keepTitles(notes)
+    r.store.insertObservation(row(T0, 'com.example.editor', 'Queued before privacy action'))
+    const before = r.store.query(`SELECT * FROM change_log`)
+    const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms } })
+    const exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
+    try {
+      await new Promise((resolve) => worker.once('message', resolve))
+      const start = performance.now()
+      if (ms === 50) {
+        const result = action(r)
+        if (name === 'delete') await (result as ReturnType<typeof r.storage.deleteLast>).done
+        assert.ok(performance.now() - start >= 30, 'waited for the held lock')
+        assert.ok(r.store.query(`SELECT * FROM change_log`).length > before.length)
+        if (name === 'pause') assert.ok(r.storage.paused())
+        assert.equal(r.store.storeHealth().pendingOps, 0)
+      } else {
+        assert.throws(() => action(r), /storage is failing; nothing was changed/)
+        const elapsed = performance.now() - start
+        assert.ok(elapsed >= 900 && elapsed < 1250, `bounded wait took ${elapsed.toFixed(1)} ms`)
+        assert.deepEqual(r.store.query(`SELECT * FROM change_log`), before)
+        assert.equal(r.storage.paused(), null)
+        assert.equal(r.store.storeHealth().pendingOps, 1)
+      }
+    } finally {
+      await exited
+      r.close()
+    }
+  })
+}

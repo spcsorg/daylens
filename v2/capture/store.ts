@@ -593,13 +593,13 @@ export class Store implements Sink {
   private flushDepth = 0
   private closing = false
 
-  flush(): boolean {
+  flush(waitForLock = false): boolean {
     const outer = this.flushDepth++ === 0
     const busyTimeout = outer ? Number(this.db.pragma('busy_timeout', { simple: true })) : null
     if (outer) {
       this.onWriteStart()
       // Capture retries a busy batch; waiting for a background writer would block every event channel.
-      if (!this.closing) this.db.pragma('busy_timeout = 0')
+      if (!this.closing && !waitForLock) this.db.pragma('busy_timeout = 0')
     }
     try {
       return this.flushNow()

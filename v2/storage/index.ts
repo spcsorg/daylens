@@ -280,7 +280,7 @@ export class Storage {
 
   private flushOrThrow(): void {
     // Queued capture writes go in first, so a deletion or pause applies to everything captured before it.
-    if (!this.store.flush()) throw new Error('storage is failing; nothing was changed')
+    if (!this.store.flush(true)) throw new Error('storage is failing; nothing was changed')
   }
 
   private point(wallMs = this.now()): GapPoint {
@@ -586,7 +586,7 @@ export class Storage {
       },
       () => {
         this.rules.loadPauses()
-        this.store.flush()
+        this.store.flush(true)
         this.capture?.interrupt()
       },
     )
@@ -618,7 +618,7 @@ export class Storage {
       },
       () => {
         this.rules.loadPauses()
-        this.store.flush()
+        this.store.flush(true)
         if (reason !== 'replaced') this.capture?.interrupt()
       },
     )
