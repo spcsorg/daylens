@@ -708,6 +708,7 @@ export class Storage {
   }
 
   setSetting(key: string, value: unknown, kind: ChangeKind = 'setting'): void {
+    if (key === 'kept_title_apps') throw new Error('Use keepTitles or stopKeepingTitles to change kept-title apps.')
     this.bus.commit(kind, { key }, () => this.putSetting(key, value))
   }
 

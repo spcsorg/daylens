@@ -172,3 +172,16 @@ test('a kept Windows identity survives Squirrel updates without admitting anothe
     for (const canary of ['OtherExeCanary', 'OtherRootCanary']) assert.deepEqual(diskContains(r.dir, canary), [])
   } finally { r.close() }
 })
+
+test('generic settings cannot bypass kept-title validation or replace the live privacy list', () => {
+  const r = rig()
+  try {
+    const id = r.storage.keepTitles(notes)
+    assert.throws(() => r.storage.setSetting('kept_title_apps', []), /keepTitles.*stopKeepingTitles/)
+    assert.equal(r.storage.keptTitleApps()[0]!.id, id)
+    r.feed(focus(notes, 'Still kept', T0))
+    assert.equal(r.q<{ title: string }>('SELECT title FROM observations')[0]!.title, 'Still kept')
+    r.storage.stopKeepingTitles(id)
+    assert.deepEqual(r.storage.keptTitleApps(), [])
+  } finally { r.close() }
+})
