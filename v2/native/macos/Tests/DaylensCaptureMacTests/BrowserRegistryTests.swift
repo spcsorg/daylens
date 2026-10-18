@@ -67,4 +67,24 @@ final class BrowserRegistryTests: XCTestCase {
     XCTAssertTrue(failed.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
   }
 
+  func testResolutionCost() throws {
+    let registry = BrowserRegistry()
+    let url = try bundle(["notes"])
+    defer { try? FileManager.default.removeItem(at: url) }
+    for _ in 0..<100 { _ = registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes") }
+    var samples: [Double] = []
+    var cpuBefore = rusage(), cpuAfter = rusage()
+    getrusage(RUSAGE_SELF, &cpuBefore)
+    for _ in 0..<1000 {
+      let start = DispatchTime.now().uptimeNanoseconds
+      XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+      samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+    }
+    getrusage(RUSAGE_SELF, &cpuAfter)
+    let cpuMs = Double(cpuAfter.ru_utime.tv_sec - cpuBefore.ru_utime.tv_sec + cpuAfter.ru_stime.tv_sec - cpuBefore.ru_stime.tv_sec) * 1000
+      + Double(cpuAfter.ru_utime.tv_usec - cpuBefore.ru_utime.tv_usec + cpuAfter.ru_stime.tv_usec - cpuBefore.ru_stime.tv_usec) / 1000
+    samples.sort()
+    print("BrowserRegistry n=1000 mean=\(samples.reduce(0, +) / 1000)ms p95=\(samples[950])ms p99=\(samples[990])ms max=\(samples[999])ms CPU=\(cpuMs / 1000)ms/resolution")
+  }
+
 }
