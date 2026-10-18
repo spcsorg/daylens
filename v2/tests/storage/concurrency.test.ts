@@ -70,36 +70,50 @@ test('a worker transaction retries while another connection holds the lock longe
   r.close()
 })
 
-test('capture flushes stay under 100 ms while a large deletion runs, with capture writing every second and two readers', async () => {
+test('automatic capture flushes land within 100 ms during a long deletion without entering failure', async (test) => {
   const r = rig()
   for (let i = 0; i < 60_000; i++) r.store.insertObservation(row(T0 + i * 20_000, i % 3 ? 'com.example.editor' : 'com.example.chat', `item ${i % 4000} plan canary${i % 500}`))
   r.store.flush()
-  const end = T0 + 60_000 * 20_000
-  r.clock.t = end + HOUR
-  const readers = [0, 1].map(() => {
-    const w = new Worker(new URL('./reader.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 60_000 } })
-    return w
-  })
-  await new Promise((res) => setTimeout(res, 200))
+  r.clock.t = T0 + 60_000 * 20_000 + HOUR
+  const readers = [0, 1].map(() => new Worker(new URL('./reader.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 60_000 } }))
   const flushes: number[] = []
-  let t = end + HOUR
-  let open = r.store.insertObservation(row(t, 'com.example.editor', 'live.md'))
-  const capture = setInterval(() => {
-    t += 1000
-    r.clock.t = t
-    if (t % 10_000 === 0) open = r.store.insertObservation(row(t, 'com.example.editor', `live ${t}.md`))
-    else r.store.extendObservation(open, t)
-    const s = performance.now()
-    r.store.flush()
-    flushes.push(performance.now() - s)
-  }, 1000)
-  const result = await r.storage.deleteSource('com.example.chat').done
-  clearInterval(capture)
-  for (const w of readers) await w.terminate()
-  assert.equal(result.observations, 20_000)
-  assert.ok(flushes.length >= 2, `${flushes.length} capture flushes during the deletion`)
-  assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(0)} ms: ${flushes.map((f) => f.toFixed(0)).join(', ')}`)
-  r.close()
+  const failures: number[] = []
+  const startWrite = r.store.onWriteStart
+  const endWrite = r.store.onWriteEnd
+  let started: number | null = null
+  let capture: ReturnType<typeof setInterval> | undefined
+  try {
+    const deletion = r.storage.deleteSource('com.example.chat')
+    r.store.onWriteStart = () => { startWrite(); started ??= performance.now() }
+    r.store.onWriteEnd = () => {
+      endWrite()
+      if (r.store.storeHealth().failingSinceWallMs !== null) failures.push(performance.now())
+      if (r.store.storeHealth().pendingOps === 0 && started !== null) {
+        flushes.push(performance.now() - started)
+        started = null
+      }
+    }
+    let writes = 0
+    capture = setInterval(() => {
+      r.clock.t += 1000
+      r.store.insertObservation(row(r.clock.t, 'com.example.editor', `automatic live ${++writes}`))
+      if (writes === 2) clearInterval(capture)
+    }, 1000)
+    const result = await deletion.done
+    assert.equal(result.observations, 20_000)
+    assert.equal(writes, 2, 'capture wrote once per second during the long deletion')
+    test.diagnostic(`automatic flush latency: ${flushes.map((f) => f.toFixed(1)).join(', ')} ms`)
+    assert.deepEqual(failures, [], 'contention never enters storage failure')
+    assert.ok(flushes.length > 0, 'the store timer flushed capture during deletion')
+    assert.ok(Math.max(...flushes) < 100, `automatic flush latency: ${flushes.map((f) => f.toFixed(1)).join(', ')} ms`)
+    assert.equal(r.store.storeHealth().pendingOps, 0, 'no capture rows remain queued after deletion')
+    assert.equal(r.store.query<{ n: number }>(`SELECT count(*) AS n FROM observations WHERE title LIKE 'automatic live %'`)[0]!.n, 2)
+    assert.deepEqual(r.store.query(`SELECT value FROM meta WHERE key = 'derive_from'`), [])
+  } finally {
+    clearInterval(capture)
+    for (const w of readers) await w.terminate()
+    r.close()
+  }
 })
 
 test('capture flushes yield a contended writer lock within 100 ms and retry every queued observation', async () => {
@@ -171,3 +185,51 @@ for (const [name, action] of Object.entries(privacyActions)) {
     }
   })
 }
+
+test('automatic busy retries retain worker priority and leave storage healthy', async () => {
+  const r = rig()
+  const events: string[] = []
+  const begin = r.store.onWriteStart, end = r.store.onWriteEnd
+  r.store.onWriteStart = () => { events.push('begin'); begin() }
+  r.store.onWriteEnd = () => { events.push('end'); end() }
+  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 1050 } })
+  const exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
+  try {
+    await new Promise((resolve) => worker.once('message', resolve))
+    r.store.insertObservation(row(T0, 'com.example.editor', 'automatic contention'))
+    await new Promise((resolve) => setTimeout(resolve, 1010))
+    assert.equal(r.store.storeHealth().failingSinceWallMs, null)
+    assert.deepEqual(events, ['begin'], 'worker priority remains held between retries')
+    await exited
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(r.store.storeHealth().pendingOps, 0)
+    assert.deepEqual(events, ['begin', 'end'])
+    assert.equal(r.store.query(`SELECT title FROM observations`).length, 1)
+  } finally { await exited; r.close() }
+})
+
+test('a contended derivation retries automatically even when all capture rows already committed', async () => {
+  const r = rig()
+  const derive = r.store.onFlushed
+  const locked = new Int32Array(new SharedArrayBuffer(4))
+  let worker: Worker | undefined
+  let exited: Promise<void> | undefined
+  let tries = 0
+  r.store.onFlushed = (ids) => {
+    if (++tries === 1) {
+      worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 50, locked } })
+      exited = new Promise<void>((resolve, reject) => { worker!.once('exit', () => resolve()); worker!.once('error', reject) })
+      Atomics.wait(locked, 0, 0, 5000)
+      assert.equal(Atomics.load(locked, 0), 1)
+    }
+    derive(ids)
+  }
+  try {
+    r.store.insertObservation(row(T0, 'com.example.editor', 'Derived after contention'))
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    assert.ok(tries > 1, 'derivation retried without another capture write')
+    assert.equal(r.store.storeHealth().failingSinceWallMs, null)
+    assert.deepEqual(r.store.query(`SELECT value FROM meta WHERE key = 'derive_from'`), [])
+    assert.equal(r.store.query(`SELECT * FROM intervals`).length, 1)
+  } finally { await exited; r.close() }
+})

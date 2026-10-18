@@ -178,6 +178,7 @@ export class Storage {
       try {
         this.derived.refreshFromMark()
       } catch (err) {
+        if (isBusy(err)) throw err
         // Derived state is rebuildable; a failure here never blocks capture.
         this.onError(`derive_${(err as { code?: string }).code ?? 'failed'}`)
       }

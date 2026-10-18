@@ -5,6 +5,7 @@ import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
 import type { GapDetail, GapPoint, GapReason, GapStart, ObservationRow, Sink } from './normalize.ts'
 import type { Line, LineOf } from './protocol.ts'
+import { isBusy } from '../storage/tx.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
 const SCHEMA_VERSION = 3
@@ -12,6 +13,7 @@ const FLUSH_INTERVAL_MS = 1000
 // The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
 export const MAX_ROW_SPAN_MS = 7 * 86_400_000
 const FLUSH_AT_OPS = 256
+const CONTENTION_RETRY_MS = 10
 const MAX_RETRY_MS = 30_000
 
 export function defaultDataDir(): string {
@@ -529,6 +531,7 @@ export class Store implements Sink {
 
   private enqueue(sql: string, params: unknown[], metadata: Pick<Op, 'extension' | 'flagSourceId'> = {}): void {
     if (this.pending.length >= this.maxPendingOps) {
+      this.failingStart ??= { wall_ms: this.now(), mono_us: null, boot: null }
       this.pending.shift()
       this.health.droppedOps++
       this.droppedSinceFailure++
@@ -542,12 +545,12 @@ export class Store implements Sink {
     else this.schedule()
   }
 
-  private schedule(): void {
+  private schedule(waitMs = this.retryMs): void {
     if (this.timer) return
     this.timer = setTimeout(() => {
       this.timer = null
       this.flush()
-    }, this.retryMs)
+    }, waitMs)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -592,12 +595,19 @@ export class Store implements Sink {
   onWriteEnd: () => void = () => {}
   private flushDepth = 0
   private closing = false
+  private writeHeld = false
+  private contended = false
+  private readonly deriving = new Set<number>()
 
   flush(waitForLock = false): boolean {
     const outer = this.flushDepth++ === 0
     const busyTimeout = outer ? Number(this.db.pragma('busy_timeout', { simple: true })) : null
     if (outer) {
-      this.onWriteStart()
+      this.contended = false
+      if (!this.writeHeld) {
+        this.writeHeld = true
+        this.onWriteStart()
+      }
       // Capture retries a busy batch; waiting for a background writer would block every event channel.
       if (!this.closing && !waitForLock) this.db.pragma('busy_timeout = 0')
     }
@@ -606,7 +616,10 @@ export class Store implements Sink {
     } finally {
       if (--this.flushDepth === 0) {
         this.db.pragma(`busy_timeout = ${busyTimeout}`)
-        this.onWriteEnd()
+        if ((!this.contended || this.closing) && this.writeHeld) {
+          this.writeHeld = false
+          this.onWriteEnd()
+        }
       }
     }
   }
@@ -627,7 +640,7 @@ export class Store implements Sink {
         params: [String(this.touchedFromWallMs)],
       })
     }
-    if (ops.length === 0 && this.nextObsId === this.persistedNextObsId) return true
+    if (ops.length === 0 && this.nextObsId === this.persistedNextObsId) return this.deriveNow()
     try {
       // Immediate: storage's deletion worker writes on its own connection, and a deferred transaction that read
       // first could not commit after it.
@@ -637,6 +650,7 @@ export class Store implements Sink {
         this.writeIdMark()
       }).immediate()
     } catch (err) {
+      if (isBusy(err)) return this.retryContention()
       const code = errorCode(err)
       this.onError(code)
       let retry = !isStatementError(code)
@@ -644,6 +658,7 @@ export class Store implements Sink {
         try {
           this.runSkippingBadOps(ops)
         } catch (inner) {
+          if (isBusy(inner)) return this.retryContention()
           this.onError(errorCode(inner))
           retry = true
         }
@@ -684,12 +699,29 @@ export class Store implements Sink {
     this.health.committedWallMs = committed
     this.health.pendingOps = 0
     if (this.touched.size > 0) {
-      const ids = [...this.touched]
+      for (const id of this.touched) this.deriving.add(id)
       this.touched.clear()
       this.touchedFromWallMs = Number.POSITIVE_INFINITY
-      this.onFlushed(ids)
     }
-    return true
+    return this.deriveNow()
+  }
+
+  private retryContention(): false {
+    this.contended = true
+    this.schedule(CONTENTION_RETRY_MS)
+    return false
+  }
+
+  private deriveNow(): boolean {
+    if (this.deriving.size === 0) return true
+    try {
+      this.onFlushed([...this.deriving])
+      this.deriving.clear()
+      return true
+    } catch (err) {
+      if (isBusy(err)) return this.retryContention()
+      throw err
+    }
   }
 
   private runSkippingBadOps(ops: Op[]): void {
@@ -717,6 +749,8 @@ export class Store implements Sink {
   close(): void {
     this.closing = true
     this.flush()
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
     this.db.close()
     this.releaseLock()
   }
