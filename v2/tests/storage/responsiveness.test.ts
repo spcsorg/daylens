@@ -27,26 +27,29 @@ test('a deletion responds at once and never stalls capture, however much it remo
   const r = rig()
   seed(r, 60_000)
   r.clock.t = T0 + 60_000 * 20_000 + HOUR
-  const lags: number[] = []
-  let last = performance.now()
+  const flushes: number[] = []
   const tick = setInterval(() => {
-    const now = performance.now()
-    lags.push(now - last - 5)
-    last = now
+    const start = performance.now()
+    r.store.insertObservation(row(r.clock.t++, 'com.example.editor', 'live capture'))
+    r.store.flush()
+    flushes.push(performance.now() - start)
   }, 5)
-  const t0 = performance.now()
-  const handle = r.storage.deleteSource('com.example.chat')
-  const responded = performance.now() - t0
-  assert.deepEqual(r.storage.search('chat'), [], 'hidden from search as soon as the call returns')
-  const result = await handle.done
-  clearInterval(tick)
-  const worstLag = Math.max(...lags)
-  assert.ok(responded < 100, `the call returned in ${responded.toFixed(1)} ms`)
-  assert.ok(worstLag < 100, `capture's event loop stalled at most ${worstLag.toFixed(1)} ms`)
-  assert.equal(result.observations, 20_000)
-  assert.deepEqual(r.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
-  assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
-  r.close()
+  try {
+    const t0 = performance.now()
+    const handle = r.storage.deleteSource('com.example.chat')
+    const responded = performance.now() - t0
+    assert.deepEqual(r.storage.search('chat'), [], 'hidden from search as soon as the call returns')
+    const result = await handle.done
+    assert.ok(responded < 100, `the call returned in ${responded.toFixed(1)} ms`)
+    assert.ok(flushes.length > 0, 'capture ran while deletion was in progress')
+    assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(1)} ms`)
+    assert.equal(result.observations, 20_000)
+    assert.deepEqual(r.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
+    assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
+  } finally {
+    clearInterval(tick)
+    r.close()
+  }
 })
 
 test('a deletion left pending by a crash is still in force, and finishes at the next start', async () => {

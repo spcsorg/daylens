@@ -100,3 +100,28 @@ test('capture flushes stay under 100 ms while a large deletion runs, with captur
   assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(0)} ms: ${flushes.map((f) => f.toFixed(0)).join(', ')}`)
   r.close()
 })
+
+test('capture flushes yield a contended writer lock within 100 ms and retry every queued observation', async () => {
+  const r = rig()
+  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 300 } })
+  const released = new Promise<void>((resolve, reject) => {
+    worker.on('message', (m) => { if (m === 'released') resolve() })
+    worker.on('error', reject)
+  })
+  try {
+    await new Promise((resolve) => worker.once('message', resolve))
+    r.store.insertObservation(row(T0, 'com.example.editor', 'Queued during contention'))
+    const start = performance.now()
+    const flushed = r.store.flush()
+    const elapsed = performance.now() - start
+    assert.ok(elapsed < 100, `capture flush blocked for ${elapsed.toFixed(1)} ms`)
+    assert.equal(flushed, false, 'contended work remains queued instead of waiting on the event loop')
+    await released
+    assert.equal(r.store.flush(), true)
+    assert.deepEqual(r.q('SELECT title FROM observations'), [{ title: 'Queued during contention' }])
+  } finally {
+    await released
+    await worker.terminate()
+    r.close()
+  }
+})

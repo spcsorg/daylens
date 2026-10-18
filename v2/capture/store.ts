@@ -591,13 +591,23 @@ export class Store implements Sink {
   onWriteStart: () => void = () => {}
   onWriteEnd: () => void = () => {}
   private flushDepth = 0
+  private closing = false
 
   flush(): boolean {
-    if (this.flushDepth++ === 0) this.onWriteStart()
+    const outer = this.flushDepth++ === 0
+    const busyTimeout = outer ? Number(this.db.pragma('busy_timeout', { simple: true })) : null
+    if (outer) {
+      this.onWriteStart()
+      // Capture retries a busy batch; waiting for a background writer would block every event channel.
+      if (!this.closing) this.db.pragma('busy_timeout = 0')
+    }
     try {
       return this.flushNow()
     } finally {
-      if (--this.flushDepth === 0) this.onWriteEnd()
+      if (--this.flushDepth === 0) {
+        this.db.pragma(`busy_timeout = ${busyTimeout}`)
+        this.onWriteEnd()
+      }
     }
   }
 
@@ -705,6 +715,7 @@ export class Store implements Sink {
   }
 
   close(): void {
+    this.closing = true
     this.flush()
     this.db.close()
     this.releaseLock()
