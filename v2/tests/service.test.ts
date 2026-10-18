@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -139,6 +139,17 @@ test('a clean stop and restart records a clean service_down gap with no overlap'
   assert.equal(JSON.parse(g[1]!.detail!).clean_stop, true)
   assert.ok(g[1]!.start_wall_ms >= g[0]!.end_wall_ms!, 'gaps do not overlap')
   assert.ok(g.every((x) => x.end_wall_ms !== null))
+})
+
+test('a staging copy left by a first read cut short is removed at startup, with agent access off', async () => {
+  const { work, dataDir } = setup()
+  mkdirSync(dataDir, { recursive: true })
+  const leftovers = ['agent-backfill.sqlite', 'agent-backfill.sqlite-wal', 'agent-backfill.sqlite-shm'].map((f) => path.join(dataDir, f))
+  for (const f of leftovers) writeFileSync(f, 'synthetic staging')
+  const svc = startService(dataDir, work)
+  await waitFor(() => svc.log().includes('helper hello'))
+  await stopService(svc.proc)
+  assert.deepEqual(leftovers.filter((f) => existsSync(f)), [])
 })
 
 test('downtime after a crash is measured even when the clock was set back an hour meanwhile', async () => {

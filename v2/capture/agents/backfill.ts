@@ -3,13 +3,12 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { Worker } from 'node:worker_threads'
-import { rmSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
-import { AgentStore } from './store.ts'
+import { AgentStore, removeStaging, STAGING_FILE } from './store.ts'
 import { addCounts } from './types.ts'
 
 export interface BackfillStats {
@@ -148,10 +147,8 @@ export function mergeStaging(db: Database.Database, staging: string): void {
 }
 
 export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void, sliceBytes = SLICE_BYTES): Promise<BackfillResult> {
-  const staging = path.join(dataDir, 'agent-backfill.sqlite')
-  const clean = () => {
-    for (const f of [staging, `${staging}-wal`, `${staging}-shm`, `${staging}-journal`]) rmSync(f, { force: true })
-  }
+  const staging = path.join(dataDir, STAGING_FILE)
+  const clean = () => removeStaging(dataDir)
   clean()
   const filesToRead = await listLogs(roots)
   if (filesToRead.length === 0) return { merged: true, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }

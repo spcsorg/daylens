@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { backfill, listLogs, runChild } from '../../capture/agents/backfill.ts'
@@ -413,6 +413,30 @@ test('a database read before the drift flag existed keeps its drift', () => {
   assert.equal(agents.hasTurnlessSource('/r'), true)
   assert.deepEqual(db.query<{ path: string }>('SELECT path FROM agent_sources WHERE turnless = 1').map((x) => x.path), ['/r/a.jsonl'])
   db.close()
+})
+
+test('deleting a session removes its rows and any staging copy of the first read', async () => {
+  const r = rig()
+  const keep = claudeCtx()
+  const gone = claudeCtx()
+  writeFileSync(claudeFile(r.home, keep), lines(claude.prompt(keep, sec(0), 'keep', { uuid: 'keep' }), claude.assistant(keep, sec(2), 'end_turn')))
+  writeFileSync(claudeFile(r.home, gone), lines(claude.prompt(gone, sec(5), 'gone', { uuid: 'gone' }), claude.assistant(gone, sec(7), 'end_turn')))
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  const staging = path.join(r.data, 'agent-backfill.sqlite')
+  writeFileSync(staging, 'synthetic staging')
+  writeFileSync(`${staging}-wal`, 'synthetic staging')
+  r.agents.deleteSession('claude_code', gone.session)
+  const left = (table: string) => r.store.query<{ session_id: string }>(`SELECT DISTINCT session_id FROM ${table}`).map((x) => x.session_id)
+  for (const table of ['agent_sessions', 'agent_turns', 'agent_events']) assert.ok(!left(table).includes(gone.session), table)
+  assert.ok(left('agent_turns').includes(keep.session))
+  assert.deepEqual([staging, `${staging}-wal`].filter((f) => existsSync(f)), [])
+  const again = r.reader()
+  await again.start()
+  await again.stop()
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns WHERE session_id = ?', gone.session), 0, 'a deleted session is not read in again')
+  r.store.close()
 })
 
 test('the first read uses bounded slices and preserves the same rows as an in-process read', async () => {

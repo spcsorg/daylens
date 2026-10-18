@@ -1,7 +1,17 @@
 // Agent session tables: named migrations over new tables only, written through the capture store's connection.
 
+import { rmSync } from 'node:fs'
+import path from 'node:path'
 import type Database from 'better-sqlite3'
 import type { Agent, AgentRecord, ParseCounts } from './types.ts'
+
+export const STAGING_FILE = 'agent-backfill.sqlite'
+
+// The first read's staging copy holds agent metadata outside the live tables, so it must not outlive a run.
+export function removeStaging(dataDir: string): void {
+  const staging = path.join(dataDir, STAGING_FILE)
+  for (const f of [staging, `${staging}-wal`, `${staging}-shm`, `${staging}-journal`]) rmSync(f, { force: true })
+}
 
 export interface Migration {
   name: string
@@ -326,6 +336,14 @@ export class AgentStore {
 
   hasTurnlessSource(root: string): boolean {
     return this.stmt('SELECT 1 FROM agent_sources WHERE root = ? AND turnless = 1 LIMIT 1').get(root) !== undefined
+  }
+
+  // Everything recorded from one session's logs; its read positions stay, so the session is not read in again.
+  deleteSession(agent: Agent, session: string): void {
+    this.db.transaction(() => {
+      for (const table of ['agent_events', 'agent_turns', 'agent_sessions']) this.db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
+    })()
+    if (this.db.name && this.db.name !== ':memory:') removeStaging(path.dirname(this.db.name))
   }
 
   hasSources(): boolean {

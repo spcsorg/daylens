@@ -6,7 +6,7 @@ import os from 'node:os'
 import { parseArgs } from 'node:util'
 import { backfill } from './agents/backfill.ts'
 import { AgentReader, homeRoots } from './agents/reader.ts'
-import { AgentStore } from './agents/store.ts'
+import { AgentStore, removeStaging } from './agents/store.ts'
 import { WslDiscovery } from './agents/wsl.ts'
 import { Normalizer, Privacy } from './normalize.ts'
 import { defaultDataDir, Store } from './store.ts'
@@ -35,6 +35,8 @@ const heartbeatS = Number(values['heartbeat-s'])
 const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
 const dataDir = values['data-dir'] ?? defaultDataDir()
 const store = new Store(dataDir, { onError: (code) => log(`storage error code=${code}`) })
+// A first read cut short after its merge leaves its staging copy; with or without agent access it is removed here.
+removeStaging(dataDir)
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
 const supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
