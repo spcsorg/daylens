@@ -825,6 +825,26 @@ test('a slice that does not answer in time hands the history to the live reader,
   r.store.close()
 })
 
+test('a stop during the first read wins: the reader lists, watches and reads nothing afterwards', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'stopped-1' }), claude.assistant(c, sec(2), 'end_turn')))
+  let release: (merged: boolean) => void = () => {}
+  let called = false
+  const reader = r.reader({ followUpMs: 50, backfill: () => { called = true; return new Promise<boolean>((resolve) => { release = resolve }) } })
+  const started = reader.start()
+  await waitFor(() => called)
+  await reader.stop()
+  release(false)
+  await started
+  appendFileSync(file, lines(claude.prompt(c, sec(10), 'more', { uuid: 'stopped-2' })))
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.deepEqual([reader.stats.listings, reader.stats.filesRead], [0, 0])
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 0)
+  r.store.close()
+})
+
 test('source capture uses emitted JavaScript for its backfill worker', async () => {
   const r = rig()
   const c = claudeCtx()

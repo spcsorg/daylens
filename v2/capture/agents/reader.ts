@@ -200,8 +200,10 @@ export class AgentReader {
     }
   }
 
+  // A stop() while any step here is awaited wins: nothing is listed, watched or scheduled after it.
   async start(): Promise<void> {
     await this.discoverRoots()
+    if (this.stopped) return
     if (this.backfill && !this.store.hasSources()) {
       const plain = this.roots.filter((r) => !r.root.available).map(({ root }) => ({ agent: root.agent, dir: root.dir, layout: root.layout, ...(root.poll ? { poll: true } : {}) }))
       let merged = false
@@ -214,6 +216,7 @@ export class AgentReader {
     }
     for (const r of this.roots) await this.reconcile(r)
     await this.drain()
+    if (this.stopped) return
     this.reconcileTimer = setInterval(() => void this.tick(), this.reconcileMs)
     this.reconcileTimer.unref()
     this.followUpTimer = setTimeout(() => void this.followUp(), this.followUpMs)
@@ -255,7 +258,7 @@ export class AgentReader {
 
   private async reconcile(r: RootState): Promise<void> {
     const { root } = r
-    if (root.available && !root.available()) return
+    if (this.stopped || (root.available && !root.available())) return
     // Watching starts before listing, so nothing written in between is missed.
     if (!r.polling && r.watcher === null) this.watch(r)
     let names: string[]
