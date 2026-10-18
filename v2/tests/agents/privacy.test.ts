@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { ClaudeParser } from '../../capture/agents/claude.ts'
 import { CodexParser } from '../../capture/agents/codex.ts'
@@ -106,4 +106,57 @@ test('tool output is never parsed: tool result lines are recognized from their f
   let decoded = false
   x.line(() => ((decoded = true), reply), reply.slice(0, 8192), reply.slice(-8192))
   assert.equal(decoded, false)
+})
+
+// The fingerprint this reader persisted before fingerprints were keyed.
+function unkeyed(s: string): string {
+  let h1 = 0x811c9dc5
+  let h2 = 0x01000193
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 0x01000193)
+    h2 = Math.imul(h2 ^ c, 0x5bd1e995)
+  }
+  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16)
+}
+
+test('persisted message fingerprints are keyed per install, owner-only, and cleared with the session', async () => {
+  const home = tmp()
+  const c = claudeCtx()
+  const cdir = path.join(home, '.claude', 'projects', '-p')
+  mkdirSync(cdir, { recursive: true })
+  writeFileSync(path.join(cdir, `${c.session}.jsonl`), [claude.prompt(c, sec(0), 'go'), claude.assistant(c, sec(1), 'tool_use', { tools: [{ id: 't', name: 'Bash' }] }), claude.queue(c, sec(2), 'enqueue', 'yes')].join('\n') + '\n')
+  const x = codexCtx()
+  const xdir = path.join(home, '.codex', 'sessions', '2026', '10', '14')
+  mkdirSync(xdir, { recursive: true })
+  const xfile = path.join(xdir, `rollout-2026-10-14T20-00-00-${x.id}.jsonl`)
+  writeFileSync(xfile, [codex.meta(x, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'yes', ['user.text'])].join('\n') + '\n')
+  const read = async (data: string) => {
+    const store = new Store(data)
+    const agents = new AgentStore(store.database)
+    const reader = new AgentReader(agents, homeRoots(home, {}), { reconcileMs: 3_600_000, followUpMs: 3_600_000 })
+    await reader.start()
+    await reader.stop()
+    const state = (agent: string) => JSON.parse(store.query<{ state: string }>('SELECT state FROM agent_sources WHERE agent = ?', agent)[0]!.state)
+    return { store, agents, codex: state('codex').recentUsers as string[], claude: Object.keys(state('claude_code').queued) }
+  }
+  const data = tmp()
+  const a = await read(data)
+  const b = await read(tmp())
+  assert.equal(a.codex.length, 1)
+  assert.equal(a.claude.length, 1)
+  assert.notEqual(a.codex[0], unkeyed('yes'))
+  assert.notEqual(a.claude[0], unkeyed('yes'))
+  assert.notEqual(a.codex[0], b.codex[0], 'another install fingerprints the same words differently')
+  if (process.platform !== 'win32') assert.equal(statSync(path.join(data, 'agent-fingerprint.key')).mode & 0o777, 0o600)
+  a.store.close()
+  b.store.close()
+  appendFileSync(xfile, [codex.tokens(sec(2)), codex.tokens(sec(3)), codex.userCompleted(sec(4), 't', 'yes', 'client')].join('\n') + '\n')
+  const again = await read(data)
+  assert.equal(again.store.query<{ n: number }>(`SELECT count(*) AS n FROM agent_events WHERE kind = 'user' AND agent = 'codex'`)[0]!.n, 1, 'the key survives a restart, so the copy still matches')
+  again.agents.deleteSession('codex', x.id)
+  again.agents.deleteSession('claude_code', c.session)
+  const states = again.store.query<{ agent: string; state: string }>('SELECT agent, state FROM agent_sources').map((r) => [r.agent, JSON.parse(r.state)])
+  for (const [agent, s] of states) assert.deepEqual(agent === 'codex' ? s.recentUsers : s.queued, agent === 'codex' ? [] : {})
+  again.store.close()
 })

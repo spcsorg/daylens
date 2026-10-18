@@ -2,7 +2,7 @@
 // Tool results are recognized from the start of the line and never parsed, so command output is never read.
 
 import { fieldsFromTail, stringAfter } from './edges.ts'
-import { digest, emptyCounts, lineText, parseTime, type AgentRecord, type LineParser, type LineText, type TurnOpener, type UserAct } from './types.ts'
+import { digest, emptyCounts, processKey, lineText, parseTime, type AgentRecord, type LineParser, type LineText, type TurnOpener, type UserAct } from './types.ts'
 
 interface OpenTurn {
   key: string
@@ -130,7 +130,8 @@ export class ClaudeParser implements LineParser {
   private readonly fileSession: string
 
   // `fileSession` is the file's stem; for a subagent file, `parentSession` is the session folder it sits in.
-  constructor(fileSession: string, parentSession: string | null, saved: string | null) {
+  constructor(fileSession: string, parentSession: string | null, saved: string | null, key: Buffer = processKey) {
+    this.key = key
     this.subagentFile = parentSession !== null
     this.fileSession = fileSession
     this.parent = parentSession
@@ -140,6 +141,7 @@ export class ClaudeParser implements LineParser {
   }
 
   private readonly parent: string | null
+  private readonly key: Buffer
 
   state(): string {
     return JSON.stringify(this.s)
@@ -402,7 +404,7 @@ export class ClaudeParser implements LineParser {
     // The time a message was typed into the queue; it is counted when it is delivered, as part of the turn it starts.
     if (o.operation === 'enqueue' && content !== null && !isInjected(content)) {
       const t = this.s.turn
-      this.s.queued[digest(content)] = [at, t !== null && t.stop !== 'end_turn' && t.stop !== 'stop_sequence']
+      this.s.queued[digest(content, this.key)] = [at, t !== null && t.stop !== 'end_turn' && t.stop !== 'stop_sequence']
       const keys = Object.keys(this.s.queued)
       if (keys.length > MAX_QUEUED) delete this.s.queued[keys[0]!]
     }
@@ -422,7 +424,7 @@ export class ClaudeParser implements LineParser {
   }
 
   private takeQueued(text: string): [number, boolean] | null {
-    const d = digest(text)
+    const d = digest(text, this.key)
     const q = this.s.queued[d]
     if (q === undefined) return null
     delete this.s.queued[d]

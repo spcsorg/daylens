@@ -1,6 +1,8 @@
 // Agent session records: what the Claude Code and Codex readers emit and the agent store writes.
 // Records carry metadata only. No prompt, reply, tool input or command output ever leaves a parser.
 
+import { createHmac, randomBytes } from 'node:crypto'
+
 export type Agent = 'claude_code' | 'codex'
 
 // interactive: a person drives the session. automated: a script, headless CLI or another agent drives it.
@@ -97,14 +99,11 @@ export function parseTime(v: unknown): number | null {
   return Number.isFinite(t) ? t : null
 }
 
-// Short, stable fingerprint for matching copies of a message within a turn.
-export function digest(s: string): string {
-  let h1 = 0x811c9dc5
-  let h2 = 0x01000193
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    h1 = Math.imul(h1 ^ c, 0x01000193)
-    h2 = Math.imul(h2 ^ c, 0x5bd1e995)
-  }
-  return (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16)
+// Parsers built without the install's key still never persist an unkeyed fingerprint.
+export const processKey = randomBytes(32)
+
+// Short fingerprint for matching copies of a message. Keyed per install, so a short message cannot be recovered from
+// the stored fingerprint by hashing guesses.
+export function digest(s: string, key: Buffer): string {
+  return createHmac('sha256', key).update(s).digest('hex').slice(0, 16)
 }

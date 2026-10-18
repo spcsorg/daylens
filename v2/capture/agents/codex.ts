@@ -2,7 +2,7 @@
 // Every line starts with its timestamp and type, so bulk records are classified from that prefix and never parsed.
 
 import { stringAfter } from './edges.ts'
-import { digest, emptyCounts, lineText, parseTime, type AgentRecord, type Basis, type LineParser, type LineText, type SessionOrigin, type TurnOpener, type UserAct } from './types.ts'
+import { digest, emptyCounts, processKey, lineText, parseTime, type AgentRecord, type Basis, type LineParser, type LineText, type SessionOrigin, type TurnOpener, type UserAct } from './types.ts'
 
 interface OpenTurn {
   key: string
@@ -113,9 +113,11 @@ export class CodexParser implements LineParser {
   private readonly fileSession: string
   // Every fingerprint of the open turn seen in this read; only the bounded recent window is persisted.
   private readonly seen = new Set<string>()
+  private readonly key: Buffer
 
-  constructor(fileSession: string, saved: string | null) {
+  constructor(fileSession: string, saved: string | null, key: Buffer = processKey) {
     this.fileSession = fileSession
+    this.key = key
     this.s = saved ? (JSON.parse(saved) as CodexState) : { session: null, origin: 'interactive', dir: null, branch: null, turn: null }
     this.s.recentUsers = (this.s.recentUsers ?? (this.s.lastUser ? [this.s.lastUser] : [])).slice(-RECENT_USERS)
     delete this.s.lastUser
@@ -336,7 +338,7 @@ export class CodexParser implements LineParser {
   private message(text: string, basis: Basis | null, at: number | null): AgentRecord[] {
     const t = this.s.turn
     if (!t || this.s.origin !== 'interactive' || t.external) return []
-    const d = digest(text)
+    const d = digest(text, this.key)
     if (this.seen.has(d) || this.s.recentUsers!.includes(d)) return []
     if (basis === null && looksInjected(text)) return []
     this.seen.add(d)

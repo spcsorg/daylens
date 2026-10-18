@@ -58,8 +58,8 @@ export function classifyFile(root: AgentRoot, file: string): FileInfo | null {
   return { session: id, parent: null, compressed }
 }
 
-function makeParser(root: AgentRoot, info: FileInfo, saved: string | null): LineParser {
-  return root.agent === 'claude_code' ? new ClaudeParser(info.session, info.parent, saved) : new CodexParser(info.session, saved)
+function makeParser(root: AgentRoot, info: FileInfo, saved: string | null, key: Buffer): LineParser {
+  return root.agent === 'claude_code' ? new ClaudeParser(info.session, info.parent, saved, key) : new CodexParser(info.session, saved, key)
 }
 
 export interface ReaderOptions {
@@ -430,7 +430,7 @@ export class AgentReader {
       return
     }
     const saved = info.compressed && !this.tails.has(file) ? null : (row?.state ?? null)
-    const parser = makeParser(root, info, saved)
+    const parser = makeParser(root, info, saved, this.store.fingerprintKey())
     const prior = row?.state ? (JSON.parse(row.state) as { _readCounts?: ParseCounts; _drift?: number }) : null
     const priorCounts: ParseCounts = prior?._readCounts ?? emptyCounts()
     // Agent output since the file's last recognized turn start; rows written before this was kept fall back to lifetime counts.

@@ -1,11 +1,37 @@
 // Agent session tables: named migrations over new tables only, written through the capture store's connection.
 
-import { rmSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { chmodSync, linkSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { threadId } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
-import type { Agent, AgentRecord, ParseCounts } from './types.ts'
+import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
+const KEY_FILE = 'agent-fingerprint.key'
+const KEY_BYTES = 32
+
+// The install's message fingerprint key, kept beside the database and readable only by its owner.
+export function loadFingerprintKey(dataDir: string): Buffer {
+  const file = path.join(dataDir, KEY_FILE)
+  const tmp = `${file}.${process.pid}.${threadId}`
+  try {
+    // Linked in whole, so a concurrent reader never sees a partly written key.
+    writeFileSync(tmp, randomBytes(KEY_BYTES), { mode: 0o600 })
+    linkSync(tmp, file)
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'EEXIST') throw err
+  } finally {
+    rmSync(tmp, { force: true })
+  }
+  let key = readFileSync(file)
+  if (key.length !== KEY_BYTES) {
+    key = randomBytes(KEY_BYTES)
+    writeFileSync(file, key, { mode: 0o600 })
+  }
+  if (process.platform !== 'win32' && (statSync(file).mode & 0o077) !== 0) chmodSync(file, 0o600)
+  return key
+}
 
 // The first read's staging copy holds agent metadata outside the live tables, so it must not outlive a run.
 export function removeStaging(dataDir: string): void {
@@ -252,6 +278,7 @@ export class AgentStore {
   private readonly db: Database.Database
   private readonly now: () => number
   private readonly stmts = new Map<string, Database.Statement>()
+  private key: Buffer | null = null
 
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
@@ -338,12 +365,28 @@ export class AgentStore {
     return this.stmt('SELECT 1 FROM agent_sources WHERE root = ? AND turnless = 1 LIMIT 1').get(root) !== undefined
   }
 
-  // Everything recorded from one session's logs; its read positions stay, so the session is not read in again.
+  private get dataDir(): string | null {
+    return this.db.name && this.db.name !== ':memory:' ? path.dirname(this.db.name) : null
+  }
+
+  fingerprintKey(): Buffer {
+    const dir = this.dataDir
+    this.key ??= dir === null ? processKey : loadFingerprintKey(dir)
+    return this.key
+  }
+
+  // Everything recorded from one session's logs, with the message fingerprints kept in its read state; its read
+  // positions stay, so the session is not read in again.
   deleteSession(agent: Agent, session: string): void {
     this.db.transaction(() => {
       for (const table of ['agent_events', 'agent_turns', 'agent_sessions']) this.db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
+      this.db.prepare(`UPDATE agent_sources SET state = CASE agent
+          WHEN 'codex' THEN json_remove(json_set(state, '$.recentUsers', json('[]')), '$.lastUser')
+          ELSE json_set(state, '$.queued', json('{}')) END
+        WHERE agent = ? AND session_id = ? AND state IS NOT NULL`).run(agent, session)
     })()
-    if (this.db.name && this.db.name !== ':memory:') removeStaging(path.dirname(this.db.name))
+    const dir = this.dataDir
+    if (dir !== null) removeStaging(dir)
   }
 
   hasSources(): boolean {

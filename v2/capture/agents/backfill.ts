@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
-import { AgentStore, removeStaging, STAGING_FILE } from './store.ts'
+import { AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE } from './store.ts'
 import { addCounts } from './types.ts'
 
 export interface BackfillStats {
@@ -152,6 +152,7 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
   clean()
   const filesToRead = await listLogs(roots)
   if (filesToRead.length === 0) return { merged: true, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }
+  loadFingerprintKey(dataDir)
   await prepareWorker()
   const worker = new BackfillWorker(staging, roots, log)
   try {
