@@ -49,6 +49,8 @@ const exec = promisify(execFile)
 let compiled: Promise<unknown> | null = null
 
 const SLICE_BYTES = 4 << 20
+// A slice reads at most SLICE_BYTES and takes about 0.1 s; one still running after this is hung.
+const SLICE_TIMEOUT_MS = 60_000
 
 async function prepareWorker(): Promise<void> {
   if (!source) return
@@ -82,10 +84,23 @@ class BackfillWorker {
     }))
   }
 
-  slice(files: string[], budget: number): Promise<BackfillStats | null> {
+  slice(files: string[], budget: number, timeoutMs = Infinity): Promise<BackfillStats | 'timeout' | null> {
     if (this.failed) return Promise.resolve(null)
     return new Promise((resolve) => {
-      this.pending = { resolve }
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            this.pending = null
+            this.failed = true
+            void this.worker.terminate()
+            void this.exited.then(() => resolve('timeout'))
+          }, timeoutMs)
+        : null
+      this.pending = {
+        resolve: (stats) => {
+          if (timer) clearTimeout(timer)
+          resolve(stats)
+        },
+      }
       this.worker.postMessage({ files, budget })
     })
   }
@@ -99,7 +114,10 @@ class BackfillWorker {
 export async function runChild(staging: string, roots: PlainRoot[], files: string[], budget: number, log: (msg: string) => void): Promise<BackfillStats | null> {
   await prepareWorker()
   const worker = new BackfillWorker(staging, roots, log)
-  try { return await worker.slice(files, budget) }
+  try {
+    const stats = await worker.slice(files, budget)
+    return stats === 'timeout' ? null : stats
+  }
   finally { await worker.close() }
 }
 
@@ -125,6 +143,8 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 export function mergeStaging(db: Database.Database, staging: string): void {
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
+    // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
+    if (db.prepare(`SELECT 1 FROM pragma_table_info('agent_sources', 'staging') WHERE name = 'turnless'`).get() === undefined) return
     db.transaction(() => {
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
@@ -146,7 +166,7 @@ export function mergeStaging(db: Database.Database, staging: string): void {
   }
 }
 
-export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void, sliceBytes = SLICE_BYTES): Promise<BackfillResult> {
+export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void, sliceBytes = SLICE_BYTES, sliceTimeoutMs = SLICE_TIMEOUT_MS): Promise<BackfillResult> {
   const staging = path.join(dataDir, STAGING_FILE)
   const clean = () => removeStaging(dataDir)
   clean()
@@ -162,7 +182,11 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
     const peaks: number[] = []
     let maxSlice = 0
     for (let remaining = files.length > 0; remaining; ) {
-      const child = await worker.slice(files, sliceBytes)
+      const child = await worker.slice(files, sliceBytes, sliceTimeoutMs)
+      if (child === 'timeout') {
+        log(`agent backfill slice exceeded ${sliceTimeoutMs} ms; live reader takes over remaining logs`)
+        break
+      }
       if (!child) return { merged: false, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }
       peaks.push(child.peak_rss_mb)
       maxSlice = Math.max(maxSlice, child.bytes_read ?? 0)

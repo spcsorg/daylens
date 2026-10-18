@@ -806,6 +806,25 @@ test('a complete first line longer than a slice is read in bounded pieces and sl
   r.store.close()
 })
 
+test('a slice that does not answer in time hands the history to the live reader, which then starts', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'slow-1' }), claude.assistant(c, sec(2), 'end_turn')))
+  const logs: string[] = []
+  let result: Awaited<ReturnType<typeof backfill>> | null = null
+  const reader = r.reader({ backfill: async (roots) => (result = await backfill(r.store.database, r.data, roots, (s) => logs.push(s), 4 << 20, 1)).merged })
+  await reader.start()
+  assert.ok(logs.some((s) => s.includes('exceeded 1 ms') && s.includes('live reader')), logs.join('\n'))
+  assert.equal((result as Awaited<ReturnType<typeof backfill>> | null)?.merged, true)
+  assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'slow-1'"), 1)
+  appendFileSync(file, lines(claude.prompt(c, sec(10), 'more', { uuid: 'slow-2' }), claude.assistant(c, sec(12), 'end_turn')))
+  await waitFor(() => r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'slow-2'") === 1)
+  await reader.stop()
+  assert.equal(existsSync(path.join(r.data, 'agent-backfill.sqlite')), false)
+  r.store.close()
+})
+
 test('source capture uses emitted JavaScript for its backfill worker', async () => {
   const r = rig()
   const c = claudeCtx()
