@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { Normalizer, Privacy } from '../../capture/normalize.ts'
+import { Normalizer, Privacy, type OrderingPoint } from '../../capture/normalize.ts'
 import type { Line } from '../../capture/protocol.ts'
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
@@ -15,11 +15,11 @@ export function tmpDir(): string {
 }
 
 /** A store, storage and normalizer wired the way the capture service wires them, on a clock the test moves. */
-export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean; onError?: (code: string) => void } = {}) {
+export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean; onError?: (code: string) => void; orderingPoint?: () => Promise<OrderingPoint | null> } = {}) {
   const clock = { t: T0, boot: 'boot-test', monoUs: null as number | null, bootIdentity: 'kernel' as 'kernel' | 'clock' }
   const now = () => clock.t
   const store = new Store(dir, { now })
-  const storage = new Storage(store, dir, { now, holdDeletions: opts.holdDeletions, onError: opts.onError, orderingPoint: () => ({ boot: clock.boot, mono_us: clock.monoUs ?? clock.t * 1000, boot_identity: clock.bootIdentity }) })
+  const storage = new Storage(store, dir, { now, holdDeletions: opts.holdDeletions, onError: opts.onError, orderingPoint: opts.orderingPoint ?? (() => ({ boot: clock.boot, mono_us: clock.monoUs ?? clock.t * 1000, boot_identity: clock.bootIdentity })) })
   let normalizer = new Normalizer(store, new Privacy(store.exclusions()))
   storage.attachCapture({
     interrupt: () => normalizer.interrupt({ wall_ms: clock.t, mono_us: null, boot: null }),

@@ -156,7 +156,7 @@ for (const [name, action] of Object.entries(privacyActions)) {
   for (const ms of [50, 1300]) test(`user ${name} ${ms === 50 ? 'waits for a contended lock' : 'fails without a privacy change beyond the existing timeout'}`, async () => {
     const r = rig()
     if (name === 'removeExclusion') r.storage.addExclusion(exclusion)
-    if (name === 'stopKeepingTitles') r.storage.keepTitles(notes)
+    if (name === 'stopKeepingTitles') await r.storage.keepTitles(notes)
     r.store.insertObservation(row(T0, 'com.example.editor', 'Queued before privacy action'))
     const before = r.store.query(`SELECT * FROM change_log`)
     const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms } })
@@ -165,14 +165,14 @@ for (const [name, action] of Object.entries(privacyActions)) {
       await new Promise((resolve) => worker.once('message', resolve))
       const start = performance.now()
       if (ms === 50) {
-        const result = action(r)
+        const result = await action(r)
         if (name === 'delete') await (result as ReturnType<typeof r.storage.deleteLast>).done
         assert.ok(performance.now() - start >= 30, 'waited for the held lock')
         assert.ok(r.store.query(`SELECT * FROM change_log`).length > before.length)
         if (name === 'pause') assert.ok(r.storage.paused())
         assert.equal(r.store.storeHealth().pendingOps, 0)
       } else {
-        assert.throws(() => action(r), /storage is failing; nothing was changed/)
+        await assert.rejects(async () => action(r), /storage is failing; nothing was changed/)
         const elapsed = performance.now() - start
         assert.ok(elapsed >= 900 && elapsed < 1250, `bounded wait took ${elapsed.toFixed(1)} ms`)
         assert.deepEqual(r.store.query(`SELECT * FROM change_log`), before)

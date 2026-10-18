@@ -137,7 +137,10 @@ export class Storage {
   readonly derived: Derived
   readonly rules: Rules
   private readonly now: () => number
-  private readonly orderingPoint: () => OrderingPoint | null
+  private readonly orderingPoint: () => OrderingPoint | null | Promise<OrderingPoint | null>
+  // The current boot as the helper names it; until it is read, titles kept in an earlier boot stay withheld.
+  private bootPoint: OrderingPoint | null = null
+  private bootRead: Promise<void> | null = null
   private capture: CaptureControl | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
@@ -149,7 +152,7 @@ export class Storage {
   private readonly holdDeletions: boolean
 
   /** holdDeletions: commit each deletion's fence but leave its removal for the next start (crash tests). */
-  constructor(store: Store, dir: string, opts: { now?: () => number; orderingPoint?: () => OrderingPoint | null; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
+  constructor(store: Store, dir: string, opts: { now?: () => number; orderingPoint?: () => OrderingPoint | null | Promise<OrderingPoint | null>; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
     this.holdDeletions = opts.holdDeletions ?? false
     this.store = store
     this.db = store.database
@@ -693,14 +696,49 @@ export class Storage {
   }
 
   private installPrivacy(): void {
-    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, this.keptTitleApps(), this.keptTitleApps().length ? this.orderingPoint() : null))
+    const kept = this.keptTitleApps()
+    if (kept.length > 0 && this.bootPoint === null) this.readBootPoint()
+    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, kept, kept.length > 0 ? this.bootPoint : null))
+  }
+
+  private async readOrdering(): Promise<OrderingPoint | null> {
+    try {
+      return await this.orderingPoint()
+    } catch {
+      this.onError('activation_clock_unavailable')
+      return null
+    }
+  }
+
+  // Retried with backoff until it succeeds; kept titles come back at once, in this session.
+  private readBootPoint(): void {
+    if (this.bootRead !== null || this.stopped) return
+    this.bootRead = (async () => {
+      for (let wait = 1000; !this.stopped; wait = Math.min(wait * 2, 60_000)) {
+        const p = await this.readOrdering()
+        if (this.stopped) return
+        if (p !== null) return this.learnBoot(p)
+        await new Promise<void>((r) => setTimeout(r, wait).unref())
+      }
+    })().finally(() => {
+      this.bootRead = null
+    })
+  }
+
+  private learnBoot(p: OrderingPoint): void {
+    if (this.bootPoint !== null) return
+    this.bootPoint = p
+    if (this.keptTitleApps().length === 0) return
+    this.installPrivacy()
+    this.capture?.interrupt()
   }
 
   keptTitleApps(): KeptTitleApp[] {
     return (this.getSetting<KeptTitleApp[]>('kept_title_apps') ?? []).map((a) => ({ ...a, id: canonicalKeptTitleId(a.id) }))
   }
 
-  keepTitles(app: AppIdentity): string {
+  /** Waits for the helper's ordering point, however slowly it starts; refuses only if the helper cannot supply one. */
+  async keepTitles(app: AppIdentity): Promise<string> {
     if (knownBrowser(app)) throw new KeepTitlesRefused('browser')
     if (new Privacy([]).classify(app).title === 'allowed') throw new KeepTitlesRefused('already_kept')
     if (app.registered_browser) throw new KeepTitlesRefused('opens_web_links')
@@ -709,18 +747,19 @@ export class Storage {
     const entry = keptTitleIdentity(app)
     if (!entry) throw new KeepTitlesRefused('unsigned')
     if (this.keptTitleApps().some((a) => a.id === entry.id && a.activation)) return entry.id
-    return this.privacyWrite(true, () => {
-      const activation = this.orderingPoint()
-      if (!activation || activation.boot_identity !== 'kernel') throw new KeepTitlesRefused('ordering_unavailable')
-      return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
-        const apps = this.keptTitleApps()
-        this.putSetting('kept_title_apps', [...apps.filter((a) => a.id !== entry.id), { ...entry, effective_from_wall_ms: this.now(), activation }])
-        return entry.id
-      }, () => {
-        this.installPrivacy()
-        this.capture?.interrupt()
-      })
-    })
+    const activation = await this.readOrdering()
+    if (!activation || activation.boot_identity !== 'kernel') throw new KeepTitlesRefused('ordering_unavailable')
+    if (this.stopped) throw new Error('storage stopped')
+    this.learnBoot(activation)
+    if (this.keptTitleApps().some((a) => a.id === entry.id && a.activation)) return entry.id
+    return this.privacyWrite(true, () => this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
+      const apps = this.keptTitleApps()
+      this.putSetting('kept_title_apps', [...apps.filter((a) => a.id !== entry.id), { ...entry, effective_from_wall_ms: this.now(), activation }])
+      return entry.id
+    }, () => {
+      this.installPrivacy()
+      this.capture?.interrupt()
+    }))
   }
 
   stopKeepingTitles(id: string): void {
