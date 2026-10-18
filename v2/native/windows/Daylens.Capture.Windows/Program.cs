@@ -30,7 +30,13 @@ internal static unsafe class Program
         if (args.Contains("--ordering-point"))
         {
             var boot = Clock.BootId();
-            Console.Write(System.Text.Json.JsonSerializer.Serialize(new { boot, mono_us = Clock.MonoUs(), boot_identity = BootIdentity.IsFromKernel(boot) ? "kernel" : "clock" }));
+            using var writer = new System.Text.Json.Utf8JsonWriter(Console.OpenStandardOutput());
+            writer.WriteStartObject();
+            writer.WriteString("boot", boot);
+            writer.WriteNumber("mono_us", Clock.MonoUs());
+            writer.WriteString("boot_identity", BootIdentity.IsFromKernel(boot) ? "kernel" : "clock");
+            writer.WriteEndObject();
+            writer.Flush();
             return 0;
         }
         _heartbeatS = IntArg(args, "--heartbeat-s", 15, 3600);
