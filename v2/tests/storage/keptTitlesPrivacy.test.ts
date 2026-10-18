@@ -99,3 +99,50 @@ test('delayed titles before activation stay off disk and out of observations and
     again.close()
   }
 })
+
+
+test('a wall-clock rollback cannot admit a queued pre-consent title, including across sleep', () => {
+  const r = rig()
+  try {
+    r.clock.t = T0
+    r.clock.monoUs = 200_000
+    r.storage.keepTitles(notes)
+    const queued = focus(notes, 'RollbackConsentCanary ⠋', T0 + 60 * MIN)
+    queued.t.mono_us = 100_000
+    r.feed(queued)
+    const afterSleep = focus(notes, 'After sleep', T0 - MIN, 'window_changed', 'awake')
+    afterSleep.t.mono_us = 300_000
+    r.feed(afterSleep)
+    assert.deepEqual(r.q('SELECT title, title_raw FROM observations ORDER BY id'), [
+      { title: null, title_raw: null }, { title: 'After sleep', title_raw: null },
+    ])
+    assert.deepEqual(r.storage.search('RollbackConsentCanary'), [])
+    assert.deepEqual(diskContains(r.dir, 'RollbackConsentCanary'), [])
+  } finally { r.close() }
+})
+
+test('a reboot after activation admits only events from the proven current kernel boot', () => {
+  const r = rig()
+  try {
+    r.storage.keepTitles(notes)
+    r.clock.boot = 'boot-next'
+    r.clock.monoUs = 1000
+    r.reopenNormalizer()
+    const next = focus(notes, 'After reboot', T0 - MIN)
+    next.boot = 'boot-next'
+    next.t.mono_us = 2000
+    r.feed(next)
+    const unknown = focus(notes, 'UnprovenBootCanary', T0 + MIN, 'window_changed', 'unknown')
+    unknown.boot = 'boot-unseen'
+    unknown.t.mono_us = 5000
+    r.feed(unknown)
+    assert.deepEqual(r.q('SELECT title FROM observations ORDER BY id'), [{ title: 'After reboot' }, { title: null }])
+    assert.deepEqual(diskContains(r.dir, 'UnprovenBootCanary'), [])
+    r.clock.bootIdentity = 'clock'
+    r.reopenNormalizer()
+    const uncertain = focus(notes, 'UncertainBootCanary', T0 + 2 * MIN)
+    uncertain.boot = 'boot-next'
+    r.feed(uncertain)
+    assert.equal(r.q<{ title: string | null }>('SELECT title FROM observations ORDER BY id DESC')[0]!.title, null)
+  } finally { r.close() }
+})

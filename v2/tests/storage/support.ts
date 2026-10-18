@@ -16,10 +16,10 @@ export function tmpDir(): string {
 
 /** A store, storage and normalizer wired the way the capture service wires them, on a clock the test moves. */
 export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean } = {}) {
-  const clock = { t: T0 }
+  const clock = { t: T0, boot: 'boot-test', monoUs: null as number | null, bootIdentity: 'kernel' as 'kernel' | 'clock' }
   const now = () => clock.t
   const store = new Store(dir, { now })
-  const storage = new Storage(store, dir, { now, holdDeletions: opts.holdDeletions })
+  const storage = new Storage(store, dir, { now, holdDeletions: opts.holdDeletions, orderingPoint: () => ({ boot: clock.boot, mono_us: clock.monoUs ?? clock.t * 1000, boot_identity: clock.bootIdentity }) })
   let normalizer = new Normalizer(store, new Privacy(store.exclusions()))
   storage.attachCapture({
     interrupt: () => normalizer.interrupt({ wall_ms: clock.t, mono_us: null, boot: null }),
@@ -42,7 +42,7 @@ export function rig(dir = tmpDir(), opts: { holdDeletions?: boolean } = {}) {
       return normalizer
     },
     reopenNormalizer: () => {
-      normalizer = new Normalizer(store, new Privacy(store.exclusions(), undefined, storage.keptTitleApps()))
+      normalizer = new Normalizer(store, new Privacy(store.exclusions(), undefined, storage.keptTitleApps(), { boot: clock.boot, mono_us: clock.monoUs ?? clock.t * 1000, boot_identity: clock.bootIdentity }))
       return normalizer
     },
     feed,

@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from './normalize.ts'
 import { defaultDataDir, Store } from './store.ts'
 import { Supervisor } from './supervisor.ts'
+import { readOrderingPoint } from './ordering.ts'
 import { Storage } from '../storage/index.ts'
 
 const { values } = parseArgs({
@@ -29,7 +30,10 @@ const heartbeatS = Number(values['heartbeat-s'])
 const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
 const dataDir = values['data-dir'] ?? defaultDataDir()
 const store = new Store(dataDir, { onError: (code) => log(`storage error code=${code}`) })
-const storage = new Storage(store, dataDir, { onError: (code) => log(`storage error code=${code}`) })
+const storage = new Storage(store, dataDir, {
+  onError: (code) => log(`storage error code=${code}`),
+  orderingPoint: () => readOrderingPoint(values.helper!, values['helper-arg'] ?? [], log),
+})
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
 const supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,

@@ -2,7 +2,7 @@
 // writer; every other reader opens the database read-only and follows the change log (changes.ts).
 import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
-import { keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type ObservationRow } from '../capture/normalize.ts'
+import { keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type OrderingPoint, type ObservationRow } from '../capture/normalize.ts'
 import type { AppIdentity } from '../capture/protocol.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
@@ -101,7 +101,7 @@ export interface DeletionHandle {
 }
 
 export class KeepTitlesRefused extends Error {
-  readonly reason: 'opens_web_links' | 'browser' | 'browser_engine' | 'engine_unknown' | 'unsigned' | 'already_kept'
+  readonly reason: 'opens_web_links' | 'browser' | 'browser_engine' | 'engine_unknown' | 'unsigned' | 'already_kept' | 'ordering_unavailable'
 
   constructor(reason: KeepTitlesRefused['reason']) {
     const messages = {
@@ -110,6 +110,7 @@ export class KeepTitlesRefused extends Error {
       browser_engine: "Daylens can't keep titles for browser engines, since they can show private browsing.",
       engine_unknown: "Daylens can't verify whether this app can show private browsing.",
       unsigned: "Daylens can't verify this app's signed identity.",
+      ordering_unavailable: "Daylens can't verify the capture clock. Try keeping titles again when capture is available.",
       already_kept: 'Daylens already keeps titles for this app.',
     }
     super(messages[reason])
@@ -136,6 +137,7 @@ export class Storage {
   readonly derived: Derived
   readonly rules: Rules
   private readonly now: () => number
+  private readonly orderingPoint: () => OrderingPoint | null
   private capture: CaptureControl | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private retentionTimer: ReturnType<typeof setTimeout> | null = null
@@ -147,11 +149,12 @@ export class Storage {
   private readonly holdDeletions: boolean
 
   /** holdDeletions: commit each deletion's fence but leave its removal for the next start (crash tests). */
-  constructor(store: Store, dir: string, opts: { now?: () => number; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
+  constructor(store: Store, dir: string, opts: { now?: () => number; orderingPoint?: () => OrderingPoint | null; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
     this.holdDeletions = opts.holdDeletions ?? false
     this.store = store
     this.db = store.database
     this.now = opts.now ?? Date.now
+    this.orderingPoint = opts.orderingPoint ?? (() => null)
     this.onError = opts.onError ?? (() => {})
     this.db.pragma('foreign_keys = ON')
     // Freed pages are overwritten, so deleted text does not linger in the file.
@@ -659,7 +662,7 @@ export class Storage {
   }
 
   private installPrivacy(): void {
-    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, this.keptTitleApps()))
+    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, this.keptTitleApps(), this.keptTitleApps().length ? this.orderingPoint() : null))
   }
 
   keptTitleApps(): KeptTitleApp[] {
@@ -674,11 +677,13 @@ export class Storage {
     if (app.engine === 'unknown') throw new KeepTitlesRefused('engine_unknown')
     const entry = keptTitleIdentity(app)
     if (!entry) throw new KeepTitlesRefused('unsigned')
-    if (this.keptTitleApps().some((a) => a.id === entry.id)) return entry.id
+    if (this.keptTitleApps().some((a) => a.id === entry.id && a.activation)) return entry.id
     this.flushOrThrow()
+    const activation = this.orderingPoint()
+    if (!activation || activation.boot_identity !== 'kernel') throw new KeepTitlesRefused('ordering_unavailable')
     return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
       const apps = this.keptTitleApps()
-      if (!apps.some((a) => a.id === entry.id)) this.putSetting('kept_title_apps', [...apps, { ...entry, effective_from_wall_ms: this.now() }])
+      this.putSetting('kept_title_apps', [...apps.filter((a) => a.id !== entry.id), { ...entry, effective_from_wall_ms: this.now(), activation }])
       return entry.id
     }, () => {
       this.installPrivacy()

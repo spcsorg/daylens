@@ -16,6 +16,13 @@ func intArg(_ name: String, _ fallback: Int, max: Int) -> Int {
   return v
 }
 
+if CommandLine.arguments.contains("--ordering-point") {
+  let boot = bootIdentity()
+  let value: [String: Any] = ["boot": boot.id, "mono_us": Clock.monoUs(), "boot_identity": boot.source]
+  FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: value))
+  exit(0)
+}
+
 let heartbeatS = intArg("--heartbeat-s", 15, max: 3600)
 let idleThresholdS = intArg("--idle-threshold-s", 120, max: 86400)
 let reconcileS = intArg("--reconcile-s", 60, max: 86400)

@@ -27,6 +27,12 @@ internal static unsafe class Program
 
     static int Main(string[] args)
     {
+        if (args.Contains("--ordering-point"))
+        {
+            var boot = Clock.BootId();
+            Console.Write(System.Text.Json.JsonSerializer.Serialize(new { boot, mono_us = Clock.MonoUs(), boot_identity = BootIdentity.IsFromKernel(boot) ? "kernel" : "clock" }));
+            return 0;
+        }
         _heartbeatS = IntArg(args, "--heartbeat-s", 15, 3600);
         _idleThresholdS = IntArg(args, "--idle-threshold-s", 120, 86400);
         _reconcileS = IntArg(args, "--reconcile-s", 60, 86400);
