@@ -56,8 +56,7 @@ public static class Engines
         }
     }
 
-    /// Packaged apps: their install folder is scanned like any other app's. A manifest that declares http and
-    /// https makes it a browser outright; a missing declaration proves nothing, so the scan decides.
+    // A package declaring either web scheme is a browser; otherwise its install-folder scan decides.
     public static Engine ForPackage(bool? declaresWebProtocols, Engine scannedInstallFolder) =>
         declaresWebProtocols == true ? Engine.Browser : scannedInstallFolder;
 }
