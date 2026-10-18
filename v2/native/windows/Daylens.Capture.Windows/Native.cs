@@ -97,4 +97,10 @@ internal static unsafe partial class Native
 
     [LibraryImport("shlwapi.dll", EntryPoint = "SHLoadIndirectString", StringMarshalling = StringMarshalling.Utf16)]
     public static partial int SHLoadIndirectString(string source, char* outBuf, uint cch, nint reserved);
+
+    [LibraryImport("shlwapi.dll", EntryPoint = "AssocQueryStringW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int AssocQueryString(uint flags, uint kind, string association, string? extra, char* output, ref uint length);
+
+    [LibraryImport("advapi32.dll")]
+    public static partial int RegNotifyChangeKeyValue(nint key, [MarshalAs(UnmanagedType.Bool)] bool subtree, uint filter, nint signal, [MarshalAs(UnmanagedType.Bool)] bool asynchronous);
 }

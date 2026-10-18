@@ -4,6 +4,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -13,6 +14,7 @@
   <ItemGroup>
     <Compile Include="../Daylens.Capture.Windows/Native.cs" Link="Windows/Native.cs" />
     <Compile Include="../Daylens.Capture.Windows/Platform.cs" Link="Windows/Platform.cs" />
+    <Compile Include="../Daylens.Capture.Windows/AssociationChanges.cs" Link="Windows/AssociationChanges.cs" />
     <Compile Include="../Daylens.Capture.Windows/Resolver.cs" Link="Windows/Resolver.cs" />
   </ItemGroup>
   <ItemGroup>

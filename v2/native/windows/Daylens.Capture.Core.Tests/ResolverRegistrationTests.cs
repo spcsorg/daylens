@@ -16,6 +16,7 @@ public sealed class WindowsTheoryAttribute : TheoryAttribute
 }
 
 [SupportedOSPlatform("windows")]
+[Collection("RegistryFixture")]
 public class ResolverRegistrationTests
 {
     static void Set(Resolver resolver, string field, object value) =>

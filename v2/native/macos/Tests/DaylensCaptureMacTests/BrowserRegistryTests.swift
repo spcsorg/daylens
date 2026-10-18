@@ -1,4 +1,5 @@
 import Foundation
+import CoreServices
 import XCTest
 @testable import DaylensCaptureMac
 
@@ -37,6 +38,33 @@ final class BrowserRegistryTests: XCTestCase {
     XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
     try writeSchemes(["notes"], to: url)
     XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+  }
+
+  func testMissingAndUnreadableBundlesWithholdTitles() throws {
+    let registry = BrowserRegistry()
+    XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: nil, bundleId: "com.example.notes"))
+    let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".app")
+    XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: missing, bundleId: "com.example.notes"))
+    let url = try bundle(["notes"])
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data("unreadable plist".utf8).write(to: url.appendingPathComponent("Contents/Info.plist"))
+    XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+  }
+
+  func testLaunchServicesOnlyRegistrationAndChangesAreSeen() throws {
+    var ids: [String] = []
+    let registry = BrowserRegistry(handlers: { _ in ids })
+    let url = try bundle(["notes"])
+    defer { try? FileManager.default.removeItem(at: url) }
+    let registered = try XCTUnwrap((LSCopyAllHandlersForURLScheme("https" as CFString)?.takeRetainedValue() as? [String])?.first)
+    XCTAssertTrue(BrowserRegistry().isRegisteredBrowser(bundleURL: url, bundleId: registered))
+    XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+    ids = ["com.example.notes"]
+    XCTAssertTrue(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+    ids = []
+    XCTAssertFalse(registry.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
+    let failed = BrowserRegistry(handlers: { _ in nil })
+    XCTAssertTrue(failed.isRegisteredBrowser(bundleURL: url, bundleId: "com.example.notes"))
   }
 
 }

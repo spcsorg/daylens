@@ -182,6 +182,33 @@ public static class StoreApps
 
 public static class Browsers
 {
+    public static string ExecutableKey(string path) => System.Text.RegularExpressions.Regex.Replace(
+        path.Replace('\\', '/'), @"/app-\d+\.\d+\.\d+(?:\.\d+)*(?:[-+][a-z0-9.-]+)?/(?=[^/]+\.exe$)", "/app-*/", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    public static IEnumerable<string> CommandTargets(string command)
+    {
+        var exe = CommandExe(command);
+        if (string.IsNullOrWhiteSpace(exe)) yield break;
+        yield return exe;
+        var normalized = exe.Replace('\\', '/');
+        var slash = normalized.LastIndexOf('/');
+        if (!normalized[(slash + 1)..].Equals("Update.exe", StringComparison.OrdinalIgnoreCase)) yield break;
+        var target = System.Text.RegularExpressions.Regex.Match(command, @"(?:^|\s)--processStart(?:AndWait)?\s+(?:""([^""]+)""|(\S+))", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!target.Success) yield break;
+        var name = (target.Groups[1].Success ? target.Groups[1].Value : target.Groups[2].Value).Replace('\\', '/');
+        if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) yield break;
+        if (name.Contains('/'))
+        {
+            if (name.Length > 2 && name[1] == ':') yield return name;
+            else yield return normalized[..(slash + 1)] + name;
+        }
+        else
+        {
+            yield return normalized[..(slash + 1)] + name;
+            yield return normalized[..(slash + 1)] + "app-*/" + name;
+        }
+    }
+
     /// The executable from a shell\open\command value such as "C:\..\chrome.exe" --single-argument %1.
     public static string? CommandExe(string? command)
     {

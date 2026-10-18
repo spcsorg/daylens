@@ -1,5 +1,6 @@
 import AppKit
 import CaptureCore
+import CoreServices
 import Darwin
 import Foundation
 import Security
@@ -55,27 +56,32 @@ func diag(_ code: String, _ value: String = "1") {
 }
 
 /// Whether an app registers to open http or https links; shared code decides what it means.
-/// Keyed on the bundle's current files, and read straight from Info.plist (Bundle caches it), so an update is seen.
 final class BrowserRegistry {
-  private let lock = NSLock()
-  private var cache: [BundleStamp: Bool] = [:]
+  private let handlers: (String) -> [String]?
+
+  init(handlers: @escaping (String) -> [String]? = { scheme in
+    LSCopyAllHandlersForURLScheme(scheme as CFString)?.takeRetainedValue() as? [String]
+  }) { self.handlers = handlers }
 
   func isRegisteredBrowser(bundleURL: URL?, bundleId: String?) -> Bool {
-    guard let url = bundleURL, let stamp = BundleStamp.of(url) else { return false }
-    lock.lock()
-    if let v = cache[stamp] { lock.unlock(); return v }
-    lock.unlock()
-    var result = false
-    let plist = url.appendingPathComponent("Contents/Info.plist")
-    if let info = NSDictionary(contentsOf: plist) as? [String: Any], let types = info["CFBundleURLTypes"] as? [[String: Any]] {
-      let schemes = Set(types.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] }.map { $0.lowercased() })
-      result = schemes.contains("http") || schemes.contains("https")
+    guard let url = bundleURL,
+          let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) as? [String: Any] else {
+      diag("browser_registry_unavailable")
+      return true
     }
-    lock.lock()
-    if cache.count > 512 { cache.removeAll() }
-    cache[stamp] = result
-    lock.unlock()
-    return result
+    if let raw = info["CFBundleURLTypes"] {
+      guard let types = raw as? [[String: Any]] else { diag("browser_registry_unavailable"); return true }
+      for type in types {
+        guard let schemes = type["CFBundleURLSchemes"] as? [String] else { diag("browser_registry_unavailable"); return true }
+        if schemes.contains(where: { ["http", "https"].contains($0.lowercased()) }) { return true }
+      }
+    }
+    guard let id = bundleId else { diag("browser_registry_unavailable"); return true }
+    for scheme in ["http", "https"] {
+      guard let ids = handlers(scheme) else { diag("browser_registry_unavailable"); return true }
+      if ids.contains(where: { $0.caseInsensitiveCompare(id) == .orderedSame }) { return true }
+    }
+    return false
   }
 }
 

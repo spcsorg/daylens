@@ -24,6 +24,11 @@ internal sealed unsafe class Resolver
     // Packaged browsers declare http/https in their manifest instead of a registry command.
     readonly Dictionary<string, bool> _webPackages = new(StringComparer.OrdinalIgnoreCase);
     HashSet<string> _browserExes = new(StringComparer.OrdinalIgnoreCase);
+    bool _browsersLoaded, _browserRegistryComplete;
+    Func<bool>? _registrationChanges;
+    Action? _refreshWatches;
+    Action<RegistryKey, string>? _watchCapabilities;
+    Func<string, string?> _effectiveCommand = EffectiveCommand;
     long _busySinceMs;
     long _generation;
     (AppInfo App, WindowInfo Window)? _last;
@@ -33,6 +38,19 @@ internal sealed unsafe class Resolver
         _emitter = emitter;
         new Thread(() =>
         {
+            try
+            {
+                var changes = new AssociationChanges();
+                _registrationChanges = changes.Poll;
+                _refreshWatches = changes.Refresh;
+                _watchCapabilities = changes.Watch;
+                LoadBrowsers();
+            }
+            catch
+            {
+                Diag.Write("browser_registry_watch_failed");
+                _registrationChanges = () => throw new InvalidOperationException();
+            }
             Loop();
         }) { IsBackground = true, Name = "daylens.capture.resolver" }.Start();
     }
@@ -311,77 +329,96 @@ internal sealed unsafe class Resolver
 
     bool IsRegisteredBrowser(string exePath)
     {
-        LoadBrowsers();
-        return _browserExes.Contains(exePath);
-    }
-
-    // Apps registered for either http or https, plus the StartMenuInternet list.
-    void LoadBrowsers()
-    {
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
-        {
-            foreach (var exe in Each(() => StartMenuInternet(root))) found.Add(exe);
-            foreach (var exe in Each(() => UrlHandlers(root))) found.Add(exe);
-        }
-        _browserExes = found;
-    }
-
-    // One bad registry entry must not hide the others.
-    static IEnumerable<string> Each(Func<IEnumerable<string?>> source)
-    {
-        var list = new List<string>();
         try
         {
-            foreach (var s in source())
-                if (s is not null) list.Add(s);
-        }
-        catch { Diag.Write("browser_registry_failed"); }
-        return list;
-    }
-
-    static IEnumerable<string?> StartMenuInternet(RegistryKey root)
-    {
-        using var smi = root.OpenSubKey(@"SOFTWARE\Clients\StartMenuInternet");
-        if (smi is null) yield break;
-        foreach (var name in smi.GetSubKeyNames())
-        {
-            string? exe = null;
-            try
+            if (!_browsersLoaded || (_registrationChanges?.Invoke() ?? true))
             {
-                using var cmd = smi.OpenSubKey($@"{name}\shell\open\command");
-                exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
+                LoadBrowsers();
+                if (_registrationChanges?.Invoke() == true) { _browsersLoaded = false; return true; }
             }
-            catch { Diag.Write("browser_registry_entry_failed"); }
-            yield return exe;
+            return !_browserRegistryComplete || _browserExes.Contains(Browsers.ExecutableKey(exePath));
         }
+        catch { Diag.Write("browser_registry_failed"); return true; }
     }
 
-    static IEnumerable<string?> UrlHandlers(RegistryKey root)
+    void LoadBrowsers()
     {
-        using var apps = root.OpenSubKey(@"SOFTWARE\RegisteredApplications");
-        if (apps is null) yield break;
-        foreach (var app in apps.GetValueNames())
+        _browsersLoaded = false;
+        _refreshWatches?.Invoke();
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _browserRegistryComplete = true;
+        void Read(Action action)
         {
+            try { action(); }
+            catch { _browserRegistryComplete = false; Diag.Write("browser_registry_failed"); }
+        }
+        void AddCommand(string? command)
+        {
+            if (command is null) return;
+            var targets = Browsers.CommandTargets(Environment.ExpandEnvironmentVariables(command)).ToArray();
+            if (targets.Length == 0) throw new InvalidDataException();
+            foreach (var target in targets) found.Add(Browsers.ExecutableKey(target));
+        }
+        void ProgId(string id)
+        {
+            using var command = Registry.ClassesRoot.OpenSubKey($@"{id}\shell\open\command");
+            AddCommand(command?.GetValue(null) as string);
+        }
+        foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
+        {
+            Read(() =>
+            {
+                using var smi = root.OpenSubKey(@"SOFTWARE\Clients\StartMenuInternet");
+                foreach (var name in smi?.GetSubKeyNames() ?? []) Read(() =>
+                {
+                    using var cmd = smi!.OpenSubKey($@"{name}\shell\open\command");
+                    AddCommand(cmd?.GetValue(null) as string);
+                });
+            });
+            Read(() =>
+            {
+                using var apps = root.OpenSubKey(@"SOFTWARE\RegisteredApplications");
+                foreach (var name in apps?.GetValueNames() ?? []) Read(() =>
+                {
+                    if (apps!.GetValue(name) is not string capPath) return;
+                    _watchCapabilities?.Invoke(root, capPath);
+                    using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
+                    foreach (var scheme in new[] { "http", "https" })
+                        if (urls?.GetValue(scheme) is string id) Read(() => ProgId(id));
+                });
+            });
             foreach (var scheme in new[] { "http", "https" })
             {
-                string? exe = null;
-                try
+                var association = $@"SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\{scheme}";
+                Read(() =>
                 {
-                    if (apps.GetValue(app) is string capPath)
-                    {
-                        using var urls = root.OpenSubKey($@"{capPath}\URLAssociations");
-                        if (urls?.GetValue(scheme) is string progId)
-                        {
-                            using var cmd = Registry.ClassesRoot.OpenSubKey($@"{progId}\shell\open\command");
-                            exe = Browsers.CommandExe(cmd?.GetValue(null) as string);
-                        }
-                    }
-                }
-                catch { Diag.Write("browser_registry_entry_failed"); }
-                yield return exe;
+                    using var choice = root.OpenSubKey(association + @"\UserChoice");
+                    if (choice?.GetValue("ProgId") is string id) ProgId(id);
+                });
+                foreach (var location in new[] { $@"SOFTWARE\Classes\{scheme}\OpenWithProgids", association + @"\OpenWithProgids" }) Read(() =>
+                {
+                    using var progIds = root.OpenSubKey(location);
+                    foreach (var id in progIds?.GetValueNames() ?? []) Read(() => ProgId(id));
+                });
             }
         }
+        foreach (var scheme in new[] { "http", "https" }) Read(() => AddCommand(_effectiveCommand?.Invoke(scheme)));
+        _browserExes = found;
+        _browsersLoaded = true;
+    }
+
+    static string? EffectiveCommand(string scheme)
+    {
+        uint length = 0;
+        var result = Native.AssocQueryString(0x1000, 1, scheme, null, null, ref length);
+        if (result == unchecked((int)0x80070483)) return null;
+        if (length == 0) throw new InvalidDataException();
+        var chars = new char[checked((int)length)];
+        fixed (char* buffer = chars)
+        {
+            if (Native.AssocQueryString(0x1000, 1, scheme, null, buffer, ref length) != 0) throw new InvalidDataException();
+        }
+        return new string(chars).TrimEnd('\0');
     }
 
     static readonly List<ChildWindow> ChildBuffer = new();
