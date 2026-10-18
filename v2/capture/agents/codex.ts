@@ -111,7 +111,8 @@ export class CodexParser implements LineParser {
   counts = emptyCounts()
   private s: CodexState
   private readonly fileSession: string
-  // Copies written out of order within this read count once per turn.
+  // Every fingerprint of the open turn seen in this read; only the bounded recent window is persisted.
+  private readonly seen = new Set<string>()
 
   constructor(fileSession: string, saved: string | null) {
     this.fileSession = fileSession
@@ -295,6 +296,7 @@ export class CodexParser implements LineParser {
         const key = UUID.test(p.turn_id) ? p.turn_id : `${(live ? null : this.s.source) ?? this.session}:${p.turn_id}`
         this.s.turn = { key, live, start, last: start, opener, users: 0, ...(!live && EXTERNAL_IMPORT.test(p.turn_id) ? { external: true } : {}) }
         this.s.recentUsers = []
+        this.seen.clear()
         out.push({ t: 'turn', key, session: this.session, dir: this.s.dir, branch: this.s.branch, opener, start, replayed: !live })
         if (opener === 'user_queued' || opener === 'user_retry') out.push(this.act(`${key}:${opener}`, opener === 'user_retry' ? 'prompt' : 'queued', 'marked', start))
         return out
@@ -335,8 +337,9 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     if (!t || this.s.origin !== 'interactive' || t.external) return []
     const d = digest(text)
-    if (this.s.recentUsers!.includes(d)) return []
+    if (this.seen.has(d) || this.s.recentUsers!.includes(d)) return []
     if (basis === null && looksInjected(text)) return []
+    this.seen.add(d)
     this.s.recentUsers!.push(d)
     if (this.s.recentUsers!.length > RECENT_USERS) this.s.recentUsers!.shift()
     const answer = text.trimStart().startsWith(ANSWER)
@@ -366,6 +369,7 @@ export class CodexParser implements LineParser {
     if (!t) return []
     this.s.turn = null
     this.s.recentUsers = []
+    this.seen.clear()
     return [{ t: 'end', key: t.key, state, at: state === 'missing' ? null : at }]
   }
 

@@ -351,3 +351,14 @@ test('recent message fingerprints retain several copies but remain bounded over 
   run(p, [codex.complete(sec(700), turn, sec(1), sec(700))])
   assert.deepEqual(JSON.parse(p.state()).recentUsers, [])
 })
+
+test('within one read, a delayed copy beyond the persisted window is still deduplicated', () => {
+  const c = codexCtx()
+  const turn = U('window')
+  const p = parser(c)
+  const ls = [codex.meta(c, sec(0)), codex.started(sec(1), turn, 'composer')]
+  for (let i = 0; i < 65; i++) ls.push(codex.userItem(sec(i + 2), `message ${i}`, TYPED))
+  ls.push(codex.tokens(sec(70)), codex.tokens(sec(71)), codex.userCompleted(sec(72), turn, 'message 0', 'client-0'))
+  assert.equal(of(run(p, ls), 'user').length, 65)
+  assert.equal(JSON.parse(p.state()).recentUsers.length, 64)
+})
