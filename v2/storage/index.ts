@@ -205,7 +205,7 @@ export class Storage {
     }
     const p = this.paused()
     if (p) {
-      if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.endPause('expired')
+      if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.expirePause()
       else this.armPauseTimer()
     }
     this.scheduleRetention(60_000)
@@ -279,6 +279,20 @@ export class Storage {
     return { imported, refused: rows.length - imported }
   }
 
+  /**
+   * A privacy action keeps the deletion worker standing back from its first write until its change has committed:
+   * the worker checks before each transaction, so the action gets the lock within one worker batch.
+   */
+  private privacyWrite<T>(flushFirst: boolean, write: () => T): T {
+    this.deletions.captureWriting(true)
+    try {
+      if (flushFirst) this.flushOrThrow()
+      return write()
+    } finally {
+      this.deletions.captureWriting(false)
+    }
+  }
+
   private flushOrThrow(): void {
     // Queued capture writes go in first, so a deletion or pause applies to everything captured before it.
     if (!this.store.flush(true)) throw new Error('storage is failing; nothing was changed')
@@ -316,10 +330,9 @@ export class Storage {
   }
 
   private delete(t: Omit<Tombstone, 'id' | 'state'>): DeletionHandle {
-    this.flushOrThrow()
     let tombstone: number
     try {
-      tombstone = this.bus.commit(
+      tombstone = this.privacyWrite(true, () => this.bus.commit(
         'deletion',
         { state: 'started', kind: t.kind, from_wall_ms: t.from_wall_ms, to_wall_ms: t.to_wall_ms },
         () => {
@@ -337,7 +350,7 @@ export class Storage {
           this.store.forgetOpenRows()
           this.capture?.interrupt()
         },
-      )
+      ))
     } catch (err) {
       this.rules.loadTombstones()
       throw err
@@ -572,7 +585,10 @@ export class Storage {
 
   /** Pauses capture for an hour, until tomorrow, until resumed, or until a given time. Nothing stamped inside is stored. */
   pause(until: PauseFor | number | null): PauseState {
-    this.flushOrThrow()
+    return this.privacyWrite(true, () => this.startPause(until))
+  }
+
+  private startPause(until: PauseFor | number | null): PauseState {
     if (this.paused()) this.endPause('replaced')
     const since = this.now()
     const untilWallMs =
@@ -610,7 +626,7 @@ export class Storage {
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     this.pauseTimer = null
     const end = p.until_wall_ms !== null && reason === 'expired' ? p.until_wall_ms : Math.max(p.since_wall_ms, this.now())
-    this.bus.commit(
+    this.privacyWrite(false, () => this.bus.commit(
       'pause',
       { ended: reason, at_wall_ms: end },
       () => {
@@ -622,19 +638,34 @@ export class Storage {
         this.store.flush(true)
         if (reason !== 'replaced') this.capture?.interrupt()
       },
-    )
+    ))
   }
 
-  private armPauseTimer(): void {
+  private expiryRetryMs = 0
+
+  // A pause whose end cannot be written yet stays in force; the end is retried with backoff, and nothing is thrown.
+  private expirePause(): void {
+    try {
+      this.endPause('expired')
+      this.expiryRetryMs = 0
+    } catch (err) {
+      this.onError(`pause_expiry_${(err as { code?: string }).code ?? 'failed'}`)
+      this.expiryRetryMs = Math.min(Math.max(this.expiryRetryMs * 2, 100), 30_000)
+      this.armPauseTimer(this.expiryRetryMs)
+    }
+  }
+
+  private armPauseTimer(minWaitMs = 0): void {
     const p = this.paused()
     if (!p || p.until_wall_ms === null) return
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
     // Timers run on monotonic time and drift across sleep; re-arm until the wall clock reaches the end.
-    const wait = Math.min(Math.max(0, p.until_wall_ms - this.now()), 3_600_000)
+    const wait = Math.max(minWaitMs, Math.min(Math.max(0, p.until_wall_ms - this.now()), 3_600_000))
     this.pauseTimer = setTimeout(() => {
       this.pauseTimer = null
+      if (this.stopped) return
       const active = this.paused()
-      if (active && active.until_wall_ms !== null && this.now() >= active.until_wall_ms) this.endPause('expired')
+      if (active && active.until_wall_ms !== null && this.now() >= active.until_wall_ms) this.expirePause()
       else this.armPauseTimer()
     }, wait)
     this.pauseTimer.unref?.()
@@ -643,17 +674,15 @@ export class Storage {
   // --- exclusions and settings -------------------------------------------
 
   addExclusion(rule: ExclusionRule): void {
-    this.flushOrThrow()
-    this.bus.commit('exclusion', { match: rule.match, added: true }, () => {
+    this.privacyWrite(true, () => this.bus.commit('exclusion', { match: rule.match, added: true }, () => {
       this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 0)').run(rule.match, rule.value, rule.label)
-    }, () => this.installExclusions())
+    }, () => this.installExclusions()))
   }
 
   removeExclusion(match: ExclusionRule['match'], value: string): void {
-    this.flushOrThrow()
-    this.bus.commit('exclusion', { match, removed: true }, () => {
+    this.privacyWrite(true, () => this.bus.commit('exclusion', { match, removed: true }, () => {
       this.db.prepare('DELETE FROM exclusions WHERE match = ? AND value = ?').run(match, value)
-    }, () => this.installExclusions())
+    }, () => this.installExclusions()))
   }
 
   private installExclusions(): void {
@@ -679,28 +708,28 @@ export class Storage {
     const entry = keptTitleIdentity(app)
     if (!entry) throw new KeepTitlesRefused('unsigned')
     if (this.keptTitleApps().some((a) => a.id === entry.id && a.activation)) return entry.id
-    this.flushOrThrow()
-    const activation = this.orderingPoint()
-    if (!activation || activation.boot_identity !== 'kernel') throw new KeepTitlesRefused('ordering_unavailable')
-    return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
-      const apps = this.keptTitleApps()
-      this.putSetting('kept_title_apps', [...apps.filter((a) => a.id !== entry.id), { ...entry, effective_from_wall_ms: this.now(), activation }])
-      return entry.id
-    }, () => {
-      this.installPrivacy()
-      this.capture?.interrupt()
+    return this.privacyWrite(true, () => {
+      const activation = this.orderingPoint()
+      if (!activation || activation.boot_identity !== 'kernel') throw new KeepTitlesRefused('ordering_unavailable')
+      return this.bus.commit('kept_titles', { id: entry.id, added: true }, () => {
+        const apps = this.keptTitleApps()
+        this.putSetting('kept_title_apps', [...apps.filter((a) => a.id !== entry.id), { ...entry, effective_from_wall_ms: this.now(), activation }])
+        return entry.id
+      }, () => {
+        this.installPrivacy()
+        this.capture?.interrupt()
+      })
     })
   }
 
   stopKeepingTitles(id: string): void {
     if (!this.keptTitleApps().some((a) => a.id === id)) return
-    this.flushOrThrow()
-    this.bus.commit('kept_titles', { id, removed: true }, () => {
+    this.privacyWrite(true, () => this.bus.commit('kept_titles', { id, removed: true }, () => {
       this.putSetting('kept_title_apps', this.keptTitleApps().filter((a) => a.id !== id))
     }, () => {
       this.installPrivacy()
       this.capture?.interrupt()
-    })
+    }))
   }
 
   getSetting<T>(key: string): T | null {

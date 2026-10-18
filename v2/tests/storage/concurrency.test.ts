@@ -233,3 +233,68 @@ test('a contended derivation retries automatically even when all capture rows al
     assert.equal(r.store.query(`SELECT * FROM intervals`).length, 1)
   } finally { await exited; r.close() }
 })
+
+test('every privacy action succeeds while a long deletion commits back to back under readers', async () => {
+  const r = rig()
+  for (let i = 0; i < 60_000; i++) r.store.insertObservation(row(T0 + i * 20_000, i % 3 ? 'com.example.editor' : 'com.example.chat', `item ${i % 4000} plan canary${i % 500}`))
+  r.store.flush()
+  r.clock.t = T0 + 60_000 * 20_000 + HOUR
+  const readers = [0, 1].map(() => new Worker(new URL('./reader.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 60_000 } }))
+  const steps: [string, () => unknown][] = [
+    ['pause', () => r.storage.pause('hour')],
+    ['resume', () => r.storage.resume()],
+    ['addExclusion', () => r.storage.addExclusion(exclusion)],
+    ['delete', () => r.storage.deleteRange(T0 - 2 * HOUR, T0 - HOUR)],
+    ['removeExclusion', () => r.storage.removeExclusion('app_id', exclusion.value)],
+    ['keepTitles', () => r.storage.keepTitles(notes)],
+    ['stopKeepingTitles', () => r.storage.stopKeepingTitles(r.storage.keptTitleApps()[0]!.id)],
+  ]
+  const failures: string[] = []
+  const succeeded = new Map<string, number>()
+  try {
+    const deletion = r.storage.deleteSource('com.example.chat')
+    let finished = false
+    void deletion.done.finally(() => { finished = true })
+    for (let i = 0; !finished; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50 + (i % 6) * 10))
+      if (finished) break
+      const [name, action] = steps[i % steps.length]!
+      r.clock.t += 1000
+      try {
+        await action()
+        succeeded.set(name, (succeeded.get(name) ?? 0) + 1)
+      } catch (err) {
+        failures.push(`${name}: ${(err as Error).message}`)
+      }
+    }
+    assert.equal((await deletion.done).observations, 20_000)
+    await r.storage.deletionsSettled()
+    assert.deepEqual(failures, [], 'no privacy action failed during the deletion')
+    for (const [name] of steps) assert.ok((succeeded.get(name) ?? 0) > 0, `${name} ran during the deletion`)
+  } finally {
+    for (const w of readers) await w.terminate()
+    r.close()
+  }
+})
+
+test('a pause that expires while the lock is held stays paused, is retried without throwing, and ends at its end time', async () => {
+  const errors: { code: string; paused: boolean }[] = []
+  const r: ReturnType<typeof rig> = rig(undefined, { onError: (code) => errors.push({ code, paused: r.storage.paused() !== null }) })
+  const until = r.clock.t + 300
+  r.storage.pause(until)
+  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 1500 } })
+  const exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
+  try {
+    await new Promise((resolve) => worker.once('message', resolve))
+    r.clock.t = until + 1
+    await exited
+    for (let i = 0; i < 100 && r.storage.paused(); i++) await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.ok(errors.length > 0 && errors.every((e) => e.code === 'pause_expiry_SQLITE_BUSY' && e.paused), JSON.stringify(errors))
+    assert.equal(r.storage.paused(), null, 'the pause ended once the lock was free')
+    assert.deepEqual(r.q('SELECT ended_wall_ms FROM pauses'), [{ ended_wall_ms: until }])
+    assert.deepEqual(r.q(`SELECT end_wall_ms FROM capture_gaps WHERE reason = 'paused'`), [{ end_wall_ms: until }])
+  } finally {
+    await exited
+    r.close()
+  }
+})
