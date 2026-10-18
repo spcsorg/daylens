@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { backfill, listLogs, runChild } from '../../capture/agents/backfill.ts'
@@ -151,6 +151,23 @@ test('a session Codex archives keeps its read position, and its compressed copy 
   assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 2)
   assert.equal(r.count('SELECT count(*) AS n FROM agent_events'), 2)
   await fourth.stop()
+  r.store.close()
+})
+
+test('a new log that reuses a deleted log\'s inode number starts from its own beginning', async () => {
+  const r = rig()
+  const old = claudeCtx()
+  const oldFile = claudeFile(r.home, old, '-old')
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  writeFileSync(file, lines(claude.prompt(c, sec(0), 'go', { uuid: 'reused-inode' }), claude.assistant(c, sec(2), 'end_turn')))
+  const st = statSync(file)
+  r.agents.markRead({ path: oldFile, agent: 'claude_code', root: r.roots[0]!.dir, session: old.session, dev: String(st.dev), ino: String(st.ino), offset: st.size, size: st.size, state: null, turnless: false })
+  const reader = r.reader()
+  await reader.start()
+  await reader.stop()
+  assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE turn_key = 'reused-inode'"), 1)
+  assert.equal(r.agents.source(oldFile)?.session_id, old.session, 'the deleted log keeps its own row')
   r.store.close()
 })
 

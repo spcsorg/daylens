@@ -407,8 +407,8 @@ export class AgentReader {
     const ino = String(st.ino)
     let row: SourceRow | null = this.store.source(file)
     if (!row) {
-      // A rename (Codex archiving a session) keeps the file's identity; the read position moves with it.
-      const moved = this.store.sourcesByInode(dev, ino).find((s) => s.path !== file && !existsSync(s.path))
+      // A rename (Codex archiving a session) keeps inode and session, so the read position moves; inodes alone get reused.
+      const moved = this.store.sourcesByInode(dev, ino).find((s) => s.path !== file && s.session_id === info.session && !existsSync(s.path))
       if (moved) {
         this.store.movedSource(moved.path, file)
         row = { ...moved, path: file }
