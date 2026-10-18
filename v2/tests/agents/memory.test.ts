@@ -5,9 +5,8 @@ import path from 'node:path'
 import { measureScan } from '../../tools/agentMemory.ts'
 import { claude, claudeCtx, sec, tmp } from './fixtures.ts'
 
-test('production first read stays below 150 MB for parent and backfill child combined', { skip: process.platform === 'win32' ? 'RSS sampler uses POSIX ps' : false }, async (t) => {
+test('capture and backfill stay below 135 MB in Electron Node mode over three runs', { skip: process.platform !== 'darwin' ? '1 ms sampler uses macOS proc_pid_rusage' : false }, async (t) => {
   const home = tmp()
-  const data = tmp()
   const c = claudeCtx()
   const dir = path.join(home, '.claude', 'projects', '-memory')
   mkdirSync(dir, { recursive: true })
@@ -18,11 +17,19 @@ test('production first read stays below 150 MB for parent and backfill child com
     appendFileSync(file, `${claude.toolResult(c, sec(i * 10 + 2), `t${i}`, 'x'.repeat(800_000))}\n`)
     appendFileSync(file, `${claude.assistant(c, sec(i * 10 + 3), 'end_turn')}\n`)
   }
-  const result = await measureScan(home, data)
-  t.diagnostic(JSON.stringify({ combined_peak_mb: result.combined_peak_mb, parent_at_peak_mb: result.parent_at_peak_mb, child_at_peak_mb: result.child_at_peak_mb }))
-  assert.ok(result.samples_with_child > 0, 'sampler observed parent and child together')
-  assert.ok(result.combined_peak_mb < 150, JSON.stringify(result))
-  assert.equal(result.passes[0].table_rows.turns, 160)
-  assert.equal(result.passes[1].files_read, 0)
-  assert.equal(result.passes[1].bytes_read, 0)
+  for (let run = 1; run <= 3; run++) {
+    const result = await measureScan(home, tmp())
+    t.diagnostic(JSON.stringify({ run, combined_peak_mb: result.combined_peak_mb, wall_ms: result.passes[0].wall_ms, mean_sample_interval_ms: result.mean_sample_interval_ms }))
+    assert.equal(result.runtime.electron, '44.5.1')
+    assert.ok(result.entrypoint.endsWith('build/js/tools/agentScan.js'))
+    assert.equal(result.sample_interval_ms, 1)
+    assert.ok(result.samples > 0, 'sampler observes RSS for the process including all worker threads')
+    assert.ok(result.combined_peak_mb <= 135, JSON.stringify(result))
+    assert.equal(result.passes[0].backfill_child.children, 1)
+    assert.ok(result.passes[0].backfill_child.max_slice_bytes <= 4 << 20)
+    assert.ok(result.passes[0].backfill_child.child.entrypoint.endsWith('backfillMain.js'))
+    assert.equal(result.passes[0].table_rows.turns, 160)
+    assert.equal(result.passes[1].files_read, 0)
+    assert.equal(result.passes[1].bytes_read, 0)
+  }
 })

@@ -13,6 +13,7 @@ guard let root = arg("--root").flatMap({ pid_t($0) }) else {
   FileHandle.standardError.write("usage: procstat --root <pid> [--interval-s 10]\n".data(using: .utf8)!)
   exit(64)
 }
+let summary = CommandLine.arguments.contains("--summary")
 let interval = Double(arg("--interval-s") ?? "10") ?? 10
 
 var timebase = mach_timebase_info_data_t()
@@ -33,14 +34,33 @@ func name(_ pid: pid_t) -> String {
   return String(cString: buf)
 }
 
+var combinedPeak: UInt64 = 0
+var parentAtPeak: UInt64 = 0
+var childAtPeak: UInt64 = 0
+var samples = 0
+var samplesWithChild = 0
+let started = Date()
+var nextSample = started
+var lastSample = started
+var maxGapMs = 0.0
 while kill(root, 0) == 0 {
-  let now = Int64(Date().timeIntervalSince1970 * 1000)
+  var parentRSS: UInt64 = 0
+  var childRSS: UInt64 = 0
+  let sampled = Date()
+  if samples > 0 { maxGapMs = max(maxGapMs, sampled.timeIntervalSince(lastSample) * 1000) }
+  lastSample = sampled
+  let now = Int64(sampled.timeIntervalSince1970 * 1000)
   for pid in descendants(of: root) {
     var info = rusage_info_v6()
     let ok = withUnsafeMutablePointer(to: &info) {
       $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V6, $0) }
     }
     guard ok == 0 else { continue }
+    if summary {
+      if pid == root { parentRSS = info.ri_resident_size }
+      else { childRSS += info.ri_resident_size }
+      continue
+    }
     let line = """
     {"t_ms":\(now),"pid":\(pid),"name":"\(name(pid))","cpu_ns":\(absToNs(info.ri_user_time + info.ri_system_time)),\
     "footprint":\(info.ri_phys_footprint),"peak_footprint":\(info.ri_lifetime_max_phys_footprint),"rss":\(info.ri_resident_size),\
@@ -49,6 +69,23 @@ while kill(root, 0) == 0 {
     """
     print(line)
   }
+  if summary {
+    samples += 1
+    if samples == 1 { print("{\"ready\":true}"); fflush(stdout) }
+    if childRSS > 0 { samplesWithChild += 1 }
+    if parentRSS + childRSS > combinedPeak {
+      combinedPeak = parentRSS + childRSS
+      parentAtPeak = parentRSS
+      childAtPeak = childRSS
+    }
+  }
   fflush(stdout)
-  Thread.sleep(forTimeInterval: interval)
+  nextSample = nextSample.addingTimeInterval(interval)
+  let delay = nextSample.timeIntervalSinceNow
+  if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+  else { nextSample = Date() }
+}
+
+if summary {
+  print("{\"combined_peak_mb\":\(Double(combinedPeak) / 1e6),\"parent_at_peak_mb\":\(Double(parentAtPeak) / 1e6),\"child_at_peak_mb\":\(Double(childAtPeak) / 1e6),\"samples_with_child\":\(samplesWithChild),\"samples\":\(samples),\"max_sample_gap_ms\":\(maxGapMs),\"mean_sample_interval_ms\":\(Date().timeIntervalSince(started) * 1000 / Double(max(1, samples)))}")
 }

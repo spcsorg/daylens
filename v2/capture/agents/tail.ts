@@ -123,30 +123,77 @@ export async function readAppended(file: string, from: number, size: number, sin
   }
 }
 
-// An archived Codex log compressed with zstd is immutable: it is read once, whole.
-export async function readCompressed(file: string, sink: LineSink, checkpoint: () => void): Promise<number> {
-  const splitter = new Splitter(sink, false)
-  let bytes = 0
-  const input = createReadStream(file)
-  const z = zlib.createZstdDecompress()
-  try {
-    await new Promise<void>((resolve, reject) => {
-      input.on('error', reject)
-      z.on('error', reject)
-      z.on('data', (chunk: Buffer) => {
-        bytes += chunk.length
-        splitter.push(chunk)
-        checkpoint()
-      })
-      z.on('end', () => resolve())
-      input.pipe(z)
-    })
-  } finally {
-    // A decompressor's native state is freed by the garbage collector only when it gets round to it; dozens of small
-    // archives in a row would otherwise hold dozens of them at once.
-    input.destroy()
-    z.close()
+class StreamTail {
+  private readonly input: ReturnType<typeof createReadStream>
+  private readonly decoder: ReturnType<typeof zlib.createZstdDecompress> | null
+  private readonly from: number
+  private readonly size: number | undefined
+  private readonly chunks: AsyncIterator<Buffer>
+  private readonly splitter: Splitter
+  private sink: LineSink = () => {}
+  private pending: Buffer = Buffer.alloc(0)
+  private ended = false
+
+  constructor(file: string, compressed: boolean, from = 0, size?: number) {
+    this.from = from
+    this.size = size
+    this.input = createReadStream(file, compressed ? {} : { start: from, end: size === undefined ? undefined : size - 1, highWaterMark: CHUNK })
+    this.decoder = compressed ? zlib.createZstdDecompress() : null
+    if (this.decoder) {
+      const decoder = this.decoder
+      this.input.on('error', (err) => decoder.destroy(err))
+    }
+    this.chunks = (this.decoder ? this.input.pipe(this.decoder) : this.input)[Symbol.asyncIterator]()
+    this.splitter = new Splitter((text, head, tail) => this.sink(text, head, tail), false)
   }
-  splitter.push(Buffer.from('\n'))
-  return bytes
+
+  async read(sink: LineSink, checkpoint: (offset: number) => void, budget = Infinity): Promise<{ bytes: number; next: number; done: boolean }> {
+    this.sink = sink
+    let bytes = 0
+    try {
+      while (!this.ended && bytes < budget) {
+        if (this.pending.length === 0) {
+          const chunk = await this.chunks.next()
+          if (chunk.done) {
+            this.ended = true
+            if (this.decoder) this.splitter.push(Buffer.from('\n'))
+            break
+          }
+          this.pending = chunk.value
+        }
+        const length = Math.min(this.pending.length, budget - bytes)
+        this.splitter.push(this.pending.subarray(0, length))
+        this.pending = this.pending.subarray(length)
+        bytes += length
+        checkpoint(this.from + this.splitter.committed)
+        if (this.size !== undefined && this.from + this.splitter.consumed >= this.size) this.ended = true
+      }
+      return { bytes, next: this.from + this.splitter.committed, done: this.ended }
+    } finally {
+      this.sink = () => {}
+      if (this.ended) this.close()
+    }
+  }
+
+  close(): void {
+    this.input.destroy()
+    this.decoder?.close()
+  }
+}
+
+export class CompressedTail extends StreamTail {
+  constructor(file: string) { super(file, true) }
+}
+
+export class AppendedTail extends StreamTail {
+  constructor(file: string, from: number, size: number) { super(file, false, from, size) }
+}
+
+export async function readCompressed(file: string, sink: LineSink, checkpoint: () => void): Promise<number> {
+  const stream = new CompressedTail(file)
+  try {
+    return (await stream.read(sink, checkpoint)).bytes
+  } finally {
+    stream.close()
+  }
 }

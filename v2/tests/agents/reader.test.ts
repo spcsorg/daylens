@@ -378,7 +378,7 @@ test('a renamed start with a recognized completion is reported as degraded', asy
   r.store.close()
 })
 
-test('the first read runs as several children over slices of the history, cutting files at line boundaries', async () => {
+test('the first read uses bounded slices and preserves the same rows as an in-process read', async () => {
   const build = (home: string) => {
     const c = claudeCtx({ session: '33333333-3333-4333-8333-333333333333' })
     const ls: string[] = []
@@ -398,7 +398,7 @@ test('the first read runs as several children over slices of the history, cuttin
   const viaChildren = a.reader({
     backfill: async (roots) => {
       const res = await backfill(a.store.database, a.data, roots, () => {}, 20_000)
-      children = res.children
+      children = res.slices
       return res.merged
     },
   })
@@ -460,7 +460,7 @@ test('an unfinished last line ends the first read, and is read once its writer f
     followUpMs: 200,
     backfill: async (roots) => {
       const res = await backfill(r.store.database, r.data, roots, () => {}, 64)
-      children = res.children
+      children = res.slices
       return res.merged
     },
   })
@@ -527,7 +527,7 @@ test('an over-slice unfinished tail is deferred so later logs finish in bounded 
   let backfillChildren = 0
   const reader = r.reader({ backfill: async (roots) => {
     const result = await backfill(r.store.database, r.data, roots, () => {})
-    backfillChildren = result.children
+    backfillChildren = result.slices
     return result.merged
   } })
   await reader.start()
@@ -551,7 +551,7 @@ test('a slice with no committed progress stops backfill and logs the live-reader
   let children = 0
   const reader = r.reader({ backfill: async (roots) => {
     const result = await backfill(r.store.database, r.data, roots, (s) => logs.push(s))
-    children = result.children
+    children = result.slices
     return result.merged
   } })
   await reader.start()
@@ -595,3 +595,90 @@ for (const child of [false, true]) {
     r.store.close()
   })
 }
+
+test('a compressed archive stops at the decoded slice budget and resumes without losing turns', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const archive = path.join(r.home, '.codex', 'archived_sessions')
+  mkdirSync(archive, { recursive: true })
+  const file = path.join(archive, `rollout-2026-10-14T20-00-00-${c.id}.jsonl.zst`)
+  const body = [codex.meta(c, sec(0))]
+  for (let i = 0; i < 80; i++) {
+    body.push(codex.started(sec(i * 10 + 1), `slice-${i}`, 'composer'))
+    body.push(codex.userItem(sec(i * 10 + 1), `prompt ${i}`, ['user.text']))
+    body.push(JSON.stringify({ type: 'response_item', timestamp: new Date(sec(i * 10 + 2)).toISOString(), payload: { type: 'function_call_output', output: 'x'.repeat(i === 1 ? 5 << 20 : 160_000) } }))
+    body.push(codex.complete(sec(i * 10 + 3), `slice-${i}`, sec(i * 10 + 1), sec(i * 10 + 3)))
+  }
+  const decoded = Buffer.from(body.join('\n'))
+  writeFileSync(file, zlib.zstdCompressSync(decoded))
+  const reader = r.reader()
+  try {
+    let remaining = true
+    let slices = 0
+    for (; remaining && slices < 10; slices++) {
+      const before = reader.stats.bytesRead
+      remaining = await reader.readOnly([file], 4 << 20)
+      assert.ok(reader.stats.bytesRead - before <= 4 << 20, `decoded ${reader.stats.bytesRead - before} bytes in one slice`)
+    }
+    assert.equal(remaining, false)
+    assert.ok(slices > 1)
+    assert.equal(reader.stats.bytesRead, decoded.length)
+    assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE end_state = 'completed'"), 80)
+    assert.equal(r.count("SELECT count(*) AS n FROM agent_events WHERE kind = 'user'"), 80)
+    assert.equal(r.agents.source(file)!.offset, r.agents.source(file)!.size)
+    const data = tmp()
+    const batch = new Store(data)
+    new AgentStore(batch.database)
+    try {
+      const result = await backfill(batch.database, data, r.roots, () => {})
+      assert.equal(result.children, 1)
+      assert.ok(result.slices > 1)
+      assert.ok(result.max_slice_bytes <= 4 << 20)
+      assert.equal(result.child?.bytes_read, decoded.length)
+      assert.equal(batch.query<{ n: number }>("SELECT count(*) AS n FROM agent_turns WHERE end_state = 'completed'")[0]!.n, 80)
+    } finally {
+      batch.close()
+    }
+  } finally {
+    await reader.stop()
+    r.store.close()
+  }
+})
+
+test('plain slices keep an oversized line in progress without exceeding the byte budget', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  const file = claudeFile(r.home, c)
+  const body = lines(claude.prompt(c, sec(0), 'go', { uuid: 'bounded-plain' }), claude.toolResult(c, sec(1), 'big', 'x'.repeat(7 << 20)), claude.assistant(c, sec(2), 'end_turn'), claude.system(c, sec(3), 'turn_duration'))
+  writeFileSync(file, body)
+  const reader = r.reader()
+  try {
+    let remaining = true
+    for (let i = 0; remaining && i < 5; i++) {
+      const before = reader.stats.bytesRead
+      remaining = await reader.readOnly([file], 4 << 20)
+      assert.ok(reader.stats.bytesRead - before <= 4 << 20, `read ${reader.stats.bytesRead - before} bytes in one slice`)
+    }
+    assert.equal(remaining, false)
+    assert.equal(reader.stats.bytesRead, Buffer.byteLength(body))
+    assert.equal(r.count("SELECT count(*) AS n FROM agent_turns WHERE end_state = 'completed'"), 1)
+    assert.equal(r.agents.source(file)!.offset, Buffer.byteLength(body))
+  } finally {
+    await reader.stop()
+    r.store.close()
+  }
+})
+
+test('source capture uses emitted JavaScript for its backfill worker', async () => {
+  const r = rig()
+  const c = claudeCtx()
+  writeFileSync(claudeFile(r.home, c), lines(claude.prompt(c, sec(0), 'go', { uuid: 'runtime' }), claude.assistant(c, sec(2), 'end_turn')))
+  try {
+    const result = await runChild(path.join(r.data, 'runtime.sqlite'), r.roots, await listLogs(r.roots), 4 << 20, () => {})
+    assert.ok(result)
+    assert.ok(result.entrypoint?.endsWith(path.join('build', 'js', 'capture', 'agents', 'backfillMain.js')), `worker entry point: ${result?.entrypoint}`)
+    assert.equal(result.runtime?.node, process.versions.node)
+  } finally {
+    r.store.close()
+  }
+})

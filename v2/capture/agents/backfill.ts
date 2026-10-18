@@ -1,8 +1,8 @@
-// The first read of a whole log history runs in short-lived child processes that write a staging database, each over a
-// bounded slice of the files. Decoding gigabytes of logs leaves memory the allocator does not hand back; a process that
-// exits returns all of it, so neither the children nor the long-running capture service grow with the history.
+// A worker keeps decoder state across slices without loading a second Electron process.
 
-import { spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { Worker } from 'node:worker_threads'
 import { rmSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -19,57 +19,89 @@ export interface BackfillStats {
   peak_mb?: Record<string, number>
   files_read: number
   mb_read: number
+  bytes_read?: number
   lines: number
   records: number
   roots?: RootCounts[]
   progressed?: boolean
   deferred_files?: string[]
+  entrypoint?: string
+  runtime?: { electron: string | null; node: string }
   remaining?: boolean
 }
 
 export interface BackfillResult {
   merged: boolean
   children: number
-  // Totals over the children; peak_rss_mb is the largest single child.
+  slices: number
+  max_slice_bytes: number
+  // RSS includes the capture process and its worker threads.
   child: BackfillStats | null
   peaks_mb: number[]
   merge_ms: number
 }
 
-// Roots cross the process boundary as plain data; folders that need a guard (WSL) are read in the service instead.
+// Roots cross the worker boundary as plain data; folders that need a guard (WSL) are read in the service instead.
 export type PlainRoot = Omit<AgentRoot, 'available'>
 
-const MAIN = fileURLToPath(new URL(`./backfillMain${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url))
+const source = path.extname(fileURLToPath(import.meta.url)) === '.ts'
+const MAIN = fileURLToPath(new URL(source ? '../../build/js/capture/agents/backfillMain.js' : './backfillMain.js', import.meta.url))
+const exec = promisify(execFile)
+let compiled: Promise<unknown> | null = null
 
-// Bytes of log one child reads before it hands over to the next; a compressed archive counts at its decoded size.
-// It bounds how much a child decodes, and so its memory, not how much of the history is read.
 const SLICE_BYTES = 4 << 20
-// A small young generation keeps the children's short-lived line strings from inflating their footprint.
-const CHILD_FLAGS = ['--max-semi-space-size=1']
 
-export function runChild(staging: string, roots: PlainRoot[], files: string[], budget: number, log: (msg: string) => void): Promise<BackfillStats | null> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, ...CHILD_FLAGS, MAIN, staging], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
-    let out = ''
-    child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d))
-    child.stderr.setEncoding('utf8').on('data', () => {})
-    child.stdin.end(JSON.stringify({ roots, files, budget }))
-    child.on('error', (err) => {
-      log(`agent backfill could not start code=${(err as { code?: unknown }).code ?? 'unknown'}`)
-      resolve(null)
+async function prepareWorker(): Promise<void> {
+  if (!source) return
+  const root = fileURLToPath(new URL('../..', import.meta.url))
+  compiled ??= exec(process.execPath, [path.join(root, 'node_modules/typescript/bin/tsc'), '-p', path.join(root, 'tsconfig.build.json')])
+  await compiled
+}
+
+class BackfillWorker {
+  private readonly worker: Worker
+  private readonly exited: Promise<number>
+  private pending: { resolve: (stats: BackfillStats | null) => void } | null = null
+  private failed = false
+
+  constructor(staging: string, roots: PlainRoot[], log: (msg: string) => void) {
+    this.worker = new Worker(MAIN, { workerData: { staging, roots }, execArgv: [], resourceLimits: { maxYoungGenerationSizeMb: 1 } })
+    this.worker.on('message', (result: BackfillStats) => {
+      this.pending?.resolve(result)
+      this.pending = null
     })
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        log(`agent backfill failed exit=${code}`)
-        return resolve(null)
-      }
-      try {
-        resolve(JSON.parse(out.trim().split('\n').pop() ?? '') as BackfillStats)
-      } catch {
-        resolve(null)
-      }
+    this.worker.on('error', (err) => {
+      this.failed = true
+      log(`agent backfill failed code=${(err as { code?: unknown }).code ?? 'unknown'}`)
     })
-  })
+    this.exited = new Promise((resolve) => this.worker.on('exit', (code) => {
+      this.failed = true
+      if (this.pending) log(`agent backfill exited before replying exit=${code}`)
+      this.pending?.resolve(null)
+      this.pending = null
+      resolve(code)
+    }))
+  }
+
+  slice(files: string[], budget: number): Promise<BackfillStats | null> {
+    if (this.failed) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      this.pending = { resolve }
+      this.worker.postMessage({ files, budget })
+    })
+  }
+
+  async close(): Promise<void> {
+    if (!this.failed) this.worker.postMessage({ stop: true })
+    await this.exited
+  }
+}
+
+export async function runChild(staging: string, roots: PlainRoot[], files: string[], budget: number, log: (msg: string) => void): Promise<BackfillStats | null> {
+  await prepareWorker()
+  const worker = new BackfillWorker(staging, roots, log)
+  try { return await worker.slice(files, budget) }
+  finally { await worker.close() }
 }
 
 // Every session log under the roots, in root order, so a session read plain is known before its compressed archive.
@@ -121,19 +153,29 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
     for (const f of [staging, `${staging}-wal`, `${staging}-shm`, `${staging}-journal`]) rmSync(f, { force: true })
   }
   clean()
+  const filesToRead = await listLogs(roots)
+  if (filesToRead.length === 0) return { merged: true, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }
+  await prepareWorker()
+  const worker = new BackfillWorker(staging, roots, log)
   try {
-    let files = await listLogs(roots)
-    if (files.length === 0) return { merged: true, children: 0, child: null, merge_ms: 0, peaks_mb: [] }
+    let files = filesToRead
     const total: BackfillStats = { wall_ms: 0, cpu_ms: 0, peak_rss_mb: 0, files_read: 0, mb_read: 0, lines: 0, records: 0 }
     const counts = new Map<string, RootCounts>()
     const peaks: number[] = []
+    let maxSlice = 0
     for (let remaining = files.length > 0; remaining; ) {
-      const child = await runChild(staging, roots, files, sliceBytes, log)
-      if (!child) return { merged: false, children: 0, child: null, merge_ms: 0, peaks_mb: [] }
+      const child = await worker.slice(files, sliceBytes)
+      if (!child) return { merged: false, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }
       peaks.push(child.peak_rss_mb)
+      maxSlice = Math.max(maxSlice, child.bytes_read ?? 0)
+      total.entrypoint = child.entrypoint
+      total.runtime = child.runtime
+      total.bytes_read = (total.bytes_read ?? 0) + (child.bytes_read ?? 0)
       total.wall_ms += child.wall_ms
       total.cpu_ms += child.cpu_ms
       total.peak_rss_mb = Math.max(total.peak_rss_mb, child.peak_rss_mb)
+      total.peak_mb ??= {}
+      for (const [key, value] of Object.entries(child.peak_mb ?? {})) total.peak_mb[key] = Math.max(total.peak_mb[key] ?? 0, value)
       total.files_read += child.files_read
       total.mb_read += child.mb_read
       total.lines += child.lines
@@ -161,8 +203,9 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
         store.setHealth(r.agent, r.dir, h.state, h.reason, h.detail)
       }
     }
-    return { merged: true, children: peaks.length, child: total, merge_ms: Math.round(performance.now() - t0), peaks_mb: peaks }
+    return { merged: true, children: 1, slices: peaks.length, max_slice_bytes: maxSlice, child: total, merge_ms: Math.round(performance.now() - t0), peaks_mb: peaks }
   } finally {
+    await worker.close()
     clean()
   }
 }

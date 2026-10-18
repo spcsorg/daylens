@@ -6,7 +6,7 @@ import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { ClaudeParser } from './claude.ts'
 import { CodexParser } from './codex.ts'
-import { readAppended, readCompressed } from './tail.ts'
+import { readAppended, CompressedTail, AppendedTail } from './tail.ts'
 import type { AgentStore, HealthState, SourceRow } from './store.ts'
 import { addCounts, emptyCounts, subCounts, type Agent, type AgentRecord, type LineParser, type ParseCounts } from './types.ts'
 
@@ -112,8 +112,6 @@ interface RootState {
 }
 
 const FLUSH_RECORDS = 2000
-// Codex archives decode to about one to three times their size; the larger figure keeps a slice from overshooting.
-const DECODED_PER_COMPRESSED_BYTE = 3
 
 function errCode(err: unknown): string {
   const c = (err as { code?: unknown })?.code
@@ -153,12 +151,12 @@ export class AgentReader {
 
   private budget: number | null = null
   private budgetStart = 0
+  private readonly tails = new Map<string, CompressedTail | AppendedTail>()
   private leftOver = false
   readonly deferredFiles: string[] = []
   progressed = false
 
-  // One slice of a first read: these files, in order, with no listing or watching, until about `budget` bytes are read.
-  // A file is cut at a line boundary and resumes from its saved position in the next slice. Returns whether any is left.
+  // Archive decoder and partial-line state stay in this reader between bounded slices.
   async readOnly(files: readonly string[], budget: number): Promise<boolean> {
     this.budget = budget
     this.budgetStart = budget
@@ -224,6 +222,8 @@ export class AgentReader {
     if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
     await this.draining
+    for (const tail of this.tails.values()) tail.close()
+    this.tails.clear()
   }
 
   // Resolves once every file event seen so far has been read and written.
@@ -408,17 +408,18 @@ export class AgentReader {
       }
     }
     // A different file at the same path, or one that shrank, was rewritten: read it again; duplicates are ignored.
-    if (row && (row.dev !== dev || row.ino !== ino || st.size < row.offset)) row = null
+    if (row && (row.dev !== dev || row.ino !== ino || st.size < row.size || (info.compressed && st.size !== row.size))) {
+      row = null
+      this.tails.get(file)?.close()
+      this.tails.delete(file)
+    }
     const from = row?.offset ?? 0
     if (from >= st.size) return
-    // A compressed archive cannot be cut, so one that may not fit what is left waits for a fresh slice.
-    const estimate = info.compressed ? st.size * DECODED_PER_COMPRESSED_BYTE : 1
-    if (this.budget !== null && (this.budget <= 0 || (estimate > this.budget && this.budget < this.budgetStart))) {
+    if (this.budget !== null && this.budget <= 0) {
       this.leftOver = true
       return
     }
-    // A compressed archive is always read from its start, so it never resumes from a saved mid-file state.
-    const parser = makeParser(root, info, info.compressed ? null : (row?.state ?? null))
+    const parser = makeParser(root, info, info.compressed && !this.tails.has(file) ? null : (row?.state ?? null))
     const priorCounts: ParseCounts = row?.state ? (JSON.parse(row.state)._readCounts ?? emptyCounts()) : emptyCounts()
     let records: AgentRecord[] = []
     let flushed = emptyCounts()
@@ -436,34 +437,53 @@ export class AgentReader {
     }
     try {
       if (info.compressed) {
-        const bytes = await readCompressed(file, sink, () => {
+        let archive = this.tails.get(file)
+        if (!archive) {
+          archive = new CompressedTail(file)
+          this.tails.set(file, archive)
+        }
+        const res = await archive.read(sink, () => {
           if (records.length >= FLUSH_RECORDS) flush(0)
-        })
-        flush(st.size)
-        this.progressed = true
-        this.stats.bytesRead += bytes
-        if (this.budget !== null) this.budget -= bytes
+        }, this.budget ?? Infinity)
+        flush(res.done ? st.size : 0)
+        if (res.bytes > 0 || res.done) this.progressed = true
+        this.stats.bytesRead += res.bytes
+        if (res.done) this.tails.delete(file)
+        if (this.budget !== null) {
+          this.budget -= res.bytes
+          if (!res.done) this.leftOver = true
+        }
       } else {
-        const res = await readAppended(
-          file, from, st.size, sink,
-          (offset) => {
-            if (records.length >= FLUSH_RECORDS) flush(offset)
-          },
-          this.budget ?? Infinity,
-        )
+        const hadTail = this.tails.has(file)
+        let res
+        const checkpoint = (offset: number) => { if (records.length >= FLUSH_RECORDS) flush(offset) }
+        if (this.budget === null) {
+          res = await readAppended(file, from, st.size, sink, checkpoint)
+        } else {
+          let tail = this.tails.get(file)
+          if (!tail) {
+            tail = new AppendedTail(file, from, st.size)
+            this.tails.set(file, tail)
+          }
+          res = await tail.read(sink, checkpoint, this.budget)
+          if (res.done) this.tails.delete(file)
+          if (!hadTail && !res.done && res.next === from && this.budget === this.budgetStart) this.deferredFiles.push(file)
+        }
         flush(res.next)
-        if (res.next > from) this.progressed = true
+        if (res.next > from || (hadTail && res.bytes > 0)) this.progressed = true
         this.stats.bytesRead += res.bytes
         if (this.budget !== null) {
           this.budget -= res.bytes
           // An unfinished EOF line waits for its writer, not another backfill slice.
-          if (res.bytes >= st.size - from && res.next < st.size) this.deferredFiles.push(file)
-          if (res.bytes < st.size - from && res.next < st.size) this.leftOver = true
+          if (('done' in res ? res.done : res.bytes >= st.size - from) && res.next < st.size) this.deferredFiles.push(file)
+          if (('done' in res ? !res.done : res.bytes < st.size - from) && res.next < st.size) this.leftOver = true
         }
       }
       this.stats.filesRead++
       this.stats.lines += parser.counts.lines
     } catch (err) {
+      this.tails.get(file)?.close()
+      this.tails.delete(file)
       const code = errCode(err)
       if (code !== 'ENOENT') r.unreadable = true
       this.log(`agent read failed agent=${root.agent} code=${code}`)

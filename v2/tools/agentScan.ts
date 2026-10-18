@@ -52,6 +52,7 @@ async function pass(label: string): Promise<void> {
       wall_ms: Math.round(wall),
       cpu_ms: Math.round((cpu.user + cpu.system) / 1000),
       peak_rss_mb: Math.round(peakRss / 1e6),
+      kernel_peak_rss_mb: process.resourceUsage().maxRSS * 1024 / 1e6,
       rss_after_mb: Math.round(process.memoryUsage().rss / 1e6),
       files_read: reader.stats.filesRead,
       bytes_read: reader.stats.bytesRead,
