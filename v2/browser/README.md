@@ -52,10 +52,16 @@ messaging host.
 
 `tools/live.ts` drives a real browser on a separate test profile and never touches a real profile. Chromium browsers
 read the host manifest from the test profile's own folder; Firefox reads only
-`~/Library/Application Support/Mozilla/NativeMessagingHosts`, so the run writes it there and removes it afterwards. A run
-waits until the Mac has had no keyboard or mouse input for two minutes, shows a notification, counts down 30 seconds,
-and redoes any step that something else interrupted. For Dia, it first proves that the launch is a separate instance
-on the test profile before the extension is loaded.
+`~/Library/Application Support/Mozilla/NativeMessagingHosts`, so the run writes it there and removes it afterwards.
+
+A run takes the screen only when someone has said they are away: the file `~/.daylens-live-away` (`--away-marker`)
+must exist, and the Mac must have had no keyboard or mouse input for ten minutes (`--away-idle-s`) or have its display
+asleep. Without the marker the runner exits 75 before launching anything. It then shows a notification and counts down
+30 seconds. The first input from then on, a locked screen or a removed marker ends the whole run: every browser and
+service it launched is quit by pid, nothing is brought back to the front, and it exits 75. Steps that another app
+interrupted with nobody at the keyboard are redone. For Dia, the runner first proves that the launch is a separate
+instance on the test profile before the extension is loaded. `tools/queue.ts` runs several runs in order and stops at
+the first exit 75.
 
 ```bash
 node browser/tools/live.ts canary --browser cft --app "<Chrome for Testing.app>" --helper native/macos/.build/release/daylens-capture-macos --out <dir> --activate <activate binary> --procstat <procstat binary>

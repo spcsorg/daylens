@@ -73,3 +73,9 @@ export async function endAll(pids: Iterable<number>, k: Killer, graceMs = 1500):
   for (let waited = 0; waited < graceMs && list.some((p) => k.alive(p)); waited += 100) await k.sleep(100)
   for (const p of list) if (k.alive(p)) k.kill(p, 'SIGKILL')
 }
+
+// Whether the run may launch a browser or bring a window forward now: only after the gate passed, and only while the
+// marker is still there.
+export function mayTakeScreen(held: boolean, s: Signals): boolean {
+  return held && s.marker()
+}

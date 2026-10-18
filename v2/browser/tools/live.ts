@@ -20,7 +20,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { cleanAddress } from '../../capture/address.ts'
-import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, watch, type Signals } from './away.ts'
+import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, watch, type Signals } from './away.ts'
 import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -315,6 +315,7 @@ class ChromiumDriver implements Driver {
     rmSync(path.join(this.dataDir, 'DevToolsActivePort'), { force: true })
     const args = this.args().filter((a) => !a.startsWith('--load-extension') && !a.startsWith('--disable-extensions-except'))
     const p = spawn(this.binary, [...args, 'about:blank'], { stdio: 'ignore' })
+    if (p.pid) launched.add(p.pid)
     const start = Date.now()
     while (!existsSync(path.join(this.dataDir, 'DevToolsActivePort'))) {
       if (p.exitCode !== null || Date.now() - start > 20_000) {
@@ -331,6 +332,7 @@ class ChromiumDriver implements Driver {
     log(`${this.name}: a separate instance on the test profile, confirmed`)
   }
   async launch(url: string): Promise<void> {
+    takeScreen(`launching ${this.name}`)
     if (this.name === 'dia') await this.proveIsolated()
     mkdirSync(this.profile, { recursive: true })
     rmSync(path.join(this.dataDir, 'DevToolsActivePort'), { force: true })
@@ -497,6 +499,7 @@ class FirefoxDriver implements Driver {
     this.bundleId = bundleIdOf(app)
   }
   async launch(url: string): Promise<void> {
+    takeScreen('launching Firefox')
     mkdirSync(this.profile, { recursive: true })
     writeFileSync(
       path.join(this.profile, 'user.js'),
@@ -686,7 +689,17 @@ const signals: Signals = { marker: () => existsSync(values['away-marker']!), loc
 // Everything a run starts, so a stop can end all of it at once.
 const launched = new Set<number>()
 const openedApps = new Set<string>()
+// Set once the away gate passed; nothing visible happens before it. A headless run takes no screen.
+let screenHeld = false
+function takeScreen(what: string): void {
+  if (HEADLESS) return
+  if (!mayTakeScreen(screenHeld, signals)) {
+    if (screenHeld) void stopRun('the away marker was removed')
+    throw new Error(`${what} before the away gate passed`)
+  }
+}
 function openApp(name: string): void {
+  takeScreen(`opening ${name}`)
   openedApps.add(name)
   execFileSync('/usr/bin/open', ['-a', name])
 }
@@ -748,6 +761,7 @@ async function announce(what: string, seconds: number): Promise<void> {
     await sleep(10_000)
   }
   // From here on the run holds the screen: the first input, during the countdown or later, ends it.
+  screenHeld = true
   watch(signals, realClock, (reason) => void stopRun(reason))
   try {
     execFileSync('/usr/bin/osascript', ['-e', `display notification "${what} starts in ${seconds} seconds and takes over the screen. Touch the keyboard or mouse to stop it." with title "Daylens browser test"`])
@@ -761,6 +775,7 @@ async function announce(what: string, seconds: number): Promise<void> {
 let activatePid: number | null = null
 function activateApp(_app: string): void {
   if (stopping) return
+  takeScreen('bringing the browser forward')
   if (activatePid === null) throw new Error('no browser launched to bring forward')
   if (!values.activate) throw new Error('--activate <binary> is required to bring the test browser forward')
   execFileSync(values.activate, [String(activatePid)])

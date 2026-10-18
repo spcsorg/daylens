@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AWAY_IDLE_S, NOT_AWAY_EXIT, endAll, gate, stopReason, watch, type Signals } from '../browser/tools/away.ts'
+import { AWAY_IDLE_S, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, stopReason, watch, type Signals } from '../browser/tools/away.ts'
 import { runQueue, splitArgs } from '../browser/tools/queue.ts'
 
 const live = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'browser', 'tools', 'live.ts'), 'utf8')
@@ -139,4 +139,22 @@ test('the runner watches from the countdown on, ends the run on a stop, and no l
     const at = live.indexOf(spawned)
     assert.ok(at >= 0 && live.slice(at, at + 700).includes('launched.add(this.proc.pid)'), spawned)
   }
+})
+
+test('nothing launches or comes to the front before the gate passes, or once the marker is gone', () => {
+  assert.equal(mayTakeScreen(false, fake()), false, 'before the gate')
+  assert.equal(mayTakeScreen(true, fake({ marker: false })), false, 'marker removed')
+  assert.equal(mayTakeScreen(true, fake()), true)
+  const launches = [...live.matchAll(/  async launch\(url: string\): Promise<void> \{\n([^\n]*)/g)].map((m) => m[1]!.trim())
+  assert.equal(launches.length, 2, 'Chromium and Firefox drivers')
+  for (const first of launches) assert.match(first, /^takeScreen\(/, 'the first thing a launch does is check the gate')
+  const activate = live.slice(live.indexOf('function activateApp'), live.indexOf('\n}\n', live.indexOf('function activateApp')))
+  assert.ok(activate.indexOf('takeScreen(') >= 0 && activate.indexOf('takeScreen(') < activate.indexOf('execFileSync('), 'checked before activating')
+  const open = live.slice(live.indexOf('function openApp'), live.indexOf('\n}\n', live.indexOf('function openApp')))
+  assert.ok(open.indexOf('takeScreen(') < open.indexOf("'/usr/bin/open'"))
+  assert.doesNotMatch(live.replace(open, ''), /'\/usr\/bin\/open', \['-a'/, 'every app opening goes through openApp')
+  const take = live.slice(live.indexOf('function takeScreen'), live.indexOf('\n}\n', live.indexOf('function takeScreen')))
+  assert.match(take, /mayTakeScreen\(screenHeld, signals\)/)
+  const announce = live.slice(live.indexOf('async function announce'), live.indexOf('\n}\n', live.indexOf('async function announce')))
+  assert.ok(announce.indexOf('screenHeld = true') > announce.indexOf("if (g === 'away') break"), 'the screen is held only after the gate passed')
 })
