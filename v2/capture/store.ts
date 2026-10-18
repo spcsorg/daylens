@@ -13,7 +13,11 @@ const FLUSH_INTERVAL_MS = 1000
 // The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
 export const MAX_ROW_SPAN_MS = 7 * 86_400_000
 const FLUSH_AT_OPS = 256
+// Contended flushes retry after a wait that starts short and doubles up to the cap.
 const CONTENTION_RETRY_MS = 10
+const MAX_CONTENTION_RETRY_MS = 250
+// Contention lasting longer than this is reported in health while retries continue.
+const CONTENTION_REPORT_MS = 5000
 const MAX_RETRY_MS = 30_000
 
 export function defaultDataDir(): string {
@@ -162,6 +166,8 @@ type Op = {
 export interface StoreHealth {
   committedWallMs: number | null
   failingSinceWallMs: number | null
+  // Set once writes have been held off by another writer for longer than the report threshold.
+  contendedSinceWallMs: number | null
   droppedOps: number
   pendingOps: number
 }
@@ -190,6 +196,7 @@ export interface StoreOptions {
   onError?: (code: string) => void
   busyTimeoutMs?: number
   maxPendingOps?: number
+  contentionReportMs?: number
 }
 
 // Errors from a single bad statement; retrying the batch would fail forever.
@@ -214,7 +221,7 @@ export class Store implements Sink {
   private nextObsId: number
   private persistedNextObsId = 0
   private nextGapId: number
-  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, droppedOps: 0, pendingOps: 0 }
+  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, contendedSinceWallMs: null, droppedOps: 0, pendingOps: 0 }
   private droppedSinceFailure = 0
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
@@ -233,6 +240,8 @@ export class Store implements Sink {
   private touched = new Set<number>()
   private touchedFromWallMs = Number.POSITIVE_INFINITY
   private readonly maxPendingOps: number
+  private readonly contentionReportMs: number
+  private contention: { sinceWallMs: number; sinceMono: number; waitMs: number } | null = null
 
   constructor(dir: string, opts: StoreOptions = {}) {
     assertNotV1(dir)
@@ -244,6 +253,7 @@ export class Store implements Sink {
     this.now = opts.now ?? Date.now
     this.onError = opts.onError ?? (() => {})
     this.maxPendingOps = opts.maxPendingOps ?? 50_000
+    this.contentionReportMs = opts.contentionReportMs ?? CONTENTION_REPORT_MS
     this.db = new Database(this.file)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('synchronous = NORMAL')
@@ -541,7 +551,7 @@ export class Store implements Sink {
       }
     }
     this.pending.push({ sql, params, ...metadata })
-    if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null) this.flush()
+    if (this.pending.length >= FLUSH_AT_OPS && this.health.failingSinceWallMs === null && this.contention === null) this.flush()
     else this.schedule()
   }
 
@@ -593,6 +603,8 @@ export class Store implements Sink {
   // Around each flush, including the derivation it triggers: storage tells its deletion worker to stand back.
   onWriteStart: () => void = () => {}
   onWriteEnd: () => void = () => {}
+  // Whether the writer that stands back (storage's deletion worker) has work; only then is the request held between retries.
+  writerYields: () => boolean = () => false
   private flushDepth = 0
   private closing = false
   private writeHeld = false
@@ -616,7 +628,7 @@ export class Store implements Sink {
     } finally {
       if (--this.flushDepth === 0) {
         this.db.pragma(`busy_timeout = ${busyTimeout}`)
-        if ((!this.contended || this.closing) && this.writeHeld) {
+        if ((!this.contended || this.closing || !this.writerYields()) && this.writeHeld) {
           this.writeHeld = false
           this.onWriteEnd()
         }
@@ -664,6 +676,7 @@ export class Store implements Sink {
         }
       }
       if (retry) {
+        this.contention = null
         if (this.health.failingSinceWallMs === null) {
           this.health.failingSinceWallMs = this.now()
           this.failingStart = { wall_ms: this.health.failingSinceWallMs, mono_us: null, boot: null }
@@ -675,6 +688,7 @@ export class Store implements Sink {
       }
     }
     this.retryMs = FLUSH_INTERVAL_MS
+    this.contention = null
     this.pending = []
     this.persistedNextObsId = this.nextObsId
     for (const op of ops) if (op.extension?.missing) this.openRows.delete(op.extension.sourceId)
@@ -708,7 +722,9 @@ export class Store implements Sink {
 
   private retryContention(): false {
     this.contended = true
-    this.schedule(CONTENTION_RETRY_MS)
+    if (this.contention === null) this.contention = { sinceWallMs: this.now(), sinceMono: performance.now(), waitMs: CONTENTION_RETRY_MS }
+    else this.contention.waitMs = Math.min(this.contention.waitMs * 2, MAX_CONTENTION_RETRY_MS)
+    this.schedule(this.contention.waitMs)
     return false
   }
 
@@ -717,6 +733,7 @@ export class Store implements Sink {
     try {
       this.onFlushed([...this.deriving])
       this.deriving.clear()
+      this.contention = null
       return true
     } catch (err) {
       if (isBusy(err)) return this.retryContention()
@@ -743,14 +760,22 @@ export class Store implements Sink {
   }
 
   storeHealth(): StoreHealth {
-    return { ...this.health, pendingOps: this.pending.length }
+    const c = this.contention
+    const contendedSinceWallMs = c !== null && performance.now() - c.sinceMono >= this.contentionReportMs ? c.sinceWallMs : null
+    return { ...this.health, contendedSinceWallMs, pendingOps: this.pending.length }
   }
 
+  /** One last write, waiting at most the busy timeout; whatever still cannot be written is reported, never dropped silently. */
   close(): void {
     this.closing = true
     this.flush()
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    const unwritten = this.pending.length + this.heartbeatOps.size
+    if (unwritten > 0) {
+      this.health.droppedOps += unwritten
+      this.onError(`unwritten_at_close_${unwritten}`)
+    }
     this.db.close()
     this.releaseLock()
   }

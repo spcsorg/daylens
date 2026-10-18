@@ -448,6 +448,11 @@ export class DeletionWorker {
     this.file = file
   }
 
+  /** Whether any job is queued or running. */
+  get busy(): boolean {
+    return this.pending.size > 0
+  }
+
   /** Capture is about to write (true) or done (false); the worker starts no write transaction in between. */
   captureWriting(on: boolean): void {
     if (on) Atomics.add(this.want, 0, 1)

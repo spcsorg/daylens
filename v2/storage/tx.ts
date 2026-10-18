@@ -2,7 +2,8 @@
 // writing fails with SQLITE_BUSY_SNAPSHOT if another connection commits in between, which waiting cannot fix.
 import type Database from 'better-sqlite3'
 
-const BUSY = new Set(['SQLITE_BUSY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_BUSY_RECOVERY', 'SQLITE_BUSY_TIMEOUT', 'SQLITE_LOCKED', 'SQLITE_LOCKED_SHAREDCACHE'])
+// Only another connection's lock clears by waiting; SQLITE_LOCKED comes from this connection itself, so it is a failure.
+const BUSY = new Set(['SQLITE_BUSY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_BUSY_RECOVERY', 'SQLITE_BUSY_TIMEOUT'])
 
 export function isBusy(err: unknown): boolean {
   return BUSY.has((err as { code?: string })?.code ?? '')

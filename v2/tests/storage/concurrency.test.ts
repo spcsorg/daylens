@@ -186,8 +186,9 @@ for (const [name, action] of Object.entries(privacyActions)) {
   })
 }
 
-test('automatic busy retries retain worker priority and leave storage healthy', async () => {
+test('automatic busy retries retain worker priority while the worker has work, and leave storage healthy', async () => {
   const r = rig()
+  r.store.writerYields = () => true
   const events: string[] = []
   const begin = r.store.onWriteStart, end = r.store.onWriteEnd
   r.store.onWriteStart = () => { events.push('begin'); begin() }
@@ -295,6 +296,115 @@ test('a pause that expires while the lock is held stays paused, is retried witho
     assert.deepEqual(r.q(`SELECT end_wall_ms FROM capture_gaps WHERE reason = 'paused'`), [{ end_wall_ms: until }])
   } finally {
     await exited
+    r.close()
+  }
+})
+
+function countTransactions(store: Store): { n: number } {
+  const db = store.database
+  const begin = db.transaction.bind(db)
+  const count = { n: 0 }
+  db.transaction = ((fn: Parameters<typeof db.transaction>[0]) => (count.n++, begin(fn))) as typeof db.transaction
+  return count
+}
+
+test('contended flushes back off instead of polling, and release worker priority when the worker has no work', async () => {
+  const dir = tmpDir()
+  const store = new Store(dir, { now: () => T0 })
+  const events: string[] = []
+  store.onWriteStart = () => events.push('begin')
+  store.onWriteEnd = () => events.push('end')
+  const attempts = countTransactions(store)
+  const blocker = new Database(path.join(dir, DB_FILE))
+  blocker.exec('BEGIN IMMEDIATE')
+  try {
+    store.insertObservation(row(T0, 'com.example.editor', 'held off'))
+    store.flush()
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    assert.ok(attempts.n < 40, `${attempts.n} flush attempts in 3 s`)
+    assert.equal(events.at(-1), 'end', 'worker priority is not held while nothing yields to capture')
+    blocker.exec('COMMIT')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(store.storeHealth().pendingOps, 0)
+    assert.equal(store.query(`SELECT title FROM observations`).length, 1)
+  } finally {
+    if (blocker.inTransaction) blocker.exec('COMMIT')
+    blocker.close()
+    store.close()
+  }
+})
+
+test('contention that outlasts the report threshold shows in health while retries continue', async () => {
+  const dir = tmpDir()
+  const errors: string[] = []
+  const store = new Store(dir, { now: () => T0, contentionReportMs: 300, onError: (c) => errors.push(c) })
+  const blocker = new Database(path.join(dir, DB_FILE))
+  blocker.exec('BEGIN IMMEDIATE')
+  try {
+    store.insertObservation(row(T0, 'com.example.editor', 'held off'))
+    store.flush()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.ok(!store.storeHealth().contendedSinceWallMs, 'brief contention is not reported')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(store.storeHealth().contendedSinceWallMs, T0)
+    assert.equal(store.storeHealth().failingSinceWallMs, null)
+    assert.equal(store.storeHealth().pendingOps, 1)
+    blocker.exec('COMMIT')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(store.storeHealth().contendedSinceWallMs, null)
+    assert.equal(store.storeHealth().pendingOps, 0)
+    assert.deepEqual(errors, [])
+  } finally {
+    if (blocker.inTransaction) blocker.exec('COMMIT')
+    blocker.close()
+    store.close()
+  }
+})
+
+test('closing while another writer holds the lock reports every unwritten op', () => {
+  const dir = tmpDir()
+  const errors: string[] = []
+  const store = new Store(dir, { now: () => T0, busyTimeoutMs: 50, onError: (c) => errors.push(c) })
+  const blocker = new Database(path.join(dir, DB_FILE))
+  blocker.exec('BEGIN IMMEDIATE')
+  try {
+    for (let i = 0; i < 3; i++) store.insertObservation(row(T0 + i, 'com.example.editor', `unwritten ${i}`))
+    assert.equal(store.flush(), false)
+    const start = performance.now()
+    store.close()
+    assert.ok(performance.now() - start >= 40, 'close made a final attempt that waited for the lock')
+    assert.deepEqual(errors, ['unwritten_at_close_3'])
+  } finally {
+    blocker.exec('COMMIT')
+    blocker.close()
+  }
+})
+
+test('a same-connection lock error is a failure, not contention: it is reported once and never holds a deletion back', async () => {
+  const errors: string[] = []
+  const r = rig(undefined, { onError: (c) => errors.push(c) })
+  for (let i = 0; i < 50; i++) r.store.insertObservation(row(T0 + i * 20_000, i % 2 ? 'com.example.editor' : 'com.example.chat', `item ${i}`))
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  const refresh = r.storage.derived.refreshFromMark
+  let calls = 0
+  r.storage.derived.refreshFromMark = () => {
+    calls++
+    throw Object.assign(new Error('database table is locked'), { code: 'SQLITE_LOCKED' })
+  }
+  try {
+    r.store.insertObservation(row(T0 + 50 * 20_000, 'com.example.editor', 'derivation fails'))
+    r.store.flush()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    assert.equal(calls, 1, 'not retried as contention')
+    assert.deepEqual(errors, ['derive_SQLITE_LOCKED'])
+    const deletion = r.storage.deleteSource('com.example.chat')
+    const result = await Promise.race([deletion.done, new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))])
+    assert.equal(result?.observations, 25, 'the deletion finished')
+    assert.equal(isBusy({ code: 'SQLITE_LOCKED' }), false)
+  } finally {
+    r.storage.derived.refreshFromMark = refresh
+    await r.storage.deletionsSettled()
     r.close()
   }
 })

@@ -172,6 +172,7 @@ export class Storage {
     this.deletions = new DeletionWorker(store.file)
     store.onWriteStart = () => this.deletions.captureWriting(true)
     store.onWriteEnd = () => this.deletions.captureWriting(false)
+    store.writerYields = () => this.deletions.busy
     store.acceptObservation = (row) => this.admit(row)
     store.acceptExtension = (row, from, to) => this.rules.mayCover(row.app_id, (row as { url?: string | null }).url ?? null, from, to)
     store.onFlushed = () => {
