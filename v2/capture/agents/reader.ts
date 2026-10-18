@@ -412,7 +412,7 @@ export class AgentReader {
       } else if (info.compressed) {
         const done = this.store.sourcesForSession(root.agent, info.session).find((s) => s.path !== file && !existsSync(s.path) && s.offset >= s.size)
         if (done) {
-          this.store.markRead({ path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset: st.size, size: st.size, state: done.state })
+          this.store.markRead({ path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset: st.size, size: st.size, state: done.state, turnless: done.turnless === 1 })
           return
         }
       }
@@ -441,7 +441,7 @@ export class AgentReader {
       const c = parser.counts
       const delta = subCounts(c, flushed)
       flushed = { ...c }
-      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c), _drift: drift }), counts: delta })
+      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c), _drift: drift }), turnless: drift > 0, counts: delta })
       this.stats.records += records.length
       records = []
       r.counts = addCounts(r.counts, delta)

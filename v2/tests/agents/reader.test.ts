@@ -5,7 +5,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { backfill, listLogs, runChild } from '../../capture/agents/backfill.ts'
 import { AgentReader, classifyFile, homeRoots, type AgentRoot } from '../../capture/agents/reader.ts'
-import { AgentStore, summarizeHealth } from '../../capture/agents/store.ts'
+import { AgentStore, agentSessionsMigration, applyMigrations, summarizeHealth } from '../../capture/agents/store.ts'
 import { Store } from '../../capture/store.ts'
 import { claude, claudeCtx, codex, codexCtx, sec, tmp } from './fixtures.ts'
 
@@ -376,6 +376,43 @@ test('a renamed start with a recognized completion is reported as degraded', asy
   const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
   assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
   r.store.close()
+})
+
+test('the drift check is an indexed lookup whose cost does not grow with the number of logs', (t) => {
+  const r = rig()
+  const root = r.roots[1]!.dir
+  const state = JSON.stringify({ session: 's', origin: 'interactive', dir: '/home/me/code/project-beta', branch: 'main', turn: null, recentUsers: Array.from({ length: 64 }, (_, i) => `${i}`.padStart(16, '0')), _readCounts: { lines: 900, bad: 0, unknown: 3, recognized: 897, turns: 12, orphan: 0 }, _drift: 0 })
+  const insert = r.store.database.prepare(`INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, updated_wall_ms) VALUES (?, 'codex', ?, ?, '1', ?, 10, 10, ?, 0)`)
+  const grow = (from: number, to: number) => r.store.database.transaction(() => { for (let i = from; i < to; i++) insert.run(path.join(root, `rollout-${i}.jsonl`), root, `s${i}`, String(i), state) })()
+  const perCall = () => {
+    for (let i = 0; i < 50; i++) r.agents.hasTurnlessSource(root)
+    const t0 = performance.now()
+    for (let i = 0; i < 500; i++) r.agents.hasTurnlessSource(root)
+    return (performance.now() - t0) / 500
+  }
+  grow(0, 1_000)
+  const small = perCall()
+  grow(1_000, 20_000)
+  const large = perCall()
+  t.diagnostic(JSON.stringify({ rows_1000_ms: small, rows_20000_ms: large }))
+  const plan = r.store.database.prepare('EXPLAIN QUERY PLAN SELECT 1 FROM agent_sources WHERE root = ? AND turnless = 1 LIMIT 1').all(root) as { detail: string }[]
+  assert.ok(plan.some((p) => p.detail.includes('agent_sources_turnless')), JSON.stringify(plan))
+  assert.ok(large < small * 4 + 0.01, `per-call cost grew from ${small} ms to ${large} ms`)
+  assert.equal(r.agents.hasTurnlessSource(root), false)
+  r.store.close()
+})
+
+test('a database read before the drift flag existed keeps its drift', () => {
+  const data = tmp()
+  const db = new Store(data)
+  applyMigrations(db.database, [agentSessionsMigration])
+  const insert = db.database.prepare(`INSERT INTO agent_sources (path, agent, root, offset, size, state, updated_wall_ms) VALUES (?, 'codex', '/r', 1, 1, ?, 0)`)
+  insert.run('/r/a.jsonl', JSON.stringify({ _readCounts: { lines: 3, bad: 0, unknown: 1, recognized: 2, turns: 0, orphan: 1 } }))
+  insert.run('/r/b.jsonl', JSON.stringify({ _readCounts: { lines: 3, bad: 0, unknown: 0, recognized: 3, turns: 1, orphan: 0 } }))
+  const agents = new AgentStore(db.database)
+  assert.equal(agents.hasTurnlessSource('/r'), true)
+  assert.deepEqual(db.query<{ path: string }>('SELECT path FROM agent_sources WHERE turnless = 1').map((x) => x.path), ['/r/a.jsonl'])
+  db.close()
 })
 
 test('the first read uses bounded slices and preserves the same rows as an in-process read', async () => {

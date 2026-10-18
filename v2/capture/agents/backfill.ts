@@ -137,8 +137,8 @@ export function mergeStaging(db: Database.Database, staging: string): void {
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
           SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events WHERE true
           ON CONFLICT (agent, event_key) DO NOTHING;
-        INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, lines, bad_lines, unknown_records, updated_wall_ms)
-          SELECT path, agent, root, session_id, dev, ino, offset, size, state, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources WHERE true
+        INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
+          SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources WHERE true
           ON CONFLICT (path) DO NOTHING;
       `)
     })()

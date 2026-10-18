@@ -1,4 +1,4 @@
-// Agent session tables: one named migration, new tables only, written through the capture store's connection.
+// Agent session tables: named migrations over new tables only, written through the capture store's connection.
 
 import type Database from 'better-sqlite3'
 import type { Agent, AgentRecord, ParseCounts } from './types.ts'
@@ -105,6 +105,17 @@ export const agentSessionsMigration: Migration = {
     `),
 }
 
+export const agentSourcesTurnlessMigration: Migration = {
+  name: 'agent_sources_turnless_v1',
+  up: (db) =>
+    db.exec(`
+      ALTER TABLE agent_sources ADD COLUMN turnless INTEGER NOT NULL DEFAULT 0;
+      UPDATE agent_sources SET turnless = 1 WHERE coalesce(json_extract(state, '$._drift'),
+        json_extract(state, '$._readCounts.orphan') > 0 AND json_extract(state, '$._readCounts.turns') = 0) > 0;
+      CREATE INDEX IF NOT EXISTS agent_sources_turnless ON agent_sources(root) WHERE turnless = 1;
+    `),
+}
+
 export interface SourceRow {
   path: string
   agent: Agent
@@ -115,6 +126,7 @@ export interface SourceRow {
   offset: number
   size: number
   state: string | null
+  turnless: number
 }
 
 export interface SourceUpdate {
@@ -127,6 +139,8 @@ export interface SourceUpdate {
   offset: number
   size: number
   state: string | null
+  // Agent output since the file's last recognized turn start.
+  turnless: boolean
   counts: ParseCounts
 }
 
@@ -216,10 +230,10 @@ const SQL = {
   wait: `INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
     VALUES (@agent, @key, @session, @turn, 'wait', @reason, NULL, @start, @end, @now)
     ON CONFLICT (agent, event_key) DO UPDATE SET end_wall_ms = coalesce(end_wall_ms, excluded.end_wall_ms)`,
-  source: `INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, lines, bad_lines, unknown_records, updated_wall_ms)
-    VALUES (@path, @agent, @root, @session, @dev, @ino, @offset, @size, @state, @lines, @bad, @unknown, @now)
+  source: `INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
+    VALUES (@path, @agent, @root, @session, @dev, @ino, @offset, @size, @state, @turnless, @lines, @bad, @unknown, @now)
     ON CONFLICT (path) DO UPDATE SET agent = excluded.agent, root = excluded.root, session_id = coalesce(excluded.session_id, session_id),
-      dev = excluded.dev, ino = excluded.ino, offset = excluded.offset, size = excluded.size, state = excluded.state,
+      dev = excluded.dev, ino = excluded.ino, offset = excluded.offset, size = excluded.size, state = excluded.state, turnless = excluded.turnless,
       lines = lines + excluded.lines, bad_lines = bad_lines + excluded.bad_lines, unknown_records = unknown_records + excluded.unknown_records,
       updated_wall_ms = excluded.updated_wall_ms`,
 }
@@ -232,7 +246,7 @@ export class AgentStore {
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
-    applyMigrations(db, [agentSessionsMigration], now)
+    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration], now)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -300,6 +314,7 @@ export class AgentStore {
           offset: source.offset,
           size: source.size,
           state: source.state,
+          turnless: source.turnless ? 1 : 0,
           lines: source.counts.lines,
           bad: source.counts.bad,
           unknown: source.counts.unknown,
@@ -310,8 +325,7 @@ export class AgentStore {
   }
 
   hasTurnlessSource(root: string): boolean {
-    return this.stmt(`SELECT 1 FROM agent_sources WHERE root = ? AND coalesce(json_extract(state, '$._drift'),
-      json_extract(state, '$._readCounts.orphan') > 0 AND json_extract(state, '$._readCounts.turns') = 0) > 0 LIMIT 1`).get(root) !== undefined
+    return this.stmt('SELECT 1 FROM agent_sources WHERE root = ? AND turnless = 1 LIMIT 1').get(root) !== undefined
   }
 
   hasSources(): boolean {
@@ -319,19 +333,19 @@ export class AgentStore {
   }
 
   source(file: string): SourceRow | null {
-    return (this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state FROM agent_sources WHERE path = ?').get(file) as SourceRow | undefined) ?? null
+    return (this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless FROM agent_sources WHERE path = ?').get(file) as SourceRow | undefined) ?? null
   }
 
   sourcesByInode(dev: string, ino: string): SourceRow[] {
-    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state FROM agent_sources WHERE dev = ? AND ino = ?').all(dev, ino) as SourceRow[]
+    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless FROM agent_sources WHERE dev = ? AND ino = ?').all(dev, ino) as SourceRow[]
   }
 
   sourcesForSession(agent: Agent, session: string): SourceRow[] {
-    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state FROM agent_sources WHERE agent = ? AND session_id = ?').all(agent, session) as SourceRow[]
+    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless FROM agent_sources WHERE agent = ? AND session_id = ?').all(agent, session) as SourceRow[]
   }
 
   sourcesUnder(root: string): SourceRow[] {
-    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state FROM agent_sources WHERE root = ?').all(root) as SourceRow[]
+    return this.stmt('SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless FROM agent_sources WHERE root = ?').all(root) as SourceRow[]
   }
 
   movedSource(from: string, to: string): void {
@@ -340,7 +354,7 @@ export class AgentStore {
 
   // A file read through to its end that was then compressed into the archive needs no second read.
   markRead(update: Omit<SourceUpdate, 'counts'>): void {
-    this.stmt(SQL.source).run({ ...update, lines: 0, bad: 0, unknown: 0, now: this.now() })
+    this.stmt(SQL.source).run({ ...update, turnless: update.turnless ? 1 : 0, lines: 0, bad: 0, unknown: 0, now: this.now() })
   }
 
   setHealth(agent: Agent, root: string, state: HealthState, reason: string | null, detail: Record<string, number | string> | null): void {
