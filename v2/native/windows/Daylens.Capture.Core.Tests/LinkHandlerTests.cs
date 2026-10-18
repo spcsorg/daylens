@@ -126,6 +126,53 @@ public class LinkHandlerTests
         }
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\"unterminated")]
+    public void HandlerWithoutAnExecutableDoesNotWithholdUnrelatedTitles(string value)
+    {
+        const string id = "DaylensEmptyHandler";
+        const string path = @"http\OpenWithProgids";
+        var stderr = Console.Error;
+        using var diagnostic = new StringWriter();
+        try
+        {
+            using (var openWith = Registry.ClassesRoot.CreateSubKey(path)) openWith.SetValue(id, "");
+            using (var command = Registry.ClassesRoot.CreateSubKey($@"{id}\shell\open\command")) command.SetValue("", value);
+            Console.SetError(diagnostic);
+            Assert.False(Registered(ResolverFor()));
+            Assert.Contains("browser_command_unusable=1", diagnostic.ToString());
+        }
+        finally
+        {
+            Console.SetError(stderr);
+            Registry.ClassesRoot.OpenSubKey(path)!.DeleteValue(id);
+            Registry.ClassesRoot.DeleteSubKeyTree(id, false);
+        }
+    }
+
+    [Fact]
+    public void UnreadableHandlerStillWithholdsEveryAppsTitles()
+    {
+        const string id = "DaylensUnreadableHandler";
+        const string path = @"https\OpenWithProgids";
+        using var command = Registry.ClassesRoot.CreateSubKey($@"{id}\shell\open\command");
+        try
+        {
+            using (var openWith = Registry.ClassesRoot.CreateSubKey(path)) openWith.SetValue(id, "");
+            command.SetValue("", $"\"{Exe}\" %1");
+            command.FailReads = true;
+            Assert.True(Registered(ResolverFor()));
+        }
+        finally
+        {
+            command.FailReads = false;
+            Registry.ClassesRoot.OpenSubKey(path)!.DeleteValue(id);
+            Registry.ClassesRoot.DeleteSubKeyTree(id, false);
+        }
+    }
+
     [Fact]
     public void FailedRegistryReadWithholdsTitles()
     {

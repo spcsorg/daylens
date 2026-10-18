@@ -356,7 +356,7 @@ internal sealed unsafe class Resolver
         {
             if (command is null) return;
             var targets = Browsers.CommandTargets(Environment.ExpandEnvironmentVariables(command)).ToArray();
-            if (targets.Length == 0) throw new InvalidDataException();
+            if (targets.Length == 0) { Diag.Write("browser_command_unusable"); return; }
             foreach (var target in targets) found.Add(Browsers.ExecutableKey(target));
         }
         void ProgId(string id)
