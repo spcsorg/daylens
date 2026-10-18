@@ -674,17 +674,7 @@ function idleSeconds(): number {
   const m = /"HIDIdleTime" = (\d+)/.exec(out)
   return m ? Number(m[1]) / 1e9 : 0
 }
-// Intel Macs report it through IODisplayWrangler; Apple silicon has no such node, so it reads as awake.
-function displayAsleep(): boolean {
-  try {
-    const out = execFileSync('/usr/sbin/ioreg', ['-n', 'IODisplayWrangler', '-r', '-d', '1'], { encoding: 'utf8' })
-    const m = /"CurrentPowerState" = (\d+)/.exec(out)
-    return m !== null && Number(m[1]) < 4
-  } catch {
-    return false
-  }
-}
-const signals: Signals = { marker: () => existsSync(values['away-marker']!), locked, displayAsleep, idleSeconds }
+const signals: Signals = { marker: () => existsSync(values['away-marker']!), locked, idleSeconds }
 
 // Everything a run starts, so a stop can end all of it at once.
 const launched = new Set<number>()

@@ -9,13 +9,13 @@ import { runQueue, splitArgs } from '../browser/tools/queue.ts'
 
 const live = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'browser', 'tools', 'live.ts'), 'utf8')
 
-function fake(over: Partial<{ marker: boolean; locked: boolean; asleep: boolean; idle: number }> = {}): Signals {
-  const v = { marker: true, locked: false, asleep: false, idle: 0, ...over }
-  return { marker: () => v.marker, locked: () => v.locked, displayAsleep: () => v.asleep, idleSeconds: () => v.idle }
+function fake(over: Partial<{ marker: boolean; locked: boolean; idle: number }> = {}): Signals {
+  const v = { marker: true, locked: false, idle: 0, ...over }
+  return { marker: () => v.marker, locked: () => v.locked, idleSeconds: () => v.idle }
 }
 
-test('no live run starts without the away marker, however long the Mac has been idle or asleep', () => {
-  for (const s of [fake({ marker: false, idle: 10_000 }), fake({ marker: false, asleep: true }), fake({ marker: false, locked: true })])
+test('no live run starts without the away marker, however long the Mac has been idle', () => {
+  for (const s of [fake({ marker: false, idle: 10_000 }), fake({ marker: false, locked: true })])
     assert.equal(gate(s), 'no_marker')
 })
 
@@ -25,9 +25,8 @@ test('two minutes without input is not away: reading at the Mac looks the same',
   assert.equal(AWAY_IDLE_S, 600)
 })
 
-test('with the marker, ten idle minutes or a sleeping display mean away; a locked screen waits', () => {
+test('with the marker, ten idle minutes mean away; a locked screen waits', () => {
   assert.equal(gate(fake({ idle: AWAY_IDLE_S })), 'away')
-  assert.equal(gate(fake({ asleep: true, idle: 5 })), 'away')
   assert.equal(gate(fake({ locked: true, idle: 10_000 })), 'locked')
 })
 
@@ -62,7 +61,7 @@ function clock() {
 
 test('the first input after the run takes the screen stops it, even in the first second; idle time growing does not', () => {
   const v = { idle: 600 }
-  const s: Signals = { marker: () => true, locked: () => false, displayAsleep: () => false, idleSeconds: () => v.idle }
+  const s: Signals = { marker: () => true, locked: () => false, idleSeconds: () => v.idle }
   const c = clock()
   const stops: string[] = []
   watch(s, c, (r) => stops.push(r))
@@ -87,7 +86,7 @@ test('the first input after the run takes the screen stops it, even in the first
 
 test('removing the marker or locking the screen during a run stops it too', () => {
   const v = { marker: true, locked: false, idle: 900 }
-  const s: Signals = { marker: () => v.marker, locked: () => v.locked, displayAsleep: () => false, idleSeconds: () => v.idle }
+  const s: Signals = { marker: () => v.marker, locked: () => v.locked, idleSeconds: () => v.idle }
   assert.equal(stopReason(s, 900, 0), null)
   v.marker = false
   assert.equal(stopReason(s, 900, 0), 'the away marker was removed')

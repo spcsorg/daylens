@@ -55,8 +55,8 @@ read the host manifest from the test profile's own folder; Firefox reads only
 `~/Library/Application Support/Mozilla/NativeMessagingHosts`, so the run writes it there and removes it afterwards.
 
 A run takes the screen only when someone has said they are away: the file `~/.daylens-live-away` (`--away-marker`)
-must exist, and the Mac must have had no keyboard or mouse input for ten minutes (`--away-idle-s`) or have its display
-asleep. Without the marker the runner exits 75 before launching anything. It then shows a notification and counts down
+must exist, the screen must be unlocked, and the Mac must have had no keyboard or mouse input for ten minutes
+(`--away-idle-s`). Without the marker the runner exits 75 before launching anything. It then shows a notification and counts down
 30 seconds. The first input from then on, a locked screen or a removed marker ends the whole run: every browser and
 service it launched is quit by pid, nothing is brought back to the front, and it exits 75. Steps that another app
 interrupted with nobody at the keyboard are redone. A runner that receives SIGTERM, SIGINT or SIGHUP, or fails,

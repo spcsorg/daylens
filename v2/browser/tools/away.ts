@@ -1,6 +1,6 @@
 // When a live run may take the screen. A run starts only when someone said they are away (the marker file) and the Mac
-// agrees: idle long enough that nobody is reading at it, or the display asleep. A locked screen means away, but a run
-// cannot drive a locked Mac, so it waits.
+// agrees: idle long enough that nobody is reading at it. A locked screen means away, but a run cannot drive a locked
+// Mac, so it waits.
 
 import os from 'node:os'
 import path from 'node:path'
@@ -14,7 +14,6 @@ export const NOT_AWAY_EXIT = 75
 export interface Signals {
   marker(): boolean
   locked(): boolean
-  displayAsleep(): boolean
   idleSeconds(): number
 }
 
@@ -23,7 +22,7 @@ export type Gate = 'no_marker' | 'present' | 'locked' | 'away'
 export function gate(s: Signals, idleS = AWAY_IDLE_S): Gate {
   if (!s.marker()) return 'no_marker'
   if (s.locked()) return 'locked'
-  if (s.displayAsleep() || s.idleSeconds() >= idleS) return 'away'
+  if (s.idleSeconds() >= idleS) return 'away'
   return 'present'
 }
 
