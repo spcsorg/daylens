@@ -2,7 +2,7 @@
 // writer; every other reader opens the database read-only and follows the change log (changes.ts).
 import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
-import { keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type OrderingPoint, type ObservationRow } from '../capture/normalize.ts'
+import { canonicalKeptTitleId, keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type OrderingPoint, type ObservationRow } from '../capture/normalize.ts'
 import type { AppIdentity } from '../capture/protocol.ts'
 import { Store } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
@@ -666,7 +666,7 @@ export class Storage {
   }
 
   keptTitleApps(): KeptTitleApp[] {
-    return this.getSetting<KeptTitleApp[]>('kept_title_apps') ?? []
+    return (this.getSetting<KeptTitleApp[]>('kept_title_apps') ?? []).map((a) => ({ ...a, id: canonicalKeptTitleId(a.id) }))
   }
 
   keepTitles(app: AppIdentity): string {

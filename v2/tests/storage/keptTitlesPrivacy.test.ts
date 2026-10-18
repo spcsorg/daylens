@@ -146,3 +146,29 @@ test('a reboot after activation admits only events from the proven current kerne
     assert.equal(r.q<{ title: string | null }>('SELECT title FROM observations ORDER BY id DESC')[0]!.title, null)
   } finally { r.close() }
 })
+
+test('a kept Windows identity survives Squirrel updates without admitting another app from the same publisher', () => {
+  const r = rig()
+  const windowsApp = (root: string, exe = 'jot.exe') => app(`${root}\\${exe}`, {
+    path: `${root}\\${exe}`, engine: 'app_runtime', signer: 'Jot Labs',
+    version_info: { original_filename: exe, product_name: 'Jot' },
+  })
+  try {
+    const old = windowsApp('C:\\Users\\me\\Jot\\app-4.41.0')
+    const id = r.storage.keepTitles(old)
+    const saved = r.storage.keptTitleApps()[0]!
+    const legacyId = JSON.stringify(['exe', old.app_id!.toLowerCase(), 'jot.exe', 'jot labs', 'jot.exe', 'jot'])
+    r.storage.db.prepare("UPDATE settings SET value = ? WHERE key = 'kept_title_apps'").run(JSON.stringify([{ ...saved, id: legacyId }]))
+    r.reopenNormalizer()
+    r.feed(focus(old, 'Before update', T0))
+    const updated = windowsApp('C:\\Users\\me\\Jot\\app-4.42.0')
+    r.feed(focus(updated, 'After update', T0 + MIN))
+    assert.deepEqual(r.q('SELECT title FROM observations ORDER BY id'), [{ title: 'Before update' }, { title: 'After update' }])
+    assert.equal(r.storage.keepTitles(updated), id)
+    assert.equal(r.storage.keptTitleApps().length, 1)
+    r.feed(focus(windowsApp('C:\\Users\\me\\Jot\\app-4.42.0', 'other.exe'), 'OtherExeCanary', T0 + 2 * MIN))
+    r.feed(focus(windowsApp('C:\\Users\\me\\Other\\app-4.42.0'), 'OtherRootCanary', T0 + 3 * MIN))
+    assert.deepEqual(r.q('SELECT title FROM observations ORDER BY id DESC LIMIT 2'), [{ title: null }, { title: null }])
+    for (const canary of ['OtherExeCanary', 'OtherRootCanary']) assert.deepEqual(diskContains(r.dir, canary), [])
+  } finally { r.close() }
+})

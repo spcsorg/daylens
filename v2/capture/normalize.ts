@@ -179,6 +179,14 @@ export interface KeptTitleApp {
   activation?: OrderingPoint | null
 }
 
+export function canonicalKeptTitleId(id: string): string {
+  const key: unknown = JSON.parse(id)
+  if (!Array.isArray(key) || key[0] !== 'exe' || typeof key[1] !== 'string') return id
+  // Squirrel replaces only the version directory; root, executable and signed product still bind the app.
+  key[1] = key[1].replace(/([\\/])app-\d+\.\d+\.\d+(?:\.\d+)*(?:[-+][a-z0-9.-]+)?([\\/])(?=[^\\/]+\.exe$)/i, '$1app-*$2')
+  return JSON.stringify(key)
+}
+
 export function keptTitleIdentity(app: AppIdentity): Omit<KeptTitleApp, 'effective_from_wall_ms' | 'activation'> | null {
   if (app.identity_state !== 'ok' || !app.app_id) return null
   const appId = app.app_id.toLowerCase()
@@ -194,7 +202,7 @@ export function keptTitleIdentity(app: AppIdentity): Omit<KeptTitleApp, 'effecti
     const vi = app.version_info
     if (!exe || (!vi?.original_filename && !vi?.product_name)) return null
     return {
-      id: JSON.stringify(['exe', appId, exe, signer, vi?.original_filename?.toLowerCase() ?? null, vi?.product_name?.toLowerCase() ?? null]),
+      id: canonicalKeptTitleId(JSON.stringify(['exe', appId, exe, signer, vi?.original_filename?.toLowerCase() ?? null, vi?.product_name?.toLowerCase() ?? null])),
       app_id: app.app_id,
       signer: app.signer,
     }
