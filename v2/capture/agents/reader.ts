@@ -85,9 +85,9 @@ export interface RootCounts {
   unreadable: boolean
 }
 
-// What a batch of reads says about a folder: degraded when lines could not be read, or when none of them were understood.
+// What a batch of reads says about a folder: degraded on unreadable lines, nothing understood, or drift in any of its files.
 export function healthFromCounts(c: ParseCounts, turnlessFile = false): { state: HealthState; reason: string | null; detail: Record<string, number> | null } {
-  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : turnlessFile || (c.orphan > 0 && c.turns === 0) ? 'turns_unrecognized' : null
+  const reason = c.bad > 0 ? 'unreadable_lines' : c.recognized === 0 ? 'unrecognized_format' : turnlessFile ? 'turns_unrecognized' : null
   return reason === null ? { state: 'ok', reason, detail: null } : { state: 'degraded', reason, detail: { ...c } }
 }
 
@@ -419,21 +419,28 @@ export class AgentReader {
       this.leftOver = true
       return
     }
-    const parser = makeParser(root, info, info.compressed && !this.tails.has(file) ? null : (row?.state ?? null))
-    const priorCounts: ParseCounts = row?.state ? (JSON.parse(row.state)._readCounts ?? emptyCounts()) : emptyCounts()
+    const saved = info.compressed && !this.tails.has(file) ? null : (row?.state ?? null)
+    const parser = makeParser(root, info, saved)
+    const prior = row?.state ? (JSON.parse(row.state) as { _readCounts?: ParseCounts; _drift?: number }) : null
+    const priorCounts: ParseCounts = prior?._readCounts ?? emptyCounts()
+    // Agent output since the file's last recognized turn start; rows written before this was kept fall back to lifetime counts.
+    let drift = saved === null ? 0 : (prior?._drift ?? (priorCounts.orphan > 0 && priorCounts.turns === 0 ? priorCounts.orphan : 0))
     let records: AgentRecord[] = []
     let flushed = emptyCounts()
     const flush = (offset: number) => {
       const c = parser.counts
       const delta = subCounts(c, flushed)
       flushed = { ...c }
-      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c) }), counts: delta })
+      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c), _drift: drift }), counts: delta })
       this.stats.records += records.length
       records = []
       r.counts = addCounts(r.counts, delta)
     }
     const sink = (text: (() => string | null) | null, head: string, tail: string) => {
+      const turns = parser.counts.turns
+      const orphan = parser.counts.orphan
       for (const rec of parser.line(text, head, tail)) records.push(rec)
+      drift = parser.counts.turns > turns ? 0 : drift + parser.counts.orphan - orphan
     }
     try {
       if (info.compressed) {

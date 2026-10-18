@@ -63,8 +63,7 @@ export interface ParseCounts {
   recognized: number
   // Turns actually created; a completion alone does not establish a turn.
   turns: number
-  // Agent activity outside any turn. Some is normal (imported histories); activity with no turn records at all means
-  // the records that mark turns are no longer recognized.
+  // Agent output outside any turn; output since a file's last recognized turn start means turn records went unrecognized.
   orphan: number
 }
 

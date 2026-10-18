@@ -582,6 +582,59 @@ for (const child of [false, true]) {
     r.store.close()
   })
 
+  test(`drift after a valid turn in the same session is not hidden by that turn (backfill=${child})`, async () => {
+    const r = rig()
+    const good = codexCtx()
+    const drift = codexCtx()
+    writeFileSync(codexFile(r.home, good), lines(codex.meta(good, sec(0)), codex.started(sec(1), 'good', 'composer'), codex.complete(sec(5), 'good', sec(1), sec(5))))
+    const driftFile = codexFile(r.home, drift)
+    writeFileSync(
+      driftFile,
+      lines(
+        codex.meta(drift, sec(10)),
+        codex.started(sec(11), 'valid', 'composer'),
+        codex.complete(sec(15), 'valid', sec(11), sec(15)),
+        codex.started(sec(20), 'renamed', 'composer').replace('task_started', 'renamed_start'),
+        codex.assistant(sec(25)),
+      ),
+    )
+    const reader = r.reader(child ? { backfill: async (roots) => (await backfill(r.store.database, r.data, roots, () => {})).merged } : {})
+    await reader.start()
+    await reader.stop()
+    assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 2)
+    const health = () => r.agents.healthFor('codex', r.roots[1]!.dir)!
+    assert.deepEqual([health().state, health().reason], ['degraded', 'turns_unrecognized'])
+    appendFileSync(driftFile, lines(codex.started(sec(30), 'later', 'composer'), codex.complete(sec(35), 'later', sec(30), sec(35))))
+    const again = r.reader()
+    await again.start()
+    await again.stop()
+    assert.equal(health().state, 'ok', 'a recognized turn after the drift clears it')
+    r.store.close()
+  })
+
+  test(`a command finishing or Codex's own note after a turn ends is not drift (backfill=${child})`, async () => {
+    const r = rig()
+    const c = codexCtx()
+    const note = JSON.stringify({ timestamp: new Date(sec(12)).toISOString(), type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'synthetic note' }] } })
+    writeFileSync(
+      codexFile(r.home, c),
+      lines(
+        codex.meta(c, sec(0)),
+        codex.started(sec(1), 'cmd', 'composer'),
+        codex.complete(sec(5), 'cmd', sec(1), sec(5)),
+        codex.itemDone(sec(6), 'cmd', sec(2), sec(6)),
+        codex.started(sec(7), 'stopped', 'composer'),
+        codex.aborted(sec(11), 'stopped', sec(7)),
+        note,
+      ),
+    )
+    const reader = r.reader(child ? { backfill: async (roots) => (await backfill(r.store.database, r.data, roots, () => {})).merged } : {})
+    await reader.start()
+    await reader.stop()
+    assert.equal(r.agents.healthFor('codex', r.roots[1]!.dir)!.state, 'ok')
+    r.store.close()
+  })
+
   test(`a renamed-start session with only a recognized completion is degraded (backfill=${child})`, async () => {
     const r = rig()
     const c = codexCtx()

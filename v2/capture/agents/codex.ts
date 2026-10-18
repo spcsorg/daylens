@@ -40,6 +40,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PREFIX = /^\{"timestamp":"([^"]+)",(?:"ordinal":\d+,)?"type":"([a-z_]+)"(?:,"payload":\{"type":"([A-Za-z_]+)")?/
 const ITEM_KIND = /"item":\{"type":"([A-Za-z]+)"/
 const NOT_USER_ROLE = /^\{"timestamp":"[^"]+",(?:"ordinal":\d+,)?"type":"response_item","payload":\{"type":"message",(?:"id":"[^"]*",)?"role":"(?:assistant|developer|system)"/
+// Instructions Codex writes after a turn ends (an abort notice) are not agent output.
+const INSTRUCTION_ROLE = /^\{"timestamp":"[^"]+",(?:"ordinal":\d+,)?"type":"response_item","payload":\{"type":"message",(?:"id":"[^"]*",)?"role":"(?:developer|system)"/
 const COMPLETED_MS = /"completed_at_ms":(\d+)/
 // Record kinds whose payload never holds anything the reader needs beyond the line's own time.
 const BULK = new Set(['reasoning', 'function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output', 'agent_message', 'token_count', 'web_search_call', 'local_shell_call', 'agent_reasoning', 'exec_command_end', 'exec_command_begin', 'mcp_tool_call_end', 'patch_apply_end'])
@@ -51,7 +53,8 @@ const RECENT_USERS = 64
 const FAR = 1_000_000
 const EXTERNAL_IMPORT = /^external-import-turn-\d+$/
 const KNOWN_EVENTS = new Set(['item_completed', 'agent_message', 'token_count', 'task_started', 'task_complete', 'thread_settings_applied', 'user_message', 'turn_aborted'])
-const OUTPUT_EVENTS = new Set(['agent_message', 'item_completed', 'user_message', 'task_complete', 'turn_aborted'])
+// A command that finishes after its turn ended (item_completed) is not agent output.
+const OUTPUT_EVENTS = new Set(['agent_message', 'user_message', 'task_complete', 'turn_aborted'])
 
 const TRIGGER_OPENER: Record<string, TurnOpener> = {
   composer: 'user',
@@ -161,7 +164,7 @@ export class CodexParser implements LineParser {
     const t = this.s.turn
     this.s.since = (this.s.since ?? FAR) + 1
     const copyOf = (kind: 'item' | 'event') => this.s.prevUser === kind && this.s.since! <= 2
-    if (!t && (type === 'response_item' || (type === 'event_msg' && sub !== undefined && OUTPUT_EVENTS.has(sub)))) this.counts.orphan++
+    if (!t && ((type === 'response_item' && !INSTRUCTION_ROLE.test(head)) || (type === 'event_msg' && sub !== undefined && OUTPUT_EVENTS.has(sub)))) this.counts.orphan++
 
     // A reply or an instruction to the model is never the person's message; its role is in the line's first bytes.
     const notUser = type === 'response_item' && sub === 'message' && NOT_USER_ROLE.test(head)
