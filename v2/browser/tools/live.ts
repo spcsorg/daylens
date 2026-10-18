@@ -20,6 +20,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { cleanAddress } from '../../capture/address.ts'
+import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, gate, type Signals } from './away.ts'
 import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -43,7 +44,9 @@ const { values, positionals } = parseArgs({
     headless: { type: 'boolean', default: false },
     // An unpacked extension folder to load instead of the dev build, for manifest experiments.
     'ext-dir': { type: 'string' },
-    'idle-s': { type: 'string', default: '120' },
+    // The file that says the person is away; a run never starts without it.
+    'away-marker': { type: 'string', default: DEFAULT_MARKER },
+    'away-idle-s': { type: 'string', default: String(AWAY_IDLE_S) },
     hold: { type: 'string', default: '5000' },
   },
 })
@@ -665,14 +668,30 @@ function idleSeconds(): number {
   const m = /"HIDIdleTime" = (\d+)/.exec(out)
   return m ? Number(m[1]) / 1e9 : 0
 }
+// Intel Macs report it through IODisplayWrangler; Apple silicon has no such node, so it reads as awake.
+function displayAsleep(): boolean {
+  try {
+    const out = execFileSync('/usr/sbin/ioreg', ['-n', 'IODisplayWrangler', '-r', '-d', '1'], { encoding: 'utf8' })
+    const m = /"CurrentPowerState" = (\d+)/.exec(out)
+    return m !== null && Number(m[1]) < 4
+  } catch {
+    return false
+  }
+}
+const signals: Signals = { marker: () => existsSync(values['away-marker']!), locked, displayAsleep, idleSeconds }
 
 // Waits until nobody has touched the Mac for a while, tells them the screen is about to be taken over, and starts
 // only if the countdown passes untouched.
 async function announce(what: string, seconds: number): Promise<void> {
   if (HEADLESS) return
-  const need = Number(values['idle-s'])
+  const need = Number(values['away-idle-s'])
   for (let said = false; ; ) {
-    if (idleSeconds() < need || locked()) {
+    const g = gate(signals, need)
+    if (g === 'no_marker') {
+      log(`${what}: not started: no away marker at ${values['away-marker']}`)
+      process.exit(NOT_AWAY_EXIT)
+    }
+    if (g !== 'away') {
       if (!said) log(`${what}: waiting for an unlocked Mac with ${need} s without keyboard or mouse input`)
       said = true
       await sleep(10_000)
