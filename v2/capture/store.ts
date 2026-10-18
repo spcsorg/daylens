@@ -429,12 +429,12 @@ export class Store implements Sink {
   private observationInsert(id: number, row: ObservationRow): Op {
     return {
       sql: `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
-         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, possibly_stale_since_wall_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         id, row.run, row.seq, row.boot, row.platform, row.source, row.kind, row.event_wall_ms, row.event_mono_us, row.tz, row.tz_offset_min,
         this.now(), row.event_wall_ms, row.app_id, row.app_name, row.app_path, row.pid, row.window, row.title, row.title_raw, row.title_state,
-        row.state, row.detail,
+        row.state, row.detail, row.possibly_stale_since_wall_ms ?? null,
       ],
     }
   }
@@ -473,6 +473,11 @@ export class Store implements Sink {
   }
 
   flagObservation(id: number, _flag: 'possibly_stale', wallMs: number): void {
+    const open = this.openRows.get(id) ?? this.storedOpenRow(id)
+    if (open) {
+      open.row.possibly_stale_since_wall_ms ??= wallMs
+      this.openRows.set(id, open)
+    }
     this.enqueue('UPDATE observations SET possibly_stale_since_wall_ms = coalesce(possibly_stale_since_wall_ms, ?) WHERE id = ?', [wallMs, id], { flagSourceId: id })
   }
 

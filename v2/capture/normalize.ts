@@ -25,6 +25,7 @@ export type StoredTitleState =
   | 'unknown'
 
 export interface ObservationRow {
+  possibly_stale_since_wall_ms?: number | null
   run: string
   seq: number
   boot: string

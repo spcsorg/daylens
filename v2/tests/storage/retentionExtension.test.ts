@@ -157,7 +157,7 @@ for (const retry of [false, true]) {
 }
 
 
-for (const order of ['extension then flag', 'flag then extension', 'extension then flag with rollback'] as const) {
+for (const order of ['extension then flag', 'flag then extension', 'committed flag then extension', 'extension then flag with rollback'] as const) {
   test(`a pruned replacement keeps its queued stale-title marker: ${order}`, () => {
     resetSeq()
     const r = rig()
@@ -167,9 +167,10 @@ for (const order of ['extension then flag', 'flag then extension', 'extension th
       r.feed(focus(editor, 'Stalled replacement', T0))
       r.store.flush()
       const staleSince = sighting + MIN
-      if (order === 'flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
+      if (order === 'flag then extension' || order === 'committed flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
+      if (order === 'committed flag then extension') r.store.flush()
       r.feed(focus(editor, 'Stalled replacement', sighting, 'reconcile'))
-      if (order !== 'flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
+      if (order !== 'flag then extension' && order !== 'committed flag then extension') r.normalizer.onTitleChannel('stalled', staleSince)
       r.clock.t = T0 + 7 * DAY_MS + MIN
       pruneStep(conn, T0 + MIN, 0)
       assert.deepEqual(r.store.query('SELECT id FROM observations'), [])
