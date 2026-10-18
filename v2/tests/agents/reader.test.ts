@@ -722,6 +722,29 @@ test('plain slices keep an oversized line in progress without exceeding the byte
   }
 })
 
+test('a complete first line longer than a slice is read in bounded pieces and slicing continues', async () => {
+  const r = rig()
+  const big = claudeCtx()
+  writeFileSync(claudeFile(r.home, big, '-a'), lines(claude.toolResult(big, sec(0), 'big', 'x'.repeat(4_300_000)), claude.prompt(big, sec(1), 'go', { uuid: 'after-big' }), claude.assistant(big, sec(2), 'end_turn')))
+  for (let i = 0; i < 6; i++) {
+    const c = claudeCtx()
+    writeFileSync(claudeFile(r.home, c, `-s${i}`), lines(claude.prompt(c, sec(10 + i), 'small', { uuid: `small${i}` }), claude.assistant(c, sec(11 + i), 'end_turn')))
+  }
+  const logs: string[] = []
+  let result: Awaited<ReturnType<typeof backfill>> | null = null
+  const reader = r.reader({ backfill: async (roots) => (result = await backfill(r.store.database, r.data, roots, (s) => logs.push(s))).merged })
+  await reader.start()
+  await reader.stop()
+  assert.ok(result)
+  const res = result as Awaited<ReturnType<typeof backfill>>
+  assert.ok(res.slices >= 2, `slices: ${res.slices}`)
+  assert.ok(res.max_slice_bytes <= 4 << 20, `max slice: ${res.max_slice_bytes}`)
+  assert.ok(!logs.some((s) => s.includes('no committed progress')), logs.join('\n'))
+  assert.equal(reader.stats.filesRead, 0, 'nothing is left for an unbounded read in this process')
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 7)
+  r.store.close()
+})
+
 test('source capture uses emitted JavaScript for its backfill worker', async () => {
   const r = rig()
   const c = claudeCtx()

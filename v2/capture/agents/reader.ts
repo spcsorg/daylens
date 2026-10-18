@@ -2,7 +2,7 @@
 // File events drive reading; a slow check compares file sizes with the stored read positions for events a watcher missed.
 
 import { existsSync, watch, type FSWatcher } from 'node:fs'
-import { readdir, stat } from 'node:fs/promises'
+import { open, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { ClaudeParser } from './claude.ts'
 import { CodexParser } from './codex.ts'
@@ -112,6 +112,16 @@ interface RootState {
 }
 
 const FLUSH_RECORDS = 2000
+
+async function endsWithNewline(file: string, size: number): Promise<boolean> {
+  const fh = await open(file, 'r')
+  try {
+    const b = Buffer.alloc(1)
+    return (await fh.read(b, 0, 1, size - 1)).bytesRead === 1 && b[0] === 0x0a
+  } finally {
+    await fh.close()
+  }
+}
 
 function errCode(err: unknown): string {
   const c = (err as { code?: unknown })?.code
@@ -474,7 +484,11 @@ export class AgentReader {
           }
           res = await tail.read(sink, checkpoint, this.budget)
           if (res.done) this.tails.delete(file)
-          if (!hadTail && !res.done && res.next === from && this.budget === this.budgetStart) this.deferredFiles.push(file)
+          if (!hadTail && !res.done && res.next === from && this.budget === this.budgetStart) {
+            // A file ending in a newline has no unfinished line, so this one is complete and keeps being read in slices.
+            if (await endsWithNewline(file, st.size)) this.progressed = true
+            else this.deferredFiles.push(file)
+          }
         }
         flush(res.next)
         if (res.next > from || (hadTail && res.bytes > 0)) this.progressed = true
