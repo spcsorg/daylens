@@ -20,7 +20,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { cleanAddress } from '../../capture/address.ts'
-import { AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, watch, type Signals } from './away.ts'
+import { ABORTED_EXIT, AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, onAbort, watch, type Signals } from './away.ts'
 import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -706,7 +706,7 @@ function openApp(name: string): void {
 let stopping = false
 // The first input, a lock, or the marker going away ends the whole run: its browsers are quit by pid, nothing is
 // brought back to the front, and the runner exits 75 so a queue stops too.
-async function stopRun(reason: string): Promise<void> {
+async function stopRun(reason: string, code = NOT_AWAY_EXIT): Promise<void> {
   if (stopping) return
   stopping = true
   log(`stopped: ${reason}`)
@@ -733,8 +733,9 @@ async function stopRun(reason: string): Promise<void> {
       execFileSync('/usr/bin/killall', [app], { stdio: 'ignore' })
     } catch {}
   }
-  process.exit(NOT_AWAY_EXIT)
+  process.exit(code)
 }
+onAbort(process, (reason) => void stopRun(reason, ABORTED_EXIT))
 const realClock = {
   now: () => Date.now(),
   every: (fn: () => void, ms: number) => {

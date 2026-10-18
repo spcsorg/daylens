@@ -59,9 +59,10 @@ must exist, and the Mac must have had no keyboard or mouse input for ten minutes
 asleep. Without the marker the runner exits 75 before launching anything. It then shows a notification and counts down
 30 seconds. The first input from then on, a locked screen or a removed marker ends the whole run: every browser and
 service it launched is quit by pid, nothing is brought back to the front, and it exits 75. Steps that another app
-interrupted with nobody at the keyboard are redone. For Dia, the runner first proves that the launch is a separate
+interrupted with nobody at the keyboard are redone. A runner that receives SIGTERM, SIGINT or SIGHUP, or fails,
+ends what it launched the same way and exits 70; SIGKILL cannot be caught. For Dia, the runner first proves that the launch is a separate
 instance on the test profile before the extension is loaded. `tools/queue.ts` runs several runs in order and stops at
-the first exit 75.
+the first exit 75 or 70.
 
 ```bash
 node browser/tools/live.ts canary --browser cft --app "<Chrome for Testing.app>" --helper native/macos/.build/release/daylens-capture-macos --out <dir> --activate <activate binary> --procstat <procstat binary>

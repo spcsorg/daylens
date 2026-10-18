@@ -79,3 +79,19 @@ export async function endAll(pids: Iterable<number>, k: Killer, graceMs = 1500):
 export function mayTakeScreen(held: boolean, s: Signals): boolean {
   return held && s.marker()
 }
+
+// Exit code for a run ended by a signal or its own failure. A queue stops on it too.
+export const ABORTED_EXIT = 70
+
+export interface Proc {
+  on(event: string, fn: (arg?: unknown) => void): unknown
+}
+
+// A runner that is told to stop, or fails, ends what it launched the same way as when someone touches the Mac.
+// SIGKILL cannot be caught.
+export function onAbort(proc: Proc, stop: (reason: string) => void): void {
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) proc.on(sig, () => stop(`the runner received ${sig}`))
+  const failed = (e: unknown) => stop(`the runner failed: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`)
+  proc.on('uncaughtException', failed)
+  proc.on('unhandledRejection', failed)
+}

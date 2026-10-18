@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AWAY_IDLE_S, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, stopReason, watch, type Signals } from '../browser/tools/away.ts'
+import { EventEmitter } from 'node:events'
+import { ABORTED_EXIT, AWAY_IDLE_S, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, onAbort, stopReason, watch, type Signals } from '../browser/tools/away.ts'
 import { runQueue, splitArgs } from '../browser/tools/queue.ts'
 
 const live = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'browser', 'tools', 'live.ts'), 'utf8')
@@ -133,7 +134,8 @@ test('the runner watches from the countdown on, ends the run on a stop, and no l
   const stop = live.slice(live.indexOf('async function stopRun'), live.indexOf('\n}\n', live.indexOf('async function stopRun')))
   assert.match(stop, /stopped: \$\{reason\}/)
   assert.match(stop, /endAll\(launched/)
-  assert.match(stop, /process\.exit\(NOT_AWAY_EXIT\)/)
+  assert.match(stop, /code = NOT_AWAY_EXIT/)
+  assert.match(stop, /process\.exit\(code\)/)
   assert.doesNotMatch(stop, /activate/)
   for (const spawned of ['this.proc = spawn(this.binary, [...this.args()', "this.proc = spawn(this.binary, ['-profile'", 'this.proc = spawn(process.execPath, [SERVICE']) {
     const at = live.indexOf(spawned)
@@ -157,4 +159,28 @@ test('nothing launches or comes to the front before the gate passes, or once the
   assert.match(take, /mayTakeScreen\(screenHeld, signals\)/)
   const announce = live.slice(live.indexOf('async function announce'), live.indexOf('\n}\n', live.indexOf('async function announce')))
   assert.ok(announce.indexOf('screenHeld = true') > announce.indexOf("if (g === 'away') break"), 'the screen is held only after the gate passed')
+})
+
+test('a runner that is signalled or fails mid-run ends every process it launched, and a queue stops on it', async () => {
+  for (const event of ['SIGTERM', 'SIGINT', 'SIGHUP', 'uncaughtException', 'unhandledRejection']) {
+    const proc = new EventEmitter()
+    const alive = new Set([101, 202, 303])
+    const reasons: string[] = []
+    let ended: Promise<void> = Promise.resolve()
+    onAbort(proc, (reason) => {
+      reasons.push(reason)
+      ended = endAll(alive, { kill: (pid) => void alive.delete(pid), alive: (pid) => alive.has(pid), sleep: async () => {} })
+    })
+    proc.emit(event, new Error('boom'))
+    await ended
+    assert.equal(alive.size, 0, `${event}: every launched pid ended`)
+    assert.equal(reasons.length, 1)
+    assert.match(reasons[0]!, event.startsWith('SIG') ? new RegExp(`received ${event}`) : /failed: Error: boom/)
+  }
+  const ran: string[] = []
+  runQueue([['cft'], ['firefox']], (args) => (ran.push(args[0]!), ABORTED_EXIT))
+  assert.deepEqual(ran, ['cft'])
+  const top = live.slice(live.indexOf('async function stopRun'))
+  assert.match(top, /\nonAbort\(process, \(reason\) => void stopRun\(reason, ABORTED_EXIT\)\)/, 'installed once, for the whole runner')
+  assert.equal(ABORTED_EXIT, 70)
 })
