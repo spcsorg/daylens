@@ -184,38 +184,61 @@ export function listFocusEventTimesInRange(
   `).all(fromMs, toMs) as FocusEventTimeAndType[]
 }
 
-export interface CaptureTitleSampleStats {
-  recentSamples: number
+export interface CaptureTitleSampleStatsByApp {
+  appBundleId: string | null
+  appName: string | null
+  samples: number
   withTitle: number
   lastCapturedAtMs: number | null
 }
 
-/** Capture-health counts: how many recent native-helper foreground samples
- *  carried a window title. Counts only — no titles or identities leave the
- *  repository. */
-export function getNativeCaptureTitleStats(
+/** Capture-health counts per app: how many recent native-helper foreground
+ *  samples carried a window title. Counts and app identity only — no titles
+ *  leave the repository. */
+export function listNativeCaptureTitleStatsByApp(
   db: Database.Database,
   sinceMs: number,
-): CaptureTitleSampleStats {
-  const row = db.prepare(`
+): CaptureTitleSampleStatsByApp[] {
+  const rows = db.prepare(`
     SELECT
-      COUNT(*) AS recent_samples,
+      app_bundle_id,
+      app_name,
+      COUNT(*) AS samples,
       SUM(CASE WHEN window_title IS NOT NULL AND trim(window_title) <> '' THEN 1 ELSE 0 END) AS with_title,
       MAX(CASE WHEN window_title IS NOT NULL AND trim(window_title) <> '' THEN ts_ms ELSE NULL END) AS last_captured_at
     FROM focus_events
     WHERE source IN ('nsworkspace_event', 'uia_foreground')
       AND event_type IN ('app_activated', 'window_changed', 'space_changed')
       AND ts_ms >= ?
-  `).get(sinceMs) as {
-    recent_samples: number
+    GROUP BY app_bundle_id, app_name
+  `).all(sinceMs) as Array<{
+    app_bundle_id: string | null
+    app_name: string | null
+    samples: number
     with_title: number | null
     last_captured_at: number | null
-  }
-  return {
-    recentSamples: row.recent_samples,
+  }>
+  return rows.map((row) => ({
+    appBundleId: row.app_bundle_id,
+    appName: row.app_name,
+    samples: row.samples,
     withTitle: row.with_title ?? 0,
     lastCapturedAtMs: row.last_captured_at,
-  }
+  }))
+}
+
+/** Browser-history visits since `sinceMs`, counted per browser bundle id
+ *  (profile suffix included, e.g. `company.thebrowser.dia:Profile 2`). */
+export function countWebsiteVisitsByBrowserSince(
+  db: Database.Database,
+  sinceMs: number,
+): Array<{ browserBundleId: string; visits: number }> {
+  return db.prepare(`
+    SELECT browser_bundle_id AS browserBundleId, COUNT(*) AS visits
+    FROM website_visits
+    WHERE visit_time >= ? AND browser_bundle_id IS NOT NULL
+    GROUP BY browser_bundle_id
+  `).all(sinceMs) as Array<{ browserBundleId: string; visits: number }>
 }
 
 /** Display-visibility samples plus the machine-state boundaries that bound

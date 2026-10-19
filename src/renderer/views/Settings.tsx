@@ -800,8 +800,9 @@ function CaptureHealthContent({
     )
   }
 
-  const titleStatus = captureHealth.windowTitles.status
-  const browserNames = captureHealth.browsers?.names ?? []
+  const windowTitles = captureHealth.windowTitles
+  const titleStatus = windowTitles.status
+  const browsers = captureHealth.browsers?.discovered ?? []
   const safariHistoryAccess = captureHealth.browsers?.safariHistoryAccess
   const permissions = captureHealth.permissions
   const linuxTracking = diagnostics?.linuxTracking
@@ -829,9 +830,11 @@ function CaptureHealthContent({
     : tone === 'warning'
       ? (permissions.platformNote
           ? permissions.platformNote
-          : titleStatus === 'degraded'
-            ? `Fewer than half of recent samples carried a window title, so parts of your day are being captured blind.${platform === 'darwin' ? ' Re-granting the Accessibility permission usually fixes this.' : ''}`
-            : 'Daylens sees which apps are open but not the titles inside them. Granting the screen/accessibility permission usually fixes this.')
+          : windowTitles.blindCause === 'browser_history'
+            ? 'Most of your recent time was in a browser with no new history visits, so Daylens can\u2019t tell which pages you were on.'
+            : platform === 'darwin' && permissions.accessibility !== 'missing'
+              ? 'Apps are coming back without window titles even though Accessibility looks granted. macOS is likely holding a stale grant from an earlier build of Daylens.'
+              : 'Daylens sees which apps are open but not the titles inside them. Granting the screen/accessibility permission usually fixes this.')
       : 'Daylens needs a few minutes of activity to confirm it\u2019s capturing properly.'
   const accent = tone === 'success'
     ? { border: '1px solid rgba(79, 219, 200, 0.24)', background: 'rgba(79, 219, 200, 0.08)' }
@@ -860,10 +863,18 @@ function CaptureHealthContent({
         })
       }
       if (!screenMissing && !accessibilityMissing) {
-        troubleshootingSteps.push({
-          label: 'Restart Daylens',
-          detail: 'Permissions look granted but titles are still missing. Quit and reopen Daylens so the capture helper picks up the new permissions.',
-        })
+        if (windowTitles.blindCause === 'browser_history') {
+          troubleshootingSteps.push({
+            label: 'Open a page in your browser',
+            detail: 'Browser page detail comes from browser history, which Daylens reads every minute. A page opened before the last 15 minutes has no new visit to match, so this clears when you next navigate.',
+          })
+        } else {
+          troubleshootingSteps.push({
+            label: 'Remove and re-add Daylens in Accessibility',
+            detail: 'System Settings > Privacy & Security > Accessibility. Select Daylens, remove it with the minus button, add it again, then restart Daylens. Switching it off and on does not clear a stale grant.',
+            action: { label: 'Open Settings', url: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' },
+          })
+        }
       }
     } else if (platform === 'win32') {
       troubleshootingSteps.push({
@@ -970,13 +981,15 @@ function CaptureHealthContent({
             )}
             <SettingsRow
               first={!linuxTracking}
-              title="Recent samples with titles"
-              description={`${captureHealth.windowTitles.recentSamplesWithTitle} of ${captureHealth.windowTitles.recentSamples} samples in the last 15 minutes carried a title.`}
-              control={<StatusPill label={`${captureHealth.windowTitles.recentSamplesWithTitle}/${captureHealth.windowTitles.recentSamples}`} />}
+              title="Recent samples with context"
+              description={`Last 15 minutes: ${windowTitles.recentSamplesWithTitle} with a window title, ${windowTitles.browserSamplesWithHistory} of ${windowTitles.browserSamples} browser samples matched to browser history.`}
+              control={<StatusPill label={`${windowTitles.samplesWithContext}/${windowTitles.recentSamples}`} />}
             />
             <SettingsRow
               title="Browsers discovered"
-              description={browserNames.length > 0 ? browserNames.join(', ') : 'No browser history locations found yet.'}
+              description={browsers.length > 0
+                ? browsers.map((browser) => browser.profileCount > 1 ? `${browser.name} (${browser.profileCount} profiles)` : browser.name).join(', ')
+                : 'No browser history locations found yet.'}
               control={<StatusPill label={String(captureHealth.browsers?.discoveredCount ?? 0)} />}
             />
             {platform === 'darwin' && safariHistoryAccess && (

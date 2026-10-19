@@ -15,7 +15,7 @@ import type { BrowserWindow } from 'electron'
 import type { CaptureVerificationState } from '@shared/types'
 import { IPC } from '@shared/types'
 import { getDb } from './database'
-import { getNativeCaptureTitleStats } from '../db/focusEventRepository'
+import { getCaptureContextStats } from './captureTitleHealth'
 import { deliverNotification } from './notificationDelivery'
 import { isRealDayHarness } from '../lib/realDayHarness'
 import { getSettings } from './settings'
@@ -90,12 +90,14 @@ function checkOnce(): void {
     console.warn('[permission-watcher] failed to read accessibility flag:', err)
   }
 
+  // Browser samples never keep a title, so they can neither prove nor
+  // disprove the grant; judge it on apps whose titles are stored.
   let recentSamples = 0
   let recentSamplesWithTitle = 0
   try {
-    const stats = getNativeCaptureTitleStats(getDb(), Date.now() - SAMPLE_WINDOW_MS)
-    recentSamples = stats.recentSamples
-    recentSamplesWithTitle = stats.withTitle
+    const stats = getCaptureContextStats(getDb(), Date.now() - SAMPLE_WINDOW_MS)
+    recentSamples = stats.titleEligibleSamples
+    recentSamplesWithTitle = stats.titleEligibleWithTitle
   } catch (err) {
     console.warn('[permission-watcher] failed to read title stats:', err)
     return

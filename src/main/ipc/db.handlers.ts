@@ -13,7 +13,8 @@ import {
   clearCategoryOverride,
   getCategoryOverrides,
 } from '../db/queries'
-import { getDisplayVisibilityStats, getNativeCaptureTitleStats } from '../db/focusEventRepository'
+import { getDisplayVisibilityStats } from '../db/focusEventRepository'
+import { deriveWindowTitleHealth, getCaptureContextStats } from '../services/captureTitleHealth'
 import {
   getWorkMemoryProfile,
   updateWorkMemoryFact,
@@ -67,7 +68,7 @@ import { setSettings } from '../services/settings'
 import { flushCurrentSession, getCurrentSession, getLinuxTrackingDiagnostics, trackingStatus } from '../services/tracking'
 import { workerAppDetail, workerAppSummaries } from '../services/rangeWorker'
 import { getCaptureVerificationState } from '../services/permissionWatcher'
-import { getBrowserStatus } from '../services/browser'
+import { getBrowserStatus, groupDiscoveredBrowsers } from '../services/browser'
 import { isWindowsFocusCaptureRunning } from '../services/windowsFocusCapture'
 import {
   deleteHistoryForApp,
@@ -1061,18 +1062,21 @@ export function registerDbHandlers(): void {
   ipcMain.handle(IPC.TRACKING.GET_DIAGNOSTICS, () => {
     const since = Date.now() - 15 * 60_000
     const db = getDb()
-    const nativeStats = getNativeCaptureTitleStats(db, since)
+    const context = getCaptureContextStats(db, since)
 
-    let recentSamples = nativeStats.recentSamples
-    let recentSamplesWithTitle = nativeStats.withTitle
-    let lastCapturedAt = nativeStats.lastCapturedAtMs
+    let recentSamples = context.recentSamples
+    let recentSamplesWithTitle = context.recentSamplesWithTitle
+    let samplesWithContext = context.samplesWithContext
+    let lastCapturedAt = context.lastCapturedAtMs
 
     if ((process.platform === 'win32' || process.platform === 'linux') && recentSamplesWithTitle === 0) {
       const sessionStats = getLegacySessionTitleStats(db, since)
       recentSamples = Math.max(recentSamples, sessionStats.recentSamples)
       recentSamplesWithTitle = Math.max(recentSamplesWithTitle, sessionStats.withTitle)
+      samplesWithContext = Math.max(samplesWithContext, sessionStats.withTitle)
       lastCapturedAt = lastCapturedAt ?? sessionStats.lastCapturedAtMs
     }
+    const titleHealth = deriveWindowTitleHealth({ ...context, recentSamples, samplesWithContext })
 
     const browserStatus = getBrowserStatus()
     const captureHelperRunning = process.platform === 'win32' ? isWindowsFocusCaptureRunning() : null
@@ -1099,23 +1103,17 @@ export function registerDbHandlers(): void {
       captureHealth: {
         permissions: getTrackingPermissionDetails(),
         windowTitles: {
-          // DEV-229: "healthy" means MOST samples carry titles, not "at least
-          // one did" — 17 titled out of 102 used to read as healthy while
-          // capture was effectively blind.
-          status: recentSamples === 0
-            ? 'waiting'
-            : recentSamplesWithTitle === 0
-              ? 'missing'
-              : recentSamplesWithTitle / recentSamples < 0.5
-                ? 'degraded'
-                : 'healthy',
+          status: titleHealth.status,
+          blindCause: titleHealth.blindCause,
           recentSamples,
           recentSamplesWithTitle,
+          samplesWithContext,
+          browserSamples: context.browserSamples,
+          browserSamplesWithHistory: context.browserSamplesWithHistory,
           lastCapturedAt,
         },
         browsers: {
-          discoveredCount: browserStatus.discoveredBrowsers.length,
-          names: browserStatus.discoveredBrowsers.map((browser) => browser.name),
+          ...groupDiscoveredBrowsers(browserStatus.discoveredBrowsers),
           safariHistoryAccess: browserStatus.safariHistoryAccess,
         },
         captureHelperRunning,

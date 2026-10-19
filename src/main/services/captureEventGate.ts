@@ -130,6 +130,14 @@ export function shouldCaptureFocusEvent(
   return true
 }
 
+/** Whether eventParams strips this app's titles as browser page content. The
+ *  catalog check is the same fallback tracking.ts uses — it covers known
+ *  browsers while the LaunchServices registry is still warming. */
+export function isBrowserFocusApp(appBundleId: string | null, appName: string | null): boolean {
+  return resolveBrowserApplication({ bundleId: appBundleId, appName }) != null
+    || resolveCanonicalApp(appBundleId ?? '', appName ?? '').defaultCategory === 'browsing'
+}
+
 // The last privacy transform before persistence.
 export function eventParams(ev: HelperEvent): FocusEvent<MacFocusEventSource> {
   // A browser's window title/url is page content, and the focus helper cannot
@@ -137,11 +145,8 @@ export function eventParams(ev: HelperEvent): FocusEvent<MacFocusEventSource> {
   // store through the corroborated visit pipeline; focus events for browsers
   // keep app identity and timing only. This applies to display-visibility
   // events identically: a browser full-screen on a second monitor is app
-  // identity and timing, never an unverified page title. The catalog check is
-  // the same fallback tracking.ts uses — it covers known browsers while the
-  // LaunchServices registry is still warming.
-  const isBrowser = resolveBrowserApplication({ bundleId: ev.app_bundle_id ?? null, appName: ev.app_name ?? null }) != null
-    || resolveCanonicalApp(ev.app_bundle_id ?? '', ev.app_name ?? '').defaultCategory === 'browsing'
+  // identity and timing, never an unverified page title.
+  const isBrowser = isBrowserFocusApp(ev.app_bundle_id ?? null, ev.app_name ?? null)
   return {
     ts_ms: ev.ts_ms,
     mono_ns: ev.mono_ns,

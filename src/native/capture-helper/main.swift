@@ -85,6 +85,38 @@ func handlesWebURLs(_ bundle: Bundle) -> Bool {
   return schemes.contains("http") && schemes.contains("https")
 }
 
+// Claiming http/https only means an app opens links (ChatGPT/Codex, Parallels
+// do). A browser also advertises web-browsing Handoff or views HTML documents.
+// Mirrors declaresWebBrowsing in browserRegistry.ts.
+func declaresWebBrowsing(_ bundle: Bundle) -> Bool {
+  if let activities = bundle.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String],
+     activities.contains("NSUserActivityTypeBrowsingWeb") {
+    return true
+  }
+  guard let docs = bundle.object(forInfoDictionaryKey: "CFBundleDocumentTypes") as? [[String: Any]] else {
+    return false
+  }
+  return docs.contains { doc in
+    guard (doc["CFBundleTypeRole"] as? String) == "Viewer" else { return false }
+    let types = (doc["LSItemContentTypes"] as? [String]) ?? []
+    let exts = (doc["CFBundleTypeExtensions"] as? [String]) ?? []
+    return types.contains("public.html") || exts.contains("html") || exts.contains("htm")
+  }
+}
+
+// Mirrors isAutomationBrowserInstall in browserRegistry.ts.
+func isAutomationBrowserInstall(bundleId: String?, appURL: URL) -> Bool {
+  if bundleId?.lowercased() == "com.google.chrome.for.testing" { return true }
+  let p = appURL.path
+  return p.split(separator: "/").contains { $0.hasPrefix(".") && $0.count > 1 }
+    || p.range(of: "/Library/Caches/", options: .caseInsensitive) != nil
+}
+
+func isWebBrowserBundle(_ bundle: Bundle, appURL: URL) -> Bool {
+  return handlesWebURLs(bundle) && declaresWebBrowsing(bundle)
+    && !isAutomationBrowserInstall(bundleId: bundle.bundleIdentifier, appURL: appURL)
+}
+
 final class BrowserRegistry {
   private let lock = NSLock()
   private var applications: [String: (url: URL, family: BrowserFamily)] = [:]
@@ -97,7 +129,7 @@ final class BrowserRegistry {
     let urls = NSWorkspace.shared.urlsForApplications(toOpen: webURL)
     var next: [String: (url: URL, family: BrowserFamily)] = [:]
     for url in urls {
-      guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, handlesWebURLs(bundle) else { continue }
+      guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, isWebBrowserBundle(bundle, appURL: url) else { continue }
       next[id] = (url, browserFamily(at: url))
     }
     lock.lock()
@@ -119,7 +151,7 @@ final class BrowserRegistry {
     guard let app = NSRunningApplication(processIdentifier: pid),
           let appURL = app.bundleURL,
           let bundle = Bundle(url: appURL),
-          handlesWebURLs(bundle) else { return nil }
+          isWebBrowserBundle(bundle, appURL: appURL) else { return nil }
     let id = bundle.bundleIdentifier ?? bundleId ?? appURL.path
     let resolved = (url: appURL, family: browserFamily(at: appURL))
     lock.lock()
@@ -214,18 +246,40 @@ let frontmost = Frontmost()
 
 // MARK: accessibility focused-window title
 
+func axElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
+  var ref: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
+        let value = ref, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+  return (value as! AXUIElement)
+}
+
+func axNonEmptyString(_ element: AXUIElement, _ attribute: String) -> String? {
+  var ref: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
+        let s = ref as? String else { return nil }
+  let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+  return trimmed.isEmpty ? nil : s
+}
+
+// AXDocument is a file URL string; only its file name is kept, never the path.
+func axDocumentName(_ window: AXUIElement) -> String? {
+  guard let raw = axNonEmptyString(window, kAXDocumentAttribute),
+        let url = URL(string: raw), url.isFileURL else { return nil }
+  let name = url.lastPathComponent
+  return name.isEmpty || name == "/" ? nil : name
+}
+
+// Focused window first, then the main window: full-screen and second-display
+// apps can answer with no focused window while their main window is readable.
+// A window with an empty title falls back to the document it shows.
 func axFocusedWindowTitle(pid: pid_t) -> String? {
   let appElem = AXUIElementCreateApplication(pid)
-  var windowRef: CFTypeRef?
-  guard AXUIElementCopyAttributeValue(appElem, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-        let win = windowRef else { return nil }
-  var titleRef: CFTypeRef?
-  guard AXUIElementCopyAttributeValue(win as! AXUIElement, kAXTitleAttribute as CFString, &titleRef) == .success else {
-    return nil
+  for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+    guard let win = axElement(appElem, attribute) else { continue }
+    if let title = axNonEmptyString(win, kAXTitleAttribute) { return title }
+    if let document = axDocumentName(win) { return document }
   }
-  let t = titleRef as? String
-  // Empty in full-screen is a successful read of a genuinely empty title -> NULL.
-  return (t?.isEmpty ?? true) ? nil : t
+  return nil
 }
 
 // MARK: per-display visibility (main thread only)

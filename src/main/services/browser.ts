@@ -499,6 +499,33 @@ function getDiscoveredBrowserDiagnostics() {
   }))
 }
 
+/** One row per browser: profiles share the base bundle id (`id:profile`). */
+export function groupDiscoveredBrowsers(
+  entries: Array<{ name: string; bundleId: string }>,
+): { discoveredCount: number; discovered: Array<{ name: string; profileCount: number }> } {
+  const byBrowser = new Map<string, { name: string; profileCount: number; hasDefault: boolean }>()
+  for (const entry of entries) {
+    const separator = entry.bundleId.indexOf(':')
+    const baseId = (separator === -1 ? entry.bundleId : entry.bundleId.slice(0, separator)).toLowerCase()
+    const isDefault = separator === -1
+    const name = isDefault ? entry.name : entry.name.replace(/\s+\([^)]*\)$/, '')
+    const existing = byBrowser.get(baseId)
+    if (!existing) {
+      byBrowser.set(baseId, { name, profileCount: 1, hasDefault: isDefault })
+      continue
+    }
+    existing.profileCount += 1
+    if (isDefault && !existing.hasDefault) {
+      existing.name = name
+      existing.hasDefault = true
+    }
+  }
+  const discovered = [...byBrowser.values()]
+    .map(({ name, profileCount }) => ({ name, profileCount }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return { discoveredCount: discovered.length, discovered }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function startBrowserTracking(): void {

@@ -46,7 +46,11 @@ const SKIPPED_SCAN_DIRECTORIES = new Set([
   'service worker',
   'session storage',
   'storage',
+  // Electron/Chromium webview partitions inside an app, not a browser profile.
+  'partitions',
 ])
+const AUTOMATION_PATH_PATTERN = /\b(?:for testing|staging|sandbox)\b/i
+const AUTOMATION_BROWSER_BUNDLE_IDS = new Set(['com.google.chrome.for.testing'])
 
 let registryCache: { readAt: number; applications: BrowserApplication[] } | null = null
 let historyCache: { readAt: number; locations: BrowserHistoryLocation[] } | null = null
@@ -120,6 +124,54 @@ function handlesWebUrls(plist: Record<string, unknown>): boolean {
   return schemes.has('http') && schemes.has('https')
 }
 
+// Claiming http/https only means an app opens links (ChatGPT/Codex, Parallels
+// do). A browser also advertises web-browsing Handoff or views HTML documents.
+function declaresWebBrowsing(plist: Record<string, unknown>): boolean {
+  const activityTypes = plist.NSUserActivityTypes
+  if (Array.isArray(activityTypes) && activityTypes.includes('NSUserActivityTypeBrowsingWeb')) return true
+
+  const documentTypes = plist.CFBundleDocumentTypes
+  if (!Array.isArray(documentTypes)) return false
+  return documentTypes.some((value) => {
+    if (!value || typeof value !== 'object') return false
+    const documentType = value as Record<string, unknown>
+    if (documentType.CFBundleTypeRole !== 'Viewer') return false
+    const contentTypes = Array.isArray(documentType.LSItemContentTypes) ? documentType.LSItemContentTypes : []
+    const extensions = Array.isArray(documentType.CFBundleTypeExtensions) ? documentType.CFBundleTypeExtensions : []
+    return contentTypes.includes('public.html') || extensions.includes('html') || extensions.includes('htm')
+  })
+}
+
+export function isMacWebBrowserPlist(plist: Record<string, unknown>): boolean {
+  return handlesWebUrls(plist) && declaresWebBrowsing(plist)
+}
+
+/** Test/agent builds (Chrome for Testing, Playwright caches, hidden tool
+ *  folders) are automation, not the person's browsing. */
+export function isAutomationBrowserInstall(application: Pick<BrowserApplication, 'bundleId' | 'appPath'>): boolean {
+  if (AUTOMATION_BROWSER_BUNDLE_IDS.has(application.bundleId.toLowerCase())) return true
+  const segments = application.appPath.split('/')
+  return segments.some((segment) => segment.startsWith('.') && segment.length > 1)
+    || /\/Library\/Caches\//i.test(application.appPath)
+}
+
+const browserVerdictByAppPath = new Map<string, boolean>()
+
+// Re-checks a LaunchServices candidate against its Info.plist. An unreadable
+// plist keeps the LaunchServices verdict.
+function qualifiesAsMacBrowser(application: BrowserApplication): boolean {
+  if (isAutomationBrowserInstall(application)) return false
+  const cacheKey = normalizedPath(application.appPath)
+  const cached = browserVerdictByAppPath.get(cacheKey)
+  if (cached !== undefined) return cached
+  const plist = fs.existsSync(path.join(application.appPath, 'Contents', 'Info.plist'))
+    ? plistJson(application.appPath)
+    : null
+  const verdict = plist ? isMacWebBrowserPlist(plist) : true
+  browserVerdictByAppPath.set(cacheKey, verdict)
+  return verdict
+}
+
 function classifyMacBrowserFamily(appPath: string): BrowserFamily {
   if (
     fs.existsSync(path.join(appPath, 'Contents', 'Resources', 'omni.ja'))
@@ -148,13 +200,14 @@ function inspectMacBrowserApplication(appPath: string): BrowserApplication | nul
   const normalizedAppPath = appBundlePath(appPath)
   if (!normalizedAppPath) return null
   const plist = plistJson(normalizedAppPath)
-  if (!plist || !handlesWebUrls(plist)) return null
+  if (!plist || !isMacWebBrowserPlist(plist)) return null
 
   const bundleId = plistString(plist, 'CFBundleIdentifier')
   const name = plistString(plist, 'CFBundleDisplayName')
     ?? plistString(plist, 'CFBundleName')
     ?? path.basename(normalizedAppPath, '.app')
   if (!bundleId) return null
+  if (isAutomationBrowserInstall({ bundleId, appPath: normalizedAppPath })) return null
 
   return {
     name,
@@ -254,7 +307,7 @@ export async function prewarmBrowserRegistry(): Promise<void> {
             ...application,
             family: classifyMacBrowserFamily(application.appPath),
             source: 'launch_services' as const,
-          })),
+          })).filter(qualifiesAsMacBrowser),
         }
         historyCache = null
         return
@@ -270,7 +323,7 @@ export async function prewarmBrowserRegistry(): Promise<void> {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 10_000,
     })
-    registryCache = { readAt: Date.now(), applications: parseLaunchServicesBrowserDump(stdout) }
+    registryCache = { readAt: Date.now(), applications: parseLaunchServicesBrowserDump(stdout).filter(qualifiesAsMacBrowser) }
     historyCache = null
   } catch {
     // Leave the cache cold; the lazy synchronous path still resolves on first use.
@@ -363,18 +416,20 @@ function scanForHistoryFiles(root: string): string[] {
   return found
 }
 
-function identityTokens(application: BrowserApplication): string[] {
-  const values = [
-    application.name,
-    application.bundleId,
-    path.basename(application.appPath, '.app'),
-  ]
+function nameTokens(value: string): string[] {
   const ignored = new Set(['app', 'browser', 'com', 'company', 'org', 'the', 'www'])
-  return unique(
-    values.flatMap((value) => value.toLowerCase().split(/[^a-z0-9]+/))
-      .filter((token) => token.length >= 3 && !ignored.has(token)),
-    (token) => token,
-  )
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 3 && !ignored.has(token))
+}
+
+// The bundle id's vendor label (`openai` in com.openai.codex) counts only when
+// the app is named after it ("Brave Browser"); otherwise it matches every
+// sibling product's data folder (Codex data under com.openai.atlas).
+function identityTokens(application: BrowserApplication): string[] {
+  const named = new Set([...nameTokens(application.name), ...nameTokens(path.basename(application.appPath, '.app'))])
+  const labels = application.bundleId.split('.')
+  const vendor = labels.length >= 3 ? labels[1].toLowerCase() : null
+  const fromBundle = nameTokens(application.bundleId).filter((token) => token !== vendor || named.has(token))
+  return unique([...named, ...fromBundle], (token) => token)
 }
 
 function historyPathMatchesFamily(historyPath: string, family: BrowserFamily): boolean {
@@ -404,11 +459,15 @@ export function discoverMacBrowserHistoryLocations(
   applications = getBrowserApplications(),
   home = os.homedir(),
 ): BrowserHistoryLocation[] {
-  const locations: BrowserHistoryLocation[] = []
   const appSupport = path.join(home, 'Library', 'Application Support')
   const containers = path.join(home, 'Library', 'Containers')
+  // A history file found under several browsers' roots (Chrome and Chrome
+  // Canary both live under Google/) belongs to the one whose identity it
+  // matches most closely.
+  const best = new Map<string, { location: BrowserHistoryLocation; score: number }>()
 
   for (const application of applications) {
+    if (isAutomationBrowserInstall(application)) continue
     const roots = new Set<string>()
     const considerChildren = (root: string, maxDepth: number) => {
       let current = [root]
@@ -424,7 +483,7 @@ export function discoverMacBrowserHistoryLocations(
           for (const entry of entries) {
             if (!entry.isDirectory()) continue
             const child = path.join(directory, entry.name)
-            if (identityPathScore(child, application) > 0) roots.add(child)
+            if (identityPathScore(path.relative(appSupport, child), application) > 0) roots.add(child)
             next.push(child)
           }
         }
@@ -445,15 +504,20 @@ export function discoverMacBrowserHistoryLocations(
     )
     for (const historyPath of historyPaths) {
       if (!historyPathMatchesFamily(historyPath, application.family)) continue
-      locations.push({
-        ...application,
-        historyPath,
-        profileId: profileIdForHistoryPath(historyPath),
+      const relativePath = path.relative(home, historyPath)
+      if (AUTOMATION_PATH_PATTERN.test(relativePath)) continue
+      const key = normalizedPath(historyPath)
+      const score = identityPathScore(relativePath, application)
+      const current = best.get(key)
+      if (current && current.score >= score) continue
+      best.set(key, {
+        score,
+        location: { ...application, historyPath, profileId: profileIdForHistoryPath(historyPath) },
       })
     }
   }
 
-  return unique(locations, (location) => normalizedPath(location.historyPath))
+  return [...best.values()].map((entry) => entry.location)
 }
 
 export function getMacBrowserHistoryLocations(): BrowserHistoryLocation[] {

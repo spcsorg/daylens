@@ -2751,7 +2751,8 @@ export interface RecorderStallBannerState {
 
 /** DEV-229: the permission watcher's live verdict on whether capture can
  *  actually read window titles — the OS grant flag AND a real-read proxy
- *  (titled share of recently persisted samples). 'blind' = flag revoked or
+ *  (titled share of recent samples from apps whose titles are stored, so
+ *  browsers are excluded; recentSamples counts those). 'blind' = flag revoked or
  *  grant silently dead; 'degraded' = under half of samples titled;
  *  'waiting' = too few samples to judge. */
 export interface CaptureVerificationState {
@@ -2770,16 +2771,22 @@ export interface TrackingDiagnosticsPayload {
   captureHealth: {
     permissions: TrackingPermissionDetails
     windowTitles: {
-      // 'degraded' = titles are arriving but on under half of samples —
-      // capture works, badly (DEV-229's "most samples carry titles" bar).
+      // 'degraded' = under half of samples carry context — a window title,
+      // or for browsers (whose titles are never stored) a history visit.
       status: 'healthy' | 'degraded' | 'waiting' | 'missing'
+      // Why context is missing: titles absent in apps that keep them (a
+      // stale Accessibility grant), or browser time with no history visits.
+      blindCause: 'window_titles' | 'browser_history' | null
       recentSamples: number
       recentSamplesWithTitle: number
+      samplesWithContext: number
+      browserSamples: number
+      browserSamplesWithHistory: number
       lastCapturedAt: number | null
     }
     browsers?: {
       discoveredCount: number
-      names: string[]
+      discovered: Array<{ name: string; profileCount: number }>
       safariHistoryAccess: SafariHistoryAccessStatus
     }
     captureHelperRunning?: boolean | null
