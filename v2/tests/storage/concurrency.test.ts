@@ -4,7 +4,7 @@ import path from 'node:path'
 import { Worker } from 'node:worker_threads'
 import type { ObservationRow } from '../../capture/normalize.ts'
 import { DB_FILE, Store } from '../../capture/store.ts'
-import { HOUR, rig, T0, tmpDir } from './support.ts'
+import { diskContains, HOUR, rig, T0, tmpDir } from './support.ts'
 import Database from 'better-sqlite3'
 import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
 import { app } from '../support/lines.ts'
@@ -38,6 +38,66 @@ test('a deletion finishes while another connection keeps committing', async () =
   assert.notEqual(r.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state, 'pending')
   assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
   r.close()
+})
+
+// Search documents for two apps, written in shuffled order with window-title-length text. Splitting pages for writes
+// in the middle of an index leaves copies of moved rows in the pages' free space, which secure_delete never clears.
+function seedShuffledSearchDocs(dir: string, n: number): void {
+  const db = new Database(path.join(dir, DB_FILE))
+  const ins = db.prepare(`INSERT INTO search_docs (kind, hour_start_wall_ms, app_id, app_name, title, url, first_wall_ms, last_wall_ms) VALUES ('activity', ?, ?, ?, ?, '', ?, ?)`)
+  const order = [...Array(n).keys()]
+  for (let i = n - 1, x = 1; i > 0; i--) {
+    x = (x * 48271) % 2147483647
+    const j = x % (i + 1)
+    ;[order[i], order[j]] = [order[j]!, order[i]!]
+  }
+  for (let b = 0; b < n; b += 100) {
+    db.transaction(() => {
+      for (const i of order.slice(b, b + 100)) {
+        const chat = i % 3 === 0
+        const hour = T0 + Math.floor(i / 600) * HOUR
+        const title = chat ? `Quokkacanary ${i} private title, a long window title the way browsers and editors write them` : `editor item ${i} with a similarly long window title so pages fill the same way`
+        ins.run(hour, chat ? 'com.example.chat' : 'com.example.editor', 'app', title, hour, hour + 1000)
+      }
+    })()
+  }
+  db.close()
+}
+
+test('purged means no deleted title is left in the files, including free space inside indexes', async () => {
+  const r = rig()
+  r.storage.start()
+  await r.storage.derivationSettled()
+  seedShuffledSearchDocs(r.dir, 6000)
+  r.clock.t = T0 + 12 * HOUR
+  const handle = r.storage.deleteSource('com.example.chat')
+  assert.equal((await handle.done).searchDocs, 2000)
+  await handle.purged
+  assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(diskContains(r.dir, 'Quokkacanary'), [])
+  r.close()
+})
+
+test('a purge cut short by a restart still leaves no deleted title in the files', async () => {
+  const r = rig()
+  r.storage.start()
+  await r.storage.derivationSettled()
+  seedShuffledSearchDocs(r.dir, 6000)
+  const reader = new Database(path.join(r.dir, DB_FILE), { readonly: true })
+  reader.prepare('BEGIN').run()
+  reader.prepare('SELECT count(*) AS n FROM search_docs').get()
+  r.clock.t = T0 + 12 * HOUR
+  assert.equal((await r.storage.deleteSource('com.example.chat').done).purged, false)
+  r.close()
+  reader.prepare('COMMIT').run()
+  reader.close()
+  const r2 = rig(r.dir)
+  r2.storage.start()
+  const t0 = Date.now()
+  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 10_000) await new Promise((res) => setTimeout(res, 50))
+  assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(diskContains(r2.dir, 'Quokkacanary'), [])
+  r2.close()
 })
 
 test('a backfill completes while another connection keeps committing, and reports settled only when it has', async () => {
