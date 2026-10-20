@@ -1,7 +1,13 @@
 // Capture service process: supervisor + normalization + storage. Runs outside the interface process.
 // Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
+//        [--agent-sessions]   reads Claude Code and Codex session logs (agent session metadata is recorded only with permission)
 
+import os from 'node:os'
 import { parseArgs } from 'node:util'
+import { backfill } from './agents/backfill.ts'
+import { AgentReader, homeRoots } from './agents/reader.ts'
+import { AgentStore, removeStaging } from './agents/store.ts'
+import { WslDiscovery } from './agents/wsl.ts'
 import { Normalizer, Privacy } from './normalize.ts'
 import { defaultDataDir, Store } from './store.ts'
 import { Supervisor } from './supervisor.ts'
@@ -18,6 +24,7 @@ const { values } = parseArgs({
     'reconcile-s': { type: 'string', default: '60' },
     'hang-after-s': { type: 'string' },
     'tick-ms': { type: 'string' },
+    'agent-sessions': { type: 'boolean', default: false },
   },
 })
 
@@ -34,6 +41,8 @@ const storage = new Storage(store, dataDir, {
   onError: (code) => log(`storage error code=${code}`),
   orderingPoint: () => readOrderingPoint(values.helper!, values['helper-arg'] ?? [], log),
 })
+// A first read cut short after its merge leaves its staging copy; with or without agent access it is removed here.
+removeStaging(dataDir)
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
 const supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
@@ -56,6 +65,19 @@ storage.attachCapture({
   },
   setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
 })
+const wsl = process.platform === 'win32' ? new WslDiscovery() : null
+const agents = values['agent-sessions']
+  ? new AgentReader(new AgentStore(store.database), homeRoots(os.homedir()), {
+      reconcileMs: Number(values['reconcile-s']) * 1000,
+      log,
+      backfill: async (roots) => {
+        const r = await backfill(store.database, dataDir, roots, log)
+        if (r.child) log(`agent backfill files=${r.child.files_read} mb=${r.child.mb_read} wall_ms=${r.child.wall_ms} merge_ms=${r.merge_ms}`)
+        return r.merged
+      },
+      ...(wsl ? { discover: () => wsl.discover() } : {}),
+    })
+  : null
 
 let stopping = false
 async function shutdown(signal: string): Promise<void> {
@@ -63,6 +85,7 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true
   log(`stopping signal=${signal}`)
   await supervisor.stop()
+  await agents?.stop()
   storage.stop()
   store.close()
   process.exit(0)
@@ -77,3 +100,4 @@ if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EO
 log(`started pid=${process.pid}`)
 supervisor.start()
 storage.start()
+agents?.start().catch((err: unknown) => log(`agent reader failed code=${(err as { code?: unknown })?.code ?? 'unknown'}`))
