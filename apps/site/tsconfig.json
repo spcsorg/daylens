@@ -1,0 +1,75 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next-a/types/**/*.ts",
+    ".next-a/dev/types/**/*.ts",
+    ".next-b/types/**/*.ts",
+    ".next-b/dev/types/**/*.ts",
+    ".next-c/types/**/*.ts",
+    ".next-c/dev/types/**/*.ts",
+    ".next-beam/types/**/*.ts",
+    ".next-beam/dev/types/**/*.ts",
+    ".next-update/types/**/*.ts",
+    ".next-update/dev/types/**/*.ts",
+    ".next-rize/types/**/*.ts",
+    ".next-rize/dev/types/**/*.ts",
+    ".next-superlogical/types/**/*.ts",
+    ".next-superlogical/dev/types/**/*.ts",
+    ".next-build-beam/types/**/*.ts",
+    ".next-build-beam/dev/types/**/*.ts",
+    ".next-chatgpt/types/**/*.ts",
+    ".next-chatgpt/dev/types/**/*.ts",
+    ".next-build-update/types/**/*.ts",
+    ".next-build-update/dev/types/**/*.ts",
+    ".next-toggl/types/**/*.ts",
+    ".next-toggl/dev/types/**/*.ts",
+    ".next-ramp/types/**/*.ts",
+    ".next-ramp/dev/types/**/*.ts",
+    ".next-build-superlogical/types/**/*.ts",
+    ".next-build-superlogical/dev/types/**/*.ts",
+    ".next-build-chatgpt/types/**/*.ts",
+    ".next-build-chatgpt/dev/types/**/*.ts",
+    ".next-build-rize/types/**/*.ts",
+    ".next-build-rize/dev/types/**/*.ts",
+    ".next-build-toggl/types/**/*.ts",
+    ".next-build-toggl/dev/types/**/*.ts",
+    ".next-build-ramp/types/**/*.ts",
+    ".next-build-ramp/dev/types/**/*.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -1,0 +1,1238 @@
+/* Daylens launch page: Superlogical's paper and voice, Ramp's sand, Toggl's enlarge, Beam's blue cards. */
+
+:root {
+  --paper: #f5f5f4;
+  --ink: #181d16;
+  --ink-2: #4b5147;
+  --muted: #686d64;
+  --rule: #181d161f;
+  --accent: #e8643c;
+  --accent-soft: #fd937133;
+  /* Inside the window: the Daylens app's own tokens. */
+  --app-bg: #fafaf7;
+  --app-bar: #f1f0eb;
+  --app-ink: #14213d;
+  --app-ink-2: #4e5871;
+  --app-ink-3: #6b7287;
+  --app-line: #e4e2db;
+  --app-block: #e9eefb;
+  --app-block-line: #c9d5f4;
+  --app-event: #f3f1ea;
+  --app-event-line: #dcd8cc;
+  --shot: #3559c4;
+  --shot-mid: 160 190 245;
+  --card: #fff;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --axis: 64px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #10120f;
+    --ink: #ececea;
+    --ink-2: #b9bdb4;
+    --muted: #8a9086;
+    --rule: #ececea24;
+    --accent: #ff8a62;
+    --accent-soft: #ff8a6233;
+    --app-bg: #17191e;
+    --app-bar: #1e2127;
+    --app-ink: #e8ebf2;
+    --app-ink-2: #aab1c2;
+    --app-ink-3: #8c93a5;
+    --app-line: #2b2f37;
+    --app-block: #22304f;
+    --app-block-line: #34477a;
+    --app-event: #23252b;
+    --app-event-line: #383b43;
+    --shot: #2a4896;
+    --shot-mid: 60 98 186;
+    --card: #181b20;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html.lx-html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+}
+
+h1,
+h2,
+p,
+ul {
+  margin: 0;
+  padding: 0;
+}
+
+ul {
+  list-style: none;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lx-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.lx-page {
+  position: relative;
+}
+
+/* Ramp's sand field, fixed behind the hero. */
+.rp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(110, 104, 88, 0.1) 100%),
+    var(--paper);
+}
+
+@media (prefers-color-scheme: dark) {
+  .rp-backdrop {
+    background: var(--paper);
+  }
+}
+
+.rp-backdrop__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Keeps the headline and the line under it clear of grains. */
+  --clear-x: clamp(240px, 62vw, 620px);
+  -webkit-mask-image: radial-gradient(ellipse var(--clear-x) min(36svh, 320px) at 50% calc(64px + clamp(32px, 8svh, 96px) + 150px), transparent 58%, #000 100%);
+  mask-image: radial-gradient(ellipse var(--clear-x) min(36svh, 320px) at 50% calc(64px + clamp(32px, 8svh, 96px) + 150px), transparent 58%, #000 100%);
+  opacity: 0;
+  filter: blur(0.35px);
+  transition: opacity 0.6s var(--ease);
+}
+
+.rp-backdrop__canvas[data-ready] {
+  opacity: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .rp-backdrop__canvas[data-ready] {
+    opacity: 0.35;
+  }
+}
+
+@media (max-width: 767px) {
+  .rp-backdrop__canvas {
+    --clear-x: 100vw;
+  }
+}
+
+/* Nav */
+.lx-nav {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 0 clamp(16px, 4vw, 40px);
+  pointer-events: none;
+  transition: background-color 0.25s var(--ease), border-color 0.25s var(--ease);
+  border-bottom: 1px solid transparent;
+}
+
+.lx-past .lx-nav {
+  background: var(--paper);
+  border-bottom-color: var(--rule);
+}
+
+.lx-nav > * {
+  pointer-events: auto;
+}
+
+.lx-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.lx-logo img {
+  border-radius: 7px;
+}
+
+.lx-nav-join {
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  transition: opacity 0.2s var(--ease);
+}
+
+.lx-nav-join:hover {
+  opacity: 0.85;
+}
+
+/* The pinned stage: the hero and the window share one sticky viewport. */
+.lx-stage {
+  --k: 0;
+  --m: 0;
+  --c: 0;
+  --s: 0;
+  --a: 0;
+  --hit: 0;
+  position: relative;
+  z-index: 1;
+  height: 380svh;
+}
+
+.lx-pin {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: hidden;
+}
+
+.lx-hero {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: calc(64px + clamp(32px, 8svh, 96px)) clamp(16px, 5vw, 48px) 0;
+  text-align: center;
+  opacity: clamp(0, calc(1 - var(--k) * 1.6), 1);
+  transform: translateY(calc(var(--k) * -48px));
+}
+
+.lx-stage[data-hero="off"] .lx-hero {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.lx-title {
+  max-width: 17ch;
+  font-size: clamp(34px, 2.2rem + 2.4vw, 68px);
+  line-height: 1.04;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lx-sub {
+  max-width: 34rem;
+  margin-top: 18px;
+  font-size: clamp(16px, 0.95rem + 0.3vw, 19px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+/* Form */
+.lx-form {
+  width: min(100%, 440px);
+  margin-top: 28px;
+}
+
+.lx-field {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 88%, white);
+  box-shadow: 0 6px 24px -12px rgb(24 29 22 / 0.25);
+  transition: border-color 0.2s var(--ease);
+}
+
+.lx-field:focus-within {
+  border-color: var(--ink);
+}
+
+.lx-field.is-error {
+  border-color: #c2412d;
+}
+
+.lx-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.lx-field input::placeholder {
+  color: var(--muted);
+}
+
+.lx-field button {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s var(--ease);
+}
+
+.lx-field button:hover {
+  opacity: 0.88;
+}
+
+.lx-field button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.lx-error {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #c2412d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .lx-field {
+    background: #1a1d18;
+  }
+  .lx-error {
+    color: #ff8f7a;
+  }
+}
+
+.lx-done {
+  margin-top: 28px;
+  max-width: 28rem;
+  font-size: 17px;
+  color: var(--ink);
+}
+
+/* The app window: starts low and narrow under the hero, grows to fill the screen. */
+.lx-window {
+  --top0: 64svh;
+  --top1: 72px;
+  --w0: min(1040px, 82vw);
+  --w1: min(1320px, 96vw);
+  --h1: calc(100svh - 72px - 16px);
+  position: absolute;
+  left: 50%;
+  top: calc(var(--top0) * (1 - var(--k)) + var(--top1) * var(--k));
+  width: calc(var(--w0) * (1 - var(--k)) + var(--w1) * var(--k));
+  height: var(--h1);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--app-line);
+  border-radius: calc(20px - var(--k) * 6px);
+  background: var(--app-bg);
+  color: var(--app-ink);
+  box-shadow: 0 30px 80px -30px rgb(20 33 61 / 0.35), 0 2px 6px rgb(20 33 61 / 0.06);
+}
+
+.lx-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  background: var(--app-bar);
+  border-bottom: 1px solid var(--app-line);
+}
+
+.lx-bar i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+
+.lx-bar i:nth-child(2) {
+  background: #febc2e;
+}
+
+.lx-bar i:nth-child(3) {
+  background: #28c840;
+}
+
+.lx-head {
+  flex-shrink: 0;
+  padding: clamp(16px, 2.6svh, 28px) clamp(16px, 3vw, 36px) 0;
+}
+
+.lx-captions {
+  position: relative;
+  height: 2.6em;
+  font-size: clamp(18px, 0.9rem + 0.9vw, 28px);
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.lx-caption {
+  position: absolute;
+  inset: 0 auto auto 0;
+  max-width: 40ch;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 0.35s var(--ease),
+    transform 0.45s var(--ease);
+}
+
+.lx-caption.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+@media (min-width: 1024px) {
+  .lx-captions {
+    height: 1.3em;
+  }
+  .lx-caption {
+    max-width: none;
+  }
+}
+
+.lx-date {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--app-ink-3);
+}
+
+.lx-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 44px clamp(16px, 3vw, 36px) clamp(16px, 2.4svh, 28px);
+}
+
+.lx-labels {
+  position: absolute;
+  top: 14px;
+  left: calc(clamp(16px, 3vw, 36px) + var(--axis));
+  right: clamp(16px, 3vw, 36px);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--app-ink-3);
+}
+
+.lx-label {
+  position: absolute;
+  top: 0;
+}
+
+.lx-label--daylens {
+  left: 0;
+  opacity: calc(var(--m) * (1 - var(--s) * (1 - var(--a))));
+}
+
+.lx-label--cal {
+  left: calc(66% + 8px - var(--axis) * 0.66);
+  opacity: calc(var(--c) * (1 - var(--s) * (1 - var(--a))));
+}
+
+.lx-grid {
+  position: relative;
+  height: 100%;
+}
+
+.lx-hour {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--app-line);
+  opacity: var(--m);
+}
+
+.lx-hour span {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--app-ink-3);
+  background: var(--app-bg);
+  padding-right: 8px;
+}
+
+/* A raw line: starts as a row in the log, travels into its block, and fades as the block takes over. */
+.lx-raw {
+  --rm: clamp(0, calc(var(--m) * 1.55 - var(--d)), 1);
+  position: absolute;
+  top: calc(var(--lt) * (1 - var(--rm)) + var(--bt) * var(--rm));
+  height: calc(var(--lh) * (1 - var(--rm)) + var(--bh) * var(--rm));
+  left: calc(var(--axis) * var(--rm));
+  width: calc(100% * (1 - var(--rm)) + (66% - var(--axis)) * var(--rm));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--app-line) calc((1 - var(--rm)) * 100%), transparent);
+  border-radius: calc(var(--rm) * 10px);
+  background: color-mix(in srgb, var(--app-block) calc(var(--rm) * 100%), transparent);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.lx-raw > * {
+  opacity: calc(1 - var(--rm) * 3);
+}
+
+.lx-raw.is-dropped {
+  opacity: calc(1 - var(--m) * 2);
+}
+
+.lx-raw-at {
+  flex-shrink: 0;
+  color: var(--app-ink-3);
+}
+
+.lx-raw img {
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.lx-raw-lock {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--app-ink-3);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.lx-raw-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--app-ink-2);
+}
+
+/* A block of what you actually did. */
+.lx-block {
+  --bm: clamp(0, calc(var(--m) * 1.8 - 0.6), 1);
+  --dim: calc(var(--s) * (1 - var(--a)) * 0.65);
+  position: absolute;
+  left: var(--axis);
+  width: calc(66% - var(--axis));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-block-line);
+  border-radius: 10px;
+  background: var(--app-block);
+  opacity: calc(var(--bm) * (1 - var(--dim)));
+  transform: scale(calc(0.97 + var(--bm) * 0.03));
+  transform-origin: left top;
+  overflow: hidden;
+  transition: box-shadow 0.3s var(--ease), border-color 0.3s var(--ease);
+}
+
+.lx-block.is-match {
+  opacity: var(--bm);
+}
+
+.lx-stage:not(.is-static) .lx-block.is-match {
+  border-color: color-mix(in srgb, var(--accent) calc(var(--hit) * (1 - var(--a)) * 100%), var(--app-block-line));
+  box-shadow: 0 0 0 calc(var(--hit) * (1 - var(--a)) * 3px) var(--accent-soft);
+}
+
+.lx-block p {
+  font-size: clamp(12px, 0.7rem + 0.25vw, 15px);
+  line-height: 1.3;
+  font-weight: 500;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.lx-icons {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+/* A short block has room for one line: title and icons share it. Phones keep two lines down to half an hour. */
+.lx-block.is-tiny {
+  flex-direction: row;
+  align-items: center;
+  padding-block: 0;
+}
+
+.lx-block.is-tiny p {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 768px) {
+  .lx-block.is-short {
+    flex-direction: row;
+    align-items: center;
+    padding-block: 0;
+  }
+  .lx-block.is-short p {
+    flex: 1;
+    min-width: 0;
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.lx-icons img {
+  border-radius: 4px;
+}
+
+/* What the calendar said. */
+.lx-event {
+  position: absolute;
+  left: calc(66% + 8px);
+  right: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--app-event-line);
+  border-radius: 10px;
+  background: var(--app-event);
+  opacity: calc(var(--c) * (1 - var(--s) * (1 - var(--a)) * 0.5));
+  transform: translateY(calc((1 - var(--c)) * 14px));
+}
+
+.lx-event p {
+  font-size: clamp(12px, 0.7rem + 0.2vw, 14px);
+  line-height: 1.3;
+  color: var(--app-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Search, over the same day. */
+.lx-search {
+  position: absolute;
+  z-index: 3;
+  top: 6px;
+  right: clamp(16px, 3vw, 36px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(420px, 60%);
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  background: var(--app-bg);
+  box-shadow: 0 8px 24px -14px rgb(20 33 61 / 0.4);
+  font-size: 14px;
+  opacity: clamp(0, calc(var(--s) * 4 * (1 - var(--a) * 1.4)), 1);
+  transform: translateY(calc((1 - clamp(0, var(--s) * 4, 1)) * -6px));
+}
+
+.lx-search svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: var(--app-ink-3);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.lx-caret {
+  width: 1.5px;
+  height: 16px;
+  margin-left: -6px;
+  background: var(--accent);
+  animation: lx-blink 1s steps(1) infinite;
+}
+
+@keyframes lx-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.lx-answer {
+  position: absolute;
+  z-index: 3;
+  top: 46px;
+  right: clamp(16px, 3vw, 36px);
+  width: min(420px, 60%);
+  padding: 12px 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  background: var(--app-bg);
+  box-shadow: 0 16px 40px -20px rgb(20 33 61 / 0.45);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--app-ink);
+  opacity: clamp(0, calc((var(--s) - 0.6) * 4 * (1 - var(--a) * 1.4)), 1);
+  transform: translateY(calc((1 - clamp(0, (var(--s) - 0.6) * 4, 1)) * 8px));
+}
+
+/* Assistants reading the same day. */
+.lx-assist {
+  position: absolute;
+  z-index: 4;
+  right: clamp(16px, 3vw, 36px);
+  bottom: clamp(16px, 2.4svh, 28px);
+  display: grid;
+  gap: 6px;
+  width: min(300px, 70%);
+  padding: 10px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: var(--app-bg);
+  box-shadow: 0 20px 50px -24px rgb(20 33 61 / 0.45);
+  opacity: clamp(0, calc(var(--a) * 3), 1);
+  transform: translateY(calc((1 - var(--a)) * 24px));
+}
+
+.lx-assist-row {
+  --ar: clamp(0, calc(var(--a) * 1.6 - var(--d)), 1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  opacity: var(--ar);
+  transform: translateX(calc((1 - var(--ar)) * 12px));
+}
+
+.lx-assist-row img {
+  border-radius: 6px;
+}
+
+.lx-assist-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.lx-assist-read {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--app-ink-3);
+}
+
+/* Reduced motion: the finished day, no pinning. */
+.lx-stage.is-static {
+  height: auto;
+}
+
+.lx-stage.is-static .lx-pin {
+  position: relative;
+  height: auto;
+  overflow: visible;
+  padding-bottom: 48px;
+}
+
+.lx-stage.is-static .lx-hero {
+  position: relative;
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  padding-bottom: 48px;
+}
+
+.lx-stage.is-static .lx-window {
+  position: relative;
+  top: 0;
+  left: 0;
+  margin: 0 auto;
+  width: var(--w1);
+  height: 760px;
+  transform: none;
+}
+
+.lx-stage.is-static .lx-caption {
+  display: none;
+}
+
+.lx-stage.is-static .lx-caption:nth-child(2) {
+  display: block;
+  position: relative;
+  opacity: 1;
+  transform: none;
+}
+
+/* Below the stage: plain reading on paper. */
+.lx-paper {
+  position: relative;
+  z-index: 2;
+  background: var(--paper);
+  padding: clamp(80px, 12vw, 160px) clamp(16px, 5vw, 48px) 0;
+}
+
+.lx-essay {
+  display: grid;
+  gap: 1.1em;
+  max-width: 40rem;
+  margin: 0 auto;
+  font-size: clamp(18px, 1rem + 0.45vw, 23px);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+
+.lx-essay--after {
+  margin-top: clamp(64px, 9vw, 112px);
+  color: var(--ink-2);
+}
+
+.lx-cards {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 20px;
+  max-width: 64rem;
+  margin: clamp(72px, 10vw, 128px) auto 0;
+}
+
+.lx-card {
+  padding: clamp(24px, 3vw, 40px);
+  border-radius: 28px;
+}
+
+.lx-card h2 {
+  font-size: clamp(22px, 1.1rem + 0.8vw, 30px);
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+/* Beam's sky: one blue field with light pooling into its corners. */
+.lx-card--records {
+  color: #fff;
+  background:
+    radial-gradient(80% 70% at 100% 110%, rgb(var(--shot-mid) / 0.55), rgb(var(--shot-mid) / 0) 70%),
+    var(--shot);
+}
+
+.lx-card--never {
+  background: var(--card);
+  border: 1px solid var(--rule);
+}
+
+.lx-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.lx-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.lx-ic {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lx-card--records .lx-ic {
+  color: #fff;
+}
+
+.lx-card--records .lx-list {
+  color: #fff;
+}
+
+.lx-ic.is-never {
+  color: var(--muted);
+}
+
+.lx-ic-strike {
+  stroke: var(--accent);
+}
+
+.lx-card--never .lx-list {
+  color: var(--ink-2);
+}
+
+.lx-closing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: clamp(96px, 14vw, 176px);
+  text-align: center;
+}
+
+.lx-closing h2 {
+  font-size: clamp(30px, 1.6rem + 2vw, 56px);
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.lx-closing > p {
+  margin-top: 12px;
+  font-size: 17px;
+  color: var(--ink-2);
+}
+
+.lx-footer {
+  display: flex;
+  justify-content: space-between;
+  max-width: 64rem;
+  margin: clamp(96px, 14vw, 160px) auto 0;
+  padding: 28px 0 40px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.lx-footer a {
+  text-decoration: none;
+}
+
+.lx-footer a:hover {
+  color: var(--ink);
+}
+
+/* Phones: the same story, the same motion, in one narrower window. */
+@media (max-width: 767px) {
+  :root {
+    --axis: 40px;
+  }
+  .lx-window {
+    --top0: 66svh;
+    --top1: 64px;
+    --w0: calc(100vw - 32px);
+    --w1: calc(100vw - 16px);
+    --h1: calc(100svh - 64px - 8px);
+  }
+  .lx-raw {
+    gap: 8px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    width: calc(100% * (1 - var(--rm)) + (60% - var(--axis)) * var(--rm));
+  }
+  .lx-raw img,
+  .lx-raw-lock {
+    width: 13px;
+    height: 13px;
+  }
+  .lx-block {
+    width: calc(60% - var(--axis));
+    padding: 6px 8px;
+  }
+  .lx-block p {
+    flex-shrink: 0;
+    font-size: 11.5px;
+  }
+  .lx-block.is-short .lx-icons {
+    display: none;
+  }
+  .lx-answer {
+    top: 44px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    font-size: 13px;
+  }
+  .lx-block .lx-icons img {
+    width: 13px;
+    height: 13px;
+  }
+  .lx-event {
+    left: calc(60% + 6px);
+    padding: 5px 7px;
+  }
+  .lx-label--cal {
+    left: calc(60% + 6px - var(--axis) * 0.6);
+  }
+  .lx-hour span {
+    font-size: 10px;
+  }
+  .lx-search {
+    top: 2px;
+    height: 30px;
+    width: calc(100% - 32px);
+  }
+  .lx-cards {
+    grid-template-columns: 1fr;
+  }
+  .lx-stage.is-static .lx-window {
+    height: 640px;
+  }
+}
+
+/* Reading pages (privacy, devlog, press): the same paper, ink and type, one column. */
+.lx-nav.is-static {
+  position: sticky;
+  background: var(--paper);
+  border-bottom-color: var(--rule);
+}
+
+.lx-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.lx-footer {
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-inline: clamp(16px, 5vw, 48px);
+}
+
+.lx-doc {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: clamp(48px, 8vw, 96px) clamp(16px, 5vw, 24px) 0;
+}
+
+.lx-doc-head h1 {
+  font-size: clamp(34px, 1.8rem + 2vw, 56px);
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.lx-doc-head p {
+  margin-top: 16px;
+  font-size: clamp(17px, 1rem + 0.3vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.lx-doc-head .lx-doc-meta {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.lx-doc-head .lx-doc-meta a {
+  color: inherit;
+}
+
+.lx-toc {
+  margin-top: 40px;
+  padding: 20px 24px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  font-size: 15px;
+}
+
+.lx-toc p {
+  font-weight: 500;
+}
+
+.lx-toc ol {
+  margin: 10px 0 0;
+  padding-left: 1.2em;
+  columns: 2 14rem;
+  column-gap: 32px;
+  color: var(--ink-2);
+}
+
+.lx-toc a {
+  text-decoration: none;
+}
+
+.lx-toc a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.lx-prose {
+  margin-top: 48px;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.lx-prose h2 {
+  margin: 56px 0 14px;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  scroll-margin-top: 80px;
+}
+
+.lx-prose h3 {
+  margin: 32px 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.lx-prose p,
+.lx-prose ul,
+.lx-prose .lx-table {
+  margin-top: 14px;
+}
+
+.lx-prose ul {
+  list-style: disc;
+  padding-left: 1.25em;
+}
+
+.lx-prose li + li {
+  margin-top: 8px;
+}
+
+.lx-prose a {
+  text-underline-offset: 3px;
+}
+
+.lx-prose code {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.lx-table {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+}
+
+.lx-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.lx-table th,
+.lx-table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--rule);
+}
+
+.lx-table th {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.lx-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.lx-posts {
+  margin-top: 48px;
+  list-style: none;
+  padding: 0;
+}
+
+.lx-posts a {
+  display: grid;
+  gap: 6px;
+  padding: 24px 0;
+  border-top: 1px solid var(--rule);
+  text-decoration: none;
+}
+
+.lx-posts time {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.lx-post-title {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.lx-posts a:hover .lx-post-title {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.lx-post-summary {
+  color: var(--ink-2);
+}
+
+.lx-logos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.lx-logos figure {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 32px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: #fff;
+  font-size: 13px;
+  color: #4b5147;
+}
+
+.lx-logos figure.is-dark {
+  background: #10120f;
+  color: #b9bdb4;
+}

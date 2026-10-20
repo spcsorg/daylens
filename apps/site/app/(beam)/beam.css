@@ -1,0 +1,1446 @@
+/* Daylens on Beam's layout (joinbeam.app). Values come from Beam's computed styles; Tailwind neutral scale. */
+:root {
+  --n50: #fafafa;
+  --n100: #f5f5f5;
+  --n200: #e5e5e5;
+  --n300: #d4d4d4;
+  --n400: #a1a1a1;
+  --n500: #737373;
+  --n600: #525252;
+  --n700: #404040;
+  --n800: #262626;
+  --n900: #171717;
+  --n950: #0a0a0a;
+
+  --page: #fff;
+  --hero: #fff;
+  --gray: var(--n50);
+  --surface: #fff;
+  --card: #fff;
+  --header: #fff;
+  --fg: var(--n950);
+  --fg-sub: var(--n700);
+  --fg-hero-sub: var(--n600);
+  --fg-muted: var(--n500);
+  --tint: rgb(10 10 10 / 0.025);
+  --line: rgb(10 10 10 / 0.1);
+  --chip: rgb(10 10 10 / 0.05);
+  --btn: var(--n950);
+  --btn-fg: #fff;
+  --btn-hover: var(--n800);
+  --soft: rgb(10 10 10 / 0.1);
+  --soft-hover: rgb(10 10 10 / 0.15);
+  --field: #fff;
+  --field-ring: rgb(0 0 0 / 0.1);
+  --placeholder: var(--n500);
+  --fg-faint: var(--n500);
+  --cover-box: var(--n100);
+  --cover-dot: var(--n600);
+  --error: #e7000b;
+  --shot: #4f79e5;
+  --shot-hi: 240 247 255;
+  --shot-mid: 205 225 252;
+
+  /* Beam's springs (motion: bounce .38 / .55s and bounce .32 / .42s), sampled to linear(). */
+  --bouncy: linear(0, 0.038, 0.1334, 0.2618, 0.404, 0.5455, 0.6764, 0.7906, 0.885, 0.9588, 1.0131, 1.0498, 1.0718, 1.0819, 1.0831, 1.0779, 1.0688, 1.0575, 1.0455, 1.0339, 1.0234, 1.0145, 1.0072, 1.0016, 0.9977, 0.9951, 0.9936, 0.993, 0.9932, 0.9937, 0.9946, 0.9956, 0.9966, 0.9975, 0.9983, 0.999, 0.9996, 1);
+  --bouncy-ms: 555ms;
+  --snappy: linear(0, 0.0545, 0.1833, 0.3447, 0.5098, 0.6606, 0.7873, 0.8866, 0.9589, 1.0075, 1.0365, 1.0507, 1.0543, 1.051, 1.0438, 1.035, 1.0261, 1.018, 1.0112, 1.0059, 1.002, 0.9995, 0.998, 0.9972, 0.9971, 0.9973, 0.9976, 0.9981, 1);
+  --snappy-ms: 420ms;
+  --tw-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --pad-x: 24px;
+}
+
+html.dark {
+  color-scheme: dark;
+  --page: var(--n950);
+  --hero: var(--n900);
+  --gray: #111111;
+  --surface: var(--n950);
+  --card: var(--n950);
+  --header: var(--n900);
+  --fg: #fff;
+  --fg-sub: var(--n400);
+  --fg-hero-sub: var(--n400);
+  --fg-muted: var(--n400);
+  --tint: rgb(255 255 255 / 0.05);
+  --line: rgb(255 255 255 / 0.1);
+  --chip: rgb(255 255 255 / 0.1);
+  --btn: var(--n300);
+  --btn-fg: var(--n950);
+  --btn-hover: var(--n200);
+  --soft: rgb(255 255 255 / 0.1);
+  --soft-hover: rgb(255 255 255 / 0.2);
+  --field: rgb(255 255 255 / 0.1);
+  --field-ring: rgb(255 255 255 / 0.1);
+  --placeholder: var(--n400);
+  --fg-faint: var(--n400);
+  --cover-box: var(--n900);
+  --cover-dot: #fff;
+  --error: #ff6467;
+  --shot: #2a4896;
+  --shot-hi: 138 179 228;
+  --shot-mid: 60 98 186;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-padding-top: 84px;
+  background: var(--page);
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--fg);
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-optical-sizing: auto;
+  font-size: 16px;
+  line-height: 24px;
+  overflow-x: clip;
+}
+
+h1,
+h2,
+h3,
+p,
+ul {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  display: block;
+}
+
+.b-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 42rem;
+  padding-inline: var(--pad-x);
+}
+
+/* Header. Beam blurs a transparent bar (backdrop-blur-3xl); here it is a flat surface. */
+.b-header {
+  position: fixed;
+  inset-inline: 0;
+  top: 12px;
+  z-index: 10;
+}
+
+.b-nav {
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 64px;
+  width: calc(100% - 24px);
+  max-width: 80rem;
+  padding-inline: 20px;
+  border-radius: 9999px;
+  background: var(--header);
+}
+
+.b-nav-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 48px;
+}
+
+.b-logo {
+  display: inline-flex;
+}
+
+.b-logo img {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.b-nav-links {
+  display: none;
+  gap: 32px;
+}
+
+.b-nav-link {
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.b-nav-right {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.b-nav-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 20px;
+}
+
+.b-btn.b-nav-cta {
+  display: none;
+}
+
+.b-menu-btn {
+  display: inline-flex;
+  padding: 6px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--fg);
+}
+
+.b-menu-btn:hover {
+  background: var(--soft);
+}
+
+.b-menu-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.b-switch {
+  position: relative;
+  display: inline-flex;
+  height: 36px;
+  width: fit-content;
+  align-items: center;
+  padding: 4px;
+  border-radius: 9999px;
+  background: var(--chip);
+}
+
+.b-switch button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--n500);
+  opacity: 0.72;
+  transition: opacity var(--bouncy-ms) var(--bouncy), scale var(--bouncy-ms) var(--bouncy);
+}
+
+.b-switch button:active {
+  scale: 0.97;
+}
+
+html:not(.dark) .b-switch button:first-of-type,
+html.dark .b-switch button:last-of-type {
+  color: var(--fg);
+  opacity: 1;
+}
+
+html.dark .b-switch button {
+  color: var(--n400);
+}
+
+.b-switch-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.b-switch-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(10 10 10 / 0.05), 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: translate var(--bouncy-ms) var(--bouncy);
+}
+
+html.dark .b-switch-thumb {
+  translate: 28px 0;
+  background: var(--n950);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+.b-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.b-btn-dark {
+  background: var(--btn);
+  color: var(--btn-fg);
+}
+
+.b-btn-dark:hover {
+  background: var(--btn-hover);
+}
+
+.b-btn-soft {
+  background: var(--soft);
+  color: var(--fg);
+}
+
+.b-btn-soft:hover {
+  background: var(--soft-hover);
+}
+
+.b-btn-lg {
+  padding: 8px 16px;
+}
+
+.b-menu {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 24px;
+  background: var(--n100);
+  color: var(--fg);
+}
+
+html.dark .b-menu {
+  background: var(--n950);
+}
+
+.b-menu::backdrop {
+  background: transparent;
+}
+
+.b-menu-top {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.b-menu-links {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.b-menu-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 30px;
+  line-height: 40px;
+  font-weight: 500;
+}
+
+.b-menu-arrow {
+  display: inline-flex;
+  padding: 6px;
+  opacity: 0;
+}
+
+.b-menu-arrow svg {
+  width: 24px;
+  height: 24px;
+}
+
+.b-menu-link:hover .b-menu-arrow {
+  opacity: 1;
+}
+
+/* Hero */
+.b-main {
+  isolation: isolate;
+  overflow: clip;
+}
+
+.b-hero {
+  position: relative;
+  isolation: isolate;
+  margin-top: -84px;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--hero);
+  padding: 180px 0 64px;
+}
+
+.b-hero-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.b-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.b-eyebrow {
+  padding: 8px 0;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--fg);
+}
+
+.b-h1 {
+  max-width: 64rem;
+  font-size: 42px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-wrap: pretty;
+  color: var(--fg);
+}
+
+.b-hero-sub {
+  max-width: 48rem;
+  font-size: 18px;
+  line-height: 32px;
+  color: var(--fg-hero-sub);
+}
+
+.b-hero-form {
+  max-width: 100%;
+}
+
+.b-cover {
+  position: relative;
+  display: inline-block;
+  border-radius: 4px;
+  padding: 4px 8px 4px 6px;
+  cursor: default;
+}
+
+.b-cover::before {
+  content: "";
+  position: absolute;
+  inset: 8px 0 0 2px;
+  border-radius: 4px;
+  background: var(--cover-box);
+  transition: background-color 200ms var(--tw-ease);
+}
+
+.b-cover.is-on::before {
+  background: var(--n900);
+}
+
+.b-cover-sparks {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms linear;
+}
+
+.b-cover.is-on .b-cover-sparks {
+  opacity: 1;
+  transition-duration: 1s;
+}
+
+.b-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.b-beam i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5%;
+  height: 1px;
+  background: linear-gradient(90deg, rgb(46 185 223 / 0), #3b82f6);
+  transform: translateX(-100%);
+}
+
+.b-cover-text {
+  position: relative;
+  z-index: 20;
+  display: inline-block;
+  color: var(--n900);
+  transition: color 200ms var(--tw-ease), scale 200ms var(--tw-ease);
+}
+
+html.dark .b-cover-text,
+.b-cover.is-on .b-cover-text {
+  color: #fff;
+}
+
+.b-cover.is-on .b-cover-text {
+  scale: 0.8;
+  animation: b-shake 200ms linear infinite;
+}
+
+@keyframes b-shake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  20%,
+  60% {
+    translate: -2.4px 2.4px;
+  }
+  40%,
+  80% {
+    translate: 2.4px -2.4px;
+  }
+}
+
+.b-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--cover-dot);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.b-cover.is-on .b-dot {
+  display: none;
+}
+
+.b-dot-tr {
+  top: 6px;
+  right: -2px;
+}
+
+.b-dot-br {
+  right: -2px;
+  bottom: -2px;
+}
+
+.b-dot-tl {
+  top: 6px;
+  left: -2px;
+}
+
+.b-dot-bl {
+  bottom: -2px;
+  left: -2px;
+}
+
+/* Form */
+.b-signup {
+  display: flex;
+  width: 100%;
+  max-width: 28rem;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.b-form {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 9999px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--field-ring);
+  color: var(--n600);
+}
+
+html.dark .b-form {
+  color: #fff;
+}
+
+.b-form.is-done {
+  background: rgb(10 10 10 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(10 10 10 / 0.1);
+  color: var(--n950);
+}
+
+html.dark .b-form.is-done {
+  background: rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  color: #fff;
+}
+
+.b-input {
+  width: 186px;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  padding: 0 16px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 28px;
+  height: 28px;
+  color: var(--fg);
+}
+
+.b-input:focus {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.b-input::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
+}
+
+.b-input:disabled {
+  opacity: 0.6;
+}
+
+.b-submit {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 9999px;
+  padding: 4px 12px;
+  background: var(--btn);
+  color: var(--btn-fg);
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: 500;
+  transition: scale var(--snappy-ms) var(--snappy);
+}
+
+.b-submit:hover {
+  background: var(--btn-hover);
+}
+
+.b-submit:active:not(:disabled) {
+  scale: 0.97;
+}
+
+.b-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.b-submit-label {
+  animation: b-fade-in var(--snappy-ms) var(--snappy);
+}
+
+@keyframes b-fade-in {
+  from {
+    opacity: 0.72;
+  }
+}
+
+.b-submit-arrow {
+  display: inline-flex;
+  transition: translate var(--snappy-ms) var(--snappy);
+}
+
+.b-submit:hover .b-submit-arrow {
+  translate: 3px 0;
+}
+
+.b-submit:active .b-submit-arrow {
+  translate: 5px 0;
+}
+
+.b-arrow {
+  width: 16px;
+  height: 16px;
+}
+
+.b-form-done {
+  display: flex;
+  min-height: 36px;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 14px;
+  line-height: 28px;
+  text-wrap: pretty;
+  animation: b-pop var(--snappy-ms) var(--snappy);
+}
+
+@keyframes b-pop {
+  from {
+    opacity: 0;
+    scale: 0.92;
+  }
+}
+
+.b-form-check {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.b-form-error {
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--error);
+}
+
+/* Hero window */
+.b-hero-media {
+  padding-top: 18vw;
+}
+
+.b-hero-frame {
+  width: 160vw;
+  max-width: none;
+}
+
+.b-example {
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--fg-faint);
+}
+
+.b-hero-window {
+  position: relative;
+  aspect-ratio: 2244 / 1444;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.06)) drop-shadow(0 24px 40px rgb(0 0 0 / 0.14));
+}
+
+.b-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.b-slide.is-on {
+  opacity: 1;
+}
+
+/* Load-in: Beam's heroStagger (delayChildren .04s, stagger .07s) and heroItem with the bouncy spring. */
+.b-rise {
+  animation: b-rise var(--bouncy-ms) var(--bouncy) both;
+  animation-delay: calc(40ms + var(--i, 0) * 70ms);
+}
+
+.b-rise-media {
+  animation: b-reveal var(--bouncy-ms) var(--bouncy) 280ms both;
+}
+
+@keyframes b-rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.97);
+  }
+}
+
+@keyframes b-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+}
+
+.b-js .b-reveal {
+  opacity: 0;
+  transform: translateY(24px) scale(0.98);
+}
+
+.b-js .b-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--bouncy-ms) var(--bouncy) var(--d, 0ms), transform var(--bouncy-ms) var(--bouncy) var(--d, 0ms);
+}
+
+/* Sections */
+.b-section {
+  padding-block: 64px;
+}
+
+.b-gray {
+  background: var(--gray);
+}
+
+.b-white {
+  background: var(--surface);
+}
+
+.b-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.b-head {
+  display: flex;
+  max-width: 42rem;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.b-head-center {
+  margin-inline: auto;
+  align-items: center;
+  text-align: center;
+}
+
+.b-h2 {
+  font-size: 32px;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-wrap: pretty;
+  color: var(--fg);
+}
+
+.b-lead {
+  max-width: 36rem;
+  font-size: 16px;
+  line-height: 28px;
+  text-wrap: pretty;
+  color: var(--fg-sub);
+}
+
+.b-features {
+  display: grid;
+  gap: 40px;
+}
+
+.b-features > .b-reveal {
+  height: 100%;
+}
+
+.b-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 32px;
+  background: var(--card);
+  padding: 8px;
+}
+
+.b-card-text {
+  position: relative;
+  z-index: 1;
+  order: 1;
+  padding: 24px;
+}
+
+.b-h3 {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  text-wrap: pretty;
+  color: var(--fg);
+}
+
+.b-card-p {
+  margin-top: 16px;
+  max-width: 32rem;
+  font-size: 16px;
+  line-height: 28px;
+  color: var(--fg-muted);
+}
+
+/* Beam's screenshots sit on baked blue gradients; this is one blue hue in CSS. */
+.b-shot {
+  position: relative;
+  order: 2;
+  flex-shrink: 0;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 24px;
+  container-type: inline-size;
+  background:
+    radial-gradient(120% 95% at 88% 105%, rgb(var(--shot-hi) / 0.95) 0%, rgb(var(--shot-mid) / 0.65) 32%, rgb(var(--shot-mid) / 0) 62%),
+    radial-gradient(60% 55% at 100% 0%, rgb(var(--shot-hi) / 0.75), rgb(var(--shot-mid) / 0) 70%),
+    radial-gradient(55% 45% at 38% 0%, rgb(var(--shot-mid) / 0.45), rgb(var(--shot-mid) / 0) 70%),
+    var(--shot);
+}
+
+.b-shot-img,
+.b-app {
+  position: absolute;
+  left: 12%;
+  top: 13%;
+  width: 120%;
+  max-width: none;
+  height: auto;
+  filter: drop-shadow(0 12px 28px rgb(20 33 61 / 0.28));
+}
+
+.b-shot-label {
+  position: absolute;
+  top: 10px;
+  left: 16px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.b-app {
+  aspect-ratio: 2244 / 1444;
+  font-size: calc(120cqw / 760);
+  overflow: hidden;
+  border: 1em solid #dcdad3;
+  border-radius: 10em;
+  background: #fafaf7;
+  font-family: var(--font-geist), var(--font-inter), system-ui, sans-serif;
+  color: #14213d;
+  line-height: 1.3;
+}
+
+.b-app-bar {
+  display: flex;
+  height: 41em;
+  align-items: center;
+  gap: 8em;
+  padding-left: 20em;
+  border-bottom: 1em solid #e4e2db;
+}
+
+.b-app-bar i {
+  width: 12em;
+  height: 12em;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+
+.b-app-bar i:nth-child(2) {
+  background: #febc2e;
+}
+
+.b-app-bar i:nth-child(3) {
+  background: #28c840;
+}
+
+.b-app-body {
+  padding: 36em 0 0 36em;
+}
+
+.b-app-search {
+  width: 560em;
+  overflow: hidden;
+  border: 1em solid #cfcdc4;
+  border-radius: 12em;
+  background: #fff;
+}
+
+.b-app-query {
+  display: flex;
+  height: 53em;
+  align-items: center;
+  gap: 14em;
+  padding: 0 17em;
+}
+
+.b-app-query span {
+  font-size: 15em;
+}
+
+.b-app-glass {
+  width: 17em;
+  height: 17em;
+  color: #4e5871;
+}
+
+.b-app-result {
+  display: flex;
+  height: 64em;
+  align-items: center;
+  gap: 12em;
+  padding: 0 16em;
+  border-top: 1em solid #e4e2db;
+}
+
+.b-app-icon {
+  width: 28em;
+  height: 28em;
+}
+
+.b-app-name {
+  font-size: 14em;
+  font-weight: 500;
+}
+
+.b-app-meta {
+  margin-top: 2em;
+  font-size: 12em;
+  color: #4e5871;
+}
+
+.b-app-open {
+  margin-left: auto;
+  width: 12em;
+  height: 12em;
+  color: #6b7287;
+}
+
+/* More reasons. Beam puts an app icon in a rounded square on each card; removed. */
+.b-reasons {
+  margin-inline: auto;
+  display: grid;
+  width: 100%;
+  max-width: 64rem;
+  gap: 16px;
+}
+
+.b-reasons > .b-reveal {
+  height: 100%;
+}
+
+.b-reason {
+  display: flex;
+  height: 100%;
+  min-height: 12rem;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 24px;
+  background: var(--tint);
+  padding: 28px;
+}
+
+.b-reason p {
+  max-width: 36rem;
+  font-size: 16px;
+  line-height: 28px;
+  color: var(--fg-muted);
+}
+
+.b-reason strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* Records / Never records, in Beam's pricing layout */
+.b-plans {
+  display: grid;
+  gap: 8px;
+}
+
+.b-plan {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  border-radius: 24px;
+  background: var(--tint);
+  padding: 24px;
+  transition: scale var(--snappy-ms) var(--snappy);
+}
+
+@media (hover: hover) {
+  .b-plan:hover {
+    scale: 1.015;
+  }
+}
+
+.b-plan-top {
+  align-self: stretch;
+}
+
+.b-plan-name {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--fg);
+}
+
+.b-plan-sub {
+  margin-top: 16px;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--fg-sub);
+}
+
+.b-plan-list {
+  margin-top: 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--fg-sub);
+}
+
+.b-plan-list li {
+  display: flex;
+  gap: 16px;
+}
+
+.b-plan-list li + li {
+  margin-top: 8px;
+}
+
+.b-plan-mark {
+  width: 14px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--fg);
+}
+
+.b-plan-foot {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--fg-faint);
+}
+
+/* FAQ */
+.b-faq-grid {
+  display: grid;
+  gap: 32px 8px;
+}
+
+.b-faq-list {
+  border-block: 1px solid var(--line);
+}
+
+.b-faq + .b-faq {
+  border-top: 1px solid var(--line);
+}
+
+.b-faq-q {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border: 0;
+  padding: 16px 0;
+  background: transparent;
+  text-align: left;
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.b-faq-chev {
+  margin-top: 4px;
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--n400);
+  transition: rotate var(--snappy-ms) var(--snappy);
+}
+
+html.dark .b-faq-chev {
+  color: var(--n500);
+}
+
+.b-faq.is-open .b-faq-chev {
+  rotate: 90deg;
+}
+
+.b-faq-chev-svg {
+  height: 16px;
+  width: auto;
+}
+
+.b-faq-a {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--snappy-ms) var(--snappy), opacity var(--snappy-ms) var(--snappy);
+}
+
+.b-faq.is-open .b-faq-a {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.b-faq-a-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.b-faq-a-text {
+  margin-top: -8px;
+  padding: 0 48px 16px 0;
+  font-size: 14px;
+  line-height: 28px;
+  color: var(--fg-sub);
+}
+
+/* Footer */
+.b-footer {
+  padding-top: 64px;
+  background: var(--surface);
+}
+
+.b-footer-band {
+  padding-block: 64px;
+  background: var(--tint);
+  color: var(--fg);
+}
+
+.b-footer-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  font-size: 14px;
+  line-height: 28px;
+}
+
+.b-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 40px;
+  padding: 0;
+  list-style: none;
+}
+
+.b-footer-links li {
+  color: var(--fg-sub);
+}
+
+.b-copy {
+  color: var(--fg-faint);
+}
+
+@media (min-width: 640px) {
+  .b-h1 {
+    font-size: 58px;
+    letter-spacing: -0.28px;
+  }
+
+  .b-h2 {
+    font-size: 40px;
+    letter-spacing: -0.24px;
+  }
+
+  .b-stack {
+    gap: 64px;
+  }
+
+  .b-card-text {
+    padding: 40px;
+  }
+
+  .b-reason {
+    padding: 32px;
+  }
+
+  .b-plans {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .b-plan {
+    align-items: flex-start;
+  }
+}
+
+@media (min-width: 768px) {
+  .b-container {
+    max-width: 48rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --pad-x: 40px;
+  }
+
+  .b-container {
+    max-width: 80rem;
+  }
+
+  .b-header {
+    position: sticky;
+    top: 0;
+    background: var(--header);
+    box-shadow: 0 1px 3px 0 rgb(10 10 10 / 0.05), 0 1px 2px -1px rgb(10 10 10 / 0.05);
+    transition: background-color 300ms var(--tw-ease), box-shadow 300ms var(--tw-ease);
+  }
+
+  html.dark .b-header {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.2), 0 1px 2px -1px rgb(0 0 0 / 0.2);
+  }
+
+  .b-nav {
+    height: 84px;
+    width: 100%;
+    padding-inline: 40px;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .b-nav-links {
+    display: flex;
+  }
+
+  .b-btn.b-nav-cta {
+    display: inline-flex;
+  }
+
+  .b-nav .b-menu-btn {
+    display: none;
+  }
+
+  .b-hero {
+    padding-top: 148px;
+  }
+
+  .b-hero-copy {
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+
+  .b-eyebrow {
+    padding: 2px 0;
+  }
+
+  .b-h1 {
+    max-width: 48rem;
+  }
+
+  .b-hero-sub {
+    max-width: 42rem;
+    color: var(--fg-sub);
+    text-wrap: pretty;
+  }
+
+  .b-signup {
+    margin-inline: auto;
+    min-width: 20rem;
+  }
+
+  .b-form-error {
+    text-align: center;
+  }
+
+  .b-hero-media {
+    margin-top: -16px;
+    padding-top: calc(8.3vw - 28px);
+  }
+
+  .b-hero-frame {
+    margin-inline: auto;
+    width: min(1080px, 75vw);
+  }
+
+  .b-example {
+    text-align: right;
+  }
+
+  .b-features {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .b-features > .b-wide {
+    grid-column: span 2;
+  }
+
+  .b-features > :not(.b-wide) .b-card-text {
+    order: 2;
+  }
+
+  .b-features > :not(.b-wide) .b-shot {
+    order: 1;
+  }
+
+  .b-wide .b-card {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .b-wide .b-card-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 64px;
+  }
+
+  .b-reasons {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .b-plans {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+  }
+
+  .b-faq-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .b-rise,
+  .b-rise-media,
+  .b-submit-label,
+  .b-form-done,
+  .b-cover.is-on .b-cover-text {
+    animation: none;
+  }
+
+  .b-js .b-reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .b-js .b-reveal.is-in,
+  .b-switch button,
+  .b-switch-thumb,
+  .b-submit,
+  .b-submit-arrow,
+  .b-plan,
+  .b-faq-chev,
+  .b-faq-a,
+  .b-slide {
+    transition: none;
+  }
+
+  .b-plan:hover {
+    scale: none;
+  }
+}

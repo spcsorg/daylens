@@ -6,6 +6,7 @@
   "main": ".vite/build/main.js",
   "workspaces": [
     "apps/web",
+    "apps/site",
     "packages/*",
     "services/billing"
   ],

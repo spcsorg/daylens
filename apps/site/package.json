@@ -1,0 +1,50 @@
+{
+  "name": "daylens-site",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:a": "SITE_VARIANT=a NEXT_DIST_DIR=.next-a next dev -p 3001",
+    "dev:b": "SITE_VARIANT=b NEXT_DIST_DIR=.next-b next dev -p 3002",
+    "dev:c": "SITE_VARIANT=c NEXT_DIST_DIR=.next-c next dev -p 3003",
+    "dev:beam": "SITE_VARIANT=beam NEXT_DIST_DIR=.next-beam next dev -p 3011",
+    "dev:ramp": "SITE_VARIANT=ramp NEXT_DIST_DIR=.next-ramp next dev -p 3012",
+    "dev:superlogical": "SITE_VARIANT=superlogical NEXT_DIST_DIR=.next-superlogical next dev -p 3013",
+    "dev:update": "SITE_VARIANT=update NEXT_DIST_DIR=.next-update next dev -p 3014",
+    "dev:chatgpt": "SITE_VARIANT=chatgpt NEXT_DIST_DIR=.next-chatgpt next dev -p 3015",
+    "dev:rize": "SITE_VARIANT=rize NEXT_DIST_DIR=.next-rize next dev -p 3016",
+    "dev:toggl": "SITE_VARIANT=toggl NEXT_DIST_DIR=.next-toggl next dev -p 3017",
+    "dev:launch": "SITE_VARIANT=launch NEXT_DIST_DIR=.next-launch next dev -p 3010",
+    "build:launch": "SITE_VARIANT=launch NEXT_DIST_DIR=.next-build-launch next build",
+    "start:launch": "SITE_VARIANT=launch NEXT_DIST_DIR=.next-build-launch next start -p 3010",
+    "build:beam": "SITE_VARIANT=beam NEXT_DIST_DIR=.next-build-beam next build",
+    "start:beam": "SITE_VARIANT=beam NEXT_DIST_DIR=.next-build-beam next start -p 4011",
+    "build:ramp": "SITE_VARIANT=ramp NEXT_DIST_DIR=.next-build-ramp next build",
+    "start:ramp": "SITE_VARIANT=ramp NEXT_DIST_DIR=.next-build-ramp next start -p 4012",
+    "build:superlogical": "SITE_VARIANT=superlogical NEXT_DIST_DIR=.next-build-superlogical next build",
+    "start:superlogical": "SITE_VARIANT=superlogical NEXT_DIST_DIR=.next-build-superlogical next start -p 4013",
+    "build:update": "SITE_VARIANT=update NEXT_DIST_DIR=.next-build-update next build",
+    "start:update": "SITE_VARIANT=update NEXT_DIST_DIR=.next-build-update next start -p 4014",
+    "build:chatgpt": "SITE_VARIANT=chatgpt NEXT_DIST_DIR=.next-build-chatgpt next build",
+    "start:chatgpt": "SITE_VARIANT=chatgpt NEXT_DIST_DIR=.next-build-chatgpt next start -p 4015",
+    "build:rize": "SITE_VARIANT=rize NEXT_DIST_DIR=.next-build-rize next build",
+    "start:rize": "SITE_VARIANT=rize NEXT_DIST_DIR=.next-build-rize next start -p 4016",
+    "build:toggl": "SITE_VARIANT=toggl NEXT_DIST_DIR=.next-build-toggl next build",
+    "start:toggl": "SITE_VARIANT=toggl NEXT_DIST_DIR=.next-build-toggl next start -p 4017",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "motion": "^12.40.0",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}
