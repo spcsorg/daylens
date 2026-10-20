@@ -710,14 +710,15 @@ export class Storage {
     }
   }
 
-  // Retried with backoff until it succeeds; kept titles come back at once, in this session.
+  // Retried with backoff until the kernel names the boot; kept titles come back at once, in this session.
   private readBootPoint(): void {
     if (this.bootRead !== null || this.stopped) return
     this.bootRead = (async () => {
       for (let wait = 1000; !this.stopped; wait = Math.min(wait * 2, 60_000)) {
         const p = await this.readOrdering()
         if (this.stopped) return
-        if (p !== null) return this.learnBoot(p)
+        if (p !== null) this.learnBoot(p)
+        if (p?.boot_identity === 'kernel') return
         await new Promise<void>((r) => setTimeout(r, wait).unref())
       }
     })().finally(() => {
@@ -725,8 +726,9 @@ export class Storage {
     })
   }
 
+  // A clock-derived boot gives way to a kernel-named one, never the other way round.
   private learnBoot(p: OrderingPoint): void {
-    if (this.bootPoint !== null) return
+    if (this.bootPoint !== null && (this.bootPoint.boot_identity === 'kernel' || p.boot_identity !== 'kernel')) return
     this.bootPoint = p
     if (this.keptTitleApps().length === 0) return
     this.installPrivacy()

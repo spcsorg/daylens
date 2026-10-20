@@ -213,6 +213,32 @@ test('after a restart into a new boot, titles kept earlier stay withheld until a
   } finally { r.close() }
 })
 
+test('a first ordering read with only a clock-derived boot keeps retrying, and kept titles return once the kernel names the boot', async () => {
+  resetSeq()
+  const first = rig()
+  await first.storage.keepTitles(notes)
+  first.close()
+  let reads = 0
+  const r = rig(first.dir, {
+    orderingPoint: async () => (++reads === 1 ? { boot: 'boot-next', mono_us: 5000, boot_identity: 'clock' } : { boot: 'boot-next', mono_us: 5000, boot_identity: 'kernel' }),
+  })
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const before = focus(notes, 'ClockOnlyCanary', T0 + MIN)
+    before.boot = 'boot-next'
+    before.t.mono_us = 6000
+    r.feed(before)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const after = focus(notes, 'After the kernel named the boot', T0 + 2 * MIN, 'window_changed', 'after')
+    after.boot = 'boot-next'
+    after.t.mono_us = 7000
+    r.feed(after)
+    assert.ok(reads >= 2, 'the ordering helper was read again after the clock-only answer')
+    assert.deepEqual(r.q('SELECT title FROM observations ORDER BY id'), [{ title: null }, { title: 'After the kernel named the boot' }])
+    assert.deepEqual(diskContains(r.dir, 'ClockOnlyCanary'), [])
+  } finally { r.close() }
+})
+
 test('keeping titles waits for a slow first run of the ordering helper instead of refusing', async () => {
   resetSeq()
   const errors: string[] = []
