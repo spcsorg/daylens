@@ -67,7 +67,7 @@ storage.attachCapture({
 })
 function agentStore(): AgentStore {
   const s = new AgentStore(store.database)
-  s.admit = (at) => storage.admitsTime(at)
+  s.withheld = () => storage.withheld()
   return s
 }
 
@@ -77,7 +77,7 @@ const agents = values['agent-sessions']
       reconcileMs: Number(values['reconcile-s']) * 1000,
       log,
       backfill: async (roots) => {
-        const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, (at) => storage.admitsTime(at))
+        const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, () => storage.withheld())
         if (r.child) log(`agent backfill files=${r.child.files_read} mb=${r.child.mb_read} wall_ms=${r.child.wall_ms} merge_ms=${r.merge_ms}`)
         return r.merged
       },

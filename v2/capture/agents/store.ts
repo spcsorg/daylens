@@ -6,6 +6,7 @@ import path from 'node:path'
 import { threadId } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
+import { admitsAt, admitsSpan, type Span } from './withheld.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
 const KEY_FILE = 'agent-fingerprint.key'
@@ -257,6 +258,7 @@ const SQL = {
   turnDir: 'UPDATE agent_turns SET project_dir = @dir WHERE agent = @agent AND turn_key = @key',
   turnOpener: `UPDATE agent_turns SET opened_by = @opener WHERE agent = @agent AND turn_key = @key AND opened_by = 'unknown'`,
   activity: 'UPDATE agent_turns SET last_activity_wall_ms = max(last_activity_wall_ms, @at) WHERE agent = @agent AND turn_key = @key',
+  turnSpan: 'SELECT max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
   // The first real end wins; 'missing' only ever gives way to a real one.
   // The end is kept apart from the last activity: a turn that fails after a stalled request ended late but did nothing since.
   end: `UPDATE agent_turns SET end_state = @state, end_wall_ms = CASE WHEN @at IS NULL THEN NULL ELSE max(@at, start_wall_ms) END
@@ -280,8 +282,8 @@ export class AgentStore {
   private readonly stmts = new Map<string, Database.Statement>()
   private key: Buffer | null = null
 
-  /** Storage's rule for a moment in time: false inside a pause, a deleted range or past retention. */
-  admit: (wallMs: number) => boolean = () => true
+  /** Time storage withholds: pauses, deleted ranges and anything past retention. */
+  withheld: () => readonly Span[] = () => []
 
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
@@ -302,17 +304,31 @@ export class AgentStore {
   apply(agent: Agent, records: readonly AgentRecord[], source?: SourceUpdate): void {
     const now = this.now()
     this.db.transaction(() => {
+      const spans = this.withheld()
+      let dropped = false
+      // A turn never stretches across withheld time: its last activity or end stays before the gap.
+      const reaches = (key: string, at: number) => {
+        const t = this.stmt(SQL.turnSpan).get({ agent, key }) as { last: number } | undefined
+        return !t || admitsSpan(spans, t.last, at)
+      }
       const latest = new Map<string, { at: number; session: string }>()
       const flushActivity = () => {
         for (const [key, a] of latest) {
+          if (!reaches(key, a.at)) {
+            dropped = true
+            continue
+          }
           this.stmt(SQL.activity).run({ agent, key, at: a.at })
           this.stmt(SQL.sessionSeen).run({ agent, session: a.session, at: a.at })
         }
         latest.clear()
       }
-      const ok = (at: number | null) => at === null || this.admit(at)
+      const ok = (at: number | null) => admitsAt(spans, at)
       for (const r of records) {
-        if (!admitted(r, ok)) continue
+        if (!admitted(r, ok)) {
+          dropped = true
+          continue
+        }
         switch (r.t) {
           case 'session':
             this.stmt(SQL.session).run({ agent, session: r.session, origin: r.origin, parent: r.parent, client: r.client, dir: r.dir, branch: r.branch, at: r.at, now })
@@ -335,7 +351,7 @@ export class AgentStore {
           case 'end':
             flushActivity()
             // An end inside withheld time keeps the turn ended without saying when.
-            this.stmt(SQL.end).run({ agent, key: r.key, state: r.state, at: ok(r.at) ? r.at : null })
+            this.stmt(SQL.end).run({ agent, key: r.key, state: r.state, at: r.at !== null && reaches(r.key, r.at) ? r.at : null })
             break
           case 'user':
             this.stmt(SQL.user).run({ agent, key: r.key, session: r.session, turn: r.turn, act: r.act, basis: r.basis, at: r.at, now })
@@ -356,7 +372,8 @@ export class AgentStore {
           ino: source.ino,
           offset: source.offset,
           size: source.size,
-          state: source.state,
+          // Parser state written while withheld records went by could describe them; the read position still advances.
+          state: dropped ? null : source.state,
           turnless: source.turnless ? 1 : 0,
           lines: source.counts.lines,
           bad: source.counts.bad,
@@ -470,6 +487,9 @@ function admitted(r: AgentRecord, ok: (at: number | null) => boolean): boolean {
       return ok(r.start)
     case 'wait':
       return ok(r.start) && ok(r.end)
+    case 'turn_dir':
+    case 'turn_opener':
+      return ok(r.at)
     default:
       return true
   }

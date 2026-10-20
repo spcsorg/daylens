@@ -25,7 +25,7 @@ test('a composer turn: context Codex adds is skipped, the person\'s message is t
   ])
   assert.equal(of(recs, 'session')[0]!.origin, 'interactive')
   assert.deepEqual(of(recs, 'turn').map((t) => [t.key, t.opener, t.start, t.replayed]), [[U('turn-1'), 'user', sec(1), false]])
-  assert.deepEqual(of(recs, 'turn_dir'), [{ t: 'turn_dir', key: U('turn-1'), dir: '/home/me/code/project-gamma' }])
+  assert.deepEqual(of(recs, 'turn_dir'), [{ t: 'turn_dir', key: U('turn-1'), dir: '/home/me/code/project-gamma', at: sec(2) }])
   assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis, u.at]), [['prompt', 'marked', sec(1)]])
   assert.deepEqual(of(recs, 'end'), [{ t: 'end', key: U('turn-1'), state: 'completed', at: sec(31) }])
   // Usage counts are bookkeeping, not work.
@@ -188,7 +188,7 @@ test('an older log without triggers or content kinds is read from its messages\'
     codex.userItem(sec(15), '<turn_aborted>\nThe user interrupted the previous turn.\n</turn_aborted>', null, null),
     codex.aborted(sec(15), U('t'), sec(1)),
   ])
-  assert.deepEqual(of(recs, 'turn_opener'), [{ t: 'turn_opener', key: U('t'), opener: 'user' }])
+  assert.deepEqual(of(recs, 'turn_opener'), [{ t: 'turn_opener', key: U('t'), opener: 'user', at: sec(3) }])
   assert.deepEqual(of(recs, 'user').map((u) => [u.act, u.basis, u.at]), [
     ['prompt', 'inferred', sec(1)],
     ['interrupt', 'inferred', sec(15)],

@@ -202,7 +202,7 @@ export class CodexParser implements LineParser {
         this.counts.recognized++
         if (typeof p.cwd === 'string') {
           this.s.dir = p.cwd
-          if (t) return [{ t: 'turn_dir', key: t.key, dir: p.cwd }]
+          if (t) return [{ t: 'turn_dir', key: t.key, dir: p.cwd, at }]
         }
         return []
       case 'event_msg':
@@ -356,7 +356,7 @@ export class CodexParser implements LineParser {
     const out: AgentRecord[] = []
     if (first && t.opener === 'unknown') {
       t.opener = answer ? 'user_answer' : 'user'
-      out.push({ t: 'turn_opener', key: t.key, opener: t.opener })
+      out.push({ t: 'turn_opener', key: t.key, opener: t.opener, at })
     }
     // The opening message of a turn is sent when the turn starts.
     const when = first ? t.start : at

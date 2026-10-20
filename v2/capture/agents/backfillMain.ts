@@ -8,10 +8,11 @@ import { AgentReader } from './reader.ts'
 import { AgentStore } from './store.ts'
 import { subCounts } from './types.ts'
 import type { PlainRoot } from './backfill.ts'
+import type { Span } from './withheld.ts'
 
 if (!parentPort) throw new Error('backfill requires a worker message port')
 const port = parentPort
-const { staging, roots } = workerData as { staging: string; roots: PlainRoot[] }
+const { staging, roots, spans } = workerData as { staging: string; roots: PlainRoot[]; spans: Span[] }
 setFlagsFromString('--expose-gc')
 const collect = runInNewContext('gc') as () => void
 setFlagsFromString('--no-expose-gc')
@@ -19,7 +20,9 @@ const db = new Database(staging)
 db.pragma('journal_mode = WAL')
 db.pragma('synchronous = OFF')
 db.pragma('cache_size = -256')
-const reader = new AgentReader(new AgentStore(db), roots, { recordHealth: false })
+const store = new AgentStore(db)
+store.withheld = () => spans ?? []
+const reader = new AgentReader(store, roots, { recordHealth: false })
 
 port.on('message', async ({ files, budget, stop }: { files: string[]; budget: number; stop?: boolean }) => {
   if (stop) {

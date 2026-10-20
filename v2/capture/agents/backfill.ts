@@ -8,6 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
+import { admitsAt, admitsSpan, nextWithheld, type Span } from './withheld.ts'
 import { AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE } from './store.ts'
 import { addCounts } from './types.ts'
 
@@ -65,8 +66,8 @@ class BackfillWorker {
   private pending: { resolve: (stats: BackfillStats | null) => void } | null = null
   private failed = false
 
-  constructor(staging: string, roots: PlainRoot[], log: (msg: string) => void) {
-    this.worker = new Worker(MAIN, { workerData: { staging, roots }, execArgv: [], resourceLimits: { maxYoungGenerationSizeMb: 1 } })
+  constructor(staging: string, roots: PlainRoot[], log: (msg: string) => void, spans: readonly Span[] = []) {
+    this.worker = new Worker(MAIN, { workerData: { staging, roots, spans }, execArgv: [], resourceLimits: { maxYoungGenerationSizeMb: 1 } })
     this.worker.on('message', (result: BackfillStats) => {
       this.pending?.resolve(result)
       this.pending = null
@@ -140,8 +141,14 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
-export function mergeStaging(db: Database.Database, staging: string, admit: (wallMs: number) => boolean = () => true): void {
-  db.function('agent_admits', { deterministic: false }, (at: number | null) => (at === null || admit(at) ? 1 : 0))
+export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = []): void {
+  db.function('agent_admits', { deterministic: false }, (at: number | null) => (admitsAt(spans, at) ? 1 : 0))
+  // A turn's activity and end stop where withheld time begins after its start.
+  db.function('agent_clip', { deterministic: false }, (start: number, at: number | null) => {
+    if (at === null || admitsSpan(spans, start, at)) return at
+    return nextWithheld(spans, start) ?? at
+  })
+  db.function('agent_end', { deterministic: false }, (start: number, at: number | null) => (at === null || admitsSpan(spans, start, at) ? at : null))
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
     // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
@@ -152,7 +159,7 @@ export function mergeStaging(db: Database.Database, staging: string, admit: (wal
           SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions WHERE agent_admits(first_wall_ms)
           ON CONFLICT (agent, session_id) DO UPDATE SET first_wall_ms = min(first_wall_ms, excluded.first_wall_ms), last_wall_ms = max(last_wall_ms, excluded.last_wall_ms);
         INSERT INTO agent_turns (agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms)
-          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms FROM staging.agent_turns WHERE agent_admits(start_wall_ms)
+          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns WHERE agent_admits(start_wall_ms)
           ON CONFLICT (agent, turn_key) DO NOTHING;
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
           SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms)
@@ -174,7 +181,7 @@ export async function backfill(
   log: (msg: string) => void,
   sliceBytes = SLICE_BYTES,
   sliceTimeoutMs = SLICE_TIMEOUT_MS,
-  admit: (wallMs: number) => boolean = () => true,
+  withheld: () => readonly Span[] = () => [],
 ): Promise<BackfillResult> {
   const staging = path.join(dataDir, STAGING_FILE)
   const clean = () => removeStaging(dataDir)
@@ -183,7 +190,7 @@ export async function backfill(
   if (filesToRead.length === 0) return { merged: true, children: 0, slices: 0, max_slice_bytes: 0, child: null, merge_ms: 0, peaks_mb: [] }
   loadFingerprintKey(dataDir)
   await prepareWorker()
-  const worker = new BackfillWorker(staging, roots, log)
+  const worker = new BackfillWorker(staging, roots, log, withheld())
   try {
     let files = filesToRead
     const total: BackfillStats = { wall_ms: 0, cpu_ms: 0, peak_rss_mb: 0, files_read: 0, mb_read: 0, lines: 0, records: 0 }
@@ -224,7 +231,7 @@ export async function backfill(
       }
     }
     const t0 = performance.now()
-    mergeStaging(db, staging, admit)
+    mergeStaging(db, staging, withheld())
     // Health is decided once over every slice, so a clean last slice cannot hide a problem in an earlier one.
     const store = new AgentStore(db)
     for (const r of counts.values()) {

@@ -10,7 +10,8 @@ import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResul
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
-import { DAY_MS, fencedBy, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
+import type { Span } from '../capture/agents/withheld.ts'
+import { DAY_MS, fencedBy, pauseEnd, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 import { immediate, isBusy } from './tx.ts'
 
@@ -715,6 +716,8 @@ export class Storage {
     if (this.bootRead !== null || this.stopped) return
     this.bootRead = (async () => {
       for (let wait = 1000; !this.stopped; wait = Math.min(wait * 2, 60_000)) {
+        // keepTitles can learn a kernel-named boot while this waits between reads.
+        if (this.bootPoint?.boot_identity === 'kernel') return
         const p = await this.readOrdering()
         if (this.stopped) return
         if (p !== null) this.learnBoot(p)
@@ -735,9 +738,14 @@ export class Storage {
     this.capture?.interrupt()
   }
 
-  /** Whether something that happened at this moment may be kept: not paused, deleted or past retention. */
-  admitsTime(wallMs: number): boolean {
-    return this.rules.accepts(wallMs, null, null)
+  /** Time nothing may be kept from, whatever the app: pauses, deleted ranges and anything older than retention. */
+  withheld(): Span[] {
+    const spans: Span[] = this.rules.pauses.map((p) => [p.since_wall_ms, pauseEnd(p)] as const)
+    for (const t of this.rules.tombstones) {
+      if (t.kind === 'range') spans.push([t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY])
+    }
+    if (this.rules.retentionDays !== null) spans.push([Number.NEGATIVE_INFINITY, this.now() - this.rules.retentionDays * DAY_MS])
+    return spans
   }
 
   keptTitleApps(): KeptTitleApp[] {

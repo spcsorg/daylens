@@ -196,6 +196,7 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
           'DELETE FROM agent_events WHERE id IN (SELECT id FROM agent_events WHERE coalesce(end_wall_ms, wall_ms) < ? LIMIT ?)',
           'DELETE FROM agent_turns WHERE id IN (SELECT id FROM agent_turns WHERE max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) < ? LIMIT ?)',
           'DELETE FROM agent_sessions WHERE id IN (SELECT id FROM agent_sessions WHERE last_wall_ms < ? LIMIT ?)',
+          'UPDATE agent_sources SET state = NULL WHERE rowid IN (SELECT rowid FROM agent_sources WHERE updated_wall_ms < ? AND state IS NOT NULL LIMIT ?)',
         ]
       : []),
   ]) {
@@ -270,6 +271,8 @@ export class Deleter {
          WHERE last_wall_ms >= @from AND first_wall_ms < @to AND EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`,
       ).run({ from, to })
       n += db.prepare(`UPDATE agent_sessions SET last_wall_ms = @from WHERE first_wall_ms < @from AND last_wall_ms > @from AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`).run({ from }).changes
+      // A log read since the range began may hold parser state (open turn, folder, message fingerprints) from inside it.
+      db.prepare('UPDATE agent_sources SET state = NULL WHERE updated_wall_ms >= @from AND state IS NOT NULL').run({ from })
     })
     return n
   }

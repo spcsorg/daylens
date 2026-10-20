@@ -47,8 +47,8 @@ export type AgentRecord =
       at: number
     }
   | { t: 'turn'; key: string; session: string; dir: string | null; branch: string | null; opener: TurnOpener; start: number; replayed: boolean }
-  | { t: 'turn_dir'; key: string; dir: string }
-  | { t: 'turn_opener'; key: string; opener: TurnOpener }
+  | { t: 'turn_dir'; key: string; dir: string; at: number | null }
+  | { t: 'turn_opener'; key: string; opener: TurnOpener; at: number | null }
   | { t: 'activity'; key: string; session: string; at: number }
   | { t: 'end'; key: string; state: TurnEndState; at: number | null }
   | { t: 'user'; key: string; session: string; turn: string | null; act: UserAct; basis: Basis; at: number }
