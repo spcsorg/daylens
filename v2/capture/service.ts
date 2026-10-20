@@ -65,13 +65,19 @@ storage.attachCapture({
   },
   setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
 })
+function agentStore(): AgentStore {
+  const s = new AgentStore(store.database)
+  s.admit = (at) => storage.admitsTime(at)
+  return s
+}
+
 const wsl = process.platform === 'win32' ? new WslDiscovery() : null
 const agents = values['agent-sessions']
-  ? new AgentReader(new AgentStore(store.database), homeRoots(os.homedir()), {
+  ? new AgentReader(agentStore(), homeRoots(os.homedir()), {
       reconcileMs: Number(values['reconcile-s']) * 1000,
       log,
       backfill: async (roots) => {
-        const r = await backfill(store.database, dataDir, roots, log)
+        const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, (at) => storage.admitsTime(at))
         if (r.child) log(`agent backfill files=${r.child.files_read} mb=${r.child.mb_read} wall_ms=${r.child.wall_ms} merge_ms=${r.merge_ms}`)
         return r.merged
       },

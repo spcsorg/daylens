@@ -735,6 +735,11 @@ export class Storage {
     this.capture?.interrupt()
   }
 
+  /** Whether something that happened at this moment may be kept: not paused, deleted or past retention. */
+  admitsTime(wallMs: number): boolean {
+    return this.rules.accepts(wallMs, null, null)
+  }
+
   keptTitleApps(): KeptTitleApp[] {
     return (this.getSetting<KeptTitleApp[]>('kept_title_apps') ?? []).map((a) => ({ ...a, id: canonicalKeptTitleId(a.id) }))
   }

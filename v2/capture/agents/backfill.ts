@@ -140,7 +140,8 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
-export function mergeStaging(db: Database.Database, staging: string): void {
+export function mergeStaging(db: Database.Database, staging: string, admit: (wallMs: number) => boolean = () => true): void {
+  db.function('agent_admits', { deterministic: false }, (at: number | null) => (at === null || admit(at) ? 1 : 0))
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
     // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
@@ -148,13 +149,13 @@ export function mergeStaging(db: Database.Database, staging: string): void {
     db.transaction(() => {
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
-          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions WHERE true
+          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions WHERE agent_admits(first_wall_ms)
           ON CONFLICT (agent, session_id) DO UPDATE SET first_wall_ms = min(first_wall_ms, excluded.first_wall_ms), last_wall_ms = max(last_wall_ms, excluded.last_wall_ms);
         INSERT INTO agent_turns (agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms)
-          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms FROM staging.agent_turns WHERE true
+          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms FROM staging.agent_turns WHERE agent_admits(start_wall_ms)
           ON CONFLICT (agent, turn_key) DO NOTHING;
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
-          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events WHERE true
+          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms)
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
           SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources WHERE true
@@ -166,7 +167,15 @@ export function mergeStaging(db: Database.Database, staging: string): void {
   }
 }
 
-export async function backfill(db: Database.Database, dataDir: string, roots: PlainRoot[], log: (msg: string) => void, sliceBytes = SLICE_BYTES, sliceTimeoutMs = SLICE_TIMEOUT_MS): Promise<BackfillResult> {
+export async function backfill(
+  db: Database.Database,
+  dataDir: string,
+  roots: PlainRoot[],
+  log: (msg: string) => void,
+  sliceBytes = SLICE_BYTES,
+  sliceTimeoutMs = SLICE_TIMEOUT_MS,
+  admit: (wallMs: number) => boolean = () => true,
+): Promise<BackfillResult> {
   const staging = path.join(dataDir, STAGING_FILE)
   const clean = () => removeStaging(dataDir)
   clean()
@@ -215,7 +224,7 @@ export async function backfill(db: Database.Database, dataDir: string, roots: Pl
       }
     }
     const t0 = performance.now()
-    mergeStaging(db, staging)
+    mergeStaging(db, staging, admit)
     // Health is decided once over every slice, so a clean last slice cannot hide a problem in an earlier one.
     const store = new AgentStore(db)
     for (const r of counts.values()) {

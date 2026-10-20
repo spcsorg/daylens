@@ -280,6 +280,9 @@ export class AgentStore {
   private readonly stmts = new Map<string, Database.Statement>()
   private key: Buffer | null = null
 
+  /** Storage's rule for a moment in time: false inside a pause, a deleted range or past retention. */
+  admit: (wallMs: number) => boolean = () => true
+
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
@@ -307,7 +310,9 @@ export class AgentStore {
         }
         latest.clear()
       }
+      const ok = (at: number | null) => at === null || this.admit(at)
       for (const r of records) {
+        if (!admitted(r, ok)) continue
         switch (r.t) {
           case 'session':
             this.stmt(SQL.session).run({ agent, session: r.session, origin: r.origin, parent: r.parent, client: r.client, dir: r.dir, branch: r.branch, at: r.at, now })
@@ -329,7 +334,8 @@ export class AgentStore {
           }
           case 'end':
             flushActivity()
-            this.stmt(SQL.end).run({ agent, key: r.key, state: r.state, at: r.at })
+            // An end inside withheld time keeps the turn ended without saying when.
+            this.stmt(SQL.end).run({ agent, key: r.key, state: r.state, at: ok(r.at) ? r.at : null })
             break
           case 'user':
             this.stmt(SQL.user).run({ agent, key: r.key, session: r.session, turn: r.turn, act: r.act, basis: r.basis, at: r.at, now })
@@ -450,5 +456,21 @@ export class AgentStore {
     return this.stmt(
       'SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms FROM agent_events WHERE wall_ms < ? AND coalesce(end_wall_ms, wall_ms) >= ? ORDER BY wall_ms',
     ).all(toMs, fromMs) as EventRow[]
+  }
+}
+
+// Records stamped inside withheld time are dropped; their read position still advances, so they never come back.
+function admitted(r: AgentRecord, ok: (at: number | null) => boolean): boolean {
+  switch (r.t) {
+    case 'session':
+    case 'activity':
+    case 'user':
+      return ok(r.at)
+    case 'turn':
+      return ok(r.start)
+    case 'wait':
+      return ok(r.start) && ok(r.end)
+    default:
+      return true
   }
 }

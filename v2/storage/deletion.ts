@@ -22,6 +22,7 @@ export interface DeletionResult {
   hoursRemoved: number
   hoursCleared: number
   assistantReads: number
+  agentRecords: number
   // Whether the old pages were also moved out of the write-ahead log when the removal finished; if not, storage
   // keeps retrying and announces when they are gone.
   purged: boolean
@@ -29,6 +30,11 @@ export interface DeletionResult {
 
 type Obs = ObservationRow & { id: number; last_seen_wall_ms: number; url?: string | null }
 type Spec = Pick<Tombstone, 'kind' | 'from_wall_ms' | 'to_wall_ms' | 'app_id' | 'site'>
+
+// Agent session tables exist once the agent reader has been enabled.
+function hasAgentTables(db: Database.Database): boolean {
+  return db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_events'`).get() !== undefined
+}
 
 function hasUrl(db: Database.Database): boolean {
   return db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'url'`).get() !== undefined
@@ -185,6 +191,13 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
     'DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT ?)',
     'DELETE FROM capture_gaps WHERE id IN (SELECT id FROM capture_gaps WHERE end_wall_ms < ? LIMIT ?)',
     'DELETE FROM assistant_reads WHERE id IN (SELECT id FROM assistant_reads WHERE to_wall_ms < ? LIMIT ?)',
+    ...(hasAgentTables(db)
+      ? [
+          'DELETE FROM agent_events WHERE id IN (SELECT id FROM agent_events WHERE coalesce(end_wall_ms, wall_ms) < ? LIMIT ?)',
+          'DELETE FROM agent_turns WHERE id IN (SELECT id FROM agent_turns WHERE max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) < ? LIMIT ?)',
+          'DELETE FROM agent_sessions WHERE id IN (SELECT id FROM agent_sessions WHERE last_wall_ms < ? LIMIT ?)',
+        ]
+      : []),
   ]) {
     n += timed(() => db.prepare(sql).run(cutoff, batch).changes)
   }
@@ -232,6 +245,35 @@ export class Deleter {
    * Runs `step(limit)` in transactions until it removes nothing, sizing `limit` so each transaction takes about
    * FTS_STEP_MS: capture's flush never waits long behind one.
    */
+  /**
+   * Agent session records in [from, to): events and turns that began inside go, and anything that crosses the start is
+   * cut there. A session keeps only the span of its remaining turns, and goes if none remain and it began inside.
+   */
+  private deleteAgentRange(from: number, to: number): number {
+    const db = this.db
+    const events = db.prepare('DELETE FROM agent_events WHERE id IN (SELECT id FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to LIMIT @limit)')
+    const turns = db.prepare('DELETE FROM agent_turns WHERE id IN (SELECT id FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to LIMIT @limit)')
+    let n = this.adaptive((limit) => events.run({ from, to, limit }).changes)
+    n += this.adaptive((limit) => turns.run({ from, to, limit }).changes)
+    const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
+    immediateRetrying(db, () => {
+      db.prepare('UPDATE agent_events SET end_wall_ms = @from WHERE wall_ms < @from AND end_wall_ms > @from').run({ from })
+      db.prepare(
+        `UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @from), end_wall_ms = CASE WHEN end_wall_ms > @from THEN @from ELSE end_wall_ms END
+         WHERE start_wall_ms < @from AND (last_activity_wall_ms > @from OR end_wall_ms > @from)`,
+      ).run({ from })
+      n += db.prepare(`DELETE FROM agent_sessions WHERE last_wall_ms >= @from AND first_wall_ms < @to AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own}) AND first_wall_ms >= @from`).run({ from, to }).changes
+      db.prepare(
+        `UPDATE agent_sessions SET
+           first_wall_ms = (SELECT min(start_wall_ms) FROM agent_turns t WHERE ${own}),
+           last_wall_ms = (SELECT max(max(last_activity_wall_ms, coalesce(end_wall_ms, 0))) FROM agent_turns t WHERE ${own})
+         WHERE last_wall_ms >= @from AND first_wall_ms < @to AND EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`,
+      ).run({ from, to })
+      n += db.prepare(`UPDATE agent_sessions SET last_wall_ms = @from WHERE first_wall_ms < @from AND last_wall_ms > @from AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`).run({ from }).changes
+    })
+    return n
+  }
+
   private adaptive(step: (limit: number) => number): number {
     let total = 0
     for (let limit = 200; ; ) {
@@ -314,7 +356,7 @@ export class Deleter {
   run(tombstoneId: number, nowWallMs: number, opts: { stopAfter?: DeletionStep } = {}): DeletionResult {
     const db = this.db
     const t = db.prepare('SELECT id, kind, from_wall_ms, to_wall_ms, app_id, site, state FROM deletions WHERE id = ?').get(tombstoneId) as Tombstone | undefined
-    const r: DeletionResult = { tombstone: tombstoneId, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0, purged: false }
+    const r: DeletionResult = { tombstone: tombstoneId, observations: 0, intervals: 0, searchDocs: 0, hoursRemoved: 0, hoursCleared: 0, assistantReads: 0, agentRecords: 0, purged: false }
     if (!t) return r
     const stop = (step: DeletionStep) => {
       if (opts.stopAfter === step) throw new Error(`stopped after ${step}`)
@@ -384,6 +426,7 @@ export class Deleter {
         return Math.max(0, before - (docCount.get() as { n: number }).n)
       })
     }
+    if (t.kind === 'range' && hasAgentTables(db)) r.agentRecords += this.deleteAgentRange(from, to)
     if (t.kind === 'range') {
       immediateRetrying(db, () => {
         db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
