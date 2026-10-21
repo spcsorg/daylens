@@ -123,14 +123,34 @@ export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec
 const ROWS_PER_STEP = 500
 const DOCS_PER_STEP = 50
 const HOURS_PER_STEP = 25
-// A secure-delete of an hour's text rewrites index pages for each of its many terms (13 ms warm at a year's size);
-// a transaction stops taking on more entries after this long, so capture's flushes never wait long for the lock.
+// A transaction stops taking on more rows, pages or index merging after this long, so capture's flushes never wait
+// long for the lock.
 const FTS_STEP_MS = 20
+// Search index pages one merge step starts with; it follows how long each step takes, like the scrub's batches.
+const MERGE_PAGES = 16
+const MAX_MERGE_PAGES = 1024
+// An index segment's rows in search_data are numbered from (segment id << 37) up.
+const SEGMENT_SHIFT = 37
 
-// Reads the search index into the cache outside any write transaction: cold, the first secure-delete of an hour's
-// text took 136 ms with the writer lock held; warm, 7 ms.
+// Reads the search index into the cache outside any write transaction, so merging it finds its pages in memory.
 export function warmSearchIndex(db: Database.Database): void {
   db.prepare('SELECT count(*) AS n, sum(length(block)) AS b FROM search_data').get()
+}
+
+/**
+ * Search entries go with FTS5's plain delete, which stops them matching at once but leaves their terms in the
+ * index's segments until those are merged. This marker, set in the same transaction, makes the purge merge them away
+ * before it scrubs (Deleter.mergeSearchIfPending).
+ */
+export const FTS_MERGE_PENDING = `INSERT INTO meta (key, value) VALUES ('fts_merge_pending', '1') ON CONFLICT (key) DO UPDATE SET value = value + 1`
+
+/** Runs `fn` inside the caller's transaction; if it changed anything, the index owes a merge. */
+function ftsRemoval<T>(db: Database.Database, fn: () => T): T {
+  const changes = db.prepare('SELECT total_changes() AS n').pluck()
+  const before = changes.get() as number
+  const out = fn()
+  if ((changes.get() as number) > before) db.prepare(FTS_MERGE_PENDING).run()
+  return out
 }
 
 /** Runs `each` for items in order until all are done or FTS_STEP_MS has passed; returns how many it ran. */
@@ -214,11 +234,11 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
   const delHourDocs = db.prepare(`DELETE FROM search_docs WHERE kind = 'hour' AND hour_id = ?`)
   const delHour = db.prepare('DELETE FROM hours WHERE id = ?')
   for (let i = 0; i < docs.length; ) {
-    i += timed(() => secureFts(db, () => timeBoxed(docs.slice(i), (id) => (n += delDoc.run(id).changes))))
+    i += timed(() => ftsRemoval(db, () => timeBoxed(docs.slice(i), (id) => (n += delDoc.run(id).changes))))
   }
   for (let i = 0; i < hours.length; ) {
     i += timed(() =>
-      secureFts(db, () =>
+      ftsRemoval(db, () =>
         timeBoxed(hours.slice(i), (id) => {
           delHourDocs.run(id)
           n += delHour.run(id).changes
@@ -227,15 +247,6 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
     )
   }
   return { removed: n + logRows, data: n }
-}
-
-// FTS5 secure-delete removes a deleted entry's terms as it goes; set only inside the caller's transaction, as a
-// literal (FTS5 rejects a bound value).
-function secureFts<T>(db: Database.Database, fn: () => T): T {
-  db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
-  const out = fn()
-  db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
-  return out
 }
 
 export type DeletionStep = 'observations' | 'intervals' | 'search' | 'hours' | 'threads'
@@ -355,8 +366,8 @@ export class Deleter {
     return total
   }
 
-  private withSecureFts<T>(fn: () => T): T {
-    return immediateRetrying(this.db, () => secureFts(this.db, fn))
+  private withFtsRemoval<T>(fn: () => T): T {
+    return immediateRetrying(this.db, () => ftsRemoval(this.db, fn))
   }
 
   /** Retention, off the capture thread: batches until nothing is older than the cutoff, then the log is purged. */
@@ -393,6 +404,7 @@ export class Deleter {
    * Throws ScrubUnavailableError when the scrub cannot run (scrubBlocked): nothing is then reported purged.
    */
   scrubIfPending(): boolean {
+    this.mergeSearchIfPending()
     const markers = this.db.prepare(SCRUB_MARKERS).all() as { key: string; value: string }[]
     if (markers.length === 0) return true
     const blocked = scrubBlocked(this.db)
@@ -403,6 +415,58 @@ export class Deleter {
       for (const m of markers) clear.run(m.key, m.value)
     })
     return true
+  }
+
+  /**
+   * Merges the search index once since the last removal of search entries: merge steps in their own transactions,
+   * each about FTS_STEP_MS and giving capture the lock first, until every segment that existed when it began has been
+   * merged away (or nothing is left to merge), which drops the removed entries' terms. The first step starts one merge
+   * of all segments; later steps continue it, so segments capture adds meanwhile do not restart it. Each step owes a
+   * scrub: the segments it replaces leave their pages' free space behind.
+   */
+  mergeSearchIfPending(onTransaction: (ms: number) => void = () => {}): void {
+    const db = this.db
+    const marker = db.prepare(`SELECT value FROM meta WHERE key = 'fts_merge_pending'`).pluck().get() as string | undefined
+    if (marker === undefined) return
+    warmSearchIndex(db)
+    const segments = db.prepare(`SELECT DISTINCT id >> ${SEGMENT_SHIFT} FROM search_data WHERE id >= ${2 ** SEGMENT_SHIFT}`).pluck()
+    const before = new Set(segments.all() as number[])
+    const changes = db.prepare('SELECT total_changes() AS n').pluck()
+    const autocheckpoint = db.pragma('wal_autocheckpoint', { simple: true }) as number
+    db.pragma('wal_autocheckpoint = 0')
+    try {
+      for (let pages = MERGE_PAGES, start = true; before.size > 0; ) {
+        const t = performance.now()
+        const worked = immediateRetrying(db, () => {
+          const n = changes.get() as number
+          // A negative count starts a merge of every segment; a positive one continues the merge in progress. FTS5
+          // rejects a bound value here.
+          db.exec(`INSERT INTO search (search, rank) VALUES ('merge', ${start ? -pages : pages})`)
+          // Fewer than two changes: the command found nothing to merge.
+          const did = (changes.get() as number) - n >= 2
+          if (did) db.prepare(SCRUB_PENDING).run()
+          return did
+        })
+        const ms = performance.now() - t
+        onTransaction(ms)
+        db.pragma('wal_checkpoint(PASSIVE)')
+        const left = new Set(segments.all() as number[])
+        if (![...before].some((s) => left.has(s))) break
+        if (!worked) {
+          // Nothing in progress and too few segments for a plain merge: start a merge of all of them, unless that
+          // was just tried, which leaves one segment holding no removed entry beside its delete marker.
+          if (start) break
+          start = true
+          continue
+        }
+        start = false
+        if (ms > FTS_STEP_MS) pages = Math.max(1, Math.floor(pages / 2))
+        else if (ms < FTS_STEP_MS / 2) pages = Math.min(MAX_MERGE_PAGES, Math.ceil(pages * 1.5))
+      }
+    } finally {
+      db.pragma(`wal_autocheckpoint = ${autocheckpoint}`)
+    }
+    immediateRetrying(db, () => db.prepare(`DELETE FROM meta WHERE key = 'fts_merge_pending' AND value = ?`).run(marker))
   }
 
   /** A scrub owed by any removal, then the checkpoint: true once no old copy is left in the files. */
@@ -491,12 +555,12 @@ export class Deleter {
     const delDoc = db.prepare('DELETE FROM search_docs WHERE id = ?')
     for (let ids = docIds.all(args) as { id: number }[]; ids.length > 0; ids = docIds.all(args) as { id: number }[]) {
       const batch = ids
-      r.searchDocs += this.withSecureFts(() => timeBoxed(batch, ({ id }) => delDoc.run(id)))
+      r.searchDocs += this.withFtsRemoval(() => timeBoxed(batch, ({ id }) => delDoc.run(id)))
     }
     const docCount = db.prepare(`SELECT count(*) AS n FROM search_docs WHERE kind = 'activity'`)
     for (let hours = this.work(tombstoneId, 'doc_hour', HOURS_PER_STEP); hours.length > 0; hours = this.work(tombstoneId, 'doc_hour', HOURS_PER_STEP)) {
       const batch = hours
-      r.searchDocs += this.withSecureFts(() => {
+      r.searchDocs += this.withFtsRemoval(() => {
         const before = (docCount.get() as { n: number }).n
         const ran = timeBoxed(batch, (h) => derived.rebuildDocs([h]))
         this.done(tombstoneId, 'doc_hour', batch.slice(0, ran))
@@ -516,7 +580,7 @@ export class Deleter {
     // Hours: wholly inside a deleted range they go; otherwise the hour loses its text and waits for a rewrite.
     for (let ids = this.work(tombstoneId, 'hour', HOURS_PER_STEP); ids.length > 0; ids = this.work(tombstoneId, 'hour', HOURS_PER_STEP)) {
       const batch = ids
-      this.withSecureFts(() => {
+      this.withFtsRemoval(() => {
         const ran = timeBoxed(batch, (id) => {
           const h = db.prepare('SELECT id, start_wall_ms, end_wall_ms, sources FROM hours WHERE id = ?').get(id) as
             | { id: number; start_wall_ms: number; end_wall_ms: number; sources: string }

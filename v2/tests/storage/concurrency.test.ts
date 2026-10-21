@@ -7,6 +7,7 @@ import { DB_FILE, Store } from '../../capture/store.ts'
 import { diskContains, HOUR, rig, T0, tmpDir } from './support.ts'
 import Database from 'better-sqlite3'
 import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
+import { Deleter } from '../../storage/deletion.ts'
 import { app } from '../support/lines.ts'
 
 function row(t: number, app: string, title: string): ObservationRow {
@@ -75,6 +76,32 @@ test('purged means no deleted title is left in the files, including free space i
   await handle.purged
   assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
   assert.deepEqual(diskContains(r.dir, 'Quokkacanary'), [])
+  r.close()
+})
+
+test('removing search entries rewrites no index page in place; they stop matching at once, and the purge merges their terms away', async () => {
+  const r = rig(tmpDir(), { holdDeletions: true })
+  seedShuffledSearchDocs(r.dir, 3000)
+  const db = r.store.database
+  // One segment to start from, and the index's own merging, which follows any write, off: what the removal itself
+  // writes is then all that changes.
+  db.exec(`INSERT INTO search (search) VALUES ('optimize'); INSERT INTO search (search, rank) VALUES ('automerge', 0)`)
+  const blocks = () => new Map((db.prepare('SELECT id, block FROM search_data WHERE id >= ?').all(2 ** 37) as { id: number; block: Buffer }[]).map((x) => [x.id, x.block]))
+  const before = blocks()
+  r.clock.t = T0 + 12 * HOUR
+  const { tombstone } = r.storage.deleteSource('com.example.chat')
+  const deleter = new Deleter(db)
+  assert.equal(deleter.run(tombstone, r.clock.t).searchDocs, 1000)
+  const after = blocks()
+  const rewritten = [...before].filter(([id, b]) => after.has(id) && !after.get(id)!.equals(b)).length
+  assert.equal(rewritten, 0, 'a removal only adds delete markers to the index; it rewrites none of its pages while holding the lock')
+  assert.deepEqual(r.q(`SELECT rowid FROM search WHERE search MATCH 'Quokkacanary'`), [], 'removed entries stop matching at once')
+  assert.deepEqual(r.q(`SELECT key FROM meta WHERE key = 'fts_merge_pending'`), [{ key: 'fts_merge_pending' }])
+  assert.equal(deleter.purge(tombstone), true)
+  assert.deepEqual(r.q(`SELECT key FROM meta WHERE key = 'fts_merge_pending'`), [])
+  assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
+  assert.deepEqual(diskContains(r.dir, 'Quokkacanary'), [])
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'editor'`)[0]!.n, 2000, 'what was kept still matches')
   r.close()
 })
 
@@ -161,6 +188,8 @@ test('automatic capture flushes land within 100 ms during a long deletion withou
     }, 1000)
     const result = await deletion.done
     assert.equal(result.observations, 20_000)
+    // The second write can land after the removal ends; the store's timer flushes it within a second.
+    for (const until = performance.now() + 3000; (writes < 2 || r.store.storeHealth().pendingOps > 0) && performance.now() < until; ) await new Promise((res) => setTimeout(res, 50))
     assert.equal(writes, 2, 'capture wrote once per second during the long deletion')
     test.diagnostic(`automatic flush latency: ${flushes.map((f) => f.toFixed(1)).join(', ')} ms`)
     assert.deepEqual(failures, [], 'contention never enters storage failure')

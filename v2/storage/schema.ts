@@ -206,8 +206,8 @@ const searchIndex: Migration = {
 
 const searchPlainDeletes: Migration = {
   name: 'search_plain_deletes',
-  // FTS5 secure-delete costs 0.26 ms per document (11 s to delete one app from 40 days). Deletions instead
-  // run 'optimize' afterwards, which rewrites the index without the deleted terms; freed pages are zeroed.
+  // FTS5 secure-delete costs 0.26 ms per document (11 s to delete one app from 40 days). Deletions instead merge
+  // the index in short steps before they are purged (Deleter.mergeSearchIfPending), which drops the deleted terms.
   up: (db) => db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`),
 }
 

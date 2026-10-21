@@ -18,10 +18,8 @@ for (let b = 0; b < 12; b++) {
     t('intervals', () => db.prepare('DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE start_wall_ms < ? ORDER BY start_wall_ms LIMIT 500)').run(cutoff)),
     t('search+hours', () =>
       db.transaction(() => {
-        db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 1)`)
         db.prepare(`DELETE FROM search_docs WHERE id IN (SELECT id FROM search_docs WHERE hour_start_wall_ms < ? AND last_wall_ms < ? LIMIT 50)`).run(cutoff, cutoff)
         db.prepare('DELETE FROM hours WHERE id IN (SELECT id FROM hours WHERE end_wall_ms <= ? LIMIT 20)').run(cutoff)
-        db.exec(`INSERT INTO search (search, rank) VALUES ('secure-delete', 0)`)
       }).immediate(),
     ),
   ]
