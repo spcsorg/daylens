@@ -341,10 +341,14 @@ export class Storage {
     return this.delete({ kind: 'range', from_wall_ms: fromWallMs, to_wall_ms: toWallMs, app_id: null, site: null })
   }
 
-  /** Deletes one app's material, in a range or across all time, with the agent sessions known to have run in it. */
+  /**
+   * Deletes one app's material, in a range or across all time, with the agent sessions known to have run in it.
+   * Across all time means up to now: what the app does afterwards is recorded again unless it is excluded.
+   */
   deleteSource(appId: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionHandle {
-    const unknown = this.unknownHostSessions(range?.from_wall_ms ?? Number.MIN_SAFE_INTEGER, range?.to_wall_ms ?? Number.MAX_SAFE_INTEGER)
-    const handle = this.delete({ kind: 'source', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: appId.toLowerCase(), site: null })
+    const to = range?.to_wall_ms ?? this.now()
+    const unknown = this.unknownHostSessions(range?.from_wall_ms ?? Number.MIN_SAFE_INTEGER, to)
+    const handle = this.delete({ kind: 'source', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: to, app_id: appId.toLowerCase(), site: null })
     return { ...handle, unknownAgentSessions: unknown }
   }
 

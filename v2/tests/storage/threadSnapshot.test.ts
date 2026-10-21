@@ -23,6 +23,8 @@ test('thread title and deletion fences share a snapshot when another connection 
   conn.pragma('foreign_keys = ON')
   try {
     const { affected, kept, thread } = sharedThread(r)
+    // Deleting an app across all time reaches what was recorded before the deletion.
+    r.clock.t = T0 + 2 * HOUR
     const { tombstone } = r.storage.deleteSource('com.example.chat')
     const prepare = r.storage.db.prepare.bind(r.storage.db)
     let completed = false

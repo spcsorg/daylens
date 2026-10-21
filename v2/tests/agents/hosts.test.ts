@@ -266,3 +266,34 @@ test('deleting an app reaches a subagent and its own subagent, but not a subagen
   assert.deepEqual(r.q<{ session_id: string }>('SELECT session_id FROM agent_sessions ORDER BY session_id').map((x) => x.session_id), ['c2', 'g2'])
   r.close()
 })
+
+test('deleting an app across all time deletes the past only: what the app and its sessions do afterwards is recorded, unless the app is excluded', async () => {
+  const { r, agents, turn, turns } = setup()
+  const obs = (t: number, title: string) => r.store.insertObservation({
+    run: 'r', seq: 0, boot: 'b', platform: 'macos', source: 's', kind: 'focus', event_wall_ms: t, event_mono_us: t * 1000, tz: 'Africa/Kigali', tz_offset_min: 120,
+    app_id: 'com.mitchellh.ghostty', app_name: 'Ghostty', app_path: '/Applications/Ghostty.app', pid: 1, window: 'w', title, title_raw: null, title_state: 'ok', state: 'ok', detail: null,
+  })
+  const titles = () => r.q<{ title: string }>(`SELECT title FROM observations WHERE app_id = 'com.mitchellh.ghostty' ORDER BY event_wall_ms`).map((x) => x.title)
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0)
+  obs(T0 + MIN, 'before')
+  agents.apply('claude_code', turn('s', 's1', T0 + MIN))
+  r.clock.t = T0 + 10 * MIN
+  const handle = r.storage.deleteSource('com.mitchellh.ghostty')
+  await handle.done
+  assert.deepEqual(r.q('SELECT from_wall_ms, to_wall_ms FROM deletions'), [{ from_wall_ms: null, to_wall_ms: T0 + 10 * MIN }], 'the tombstone ends when the app was deleted')
+  assert.deepEqual([titles(), turns('s')], [[], []])
+
+  obs(T0 + 2 * MIN, 'before, read again')
+  agents.apply('claude_code', turn('s', 's1', T0 + MIN))
+  assert.deepEqual([titles(), turns('s')], [[], []], 'the past is never imported again')
+
+  r.clock.t = T0 + 11 * MIN
+  obs(T0 + 11 * MIN, 'after')
+  agents.apply('claude_code', turn('s', 's2', T0 + 11 * MIN))
+  assert.deepEqual([titles(), turns('s')], [['after'], ['s2']], 'what the app and its session do afterwards is recorded')
+
+  r.storage.addExclusion({ match: 'app_id', value: 'com.mitchellh.ghostty', label: 'Ghostty' })
+  agents.apply('claude_code', turn('s', 's3', T0 + 12 * MIN))
+  assert.deepEqual(turns('s'), ['s2'], 'once excluded, its sessions are not')
+  r.close()
+})

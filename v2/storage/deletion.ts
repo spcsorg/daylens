@@ -64,21 +64,26 @@ function bounds(t: Spec) {
 
 /**
  * Inside the fence transaction: rows crossing an edge keep only their parts outside the range, and one that spans
- * it is split in two. Only a bounded range has edges; the scan before it is limited by MAX_INTERVAL_MS.
+ * it is split in two. Each bound is an edge (an app deleted across all time has only its end, the moment it was
+ * deleted); the scan before an edge is limited by MAX_INTERVAL_MS.
  */
 export function fenceEdges(db: Database.Database, t: Spec, allocateId: () => number): void {
-  if (t.from_wall_ms === null || t.to_wall_ms === null) return
   const args = bounds(t)
   const { from, to } = args
   const pre = prefilter(db, t)
   const matches = (o: Obs) => tombstoneMatches(t, o.app_id, o.url ?? null)
   const cols = (db.prepare('PRAGMA table_info(observations)').all() as { name: string }[]).map((c) => c.name)
   const insertCopy = db.prepare(`INSERT INTO observations (${cols.join(', ')}) VALUES (${cols.map((c) => '@' + c).join(', ')})`)
-  for (const o of (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @lo AND event_wall_ms < @from AND last_seen_wall_ms > @from AND ${pre}`).all(args) as Obs[]).filter(matches)) {
-    if (o.last_seen_wall_ms > to) insertCopy.run({ ...o, id: allocateId(), event_wall_ms: to, event_mono_us: o.event_mono_us + (to - o.event_wall_ms) * 1000 })
-    db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE id = ?').run(from, o.id)
+  if (t.from_wall_ms !== null) {
+    for (const o of (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @lo AND event_wall_ms < @from AND last_seen_wall_ms > @from AND ${pre}`).all(args) as Obs[]).filter(matches)) {
+      if (o.last_seen_wall_ms > to) insertCopy.run({ ...o, id: allocateId(), event_wall_ms: to, event_mono_us: o.event_mono_us + (to - o.event_wall_ms) * 1000 })
+      db.prepare('UPDATE observations SET last_seen_wall_ms = ? WHERE id = ?').run(from, o.id)
+    }
   }
-  for (const o of (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND last_seen_wall_ms > @to AND ${pre}`).all(args) as Obs[]).filter(matches)) {
+  if (t.to_wall_ms === null) return
+  // A row that crosses the end began inside the range and at most MAX_ROW_SPAN_MS before it.
+  const toLo = Math.max(from, to - MAX_ROW_SPAN_MS)
+  for (const o of (db.prepare(`SELECT * FROM observations WHERE event_wall_ms >= @toLo AND event_wall_ms < @to AND last_seen_wall_ms > @to AND ${pre}`).all({ ...args, toLo }) as Obs[]).filter(matches)) {
     db.prepare('UPDATE observations SET event_wall_ms = ?, event_mono_us = ? WHERE id = ?').run(to, o.event_mono_us + (to - o.event_wall_ms) * 1000, o.id)
   }
 }
@@ -92,14 +97,11 @@ export function fenceEdges(db: Database.Database, t: Spec, allocateId: () => num
 export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec): void {
   const { from, to, app, site } = bounds(t)
   const item = db.prepare('INSERT OR IGNORE INTO deletion_work (tombstone_id, kind, ref) VALUES (?, ?, ?)')
-  if (t.from_wall_ms !== null && t.to_wall_ms !== null) {
-    const edges = db
-      .prepare(
-        `SELECT DISTINCT hour_start_wall_ms AS h FROM search_docs WHERE kind = 'activity' AND hour_start_wall_ms >= ? AND hour_start_wall_ms < ?
-           AND ((hour_start_wall_ms < ? AND hour_start_wall_ms + ? > ?) OR (hour_start_wall_ms < ? AND hour_start_wall_ms + ? > ?))`,
-      )
-      .all(from - HOUR_MS, to, from, HOUR_MS, from, to, HOUR_MS, to) as { h: number }[]
-    for (const { h } of edges) item.run(tombstoneId, 'doc_hour', h)
+  // The hours an edge cuts through.
+  const edgeHours = db.prepare(`SELECT DISTINCT hour_start_wall_ms AS h FROM search_docs WHERE kind = 'activity' AND hour_start_wall_ms > ? AND hour_start_wall_ms < ?`)
+  for (const edge of [t.from_wall_ms, t.to_wall_ms]) {
+    if (edge === null) continue
+    for (const { h } of edgeHours.all(edge - HOUR_MS, edge) as { h: number }[]) item.run(tombstoneId, 'doc_hour', h)
   }
   const hours = db.prepare('SELECT id, sources FROM hours WHERE end_wall_ms > ? AND start_wall_ms < ?').all(from, to) as { id: number; sources: string }[]
   for (const h of hours) {
@@ -533,9 +535,10 @@ export class Deleter {
     stop('observations')
     const ivCandidates = db.prepare(`SELECT id, app_id, site, title FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
     r.intervals += this.removeById('intervals', () => ivCandidates.all(args) as { id: number }[])
-    if (bounded) {
-      // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
-      for (let at: number | null = from, rows = 200; at !== null; ) {
+    if (t.to_wall_ms !== null) {
+      // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again; with no start,
+      // only those around its end.
+      for (let at: number | null = bounded ? from : to, rows = 200; at !== null; ) {
         const s: number = at
         const t0 = performance.now()
         at = immediateRetrying(db, () => derived.rederiveStep(s, to, rows))
@@ -547,9 +550,7 @@ export class Deleter {
 
     // Search: entries in hours wholly inside the range (or, across all time, every entry of the app or site) go by
     // query; hours cut by a range edge are rebuilt from the intervals that remain, as planned.
-    const inside = bounded
-      ? `hour_start_wall_ms >= @from AND hour_start_wall_ms + ${HOUR_MS} <= @to AND ${ivMatch}`
-      : ivMatch
+    const inside = `hour_start_wall_ms >= @from AND hour_start_wall_ms + ${HOUR_MS} <= @to AND ${ivMatch}`
     warmSearchIndex(db)
     const docIds = db.prepare(`SELECT id FROM search_docs WHERE kind = 'activity' AND ${inside} LIMIT ${DOCS_PER_STEP}`)
     const delDoc = db.prepare('DELETE FROM search_docs WHERE id = ?')
