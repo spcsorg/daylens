@@ -533,6 +533,37 @@ test('a deletion whose announcements meet a lock held past the busy timeout fini
   }
 })
 
+test('a deletion is announced purged only after it is announced done, however long the done announcement waits', async () => {
+  const errors: string[] = []
+  const r = rig(undefined, { onError: (code) => errors.push(code) })
+  r.store.insertObservation(row(T0, 'com.example.chat', 'order canary'))
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  type Commit = (kind: string, payload: Record<string, unknown>, ...rest: unknown[]) => unknown
+  const bus = (r.storage as unknown as { bus: { commit: Commit } }).bus
+  const commit = bus.commit.bind(bus)
+  // The done announcement meets a busy lock three times; nothing else does.
+  let refused = 0
+  bus.commit = (kind, payload, ...rest) => {
+    if (kind === 'deletion' && payload.state === 'done' && refused < 3) {
+      refused++
+      throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' })
+    }
+    return commit(kind, payload, ...rest)
+  }
+  try {
+    const handle = r.storage.deleteSource('com.example.chat')
+    await handle.done
+    await handle.purged
+    const states = r.q<{ payload: string }>(`SELECT payload FROM change_log WHERE kind = 'deletion' ORDER BY seq`).map((c) => JSON.parse(c.payload).state)
+    assert.deepEqual(states, ['started', 'done', 'purged'])
+    assert.deepEqual(errors, ['deletion_announce_SQLITE_BUSY', 'deletion_announce_SQLITE_BUSY', 'deletion_announce_SQLITE_BUSY'])
+  } finally {
+    await r.storage.deletionsSettled()
+    r.close()
+  }
+})
+
 test('a flush contended by a writer that yields to capture lands as soon as that writer lets go', async () => {
   const dir = tmpDir()
   const store = new Store(dir, { now: () => T0 })

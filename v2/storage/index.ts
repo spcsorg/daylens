@@ -460,13 +460,18 @@ export class Storage {
 
   private async finishDeletion(tombstone: number): Promise<DeletionResult> {
     const result = await this.deletions.run(tombstone, this.now())
-    void this.announceDeletion('done', tombstone)
+    const done = this.announceDeletion('done', tombstone)
+    this.doneAnnouncements.set(tombstone, done)
+    void done.then(() => this.doneAnnouncements.delete(tombstone))
     if (result.purged) this.purges.set(tombstone, this.announcePurged(tombstone))
     return result
   }
 
+  private readonly doneAnnouncements = new Map<number, Promise<void>>()
+
+  // The done announcement may still be retrying against a busy lock; purged never reaches listeners before it.
   private announcePurged(tombstone: number): Promise<void> {
-    return this.announceDeletion('purged', tombstone)
+    return (this.doneAnnouncements.get(tombstone) ?? Promise.resolve()).then(() => this.announceDeletion('purged', tombstone))
   }
 
   /**
