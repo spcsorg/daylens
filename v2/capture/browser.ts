@@ -72,7 +72,7 @@ export interface BrowserPagesOptions {
 
 export class BrowserPages {
   private readonly sink: Sink
-  private readonly privacy: Privacy
+  private privacy: Privacy
   private readonly now: () => number
   private readonly log: (msg: string) => void
   private readonly conns = new Map<number, Conn>()
@@ -89,6 +89,11 @@ export class BrowserPages {
     this.privacy = privacy
     this.now = opts.now ?? Date.now
     this.log = opts.log ?? (() => {})
+  }
+
+  // Exclusions changed while running; the next tab line or front change is judged by them.
+  setPrivacy(privacy: Privacy): void {
+    this.privacy = privacy
   }
 
   connectionCount(): number {

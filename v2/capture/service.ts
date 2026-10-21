@@ -87,7 +87,10 @@ storage.attachCapture({
     normalizer.interrupt(supervisor!.currentPoint())
     supervisor!.requestSnapshot()
   },
-  setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
+  setPrivacy: (privacy) => {
+    normalizer.setPrivacy(privacy)
+    pages.setPrivacy(privacy)
+  },
 })
 function agentStore(): AgentStore {
   const s = new AgentStore(store.database)

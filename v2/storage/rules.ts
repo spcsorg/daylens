@@ -1,6 +1,7 @@
 // What may be stored and derived: pauses, deletions (tombstones), exclusions and retention. One copy of these rules
 // serves capture, import, derivation and the deletion worker, each loading them from the database.
 import type Database from 'better-sqlite3'
+import { addressHost } from '../capture/address.ts'
 import type { ExclusionRule } from '../capture/defaults.ts'
 import { Privacy, type ObservationRow } from '../capture/normalize.ts'
 import { siteOf, type ObsRow } from './derive.ts'
@@ -133,8 +134,10 @@ export class Rules {
     return true
   }
 
-  excluded(row: ObservationRow): boolean {
-    if (row.kind !== 'focus') return false
+  /** A row of an excluded app, or a page on an excluded site (and its subdomains). */
+  excluded(row: ObservationRow & { url?: string | null }): boolean {
+    if (row.kind !== 'focus' && row.kind !== 'page') return false
+    if (row.url && this.privacy.siteExcluded(addressHost(row.url))) return true
     let aumid: string | null = null
     if (row.detail?.includes('"aumid"')) {
       try {
