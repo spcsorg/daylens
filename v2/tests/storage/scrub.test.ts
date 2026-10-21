@@ -7,7 +7,7 @@ import type { ObservationRow } from '../../capture/normalize.ts'
 import { Store } from '../../capture/store.ts'
 import { Deleter } from '../../storage/deletion.ts'
 import { Storage } from '../../storage/index.ts'
-import { ScrubUnavailableError, scrubAll, unallocated } from '../../storage/scrub.ts'
+import { btreePages, ScrubUnavailableError, scrubAll, unallocated } from '../../storage/scrub.ts'
 import { HOUR, rig, T0, tmpDir } from './support.ts'
 
 function random(seed: number): () => number {
@@ -17,6 +17,16 @@ function random(seed: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
+}
+
+// Each page's role as SQLite's own b-tree walk reports it, independent of the scrub's code; a page it does not list
+// is a freelist or pointer-map page.
+function roles(db: Database.Database): Map<number, string> {
+  return new Map((db.prepare('SELECT pageno, pagetype FROM dbstat WHERE aggregate = 0').all() as { pageno: number; pagetype: string }[]).map((r) => [r.pageno, r.pagetype]))
+}
+
+function dump(db: Database.Database): string {
+  return JSON.stringify([db.prepare('SELECT * FROM t ORDER BY id').all(), db.prepare('SELECT * FROM w ORDER BY k').all()])
 }
 
 function pages(db: Database.Database): Map<number, Buffer> {
@@ -57,7 +67,8 @@ test('a scrub zeroes only cell-free space, keeps every page valid, and leaves no
           const id = next++
           const k = key(id)
           keys.set(id, k)
-          insert.run(id, k, text(id, Math.floor(rand() * 900)))
+          // Some values span overflow pages, which the scrub must never touch.
+          insert.run(id, k, text(id, rand() < 0.05 ? 5000 + Math.floor(rand() * 9000) : Math.floor(rand() * 900)))
           insertW.run(k, text(id, Math.floor(rand() * 300)))
           live.add(id)
         } else {
@@ -75,16 +86,25 @@ test('a scrub zeroes only cell-free space, keeps every page valid, and leaves no
       }
     })()
     const before = pages(db)
+    const role = roles(db)
+    const rows = dump(db)
     const usable = (db.pragma('page_size', { simple: true }) as number) - before.get(1)![20]!
     scrubAll(db, 20, (fn) => db.transaction(fn).immediate())
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok', `round ${round}`)
+    assert.equal(dump(db), rows, `round ${round}: a row changed`)
     const after = pages(db)
     assert.equal(after.size, before.size)
     for (const [pgno, page] of before) {
+      const r = role.get(pgno)
+      if (r !== 'internal' && r !== 'leaf') {
+        assert.ok(after.get(pgno)!.equals(page), `round ${round}: page ${pgno} (${r ?? 'free'}) is not a b-tree page and was written`)
+        continue
+      }
       const expected = Buffer.from(page)
       for (const [a, b] of unallocated(page, pgno, usable) ?? []) expected.fill(0, a, b)
       assert.ok(after.get(pgno)!.equals(expected), `round ${round}: page ${pgno} changed outside its free space`)
     }
+    if (round === 9) assert.ok([...role.values()].includes('overflow'), 'overflow pages were present')
     db.pragma('wal_checkpoint(TRUNCATE)')
     const bytes = Buffer.concat([file, `${file}-wal`].filter((f) => existsSync(f)).map((f) => readFileSync(f))).toString('latin1')
     const found = new Set([...bytes.matchAll(/Scrubcanary(\d+)[xk]/g)].map((m) => Number(m[1])))
@@ -93,6 +113,46 @@ test('a scrub zeroes only cell-free space, keeps every page valid, and leaves no
   }
   assert.ok(deleted.size > 1000 && live.size > 1000)
   db.close()
+})
+
+test('a pointer-map page that starts with a b-tree type byte is not a b-tree page, and a file with auto_vacuum is never scrubbed', () => {
+  const file = path.join(tmpDir(), 'autovacuum.sqlite')
+  const db = new Database(file)
+  db.pragma('auto_vacuum = INCREMENTAL')
+  db.pragma('journal_mode = WAL')
+  db.exec('CREATE TABLE a (x TEXT)')
+  const ins = db.prepare('INSERT INTO a VALUES (?)')
+  for (let i = 0; i < 200; i++) ins.run('Ptrcanary '.repeat(50))
+  // With no table left, page 3 is free, and the pointer map on page 2 opens with its type, 2: an index page's byte.
+  db.exec('DROP TABLE a')
+  const before = pages(db)
+  assert.equal(before.get(2)![0], 0x02)
+  assert.equal(roles(db).has(2), false, 'SQLite lists page 2 in no b-tree')
+  assert.equal(btreePages(db)[2], 0)
+  assert.throws(() => scrubAll(db, 20, (fn) => db.transaction(fn).immediate()), (err: Error) => err instanceof ScrubUnavailableError && err.message === 'scrub_auto_vacuum')
+  assert.ok(pages(db).get(2)!.equals(before.get(2)!))
+  assert.equal(db.pragma('integrity_check', { simple: true }), 'ok')
+  db.close()
+})
+
+test('a deletion on a file with auto_vacuum is never reported purged, and storage says why', () => {
+  const dir = tmpDir()
+  const db = new Database(path.join(dir, 'daylens-v2.sqlite'))
+  db.pragma('auto_vacuum = FULL')
+  db.close()
+  const errors: string[] = []
+  const r = rig(dir, { holdDeletions: true, onError: (code) => errors.push(code) })
+  r.storage.start()
+  assert.ok(errors.includes('scrub_auto_vacuum'), errors.join())
+  r.store.insertObservation(row(T0, 'Autovacuum canary'))
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  const { tombstone } = r.storage.deleteSource('com.example.chat')
+  const deleter = new Deleter(r.store.database)
+  assert.equal(deleter.run(tombstone, r.clock.t).observations, 1)
+  assert.throws(() => deleter.purge(tombstone), /scrub_auto_vacuum/)
+  assert.deepEqual(r.q('SELECT state FROM deletions'), [{ state: 'done' }])
+  r.close()
 })
 
 test('a page whose free-space chain is invalid is never written', () => {

@@ -12,7 +12,7 @@ import { Derived, HOUR_MS, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
 import { immediateRetrying } from './tx.ts'
-import { ScrubUnavailableError, scrubAll, scrubAvailable } from './scrub.ts'
+import { ScrubUnavailableError, scrubAll, scrubBlocked } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
 import { dbHostLookup, resolveHost } from '../capture/agents/store.ts'
 import type { Agent } from '../capture/agents/types.ts'
@@ -390,12 +390,13 @@ export class Deleter {
   /**
    * Zeroes free space inside every b-tree page once since the last removal, in slices that each hold the lock for
    * about FTS_STEP_MS and give capture the lock first, so the checkpoint after it leaves no removed text on disk.
-   * Throws ScrubUnavailableError on a build without sqlite_dbpage: nothing is then reported purged.
+   * Throws ScrubUnavailableError when the scrub cannot run (scrubBlocked): nothing is then reported purged.
    */
   scrubIfPending(): boolean {
     const markers = this.db.prepare(SCRUB_MARKERS).all() as { key: string; value: string }[]
     if (markers.length === 0) return true
-    if (!scrubAvailable(this.db)) throw new ScrubUnavailableError()
+    const blocked = scrubBlocked(this.db)
+    if (blocked !== null) throw new ScrubUnavailableError(blocked)
     scrubAll(this.db, FTS_STEP_MS, (fn) => immediateRetrying(this.db, fn))
     immediateRetrying(this.db, () => {
       const clear = this.db.prepare('DELETE FROM meta WHERE key = ? AND value = ?')

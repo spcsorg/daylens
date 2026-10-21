@@ -5,19 +5,41 @@
 import type Database from 'better-sqlite3'
 
 export class ScrubUnavailableError extends Error {
-  constructor() {
-    super('scrub_unavailable')
+  constructor(code: ScrubBlock = 'scrub_unavailable') {
+    super(code)
   }
 }
 
-/** Whether this connection's SQLite was built with sqlite_dbpage (tools/buildSqlite.ts). */
-export function scrubAvailable(db: Database.Database): boolean {
+export type ScrubBlock = 'scrub_unavailable' | 'scrub_auto_vacuum' | 'scrub_file_too_large'
+
+// A page's role is taken from the b-tree graph when the scrub starts. A page that later stops being a b-tree page
+// becomes a freelist page (zeroed by secure_delete, or a trunk) or an overflow page, which start with a page number;
+// below 2^24 pages that number's first byte is 0, never a b-tree type, so the type byte rules such a page out.
+const MAX_PAGES = 2 ** 24
+
+/**
+ * Why this connection cannot scrub, or null: a SQLite without sqlite_dbpage (tools/buildSqlite.ts); a file with
+ * auto_vacuum, whose pointer-map pages can start with a b-tree type byte; or one too large for the rule above.
+ */
+export function scrubBlocked(db: Database.Database): ScrubBlock | null {
   try {
     db.prepare('SELECT 1 FROM sqlite_dbpage WHERE pgno = 1').get()
-    return true
   } catch {
-    return false
+    return 'scrub_unavailable'
   }
+  if ((db.pragma('auto_vacuum', { simple: true }) as number) !== 0) return 'scrub_auto_vacuum'
+  if ((db.pragma('page_count', { simple: true }) as number) >= MAX_PAGES) return 'scrub_file_too_large'
+  return null
+}
+
+/** Outside any write transaction: which pages the file's b-trees reach (table and index pages, not overflow). */
+export function btreePages(db: Database.Database): Uint8Array {
+  const count = db.pragma('page_count', { simple: true }) as number
+  const out = new Uint8Array(count + 1)
+  for (const [pgno] of db.prepare(`SELECT pageno FROM dbstat WHERE aggregate = 0 AND pagetype IN ('internal', 'leaf')`).raw().iterate() as Iterable<[number]>) {
+    if (pgno <= count) out[pgno] = 1
+  }
+  return out
 }
 
 const BTREE_PAGE_TYPES = new Set([0x02, 0x05, 0x0a, 0x0d])
@@ -61,15 +83,16 @@ function usableSize(db: Database.Database, read: Database.Statement): number {
 }
 
 /**
- * Outside any write transaction: from page `from` on, the b-tree pages whose unallocated space is not all zeros, up
- * to `max` of them. Returns them with the page to continue from (null when the scan reached the last page).
+ * Outside any write transaction: from page `from` on, the b-tree pages (`btree`, from btreePages) whose unallocated
+ * space is not all zeros, up to `max` of them. Returns them with the page to continue from (null at the last page).
  */
-export function scanPages(db: Database.Database, from: number, max: number): { pages: number[]; next: number | null } {
+export function scanPages(db: Database.Database, from: number, max: number, btree: Uint8Array): { pages: number[]; next: number | null } {
   const read = db.prepare('SELECT data FROM sqlite_dbpage WHERE pgno = ?').pluck()
   const usable = usableSize(db, read)
-  const count = db.pragma('page_count', { simple: true }) as number
+  const count = Math.min(db.pragma('page_count', { simple: true }) as number, btree.length - 1)
   const pages: number[] = []
   for (let pgno = from; pgno <= count; pgno++) {
+    if (btree[pgno] !== 1) continue
     const page = read.get(pgno) as Buffer
     if (hasText(page, unallocated(page, pgno, usable))) pages.push(pgno)
     if (pages.length >= max && pgno < count) return { pages, next: pgno + 1 }
@@ -116,6 +139,9 @@ export function zeroPages(db: Database.Database, pages: readonly number[], budge
  * transaction's duration and page count (benchmarks and tests).
  */
 export function scrubAll(db: Database.Database, stepMs: number, transaction: <T>(fn: () => T) => T, onTransaction: (ms: number, pages: number) => void = () => {}): void {
+  const blocked = scrubBlocked(db)
+  if (blocked !== null) throw new ScrubUnavailableError(blocked)
+  const btree = btreePages(db)
   // An automatic checkpoint would run inside the commit call and be timed as if it held the lock; a passive one
   // between batches keeps the log as short without taking the writer lock.
   const autocheckpoint = db.pragma('wal_autocheckpoint', { simple: true }) as number
@@ -123,7 +149,7 @@ export function scrubAll(db: Database.Database, stepMs: number, transaction: <T>
   try {
     let batch = 200
     for (let from: number | null = 1; from !== null; ) {
-      const scan = scanPages(db, from, batch)
+      const scan = scanPages(db, from, batch, btree)
       for (let i = 0; i < scan.pages.length; ) {
         const todo = scan.pages.slice(i)
         const t = performance.now()
