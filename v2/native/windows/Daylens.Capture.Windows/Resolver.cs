@@ -331,7 +331,9 @@ internal sealed unsafe class Resolver
     {
         try
         {
-            if (!_browsersLoaded || (_registrationChanges?.Invoke() ?? true))
+            var changed = _registrationChanges?.Invoke() ?? true;
+            // An incomplete read withholds titles until a later read completes, even with no registration change.
+            if (!_browsersLoaded || !_browserRegistryComplete || changed)
             {
                 LoadBrowsers();
                 if (_registrationChanges?.Invoke() == true) { _browsersLoaded = false; return true; }

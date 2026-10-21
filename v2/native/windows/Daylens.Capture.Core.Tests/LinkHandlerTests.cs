@@ -180,4 +180,34 @@ public class LinkHandlerTests
         try { Assert.True(Registered(ResolverFor())); }
         finally { Registry.LocalMachine.FailReads = false; }
     }
+
+    [Fact]
+    public void TransientRegistryFailureWithholdsTitlesOnlyWhileReadsFail()
+    {
+        var resolver = ResolverFor();
+        var version = RegistryKey.Version;
+        Registry.LocalMachine.FailReads = true;
+        try
+        {
+            Assert.True(Registered(resolver));
+            Assert.True(Registered(resolver));
+        }
+        finally { Registry.LocalMachine.FailReads = false; }
+        Assert.Equal(version, RegistryKey.Version);
+        Assert.False(Registered(resolver));
+        Assert.False(Registered(resolver));
+        Registry.LocalMachine.FailReads = true;
+        try
+        {
+            Registry.CurrentUser.CreateSubKey(@"Software\DaylensTransientChange").Dispose();
+            Assert.True(Registered(resolver));
+            Assert.True(Registered(resolver));
+        }
+        finally
+        {
+            Registry.LocalMachine.FailReads = false;
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\DaylensTransientChange", false);
+        }
+        Assert.False(Registered(resolver));
+    }
 }
