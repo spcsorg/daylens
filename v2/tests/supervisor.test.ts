@@ -124,6 +124,22 @@ test('a heartbeat that ends a stall gap does not carry the row across it; the wi
   await h.finish()
 })
 
+test('after a helper crash, the new helper\'s snapshot and heartbeats never reopen the row from before it', async () => {
+  const h = harness({ FAKE_MODE: 'crash', FAKE_AFTER_MS: '500', FAKE_FOCUS_MS: '3600000' }, { stableMs: 100 })
+  h.sup.start()
+  await waitFor(() => h.sup.stats.restarts >= 1 && h.gaps().some((g) => g.reason === 'helper_crashed' && g.end_wall_ms !== null))
+  const restarts = h.sup.stats.restarts
+  const beats = h.sup.stats.heartbeats
+  await waitFor(() => h.sup.stats.heartbeats >= beats + 3 && h.sup.stats.restarts === restarts)
+  const crash = h.gaps().find((g) => g.reason === 'helper_crashed')!
+  const rows = h.store.query<{ event_wall_ms: number; last_seen_wall_ms: number }>(`SELECT event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
+  assert.ok(rows.length >= 2, `a row before the crash and one from the new helper's snapshot (${rows.length} rows)`)
+  assert.ok(rows[0]!.last_seen_wall_ms <= crash.start_wall_ms, 'the row before the crash ends at it')
+  assert.ok(rows[1]!.event_wall_ms >= crash.end_wall_ms!, 'the new helper\'s window is a new row')
+  assert.ok(rows[1]!.last_seen_wall_ms > rows[1]!.event_wall_ms, 'heartbeats carry the new row')
+  await h.finish()
+})
+
 test('when the display comes back on, the helper is asked for a fresh read of the window in front', async () => {
   const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
   const h = harness({ FAKE_MODE: 'display_cycle', FAKE_AFTER_MS: '200', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })

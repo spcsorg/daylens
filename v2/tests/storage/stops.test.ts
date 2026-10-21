@@ -243,6 +243,51 @@ test('a heartbeat never carries a row through a pause, and the row from before i
   r.close()
 })
 
+test('a heartbeat never carries a row through a lock when its focus line was stamped before the lock but arrived after it', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
+  beats(r, T0, T0 + 5 * MIN)
+  r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 5 * MIN + 100))
+  r.feed(focus(editor, 'todo.md - Editor', T0 + 5 * MIN + 50, 'title_changed'))
+  beats(r, T0 + 5 * MIN, T0 + 30 * MIN)
+  r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 30 * MIN + 1))
+  assert.deepEqual(editorRows(r), [
+    [0, 5 * MIN],
+    [5 * MIN + 50, 5 * MIN + 50],
+  ])
+  r.close()
+})
+
+test('a heartbeat that reaches storage after a pause began, before capture was interrupted, is refused', () => {
+  resetSeq()
+  const r = rig()
+  // Not attached to storage, so the pause cannot interrupt it: only the store's own refusal stands.
+  const n = new Normalizer(r.store, new Privacy(r.store.exclusions()))
+  n.handle(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
+  assert.equal(n.sighted(T0 + MIN), false)
+  r.clock.t = T0 + 2 * MIN
+  r.storage.pause('until_resumed')
+  assert.equal(n.sighted(T0 + 3 * MIN), true, 'refused, so the window is read again')
+  assert.deepEqual(editorRows(r), [[0, MIN]])
+  r.close()
+})
+
+test('a heartbeat never carries a row past the moment its app is excluded', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
+  beats(r, T0, T0 + 5 * MIN)
+  r.clock.t = T0 + 5 * MIN + 1
+  r.storage.addExclusion({ match: 'app_id', value: 'com.example.editor', label: 'Editor' })
+  beats(r, T0 + 5 * MIN, T0 + 15 * MIN)
+  r.feed(focus(editor, 'notes.md - Editor', T0 + 15 * MIN + 10, 'snapshot'))
+  beats(r, T0 + 15 * MIN, T0 + 16 * MIN)
+  assert.deepEqual(editorRows(r), [[0, 5 * MIN]])
+  assert.deepEqual(r.q(`SELECT reason, start_wall_ms - ? AS s FROM capture_gaps WHERE reason = 'excluded'`, T0), [{ reason: 'excluded', s: 15 * MIN + 10 }])
+  r.close()
+})
+
 test('a heartbeat storage refuses ends the row and asks for a fresh read, once', () => {
   resetSeq()
   class Refusing extends MemorySink {
