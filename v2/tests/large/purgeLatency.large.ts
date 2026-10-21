@@ -103,3 +103,11 @@ test('capture writes land within the flush budget while a large file is purged, 
   assert.equal(r.state, 'purged')
   assert.deepEqual(r.canaryLeft, [])
 })
+
+test('capture writes land within the flush budget while a large deletion removes rows', { timeout: 30 * 60_000 }, async (t) => {
+  const r = await once()
+  const removal = r.flushes.filter((f) => f.phase === 'pending').map((f) => f.ms)
+  t.diagnostic(JSON.stringify({ size_mb: Math.round(r.sizeMb), observations_deleted: r.observations, done_s: Math.round(r.doneMs / 100) / 10, removal: summary(removal) }))
+  assert.ok(removal.length > 100, 'capture wrote while rows were removed')
+  assert.ok(Math.max(...removal) <= FLUSH_BUDGET_MS, `slowest write during the removal took ${Math.max(...removal).toFixed(1)} ms`)
+})

@@ -246,19 +246,15 @@ export class Deleter {
   }
 
   /**
-   * Runs `step(limit)` in transactions until it removes nothing, sizing `limit` so each transaction takes about
-   * FTS_STEP_MS: capture's flush never waits long behind one.
-   */
-  /**
    * Agent session records in [from, to): events and turns that began inside go, and anything that crosses the start is
    * cut there. A session keeps only the span of its remaining turns, and goes if none remain and it began inside.
    */
   private deleteAgentRange(from: number, to: number): number {
     const db = this.db
-    const events = db.prepare('DELETE FROM agent_events WHERE id IN (SELECT id FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to LIMIT @limit)')
-    const turns = db.prepare('DELETE FROM agent_turns WHERE id IN (SELECT id FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to LIMIT @limit)')
-    let n = this.adaptive((limit) => events.run({ from, to, limit }).changes)
-    n += this.adaptive((limit) => turns.run({ from, to, limit }).changes)
+    const events = db.prepare(`SELECT id, session_id, detail FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
+    const turns = db.prepare(`SELECT id, session_id, project_dir, branch FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
+    let n = this.removeById('agent_events', () => events.all({ from, to }) as { id: number }[])
+    n += this.removeById('agent_turns', () => turns.all({ from, to }) as { id: number }[])
     const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
     immediateRetrying(db, () => {
       db.prepare('UPDATE agent_events SET end_wall_ms = @from WHERE wall_ms < @from AND end_wall_ms > @from').run({ from })
@@ -280,17 +276,25 @@ export class Deleter {
     return n
   }
 
-  private adaptive(step: (limit: number) => number): number {
+  /**
+   * Removes rows by id until `candidates` names none. Candidates are read outside any write transaction, which also
+   * brings their pages into the cache, and each transaction removes them one at a time until FTS_STEP_MS has passed:
+   * a batch sized by how long the last one took can still meet pages the disk has to supply, with the lock held.
+   */
+  private removeById(table: string, candidates: () => { id: number }[]): number {
+    const del = this.db.prepare(`DELETE FROM ${table} WHERE id = ?`)
     let total = 0
-    for (let limit = 200; ; ) {
-      const t = performance.now()
-      const n = immediateRetrying(this.db, () => step(limit))
-      const ms = performance.now() - t
-      total += n
-      if (n === 0) return total
-      if (ms > FTS_STEP_MS) limit = Math.max(10, Math.floor(limit / 2))
-      else if (ms < FTS_STEP_MS / 2) limit = Math.min(5000, Math.ceil(limit * 1.5))
+    for (let rows = candidates(); rows.length > 0; rows = candidates()) total += this.removeRows(del, rows)
+    return total
+  }
+
+  private removeRows(del: Database.Statement, rows: readonly { id: number }[]): number {
+    let total = 0
+    for (let i = 0; i < rows.length; ) {
+      const batch = rows.slice(i)
+      i += immediateRetrying(this.db, () => timeBoxed(batch, ({ id }) => (total += del.run(id).changes)))
     }
+    return total
   }
 
   private withSecureFts<T>(fn: () => T): T {
@@ -385,24 +389,22 @@ export class Deleter {
       // Before the browser step there are no page addresses, so no observation can belong to a site.
       const withUrl = hasUrl(db)
       const page = withUrl
-        ? db.prepare(`SELECT id, app_id, url FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to AND id > @after ORDER BY id LIMIT 2000`)
+        ? db.prepare(`SELECT id, app_id, url, title FROM observations WHERE url IS NOT NULL AND event_wall_ms >= @from AND event_wall_ms < @to AND id > @after ORDER BY id LIMIT 2000`)
         : null
       const del = db.prepare('DELETE FROM observations WHERE id = ?')
       for (let after = 0; page !== null; ) {
         const rows = page.all({ ...args, after }) as Obs[]
         if (rows.length === 0) break
-        immediateRetrying(db, () => {
-          for (const o of rows.filter(matches)) r.observations += del.run(o.id).changes
-        })
+        r.observations += this.removeRows(del, rows.filter(matches))
         after = rows[rows.length - 1]!.id
       }
     } else {
-      const step = db.prepare(`DELETE FROM observations WHERE id IN (SELECT id FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre} LIMIT @limit)`)
-      r.observations += this.adaptive((limit) => step.run({ ...args, limit }).changes)
+      const candidates = db.prepare(`SELECT id, app_id, title FROM observations WHERE event_wall_ms >= @from AND event_wall_ms < @to AND ${pre} LIMIT ${ROWS_PER_STEP}`)
+      r.observations += this.removeById('observations', () => candidates.all(args) as { id: number }[])
     }
     stop('observations')
-    const ivStep = db.prepare(`DELETE FROM intervals WHERE id IN (SELECT id FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT @limit)`)
-    r.intervals += this.adaptive((limit) => ivStep.run({ ...args, limit }).changes)
+    const ivCandidates = db.prepare(`SELECT id, app_id, site, title FROM intervals WHERE ${ivMatch} AND start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
+    r.intervals += this.removeById('intervals', () => ivCandidates.all(args) as { id: number }[])
     if (bounded) {
       // Rows around the range (trimmed, split, or whose next row is gone) get their intervals again.
       for (let at: number | null = from, rows = 200; at !== null; ) {
