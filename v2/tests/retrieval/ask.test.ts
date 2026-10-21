@@ -25,8 +25,8 @@ function fakeModel(reply: (req: AskRequest) => unknown, seen: AskRequest[] = [],
   }
 }
 
-function setup() {
-  const r = rig()
+function setup(opts: { holdDeletions?: boolean } = {}) {
+  const r = rig(undefined, opts)
   day(r)
   r.storage.writeHour({ start_wall_ms: T0, tz: 'Africa/Kigali', status: 'written', title: 'Budget review', summary: 'Went through Q4 numbers.', sources: [{ app_id: 'com.example.editor' }] }, r.storage.hourBasis(T0))
   const reader = Reader.open(path.join(r.dir, DB_FILE))
@@ -78,6 +78,48 @@ test('an answer keeps only statements that cite what the AI was given, and each 
   const record = JSON.parse(seen[0]!.prompt) as { hours: { title?: string }[] }
   assert.equal(record.hours[0]!.title, 'Budget review')
   s.close()
+})
+
+test('what is deleted while the AI is answering is taken out of the answer, and the answer says so', async () => {
+  for (const hold of [true, false]) {
+    const s = setup({ holdDeletions: hold })
+    type Rec = { hours: { id: string }[]; sources: { id: string; address?: string; file?: string }[] }
+    const model = (del: () => { done: Promise<unknown> }) => ({
+      name: 'Fake',
+      provider: 'fake',
+      run: async (req: AskRequest): Promise<AskReply> => {
+        const rec = JSON.parse(req.prompt) as Rec
+        s.r.clock.t = NEXT_DAY
+        const handle = del()
+        if (!hold) await handle.done
+        const page = rec.sources.find((x) => x.address)
+        const file = rec.sources.find((x) => x.file === 'q4-budget.xlsx')!
+        return {
+          output: {
+            answerable: true,
+            statements: [
+              ...(page ? [{ text: 'You read the budget review page.', sources: [page.id] }] : []),
+              { text: 'You worked in the budget sheet.', sources: [file.id] },
+              { text: 'The hour went on the budget.', sources: [rec.hours[0]!.id] },
+            ],
+          },
+          model: 'fake-1', input_tokens: 1, output_tokens: 1, cost_micro_usd: 0,
+        }
+      },
+    })
+    const q = 'what did I do on the budget yesterday?'
+    const res = await ask(q, { reader: s.reader, model: model(() => s.r.storage.deleteSite('docs.example.com')), log: s.r.storage, now: () => NEXT_DAY }, LIMITS)
+    assert.equal(res.kind, 'answer', `hold=${hold}`)
+    if (res.kind !== 'answer') return
+    assert.deepEqual(res.statements.map((x) => x.text), ['You worked in the budget sheet.'], `hold=${hold}: the page and the hour it was in are gone`)
+    assert.equal(res.withdrawn, 2)
+    assert.ok(!JSON.stringify(res).includes('docs.example.com'), `hold=${hold}: nothing of the deleted site is returned, search results included`)
+
+    const all = await ask(q, { reader: s.reader, model: model(() => s.r.storage.deleteRange(T0, T0 + HOUR)), log: s.r.storage, now: () => NEXT_DAY }, LIMITS)
+    assert.deepEqual([all.kind, all.kind === 'withdrawn' && all.withdrawn], ['withdrawn', 2], `hold=${hold}`)
+    assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [] })
+    s.close()
+  }
 })
 
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {

@@ -106,6 +106,22 @@ export function checkSchema(db: Database.Database): void {
   if (missing.length > 0) throw new UnknownSchemaError(`storage has not finished setting up this database (missing ${missing.join(', ')})`)
 }
 
+/** What was read over [from, to): the apps and sites it showed. */
+export interface ReadSpan {
+  from: number
+  to: number
+  apps: readonly (string | null | undefined)[]
+  sites: readonly (string | null | undefined)[]
+}
+
+/** Whether a deletion takes out any of what was read: the whole span for a range, else the app or the site in it. */
+export function deletionCovers(t: Tombstone, r: ReadSpan): boolean {
+  if (!(r.to > (t.from_wall_ms ?? Number.NEGATIVE_INFINITY) && r.from < (t.to_wall_ms ?? Number.POSITIVE_INFINITY))) return false
+  if (t.kind === 'range') return true
+  if (t.kind === 'source') return r.apps.some((a) => a?.toLowerCase() === t.app_id)
+  return r.sites.some((s) => matchesSite(s?.toLowerCase().replace(/^www\./, '') ?? null, t.site!))
+}
+
 /** What remains of [s, e) once every pending deletion that covers the row has taken its span out. */
 function fenced(i: IntervalRow, pending: readonly Tombstone[]): [number, number][] {
   let parts: [number, number][] = [[i.start_wall_ms, i.end_wall_ms]]
@@ -159,6 +175,16 @@ export class Reader {
       sum('SELECT coalesce(sum(length(sz)), 0) FROM search_docsize') +
       sum(`SELECT coalesce(sum(length(title) + length(url) + length(files) + length(hour_text)), 0) FROM search_docs`)
     )
+  }
+
+  /** The newest deletion so far. Deletion ids only grow, so whatever was read after this can be checked against later ones. */
+  deletionMark(): number {
+    return (this.db.prepare('SELECT coalesce(max(id), 0) FROM deletions').pluck().get() as number)
+  }
+
+  /** Every deletion begun after the mark, pending or finished. */
+  deletionsSince(mark: number): Tombstone[] {
+    return this.db.prepare(`SELECT id, kind, from_wall_ms, to_wall_ms, lower(app_id) AS app_id, lower(site) AS site, state FROM deletions WHERE id > ? ORDER BY id`).all(mark) as Tombstone[]
   }
 
   /** The hour as every screen shows it (corrections win, pending deletions already applied), or null. */

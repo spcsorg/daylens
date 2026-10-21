@@ -1,11 +1,11 @@
 // Ask: answers about any day from the record, through the AI the person chose. The model has no tools; it gets the
 // hours and sources code selected, as data, and returns statements that each cite them. Code checks every citation
 // and drops a statement that cites nothing or anything it was not given. Answers are returned, never stored.
+import { HOUR_MS } from '../storage/derive.ts'
 import type { HourSource } from '../storage/hours.ts'
 import type { AssistantRead, UsageEntry } from '../storage/index.ts'
-import type { HourView, Reader } from './reader.ts'
+import { deletionCovers, type HourView, type ReadSpan, type Reader } from './reader.ts'
 import { search, type FoundItem, type OpenAction, type SearchResults } from './search.ts'
-
 
 /** How much of the record one question may send. Product decisions with no defaults: the caller states each. */
 export interface AskLimits {
@@ -50,9 +50,12 @@ export type Citation =
   | { kind: 'page' | 'file' | 'window'; title: string | null; url: string | null; file: string | null; app_name: string | null; open: OpenAction }
 
 export type AskResult =
-  | { kind: 'answer'; statements: { text: string; cites: Citation[] }[]; dropped: number; results: SearchResults }
+  // withdrawn: statements left out because what they cite was deleted while the AI was answering.
+  | { kind: 'answer'; statements: { text: string; cites: Citation[] }[]; dropped: number; withdrawn: number; results: SearchResults }
   // The record does not answer the question; the search results are still shown.
   | { kind: 'no_answer'; missing: string | null; results: SearchResults }
+  // Every statement cited something deleted while the AI was answering, so none is shown.
+  | { kind: 'withdrawn'; withdrawn: number; results: SearchResults }
   | { kind: 'search_only'; results: SearchResults }
 
 export class AskError extends Error {
@@ -171,7 +174,10 @@ interface SentSource {
   file: string | null
   ms: number | null
   last_wall_ms: number
+  // The sent hours it was seen in.
   hour_starts: number[]
+  // Every hour it was seen in, sent or not.
+  seen_hours: number[]
 }
 
 function siteOf(url: string | null): string | null {
@@ -192,10 +198,12 @@ function checkLimits(l: AskLimits): void {
 export async function ask(question: string, deps: { reader: Reader; model: AskModel | null; log: AskLog; now?: () => number }, limits: AskLimits): Promise<AskResult> {
   checkLimits(limits)
   const now = (deps.now ?? Date.now)()
+  const mark = deps.reader.deletionMark()
   const days = daysIn(question, now)
   const words = searchWords(question)
   const range = days.length > 0 ? { fromWallMs: days[0]![0], toWallMs: days.at(-1)![1] } : {}
-  const results = words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...range }) : { pages: [], files: [], windows: [], hours: [] }
+  const find = () => (words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...range }) : { pages: [], files: [], windows: [], hours: [] })
+  let results = find()
   if (!deps.model) return { kind: 'search_only', results }
 
   // Hours: those of the days asked about, else those the search results were seen in. Hours where a result was seen
@@ -228,7 +236,8 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       if (!sent.has(key)) notSent.add(key)
       continue
     }
-    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: i.seen_in.map((s) => s.hour_start_wall_ms).filter((s) => hourStarts.has(s)) })
+    const seen = i.seen_in.map((s) => s.hour_start_wall_ms)
+    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), seen_hours: seen })
   }
   const own = hours.flatMap((h) => h.sources.map((s) => ({ h, s }))).sort((a, b) => b.s.ms - a.s.ms)
   for (const { h, s } of own) {
@@ -236,6 +245,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     const prev = sent.get(key)
     if (prev) {
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
+      if (!prev.seen_hours.includes(h.start_wall_ms)) prev.seen_hours.push(h.start_wall_ms)
       prev.ms = (prev.ms ?? 0) + s.ms
       continue
     }
@@ -243,7 +253,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       notSent.add(key)
       continue
     }
-    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms] })
+    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], seen_hours: [h.start_wall_ms] })
   }
   const sources = [...sent.values()]
   if (hours.length === 0 && sources.length === 0) return { kind: 'no_answer', missing: null, results }
@@ -302,6 +312,26 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
 
   const out = reply.output as { answerable?: unknown; statements?: unknown; missing?: unknown } | null
   if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`)
+
+  // A deletion begun since the record was read takes out of the answer everything it covers, though the AI saw it.
+  const later = deps.reader.deletionsSince(mark)
+  const gone = new Set<string>()
+  if (later.length > 0) {
+    results = find()
+    const covered = (spans: ReadSpan[]) => spans.some((span) => later.some((t) => deletionCovers(t, span)))
+    hours.forEach((h, i) => {
+      const span = {
+        from: h.start_wall_ms,
+        to: h.end_wall_ms,
+        apps: [...h.apps.map((a) => a.app_id), ...(h.hour?.sources ?? []).map((s) => s.app_id)],
+        sites: [...h.sources.map((s) => siteOf(s.url)), ...(h.hour?.sources ?? []).map((s) => s.site)],
+      }
+      if (covered([span])) gone.add(`h${i + 1}`)
+    })
+    sources.forEach((s, i) => {
+      if (covered(s.seen_hours.map((at) => ({ from: at, to: at + HOUR_MS, apps: [s.app_id], sites: [siteOf(s.url)] })))) gone.add(`s${i + 1}`)
+    })
+  }
   const byId = new Map<string, Citation>()
   hours.forEach((h, i) =>
     byId.set(`h${i + 1}`, { kind: 'hour', start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, hour_id: h.hour?.id ?? null, title: h.hour?.title ?? null, open: { kind: 'hour', hour_start_wall_ms: h.start_wall_ms, hour_id: h.hour?.id ?? null } }),
@@ -314,6 +344,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
   )
   const statements: { text: string; cites: Citation[] }[] = []
   let dropped = 0
+  let withdrawn = 0
   for (const st of out.statements as unknown[]) {
     const s = st as { text?: unknown; sources?: unknown }
     const ids = Array.isArray(s.sources) ? s.sources : []
@@ -322,8 +353,15 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       dropped++
       continue
     }
+    if ((ids as string[]).some((id) => gone.has(id))) {
+      withdrawn++
+      continue
+    }
     statements.push({ text: s.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) })
   }
-  if (!out.answerable || statements.length === 0) return { kind: 'no_answer', missing: typeof out.missing === 'string' && out.missing.trim() ? out.missing : null, results }
-  return { kind: 'answer', statements, dropped, results }
+  if (statements.length === 0 && withdrawn > 0) return { kind: 'withdrawn', withdrawn, results }
+  // What the AI says the record lacks can name what was deleted.
+  const missing = gone.size === 0 && typeof out.missing === 'string' && out.missing.trim() ? out.missing : null
+  if (!out.answerable || statements.length === 0) return { kind: 'no_answer', missing, results }
+  return { kind: 'answer', statements, dropped, withdrawn, results }
 }
