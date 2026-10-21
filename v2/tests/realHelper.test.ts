@@ -193,3 +193,26 @@ test('with the real helper, a window kept in front stays recorded past its focus
   assert.ok(rows.length > 0)
   assert.ok(covered >= 3000, `focus rows cover ${covered} ms of a 6 s run (${rows.length} rows)`)
 })
+
+test('the real helper is responsible for itself, so window-title access is granted to it and not to node', { skip }, async () => {
+  const proc = spawn(HELPER, ['--heartbeat-s', '1'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  let out = ''
+  let err = ''
+  proc.stdout!.setEncoding('utf8').on('data', (c: string) => (out += c))
+  proc.stderr!.setEncoding('utf8').on('data', (c: string) => (err += c))
+  try {
+    await waitFor(() => out.includes('"kind":"hello"'))
+    const hello = parseLine(out.split('\n')[0]!)
+    assert.ok(hello.ok && hello.line.kind === 'hello')
+    assert.equal(hello.line.obs.pid, proc.pid, 'the helper re-executes in place: node still holds its pid and pipes')
+    const responsible = Object.fromEntries(
+      execFileSync(HELPER, ['--responsible-pid', String(proc.pid), String(process.pid)], { timeout: 10_000 }).toString().trim().split('\n').map((l) => l.split('\t').reverse()),
+    )
+    assert.equal(responsible[String(proc.pid)], String(proc.pid))
+    assert.notEqual(responsible[String(process.pid)], String(proc.pid))
+    assert.doesNotMatch(err, /responsibility=/)
+  } finally {
+    proc.stdin!.write('{"op":"shutdown"}\n')
+    await new Promise((r) => proc.once('exit', r))
+  }
+})

@@ -12,6 +12,7 @@ BrowserHost.runIfLaunchedByBrowser()
 TcpPeer.runIfAsked()
 SecretTool.runIfAsked()
 runHostOfIfAsked()
+runResponsiblePidIfAsked()
 
 let helperVersion = "2.0.0-dev"
 
@@ -43,6 +44,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--classify") {
   for path in CommandLine.arguments[(i + 1)...] { print("\(engines.engine(bundleURL: URL(fileURLWithPath: path), process: nil).rawValue)\t\(path)") }
   exit(0)
 }
+
+takeResponsibility()
 
 let boot = bootIdentity()
 let emitter = Emitter(run: UUID().uuidString, boot: boot.id, platform: "macos", write: writeStdout)

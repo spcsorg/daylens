@@ -14,7 +14,7 @@ node capture/service.ts --helper native/macos/.build/release/daylens-capture-mac
 
 `npm run build:sqlite` rebuilds better-sqlite3 so that deletion can zero deleted text left inside database pages. Without it, the engine still records, logs `storage error code=scrub_unavailable` at start, and never reports a deletion as purged. Run it again after every `npm ci` or `npm install`.
 
-Stop the engine with Ctrl+C. It writes to `~/Library/Application Support/Daylens V2 Dev`, or to `--data-dir <dir>` if you pass one.
+Window titles stay empty until the helper has Accessibility access; see step 4 below. Stop the engine with Ctrl+C. It writes to `~/Library/Application Support/Daylens V2 Dev`, or to `--data-dir <dir>` if you pass one.
 
 ## Install it as a login item
 
@@ -33,7 +33,11 @@ Stop the engine with Ctrl+C. It writes to `~/Library/Application Support/Daylens
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/app.daylens.engine.plist
    ```
 
-4. Give it window-title access. The helper checks for Accessibility access but does not ask for it, so window titles stay empty until you allow it. Open System Settings › Privacy & Security › Accessibility and turn on the program macOS lists for the engine. Under launchd that is expected to be `node` from the plist, which gives every script run by that `node` the same access. If no entry appears, add that `node` with the + button. Then restart the engine (below).
+4. Give the helper window-title access. The access belongs to the capture helper itself, `native/macos/.build/release/daylens-capture-macos`, not to `node` or the terminal you start the engine from: at start the helper re-executes itself in place with macOS's responsibility for it disclaimed, so macOS checks the helper's own permission. The helper checks for Accessibility access but does not ask for it, so window titles stay empty until you allow it. Open System Settings › Privacy & Security › Accessibility, click +, press Cmd-Shift-G, paste the helper's full path, add it and turn it on. Then restart the engine (below).
+
+   `swift build` signs the helper ad hoc, which identifies only that build. If titles stay empty after you rebuild the helper, remove its entry with − and add it again. To keep one grant across rebuilds, sign each build with a signing identity of your own: `codesign -f -s "<identity>" native/macos/.build/release/daylens-capture-macos` (`security find-identity -v -p codesigning` lists them).
+
+   If the log shows `helper responsibility=…`, the helper could not take the permission itself, and macOS checks the program that started the engine instead: `node` from the plist under launchd.
 
 ## Day to day
 

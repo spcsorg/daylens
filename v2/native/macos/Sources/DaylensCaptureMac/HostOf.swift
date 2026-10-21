@@ -4,13 +4,6 @@ import AppKit
 import CaptureCore
 import Foundation
 
-private typealias ResponsibleFn = @convention(c) (pid_t) -> pid_t
-
-private let responsibleFn: ResponsibleFn? = {
-  guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else { return nil }
-  return unsafeBitCast(sym, to: ResponsibleFn.self)
-}()
-
 private func parentPid(_ pid: Int32) -> Int32? {
   var info = kinfo_proc()
   var size = MemoryLayout<kinfo_proc>.stride
