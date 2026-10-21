@@ -416,6 +416,8 @@ export class AgentReader {
     if (root.available && !root.available()) return
     const info = classifyFile(root, file)
     if (!info) return
+    // Nothing of a deleted session is read again, nor its log's position kept.
+    if (this.store.isDeletedSession(root.agent, info.session)) return
     let st
     try {
       st = await stat(file)

@@ -6,7 +6,7 @@ import { backfill } from '../../capture/agents/backfill.ts'
 import { ClaudeParser } from '../../capture/agents/claude.ts'
 import { AgentReader, homeRoots } from '../../capture/agents/reader.ts'
 import { AgentStore } from '../../capture/agents/store.ts'
-import type { AgentRecord } from '../../capture/agents/types.ts'
+import { emptyCounts, type AgentRecord } from '../../capture/agents/types.ts'
 import { rig, MIN, T0 } from '../storage/support.ts'
 import { claude, claudeCtx, of, run, tmp } from './fixtures.ts'
 
@@ -18,6 +18,7 @@ function setup() {
   const agents = new AgentStore(r.store.database, () => r.clock.t)
   agents.withheld = () => r.storage.withheld()
   agents.hostAllowed = (host, at) => r.storage.agentHostAllowed(host, at)
+  agents.hostExcluded = (host) => r.storage.excludesAgentHost(host)
   const turn = (session: string, key: string, at: number): AgentRecord[] => [
     { t: 'session', session, origin: 'interactive', parent: null, client: 'cli', dir: '/w', branch: null, at },
     { t: 'turn', key, session, dir: '/w', branch: null, opener: 'user', start: at, replayed: false },
@@ -132,7 +133,7 @@ test('a log read live is traced to the app it runs in, and nothing is kept from 
   await reader.start()
   await reader.stop()
   assert.deepEqual(traced, [c.session])
-  assert.deepEqual(r.q(`SELECT app_id, basis FROM agent_hosts WHERE session_id = ?`, c.session), [{ app_id: 'com.mitchellh.ghostty', basis: 'responsible' }])
+  assert.deepEqual(r.q(`SELECT app_id, app_name, app_path, basis FROM agent_hosts WHERE session_id = ?`, c.session), [{ app_id: null, app_name: null, app_path: null, basis: 'excluded' }])
   assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM agent_turns WHERE session_id = ?', c.session)[0]!.n, 0)
   r.close()
 })
@@ -151,7 +152,7 @@ test('the first read merges nothing a session did in an excluded app', async () 
     reconcileMs: 3_600_000,
     followUpMs: 3_600_000,
     coalesceMs: 20,
-    backfill: async (roots) => (merged = (await backfill(r.store.database, r.dir, roots, () => {}, undefined, undefined, () => r.storage.withheld(), (h, at) => r.storage.agentHostAllowed(h, at))).merged),
+    backfill: async (roots) => (merged = (await backfill(r.store.database, r.dir, roots, () => {}, undefined, undefined, () => r.storage.withheld(), agents)).merged),
   })
   await reader.start()
   await reader.stop()
@@ -159,6 +160,37 @@ test('the first read merges nothing a session did in an excluded app', async () 
   const count = (s: string) => r.q<{ n: number }>('SELECT count(*) AS n FROM agent_turns WHERE session_id = ?', s)[0]!.n
   assert.equal(count(desktop.session), 0, 'the Claude app is excluded')
   assert.equal(count(terminal.session), 0, 'an app that runs agent sessions is excluded, and this one does not say which app it ran in')
-  assert.deepEqual(r.q('SELECT app_id FROM agent_hosts WHERE session_id = ?', desktop.session), [{ app_id: 'com.anthropic.claudefordesktop' }])
+  assert.deepEqual(r.q('SELECT app_id, app_name, app_path, basis FROM agent_hosts WHERE session_id = ?', desktop.session), [{ app_id: null, app_name: null, app_path: null, basis: 'excluded' }], 'the excluded app is not named')
+  r.close()
+})
+
+test('deleting a session removes the apps it ran in and its logs\' read positions, and nothing adds them back', () => {
+  const { r, agents, turn } = setup()
+  const source = { path: '/logs/s.jsonl', agent: 'claude_code' as const, root: '/logs', session: 's', dev: '1', ino: '2', offset: 10, size: 10, state: '{}', turnless: false, counts: emptyCounts() }
+  agents.apply('claude_code', [{ t: 'client', session: 's', client: 'claude-desktop', at: T0 }, ...turn('s', 's1', T0 + MIN)], source)
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + 2 * MIN)
+  const left = () => ['agent_hosts', 'agent_sources'].map((t) => r.q<{ n: number }>(`SELECT count(*) AS n FROM ${t} WHERE session_id = 's'`)[0]!.n)
+  assert.deepEqual(left(), [2, 1])
+  agents.deleteSession('claude_code', 's')
+  assert.deepEqual(left(), [0, 0], 'no app, path or read position of a deleted session is kept')
+  agents.apply('claude_code', [{ t: 'client', session: 's', client: 'claude-desktop', at: T0 + 3 * MIN }])
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + 4 * MIN)
+  assert.deepEqual(left(), [0, 0], 'a client record or a traced app adds nothing to a deleted session')
+  r.close()
+})
+
+test('an excluded app is never named for a session, and the session and sessions of unknown apps stay out', () => {
+  const { r, agents, turn, turns } = setup()
+  const term = { app_id: 'com.example.term', name: 'Term', path: '/Applications/Term.app' }
+  r.storage.addExclusion({ match: 'app_id', value: 'com.example.term', label: 'Term' })
+  agents.recordHost('claude_code', 's', term, 'responsible', T0)
+  agents.apply('claude_code', [...turn('s', 's1', T0 + MIN), ...turn('u', 'u1', T0 + MIN)])
+  assert.deepEqual(r.q('SELECT app_id, app_name, app_path, basis FROM agent_hosts'), [{ app_id: null, app_name: null, app_path: null, basis: 'excluded' }])
+  assert.deepEqual(turns('s'), [])
+  assert.deepEqual(turns('u'), [], 'the excluded app is known to run sessions, so a session whose app is not known may run in it')
+  r.storage.removeExclusion('app_id', 'com.example.term')
+  agents.recordHost('claude_code', 's', term, 'responsible', T0 + 5 * MIN)
+  agents.apply('claude_code', turn('s', 's2', T0 + 6 * MIN))
+  assert.deepEqual(turns('s'), ['s2'], 'once the app is no longer excluded, the session is recorded from when it is traced there again')
   r.close()
 })

@@ -378,11 +378,18 @@ export class Storage {
     return !this.agentHostExcluded()
   }
 
+  /** Whether the app an agent session ran in is excluded. */
+  excludesAgentHost(host: SessionHost): boolean {
+    return host.app_id !== null && this.rules.privacy.excludes(host.app_id, host.app_path)
+  }
+
   private agentHostExcluded(): boolean {
     const rules = this.store.exclusions().filter((r) => r.match !== 'site')
     if (rules.length === 0) return false
     if (rules.some((r) => r.match === 'app_id' && isKnownAgentHost(r.value))) return true
     if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() === undefined) return false
+    // A session seen in an excluded app is kept without the app's name, so any such session counts.
+    if (this.db.prepare(`SELECT 1 FROM agent_hosts WHERE basis = 'excluded' LIMIT 1`).get() !== undefined) return true
     const seen = this.db.prepare('SELECT DISTINCT app_id, app_path FROM agent_hosts WHERE app_id IS NOT NULL').all() as SessionHost[]
     return seen.some((h) => this.rules.privacy.excludes(h.app_id, h.app_path))
   }

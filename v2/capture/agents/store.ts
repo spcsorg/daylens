@@ -190,12 +190,26 @@ export const agentHostsMigration: Migration = {
     `),
 }
 
-export type HostRecordBasis = 'log' | 'responsible' | 'parent' | 'none'
+export type HostRecordBasis = 'log' | 'responsible' | 'parent' | 'none' | 'excluded'
 
 export interface SessionHost {
   app_id: string | null
   app_path: string | null
+  // Ran in an excluded app; which one is not kept.
+  excluded?: true
 }
+
+const EXCLUDED_HOST: SessionHost = { app_id: null, app_path: null, excluded: true }
+
+/** What storage keeps of an agent session, given the app it ran in. */
+export interface HostPolicy {
+  // Whether what the session did at a time is kept (null: the app is not known).
+  hostAllowed: (host: SessionHost | null, atWallMs: number) => boolean
+  // Whether the app is excluded; nothing that names it is kept.
+  hostExcluded: (host: SessionHost) => boolean
+}
+
+export const ALLOW_ALL_HOSTS: HostPolicy = { hostAllowed: () => true, hostExcluded: () => false }
 
 /**
  * Everything recorded from one session's logs, with the message fingerprints kept in its read state. The tombstone
@@ -204,11 +218,10 @@ export interface SessionHost {
 export function deleteAgentSession(db: Database.Database, agent: Agent, session: string, nowWallMs: number): void {
   db.transaction(() => {
     db.prepare('INSERT OR IGNORE INTO agent_deleted_sessions (agent, session_id, deleted_wall_ms) VALUES (?, ?, ?)').run(agent, session, nowWallMs)
-    for (const table of ['agent_events', 'agent_turns', 'agent_sessions']) db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
-    db.prepare(`UPDATE agent_sources SET state = CASE agent
-        WHEN 'codex' THEN json_remove(json_set(state, '$.recentUsers', json('[]')), '$.lastUser')
-        ELSE json_set(state, '$.queued', json('{}')) END
-      WHERE agent = ? AND session_id = ? AND state IS NOT NULL`).run(agent, session)
+    // Its apps, its logs' paths and read positions go too: the reader skips a log whose name is a deleted session.
+    const tables = ['agent_events', 'agent_turns', 'agent_sessions', 'agent_sources']
+    if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get()) tables.push('agent_hosts')
+    for (const table of tables) db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
     db.prepare(SCRUB_PENDING).run()
   })()
   const dir = db.name && db.name !== ':memory:' ? path.dirname(db.name) : null
@@ -347,8 +360,8 @@ export class AgentStore {
 
   /** Time storage withholds: pauses, deleted ranges and anything past retention. */
   withheld: () => readonly Span[] = () => []
-  /** Whether storage keeps what a session did at a time in the app it ran in then (null: the app is not known). */
-  hostAllowed: (host: SessionHost | null, atWallMs: number) => boolean = () => true
+  hostAllowed: HostPolicy['hostAllowed'] = ALLOW_ALL_HOSTS.hostAllowed
+  hostExcluded: HostPolicy['hostExcluded'] = ALLOW_ALL_HOSTS.hostExcluded
 
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
@@ -392,6 +405,7 @@ export class AgentStore {
       const unknownAllowed = new Map<number, boolean>()
       const hostOk = (session: string, at: number) => {
         const host = this.hostAt(agent, session, at)
+        if (host?.excluded) return false
         if (host !== null) return this.hostAllowed(host, at)
         let v = unknownAllowed.get(at)
         if (v === undefined) unknownAllowed.set(at, (v = this.hostAllowed(null, at)))
@@ -407,7 +421,7 @@ export class AgentStore {
       }
       for (const r of records) {
         if (r.t === 'client') {
-          this.recordHost(agent, r.session, clientApp(agent, r.client), 'log', r.at)
+          if (!isDeleted(r.session)) this.recordHost(agent, r.session, clientApp(agent, r.client), 'log', r.at)
           continue
         }
         const at = recordAt(r)
@@ -493,22 +507,33 @@ export class AgentStore {
    * process; the same app again keeps the span it has.
    */
   recordHost(agent: Agent, session: string, app: HostApp | null, basis: HostRecordBasis, at: number): void {
+    if (this.isDeletedSession(agent, session)) return
+    // An excluded app is kept only as excluded, which keeps the session's records out without naming the app. An app
+    // deleted or paused for a time keeps its name: that is what refuses the session's records from that time.
+    if (app !== null && this.hostExcluded({ app_id: app.app_id, app_path: app.path })) {
+      app = null
+      basis = 'excluded'
+    }
     const last = this.stmt('SELECT app_id, basis FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms <= ? ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(agent, session, at) as
       | { app_id: string | null; basis: string }
       | undefined
-    if (last && (last.app_id?.toLowerCase() ?? null) === (app?.app_id?.toLowerCase() ?? null)) return
+    if (last && (last.app_id?.toLowerCase() ?? null) === (app?.app_id?.toLowerCase() ?? null) && (last.basis === 'excluded') === (basis === 'excluded')) return
     if (app === null && basis === 'log' && last && last.basis !== 'log') return
     this.stmt('INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms) VALUES (?, ?, ?, ?, ?, ?, ?)').run(agent, session, app?.app_id ?? null, app?.name ?? null, app?.path ?? null, basis, at)
   }
 
   /** The app a session ran in at a time, or a subagent's parent session's; null when it is not known. */
   hostAt(agent: Agent, session: string, at: number): SessionHost | null {
-    const span = this.stmt('SELECT app_id, app_path FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms <= ? ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(agent, session, at) as
-      | SessionHost
+    const span = this.stmt('SELECT app_id, app_path, basis FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms <= ? ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(agent, session, at) as
+      | (SessionHost & { basis: string })
       | undefined
-    if (span) return span.app_id === null ? null : span
+    if (span) return span.basis === 'excluded' ? EXCLUDED_HOST : span.app_id === null ? null : { app_id: span.app_id, app_path: span.app_path }
     const parent = this.stmt('SELECT parent_session_id AS p FROM agent_sessions WHERE agent = ? AND session_id = ?').get(agent, session) as { p: string | null } | undefined
     return parent?.p && parent.p !== session ? this.hostAt(agent, parent.p, at) : null
+  }
+
+  isDeletedSession(agent: Agent, session: string | null): boolean {
+    return session !== null && this.stmt(SQL.deletedSession).get(agent, session) !== undefined
   }
 
   sourceUpdatedAt(file: string): number | null {

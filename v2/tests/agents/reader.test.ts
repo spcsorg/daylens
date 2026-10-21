@@ -492,7 +492,7 @@ test('a deleted session stays deleted when its log is replaced by a new file or 
   for (const table of ['agent_sessions', 'agent_turns', 'agent_events']) {
     assert.equal(r.count(`SELECT count(*) AS n FROM ${table} WHERE session_id IN (?, ?)`, gone.session, x.id), 0, table)
   }
-  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id IN (?, ?) AND state IS NOT NULL', gone.session, x.id), 0, 'no parser state is kept for a deleted session')
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id IN (?, ?)', gone.session, x.id), 0, 'no log path or read position is kept for a deleted session')
   r.store.close()
 })
 
@@ -512,7 +512,7 @@ test('the first read merges nothing from a deleted session', async () => {
   for (const table of ['agent_sessions', 'agent_turns', 'agent_events']) {
     assert.equal(r.count(`SELECT count(*) AS n FROM ${table} WHERE session_id = ?`, gone.session), 0, table)
   }
-  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id = ? AND state IS NOT NULL', gone.session), 0)
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id = ?', gone.session), 0, 'no log path or read position is merged for a deleted session')
   r.store.close()
 })
 

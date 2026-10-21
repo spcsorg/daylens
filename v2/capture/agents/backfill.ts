@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
 import { admitsAt, admitsSpan, nextWithheld, type Span } from './withheld.ts'
-import { AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE, type SessionHost } from './store.ts'
+import { ALLOW_ALL_HOSTS, AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE, type HostPolicy } from './store.ts'
 import { addCounts } from './types.ts'
 
 export interface BackfillStats {
@@ -141,7 +141,7 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
-export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = [], hostAllowed: (host: SessionHost | null, at: number) => boolean = () => true): void {
+export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = [], hosts: HostPolicy = ALLOW_ALL_HOSTS): void {
   db.function('agent_admits', { deterministic: false }, (at: number | null) => (admitsAt(spans, at) ? 1 : 0))
   // A turn's activity and end stop where withheld time begins after its start.
   db.function('agent_clip', { deterministic: false }, (start: number, at: number | null) => {
@@ -153,9 +153,12 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
   // What storage refuses for the app a session ran in at that time, the merge leaves out, as the live reader does.
   // The function runs inside the merge's statements, so only a known app is judged there; the unknown case is
   // decided once, before them.
-  const unknownOk = hostAllowed(null, Date.now()) ? 1 : 0
+  const unknownOk = hosts.hostAllowed(null, Date.now()) ? 1 : 0
   db.function('agent_host_ok', { deterministic: false }, (appId: string | null, appPath: string | null, at: number) =>
-    appId === null ? unknownOk : hostAllowed({ app_id: appId, app_path: appPath }, at) ? 1 : 0,
+    appId === null ? unknownOk : hosts.hostAllowed({ app_id: appId, app_path: appPath }, at) ? 1 : 0,
+  )
+  db.function('agent_host_excluded', { deterministic: false }, (appId: string | null, appPath: string | null) =>
+    appId !== null && hosts.hostExcluded({ app_id: appId, app_path: appPath }) ? 1 : 0,
   )
   const host = (t: string, at: string, col: string) =>
     `(SELECT h.${col} FROM agent_hosts h WHERE h.agent = ${t}.agent AND h.session_id = ${t}.session_id AND h.from_wall_ms <= ${t}.${at} ORDER BY h.from_wall_ms DESC, h.id DESC LIMIT 1)`
@@ -166,8 +169,10 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
     if (db.prepare(`SELECT 1 FROM pragma_table_info('agent_sources', 'staging') WHERE name = 'turnless'`).get() === undefined) return
     db.transaction(() => {
       if (db.prepare(`SELECT 1 FROM staging.sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() !== undefined) {
+        // An excluded app is kept only as excluded, as the live reader keeps it.
         db.exec(`INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms)
-          SELECT agent, session_id, app_id, app_name, app_path, basis, from_wall_ms FROM staging.agent_hosts s WHERE ${live('s')}
+          SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, from_wall_ms
+          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x FROM staging.agent_hosts) s WHERE ${live('s')}
             AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.from_wall_ms)`)
       }
       db.exec(`
@@ -181,7 +186,7 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
           SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms) AND ${live('s')} AND ${hostOk('s', 'wall_ms')}
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
-          SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN ${live('s')} THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE true
+          SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')}
           ON CONFLICT (path) DO NOTHING;
       `)
     })()
@@ -198,7 +203,7 @@ export async function backfill(
   sliceBytes = SLICE_BYTES,
   sliceTimeoutMs = SLICE_TIMEOUT_MS,
   withheld: () => readonly Span[] = () => [],
-  hostAllowed: (host: SessionHost | null, at: number) => boolean = () => true,
+  hosts: HostPolicy = ALLOW_ALL_HOSTS,
 ): Promise<BackfillResult> {
   const staging = path.join(dataDir, STAGING_FILE)
   const clean = () => removeStaging(dataDir)
@@ -248,7 +253,7 @@ export async function backfill(
       }
     }
     const t0 = performance.now()
-    mergeStaging(db, staging, withheld(), hostAllowed)
+    mergeStaging(db, staging, withheld(), hosts)
     // Health is decided once over every slice, so a clean last slice cannot hide a problem in an earlier one.
     const store = new AgentStore(db)
     for (const r of counts.values()) {
