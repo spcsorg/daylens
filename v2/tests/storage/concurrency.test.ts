@@ -477,23 +477,24 @@ test('a deletion whose announcements meet a lock held past the busy timeout fini
   r.clock.t = T0 + HOUR
   const deletions = (r.storage as unknown as { deletions: { run: (t: number, now: number) => Promise<unknown> } }).deletions
   const run = deletions.run.bind(deletions)
-  let released = false
+  let lockedAt = 0
   let exited: Promise<void> = Promise.resolve()
   deletions.run = async (t, now) => {
     const result = await run(t, now)
     const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 1500 } })
     exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
-    worker.on('message', (m) => { if (m === 'released') released = true })
     await new Promise((resolve) => worker.once('message', resolve))
+    lockedAt = performance.now()
     return result
   }
   try {
     const handle = r.storage.deleteSource('com.example.chat')
     const t0 = performance.now()
     assert.equal((await handle.done).observations, 1)
-    assert.ok(!released && performance.now() - t0 < 500, 'the deletion finished without waiting out the busy timeout')
+    assert.ok(performance.now() - t0 < 500, 'the deletion finished without waiting out the busy timeout')
     await handle.purged
-    assert.ok(released, 'purged is announced only once the lock is free')
+    // The other connection holds the lock for 1500 ms after it reports holding it.
+    assert.ok(performance.now() - lockedAt >= 1400, 'purged is announced only once the lock is free')
     const states = r.q<{ payload: string }>(`SELECT payload FROM change_log WHERE kind = 'deletion'`).map((c) => JSON.parse(c.payload).state)
     assert.ok(states.includes('done') && states.includes('purged'), JSON.stringify(states))
     assert.ok(errors.length > 0 && errors.every((e) => e === 'deletion_announce_SQLITE_BUSY'), JSON.stringify(errors))
