@@ -14,6 +14,8 @@ import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
 import { immediateRetrying } from './tx.ts'
 import { ScrubUnavailableError, scrubAll, scrubAvailable } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
+import { dbHostLookup, resolveHost } from '../capture/agents/store.ts'
+import type { Agent } from '../capture/agents/types.ts'
 
 export interface DeletionResult {
   tombstone: number
@@ -278,39 +280,56 @@ export class Deleter {
   }
 
   /**
-   * Agent records of sessions known to have run in the app, for the time they ran in it within [from, to), and of
-   * their subagents that ran nowhere else; a session left with no turns goes. Sessions whose app is not known stay.
+   * Agent records of sessions known to have run in the app, for the time they ran in it within [from, to): the
+   * sessions with a span in it, and their subagents at any depth, each record judged by the app its session resolves
+   * to at its time (a subagent with a span of its own elsewhere stays). A session left with no turns goes. Sessions
+   * whose app is not known stay.
    */
   private deleteAgentHost(app: string, from: number, to: number): number {
     const db = this.db
-    const spans = db
-      .prepare(
-        `SELECT agent, session_id, from_wall_ms AS s,
-           (SELECT min(n.from_wall_ms) FROM agent_hosts n WHERE n.agent = h.agent AND n.session_id = h.session_id AND n.from_wall_ms > h.from_wall_ms) AS e
-         FROM agent_hosts h WHERE lower(app_id) = ?`,
-      )
-      .all(app) as { agent: string; session_id: string; s: number; e: number | null }[]
-    const children = db.prepare(
-      `SELECT session_id FROM agent_sessions c WHERE agent = ? AND parent_session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = c.agent AND h.session_id = c.session_id)`,
-    )
-    const events = db.prepare(`SELECT id, detail FROM agent_events WHERE agent = @agent AND session_id = @session AND wall_ms >= @s AND wall_ms < @e LIMIT ${ROWS_PER_STEP}`)
-    const turns = db.prepare(`SELECT id, project_dir FROM agent_turns WHERE agent = @agent AND session_id = @session AND start_wall_ms >= @s AND start_wall_ms < @e LIMIT ${ROWS_PER_STEP}`)
+    const look = dbHostLookup(db)
+    const roots = db.prepare('SELECT DISTINCT agent, session_id FROM agent_hosts WHERE lower(app_id) = ?').all(app) as { agent: Agent; session_id: string }[]
+    const children = db.prepare('SELECT session_id FROM agent_sessions WHERE agent = ? AND parent_session_id = ?')
+    const sessions = new Map<string, { agent: Agent; session: string }>()
+    for (const queue = roots.map((x) => ({ agent: x.agent, session: x.session_id })); queue.length > 0; ) {
+      const next = queue.shift()!
+      const k = `${next.agent}\n${next.session}`
+      if (sessions.has(k)) continue
+      sessions.set(k, next)
+      for (const c of children.all(next.agent, next.session) as { session_id: string }[]) queue.push({ agent: next.agent, session: c.session_id })
+    }
+    const inApp = (agent: Agent, session: string, at: number) => resolveHost(look, agent, session, at)?.app_id?.toLowerCase() === app
+    const pages = {
+      agent_events: db.prepare(`SELECT id, wall_ms AS at FROM agent_events WHERE agent = @agent AND session_id = @session AND wall_ms >= @from AND wall_ms < @to AND id > @after ORDER BY id LIMIT ${ROWS_PER_STEP}`),
+      agent_turns: db.prepare(`SELECT id, start_wall_ms AS at FROM agent_turns WHERE agent = @agent AND session_id = @session AND start_wall_ms >= @from AND start_wall_ms < @to AND id > @after ORDER BY id LIMIT ${ROWS_PER_STEP}`),
+    }
     let n = 0
-    for (const sp of spans) {
-      const s = Math.max(sp.s, from)
-      const e = Math.min(sp.e ?? Number.MAX_SAFE_INTEGER, to)
-      if (s >= e) continue
-      const sessions = [sp.session_id, ...(children.all(sp.agent, sp.session_id) as { session_id: string }[]).map((c) => c.session_id)]
-      for (const session of sessions) {
-        const args = { agent: sp.agent, session, s, e }
-        n += this.removeById('agent_events', () => events.all(args) as { id: number }[])
-        n += this.removeById('agent_turns', () => turns.all(args) as { id: number }[])
-        immediateRetrying(db, () => {
-          n += db.prepare(`DELETE FROM agent_sessions WHERE agent = ? AND session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id)`).run(sp.agent, session).changes
-          // Parser state of the session's logs can describe what was removed (an open turn, message fingerprints).
-          db.prepare('UPDATE agent_sources SET state = NULL WHERE agent = ? AND session_id = ? AND state IS NOT NULL').run(sp.agent, session)
-        })
+    // Session rows go only after every record is judged: a subagent resolves through its parent's row.
+    const affected: { agent: Agent; session: string }[] = []
+    for (const { agent, session } of sessions.values()) {
+      let removed = 0
+      for (const [table, page] of Object.entries(pages)) {
+        const del = db.prepare(`DELETE FROM ${table} WHERE id = ?`)
+        for (let after = 0; ; ) {
+          const rows = page.all({ agent, session, from, to, after }) as { id: number; at: number }[]
+          if (rows.length === 0) break
+          removed += this.removeRows(del, rows.filter((row) => inApp(agent, session, row.at)))
+          after = rows[rows.length - 1]!.id
+        }
       }
+      n += removed
+      const ownSpan = db.prepare(
+        `SELECT 1 FROM agent_hosts h WHERE h.agent = ? AND h.session_id = ? AND lower(h.app_id) = ? AND h.from_wall_ms < ?
+           AND coalesce((SELECT min(x.from_wall_ms) FROM agent_hosts x WHERE x.agent = h.agent AND x.session_id = h.session_id AND x.from_wall_ms > h.from_wall_ms), ${Number.MAX_SAFE_INTEGER}) > ?`,
+      ).get(agent, session, app, to, from)
+      if (removed > 0 || ownSpan !== undefined) affected.push({ agent, session })
+    }
+    for (const { agent, session } of affected) {
+      immediateRetrying(db, () => {
+        n += db.prepare(`DELETE FROM agent_sessions WHERE agent = ? AND session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id)`).run(agent, session).changes
+        // Parser state of the session's logs can describe what was removed (an open turn, message fingerprints).
+        db.prepare('UPDATE agent_sources SET state = NULL WHERE agent = ? AND session_id = ? AND state IS NOT NULL').run(agent, session)
+      })
     }
     return n
   }

@@ -211,6 +211,69 @@ export interface HostPolicy {
 
 export const ALLOW_ALL_HOSTS: HostPolicy = { hostAllowed: () => true, hostExcluded: () => false }
 
+export interface HostSpan {
+  app_id: string | null
+  app_path: string | null
+  basis: string
+}
+
+/** Where the app a session ran in is looked up: its own spans, and the session that started it. */
+export interface HostLookup {
+  span: (agent: Agent, session: string, at: number) => HostSpan | undefined
+  parent: (agent: Agent, session: string) => string | null
+}
+
+/**
+ * The app a session ran in at a time; a session with no span of its own then runs where its parent did, up the
+ * chain. Null when it is not known. Live reads, the first read's merge and deletion all decide through this.
+ */
+export function resolveHost(look: HostLookup, agent: Agent, session: string, at: number): SessionHost | null {
+  const seen = new Set<string>()
+  for (let s: string | null = session; s !== null && !seen.has(s); s = look.parent(agent, s)) {
+    seen.add(s)
+    const span = look.span(agent, s, at)
+    if (span) return span.basis === 'excluded' ? EXCLUDED_HOST : span.app_id === null ? null : { app_id: span.app_id, app_path: span.app_path }
+  }
+  return null
+}
+
+/** Looks the app up in a database's agent tables. */
+export function dbHostLookup(db: Database.Database): HostLookup {
+  const span = db.prepare('SELECT app_id, app_path, basis FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms <= ? ORDER BY from_wall_ms DESC, id DESC LIMIT 1')
+  const parent = db.prepare('SELECT parent_session_id AS p FROM agent_sessions WHERE agent = ? AND session_id = ?')
+  return {
+    span: (agent, session, at) => span.get(agent, session, at) as HostSpan | undefined,
+    parent: (agent, session) => (parent.get(agent, session) as { p: string | null } | undefined)?.p ?? null,
+  }
+}
+
+/** The same lookup over rows held in memory, for use inside a statement, where the connection cannot run another. */
+export function memoryHostLookup(spans: readonly (HostSpan & { agent: string; session_id: string; from_wall_ms: number })[], parents: readonly { agent: string; session_id: string; parent: string }[]): HostLookup {
+  // Spans in from_wall_ms then id order; the last one at or before a time is in force.
+  const bySession = new Map<string, (HostSpan & { from_wall_ms: number })[]>()
+  for (const sp of spans) {
+    const k = `${sp.agent}\n${sp.session_id}`
+    let list = bySession.get(k)
+    if (!list) bySession.set(k, (list = []))
+    list.push(sp)
+  }
+  const parentOf = new Map<string, string>()
+  for (const p of parents) if (!parentOf.has(`${p.agent}\n${p.session_id}`)) parentOf.set(`${p.agent}\n${p.session_id}`, p.parent)
+  return {
+    span: (agent, session, at) => {
+      const list = bySession.get(`${agent}\n${session}`)
+      if (!list) return undefined
+      let found: HostSpan | undefined
+      for (const sp of list) {
+        if (sp.from_wall_ms > at) break
+        found = sp
+      }
+      return found
+    },
+    parent: (agent, session) => parentOf.get(`${agent}\n${session}`) ?? null,
+  }
+}
+
 /**
  * Everything recorded from one session's logs, with the message fingerprints kept in its read state. The tombstone
  * keeps it from being written again, from any copy of its logs.
@@ -403,8 +466,14 @@ export class AgentStore {
       }
       // What storage refuses for an app (excluded, or deleted for that time) it refuses for the sessions run in it.
       const unknownAllowed = new Map<number, boolean>()
+      // A subagent's first record comes before its row holds the link to its parent.
+      const parents = new Map<string, string>()
+      for (const r of records) if (r.t === 'session' && r.parent !== null && r.parent !== r.session) parents.set(r.session, r.parent)
+      this.lookup ??= dbHostLookup(this.db)
+      const db = this.lookup
+      const look: HostLookup = { span: db.span, parent: (a, s) => (parents.size > 0 ? parents.get(s) : undefined) ?? db.parent(a, s) }
       const hostOk = (session: string, at: number) => {
-        const host = this.hostAt(agent, session, at)
+        const host = resolveHost(look, agent, session, at)
         if (host?.excluded) return false
         if (host !== null) return this.hostAllowed(host, at)
         let v = unknownAllowed.get(at)
@@ -522,14 +591,12 @@ export class AgentStore {
     this.stmt('INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms) VALUES (?, ?, ?, ?, ?, ?, ?)').run(agent, session, app?.app_id ?? null, app?.name ?? null, app?.path ?? null, basis, at)
   }
 
-  /** The app a session ran in at a time, or a subagent's parent session's; null when it is not known. */
+  private lookup: HostLookup | null = null
+
+  /** The app a session ran in at a time, or its parent's; null when it is not known. */
   hostAt(agent: Agent, session: string, at: number): SessionHost | null {
-    const span = this.stmt('SELECT app_id, app_path, basis FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms <= ? ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(agent, session, at) as
-      | (SessionHost & { basis: string })
-      | undefined
-    if (span) return span.basis === 'excluded' ? EXCLUDED_HOST : span.app_id === null ? null : { app_id: span.app_id, app_path: span.app_path }
-    const parent = this.stmt('SELECT parent_session_id AS p FROM agent_sessions WHERE agent = ? AND session_id = ?').get(agent, session) as { p: string | null } | undefined
-    return parent?.p && parent.p !== session ? this.hostAt(agent, parent.p, at) : null
+    this.lookup ??= dbHostLookup(this.db)
+    return resolveHost(this.lookup, agent, session, at)
   }
 
   isDeletedSession(agent: Agent, session: string | null): boolean {

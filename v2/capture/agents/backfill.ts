@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
 import { admitsAt, admitsSpan, nextWithheld, type Span } from './withheld.ts'
-import { ALLOW_ALL_HOSTS, AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE, type HostPolicy } from './store.ts'
-import { addCounts } from './types.ts'
+import { ALLOW_ALL_HOSTS, AgentStore, loadFingerprintKey, memoryHostLookup, removeStaging, resolveHost, STAGING_FILE, type HostPolicy } from './store.ts'
+import { addCounts, type Agent } from './types.ts'
 
 export interface BackfillStats {
   wall_ms: number
@@ -150,19 +150,15 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
   })
   db.function('agent_end', { deterministic: false }, (start: number, at: number | null) => (at === null || admitsSpan(spans, start, at) ? at : null))
   const live = (t: string) => `NOT EXISTS (SELECT 1 FROM main.agent_deleted_sessions d WHERE d.agent = ${t}.agent AND d.session_id = ${t}.session_id)`
-  // What storage refuses for the app a session ran in at that time, the merge leaves out, as the live reader does.
-  // The function runs inside the merge's statements, so only a known app is judged there; the unknown case is
-  // decided once, before them.
-  const unknownOk = hosts.hostAllowed(null, Date.now()) ? 1 : 0
-  db.function('agent_host_ok', { deterministic: false }, (appId: string | null, appPath: string | null, at: number) =>
-    appId === null ? unknownOk : hosts.hostAllowed({ app_id: appId, app_path: appPath }, at) ? 1 : 0,
-  )
+  // What storage refuses for the app a session ran in at that time, the merge leaves out, as the live reader does. The
+  // function runs inside the merge's statements, where the connection can run no other, so the apps and parent links
+  // it resolves through are read beforehand, once the staging apps are in.
+  let decide: (agent: Agent, session: string, at: number) => boolean = () => true
+  db.function('agent_host_ok', { deterministic: false }, (agent: Agent, session: string, at: number) => (decide(agent, session, at) ? 1 : 0))
   db.function('agent_host_excluded', { deterministic: false }, (appId: string | null, appPath: string | null) =>
     appId !== null && hosts.hostExcluded({ app_id: appId, app_path: appPath }) ? 1 : 0,
   )
-  const host = (t: string, at: string, col: string) =>
-    `(SELECT h.${col} FROM agent_hosts h WHERE h.agent = ${t}.agent AND h.session_id = ${t}.session_id AND h.from_wall_ms <= ${t}.${at} ORDER BY h.from_wall_ms DESC, h.id DESC LIMIT 1)`
-  const hostOk = (t: string, at: string) => `agent_host_ok(${host(t, at, 'app_id')}, ${host(t, at, 'app_path')}, ${t}.${at})`
+  const hostOk = (t: string, at: string) => `agent_host_ok(${t}.agent, ${t}.session_id, ${t}.${at})`
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
     // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
@@ -174,6 +170,17 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
           SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, from_wall_ms
           FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x FROM staging.agent_hosts) s WHERE ${live('s')}
             AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.from_wall_ms)`)
+      }
+      const look = memoryHostLookup(
+        db.prepare('SELECT agent, session_id, app_id, app_path, basis, from_wall_ms FROM main.agent_hosts ORDER BY from_wall_ms, id').all() as Parameters<typeof memoryHostLookup>[0],
+        db.prepare(`SELECT agent, session_id, parent_session_id AS parent FROM main.agent_sessions WHERE parent_session_id IS NOT NULL
+          UNION ALL SELECT agent, session_id, parent_session_id FROM staging.agent_sessions WHERE parent_session_id IS NOT NULL`).all() as Parameters<typeof memoryHostLookup>[1],
+      )
+      // Whether a session whose app is not known is kept depends on the apps just merged.
+      const unknownOk = hosts.hostAllowed(null, Date.now())
+      decide = (agent, session, at) => {
+        const host = resolveHost(look, agent, session, at)
+        return host === null ? unknownOk : !host.excluded && hosts.hostAllowed(host, at)
       }
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)

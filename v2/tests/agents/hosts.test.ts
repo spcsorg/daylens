@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { backfill } from '../../capture/agents/backfill.ts'
+import Database from 'better-sqlite3'
+import { backfill, mergeStaging } from '../../capture/agents/backfill.ts'
 import { ClaudeParser } from '../../capture/agents/claude.ts'
 import { AgentReader, homeRoots } from '../../capture/agents/reader.ts'
 import { AgentStore } from '../../capture/agents/store.ts'
@@ -192,5 +193,76 @@ test('an excluded app is never named for a session, and the session and sessions
   agents.recordHost('claude_code', 's', term, 'responsible', T0 + 5 * MIN)
   agents.apply('claude_code', turn('s', 's2', T0 + 6 * MIN))
   assert.deepEqual(turns('s'), ['s2'], 'once the app is no longer excluded, the session is recorded from when it is traced there again')
+  r.close()
+})
+
+// A session, its subagent and the subagent's own subagent; only the first has an app of its own.
+const chain = (at: number, tag = ''): AgentRecord[] => [
+  { t: 'session', session: `p${tag}`, origin: 'interactive', parent: null, client: 'cli', dir: '/w', branch: null, at },
+  { t: 'turn', key: `p${tag}:${at}`, session: `p${tag}`, dir: '/w', branch: null, opener: 'user', start: at, replayed: false },
+  { t: 'session', session: `c${tag}`, origin: 'subagent', parent: `p${tag}`, client: null, dir: '/w', branch: null, at },
+  { t: 'turn', key: `c${tag}:${at}`, session: `c${tag}`, dir: '/w', branch: null, opener: 'agent', start: at, replayed: false },
+  { t: 'session', session: `g${tag}`, origin: 'subagent', parent: `c${tag}`, client: null, dir: '/w', branch: null, at },
+  { t: 'turn', key: `g${tag}:${at}`, session: `g${tag}`, dir: '/w', branch: null, opener: 'agent', start: at, replayed: false },
+]
+const keys = (r: ReturnType<typeof setup>['r']) => r.q<{ turn_key: string }>('SELECT turn_key FROM agent_turns ORDER BY session_id, start_wall_ms').map((x) => x.turn_key)
+
+test('read live, a subagent and its own subagent run where the session that started them does', () => {
+  const { r, agents, turn } = setup()
+  r.storage.addExclusion({ match: 'app_id', value: 'com.googlecode.iterm2', label: 'iTerm' })
+  agents.recordHost('claude_code', 'p', ghostty, 'responsible', T0)
+  agents.apply('claude_code', [...chain(T0 + MIN), ...turn('u', 'u1', T0 + MIN)])
+  assert.deepEqual(keys(r), [`c:${T0 + MIN}`, `g:${T0 + MIN}`, `p:${T0 + MIN}`], 'the chain is in Ghostty, which is kept; the session of an unknown app is not')
+  assert.equal(agents.hostAt('claude_code', 'g', T0 + MIN)?.app_id, 'com.mitchellh.ghostty')
+  r.storage.addExclusion({ match: 'app_id', value: 'com.mitchellh.ghostty', label: 'Ghostty' })
+  agents.apply('claude_code', chain(T0 + 2 * MIN))
+  assert.deepEqual(keys(r), [`c:${T0 + MIN}`, `g:${T0 + MIN}`, `p:${T0 + MIN}`], 'once Ghostty is excluded, nothing of the chain is recorded')
+  r.close()
+})
+
+test('the first read judges a subagent and its own subagent by the app of the session that started them, and an unknown app by the apps it merged', async () => {
+  const { r, turn } = setup()
+  r.storage.addExclusion({ match: 'app_id', value: 'com.googlecode.iterm2', label: 'iTerm' })
+  const staging = path.join(r.dir, 'staging-chain.sqlite')
+  const db = new Database(staging)
+  const s = new AgentStore(db)
+  s.recordHost('claude_code', 'p', ghostty, 'responsible', T0)
+  s.apply('claude_code', [...chain(T0 + MIN), ...turn('u', 'u1', T0 + MIN)])
+  db.close()
+  const agents = new AgentStore(r.store.database, () => r.clock.t)
+  mergeStaging(r.store.database, staging, r.storage.withheld(), { hostAllowed: (h, at) => r.storage.agentHostAllowed(h, at), hostExcluded: (h) => r.storage.excludesAgentHost(h) })
+  assert.deepEqual(keys(r), [`c:${T0 + MIN}`, `g:${T0 + MIN}`, `p:${T0 + MIN}`])
+  assert.equal(agents.hostAt('claude_code', 'g', T0 + MIN)?.app_id, 'com.mitchellh.ghostty')
+  r.close()
+
+  const { r: r2, turn: turn2 } = setup()
+  r2.storage.addExclusion({ match: 'app_id', value: 'com.example.term', label: 'Term' })
+  const staging2 = path.join(r2.dir, 'staging-term.sqlite')
+  const db2 = new Database(staging2)
+  const s2 = new AgentStore(db2)
+  s2.recordHost('claude_code', 't', { app_id: 'com.example.term', name: 'Term', path: null }, 'responsible', T0)
+  s2.apply('claude_code', [...turn2('t', 't1', T0 + MIN), ...turn2('u', 'u1', T0 + MIN)])
+  db2.close()
+  mergeStaging(r2.store.database, staging2, r2.storage.withheld(), { hostAllowed: (h, at) => r2.storage.agentHostAllowed(h, at), hostExcluded: (h) => r2.storage.excludesAgentHost(h) })
+  assert.deepEqual(keys(r2), [], 'the merge finds an excluded app running sessions, so a session whose app is not known is held back')
+  r2.close()
+})
+
+test('deleting an app reaches a subagent and its own subagent, but not a subagent that ran in another app, nor its subagent', async () => {
+  const { r, agents } = setup()
+  agents.recordHost('claude_code', 'p', ghostty, 'responsible', T0)
+  agents.apply('claude_code', chain(T0 + MIN))
+  agents.recordHost('claude_code', 'c2', vscode, 'responsible', T0)
+  agents.apply('claude_code', [
+    { t: 'session', session: 'c2', origin: 'subagent', parent: 'p', client: null, dir: '/w', branch: null, at: T0 + MIN },
+    { t: 'turn', key: 'c2', session: 'c2', dir: '/w', branch: null, opener: 'agent', start: T0 + MIN, replayed: false },
+    { t: 'session', session: 'g2', origin: 'subagent', parent: 'c2', client: null, dir: '/w', branch: null, at: T0 + MIN },
+    { t: 'turn', key: 'g2', session: 'g2', dir: '/w', branch: null, opener: 'agent', start: T0 + MIN, replayed: false },
+  ])
+  assert.equal(keys(r).length, 5)
+  r.clock.t = T0 + 10 * MIN
+  await r.storage.deleteSource('com.mitchellh.ghostty').done
+  assert.deepEqual(keys(r), ['c2', 'g2'])
+  assert.deepEqual(r.q<{ session_id: string }>('SELECT session_id FROM agent_sessions ORDER BY session_id').map((x) => x.session_id), ['c2', 'g2'])
   r.close()
 })
