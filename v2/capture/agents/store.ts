@@ -7,6 +7,7 @@ import { threadId } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 import { admitsAt, admitsSpan, type Span } from './withheld.ts'
+import { VACUUM_PENDING } from '../../storage/deletion.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
 const KEY_FILE = 'agent-fingerprint.key'
@@ -153,6 +154,20 @@ export const agentSourcesTurnlessMigration: Migration = {
     `),
 }
 
+// A deleted session's tombstone: its records are never written again, whichever file or folder they are read from.
+export const agentDeletedSessionsMigration: Migration = {
+  name: 'agent_deleted_sessions_v1',
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_deleted_sessions (
+        agent TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        deleted_wall_ms INTEGER NOT NULL,
+        PRIMARY KEY (agent, session_id)
+      ) WITHOUT ROWID;
+    `),
+}
+
 export interface SourceRow {
   path: string
   agent: Agent
@@ -258,6 +273,7 @@ const SQL = {
   turnDir: 'UPDATE agent_turns SET project_dir = @dir WHERE agent = @agent AND turn_key = @key',
   turnOpener: `UPDATE agent_turns SET opened_by = @opener WHERE agent = @agent AND turn_key = @key AND opened_by = 'unknown'`,
   activity: 'UPDATE agent_turns SET last_activity_wall_ms = max(last_activity_wall_ms, @at) WHERE agent = @agent AND turn_key = @key',
+  deletedSession: 'SELECT 1 FROM agent_deleted_sessions WHERE agent = ? AND session_id = ?',
   turnSpan: 'SELECT max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
   // The first real end wins; 'missing' only ever gives way to a real one.
   // The end is kept apart from the last activity: a turn that fails after a stalled request ended late but did nothing since.
@@ -288,7 +304,7 @@ export class AgentStore {
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
-    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration], now)
+    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration], now)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -324,8 +340,15 @@ export class AgentStore {
         latest.clear()
       }
       const ok = (at: number | null) => admitsAt(spans, at)
+      const deleted = new Map<string, boolean>()
+      const isDeleted = (session: string | null) => {
+        if (session === null) return false
+        let d = deleted.get(session)
+        if (d === undefined) deleted.set(session, (d = this.stmt(SQL.deletedSession).get(agent, session) !== undefined))
+        return d
+      }
       for (const r of records) {
-        if (!admitted(r, ok)) {
+        if (!admitted(r, ok) || ('session' in r && isDeleted(r.session))) {
           dropped = true
           continue
         }
@@ -373,7 +396,7 @@ export class AgentStore {
           offset: source.offset,
           size: source.size,
           // Parser state written while withheld records went by could describe them; the read position still advances.
-          state: dropped ? null : source.state,
+          state: dropped || isDeleted(source.session) ? null : source.state,
           turnless: source.turnless ? 1 : 0,
           lines: source.counts.lines,
           bad: source.counts.bad,
@@ -398,15 +421,17 @@ export class AgentStore {
     return this.key
   }
 
-  // Everything recorded from one session's logs, with the message fingerprints kept in its read state; its read
-  // positions stay, so the session is not read in again.
+  // Everything recorded from one session's logs, with the message fingerprints kept in its read state. The tombstone
+  // keeps it from being written again, from any copy of its logs.
   deleteSession(agent: Agent, session: string): void {
     this.db.transaction(() => {
+      this.db.prepare('INSERT OR IGNORE INTO agent_deleted_sessions (agent, session_id, deleted_wall_ms) VALUES (?, ?, ?)').run(agent, session, this.now())
       for (const table of ['agent_events', 'agent_turns', 'agent_sessions']) this.db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
       this.db.prepare(`UPDATE agent_sources SET state = CASE agent
           WHEN 'codex' THEN json_remove(json_set(state, '$.recentUsers', json('[]')), '$.lastUser')
           ELSE json_set(state, '$.queued', json('{}')) END
         WHERE agent = ? AND session_id = ? AND state IS NOT NULL`).run(agent, session)
+      this.db.prepare(VACUUM_PENDING).run()
     })()
     const dir = this.dataDir
     if (dir !== null) removeStaging(dir)

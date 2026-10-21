@@ -456,6 +456,66 @@ test('deleting a session removes its rows and any staging copy of the first read
   r.store.close()
 })
 
+test('a deleted session stays deleted when its log is replaced by a new file or copied into another folder', async () => {
+  const r = rig()
+  const gone = claudeCtx()
+  const x = codexCtx()
+  const file = claudeFile(r.home, gone)
+  const body = lines(claude.prompt(gone, sec(5), 'gone', { uuid: 'gone' }), claude.assistant(gone, sec(7), 'end_turn'))
+  writeFileSync(file, body)
+  const xfile = codexFile(r.home, x)
+  const xbody = lines(codex.meta(x, sec(0)), codex.started(sec(1), 'xt', 'composer'), codex.userItem(sec(1), 'go', ['user.text']), codex.complete(sec(5), 'xt', sec(1), sec(5)))
+  writeFileSync(xfile, xbody)
+  const first = r.reader()
+  await first.start()
+  await first.stop()
+  assert.ok(r.count('SELECT count(*) AS n FROM agent_turns WHERE session_id IN (?, ?)', gone.session, x.id) >= 2)
+  r.agents.deleteSession('claude_code', gone.session)
+  r.agents.deleteSession('codex', x.id)
+
+  const later = lines(claude.prompt(gone, sec(20), 'later', { uuid: 'later' }), claude.assistant(gone, sec(22), 'end_turn'))
+  const inode = statSync(file).ino
+  rmSync(file)
+  writeFileSync(`${file}.new`, body + later)
+  renameSync(`${file}.new`, file)
+  assert.notEqual(statSync(file).ino, inode)
+  writeFileSync(claudeFile(r.home, gone, '-home-me-code-project-beta'), body + later)
+  rmSync(xfile)
+  writeFileSync(xfile, xbody)
+  const copyDir = path.join(r.home, '.codex', 'sessions', '2026', '10', '15')
+  mkdirSync(copyDir, { recursive: true })
+  writeFileSync(path.join(copyDir, path.basename(xfile)), xbody)
+
+  const again = r.reader()
+  await again.start()
+  await again.stop()
+  for (const table of ['agent_sessions', 'agent_turns', 'agent_events']) {
+    assert.equal(r.count(`SELECT count(*) AS n FROM ${table} WHERE session_id IN (?, ?)`, gone.session, x.id), 0, table)
+  }
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id IN (?, ?) AND state IS NOT NULL', gone.session, x.id), 0, 'no parser state is kept for a deleted session')
+  r.store.close()
+})
+
+test('the first read merges nothing from a deleted session', async () => {
+  const r = rig()
+  const keep = claudeCtx()
+  const gone = claudeCtx()
+  writeFileSync(claudeFile(r.home, keep), lines(claude.prompt(keep, sec(0), 'keep', { uuid: 'keep' }), claude.assistant(keep, sec(2), 'end_turn')))
+  writeFileSync(claudeFile(r.home, gone), lines(claude.prompt(gone, sec(5), 'gone', { uuid: 'gone' }), claude.assistant(gone, sec(7), 'end_turn')))
+  r.agents.deleteSession('claude_code', gone.session)
+  let merged = false
+  const reader = r.reader({ backfill: async (roots) => (merged = (await backfill(r.store.database, r.data, roots, () => {})).merged) })
+  await reader.start()
+  await reader.stop()
+  assert.ok(merged, 'the first read went through the staging merge')
+  assert.ok(r.count('SELECT count(*) AS n FROM agent_turns WHERE session_id = ?', keep.session) > 0)
+  for (const table of ['agent_sessions', 'agent_turns', 'agent_events']) {
+    assert.equal(r.count(`SELECT count(*) AS n FROM ${table} WHERE session_id = ?`, gone.session), 0, table)
+  }
+  assert.equal(r.count('SELECT count(*) AS n FROM agent_sources WHERE session_id = ? AND state IS NOT NULL', gone.session), 0)
+  r.store.close()
+})
+
 test('the first read uses bounded slices and preserves the same rows as an in-process read', async () => {
   const build = (home: string) => {
     const c = claudeCtx({ session: '33333333-3333-4333-8333-333333333333' })

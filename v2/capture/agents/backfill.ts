@@ -149,6 +149,7 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
     return nextWithheld(spans, start) ?? at
   })
   db.function('agent_end', { deterministic: false }, (start: number, at: number | null) => (at === null || admitsSpan(spans, start, at) ? at : null))
+  const live = (t: string) => `NOT EXISTS (SELECT 1 FROM main.agent_deleted_sessions d WHERE d.agent = ${t}.agent AND d.session_id = ${t}.session_id)`
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
     // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
@@ -156,16 +157,16 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
     db.transaction(() => {
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
-          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions WHERE agent_admits(first_wall_ms)
+          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(first_wall_ms) AND ${live('s')}
           ON CONFLICT (agent, session_id) DO UPDATE SET first_wall_ms = min(first_wall_ms, excluded.first_wall_ms), last_wall_ms = max(last_wall_ms, excluded.last_wall_ms);
         INSERT INTO agent_turns (agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms)
-          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns WHERE agent_admits(start_wall_ms)
+          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns s WHERE agent_admits(start_wall_ms) AND ${live('s')}
           ON CONFLICT (agent, turn_key) DO NOTHING;
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
-          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms)
+          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms) AND ${live('s')}
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
-          SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources WHERE true
+          SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN ${live('s')} THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE true
           ON CONFLICT (path) DO NOTHING;
       `)
     })()
