@@ -79,6 +79,15 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `fixtures/valid.json` holds one golden line per kind and platform; `fixtures/invalid.json` holds lines the service must reject, with the reason. The TypeScript validator, the Swift encoder and the C# encoder are all tested against these files.
 
+## One-shot commands
+
+The service also runs the macOS capture helper for single answers. Each prints its answer on stdout and exits; none of them captures anything.
+
+- `<helper> --host-of <pid>...` names the app each process runs in, for agent sessions. One JSON line per pid: `{"pid":<n>,"basis":"responsible"|"parent"|"none","app":{"app_id","name","path","pid"}|null}`. `responsible`: the process macOS holds responsible for it is a running app with a bundle (not the process itself). `parent`: the nearest app among its parent processes, the process itself excluded. `none`: neither; `app` is `null`. `--no-responsibility` skips the responsible-process call. The service waits at most 5 s; a pid with no valid line gets no answer, and its session's app stays unknown. macOS only; on other platforms every session's app is unknown.
+- `<helper> --responsible-pid <pid>...` prints, per pid, the pid macOS holds responsible for that process and the pid asked about, tab-separated (`-` when unknown). The capture helper re-executes itself at start with that responsibility disclaimed, so it is responsible for itself and holds its own window-title permission; this command checks that.
+- `<helper> --ordering-point` prints `{"boot","mono_us","boot_identity"}` for the moment it runs.
+- `--tcp-peer` and `--secret` are described under [Local connection](#local-connection).
+
 ## Browser host
 
 The Daylens browser extension talks to a native messaging host: the capture helper started by the browser, which then forwards to the capture service. The helper runs as the host only when the browser starts it with an extension origin (Chromium: `chrome-extension://<id>/`, plus `--parent-window=` on Windows; Firefox: the host manifest path and the add-on ID) and the ID is on the helper's allowlist. In this mode it captures nothing.
@@ -87,8 +96,8 @@ The Daylens browser extension talks to a native messaging host: the capture help
 
 - The capture service listens on a local endpoint. macOS and Linux: a Unix socket, `<per-user temp folder>/daylens-v2/browser.sock` (macOS: `confstr(_CS_DARWIN_USER_TEMP_DIR)`; Linux: `$XDG_RUNTIME_DIR`), in a folder only the user can open, socket mode 0600. Windows: the named pipe `\\.\pipe\daylens-v2-browser-<user name>`. `DAYLENS_V2_BROWSER_SOCKET` overrides the path for both sides.
 - The host checks that the listener runs as the same user (`getpeereid` on macOS, the pipe server's process token on Windows) before sending anything.
-- Host to service: one JSON line per message, UTF-8, at most 16 KiB. A line is either a protocol line of kind `tab` with the host's own `run` and `seq`, or a control op: `{"op":"pause","for":"hour"|"tomorrow"|"until_resumed"}`, `{"op":"resume"}`, `{"op":"status"}`.
-- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change and in answer to `status`; `{"op":"snapshot","epoch":<n>|null}` when the service needs the present state (a new app or window came to the front, or lines were lost). The host passes `epoch` to the extension, and the extension's answer carries it back.
+- Host to service: one JSON line per message, UTF-8, at most 16 KiB. A line is either a protocol line of kind `tab` with the host's own `run` and `seq`, or a control op: `{"op":"browser_pause","until_wall_ms":<ms>|null,"browser":<app identity>}`, `{"op":"browser_resume","browser":<app identity>}`, `{"op":"status"}`. A pause or resume always names the browser that started the host, with the identity the host stamps on its `tab` lines; it pauses that browser only (its pages and its windows), never the rest of Daylens. `until_wall_ms` `null` means until resumed. The service refuses a browser it cannot name.
+- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change, in answer to `status` and after a pause or resume it carried out, where `capture` says whether all of Daylens is paused; `{"op":"error","for":<op>}` when a pause or resume failed; `{"op":"snapshot","epoch":<n>|null}` when the service needs the present state (a new app or window came to the front, or lines were lost). The host passes `epoch` to the extension, and the extension's answer carries it back.
 - A host that cannot reach the service retries on every extension message, and on macOS when the socket folder changes; on Windows every 30 s.
 
 ### `tab`
