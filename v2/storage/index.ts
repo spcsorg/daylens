@@ -9,7 +9,7 @@ import { ChangeBus, type ChangeKind } from './changes.ts'
 import { DeletionWorker, fenceEdges, fenceGaps, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { readFacts, type HourFacts } from './facts.ts'
-import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
+import { clearHoursCitingSession, indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
 import { planAgentDeletion } from './agentDeletion.ts'
 import type { Span } from '../capture/agents/withheld.ts'
@@ -39,6 +39,8 @@ export interface HourInput {
   outcome?: string | null
   suggestion?: string | null
   sources?: HourSource[]
+  // The observations the text rests on; their apps and sites are added to the sources deletions match on.
+  observations?: number[]
   writer?: string | null
 }
 
@@ -456,7 +458,12 @@ export class Storage {
   /** Deletes one agent session for good (one a deleted app's confirmation offered); resolves once it is purged. */
   async deleteAgentSession(agent: Agent, session: string): Promise<boolean> {
     if (!this.agentTables()) return true
-    this.privacyWrite(true, () => this.bus.commit('deletion', { agent_session: true }, () => deleteAgentSession(this.db, agent, session, this.now())))
+    this.privacyWrite(true, () =>
+      this.bus.commit('deletion', { agent_session: true }, () => {
+        deleteAgentSession(this.db, agent, session, this.now())
+        clearHoursCitingSession(this.db, agent, session, this.now())
+      }),
+    )
     return (await this.store.purgeFile?.()) ?? false
   }
 
@@ -654,7 +661,8 @@ export class Storage {
     this.flushOrThrow()
     const start = h.start_wall_ms
     const end = start + HOUR_MS
-    const sources = h.sources ?? []
+    const observations = [...new Set(h.observations ?? [])]
+    const sources = this.citedSources(h.sources ?? [], observations)
     const current = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(start) as { version: number } | undefined
     if ((current?.version ?? null) !== basis.version) throw new StaleHourError('the hour changed after this text was computed')
     for (const t of this.rules.tombstones) {
@@ -680,15 +688,16 @@ export class Storage {
         outcome: h.outcome ?? null,
         suggestion: h.suggestion ?? null,
         sources: JSON.stringify(sources),
+        observations: JSON.stringify(observations),
         writer: h.writer ?? null,
         now: this.now(),
       }
       const row = this.db
         .prepare(
-          `INSERT INTO hours (start_wall_ms, end_wall_ms, tz, status, title, summary, detail, outcome, sources, suggestion, writer, updated_wall_ms)
-           VALUES (@start, @end, @tz, @status, @title, @summary, @detail, @outcome, @sources, @suggestion, @writer, @now)
+          `INSERT INTO hours (start_wall_ms, end_wall_ms, tz, status, title, summary, detail, outcome, sources, observations, suggestion, writer, updated_wall_ms)
+           VALUES (@start, @end, @tz, @status, @title, @summary, @detail, @outcome, @sources, @observations, @suggestion, @writer, @now)
            ON CONFLICT (start_wall_ms) DO UPDATE SET tz = excluded.tz, status = excluded.status, title = excluded.title, summary = excluded.summary,
-             detail = excluded.detail, outcome = excluded.outcome, sources = excluded.sources, suggestion = excluded.suggestion,
+             detail = excluded.detail, outcome = excluded.outcome, sources = excluded.sources, observations = excluded.observations, suggestion = excluded.suggestion,
              writer = excluded.writer, version = version + 1, needs_rewrite = 0, updated_wall_ms = excluded.updated_wall_ms
            RETURNING id`,
         )
@@ -697,6 +706,35 @@ export class Storage {
       return row.id
     })
     return this.hour(id)!
+  }
+
+  // A cited observation or agent session that is no longer recorded was deleted (or never existed): the text is refused.
+  private citedSources(given: HourSource[], observations: number[]): HourSource[] {
+    const out = [...given]
+    const seen = new Set(given.map((s) => JSON.stringify(s)))
+    const add = (s: HourSource) => {
+      const k = JSON.stringify(s)
+      if (seen.has(k)) return
+      seen.add(k)
+      out.push(s)
+    }
+    const row = this.db.prepare('SELECT app_id, url FROM observations WHERE id = ?')
+    for (const id of observations) {
+      const o = row.get(id) as { app_id: string | null; url: string | null } | undefined
+      if (!o) throw new DeletedMaterialError('this hour cites an observation that is no longer recorded')
+      if (o.app_id) add({ app_id: o.app_id })
+      const site = siteOf(o.url)
+      if (site) add({ site })
+    }
+    const agents = this.agentTables()
+    for (const s of given) {
+      if (s.agent === undefined && s.session === undefined) continue
+      if (!agents || !s.agent || !s.session) throw new DeletedMaterialError('this hour cites an agent session that is not recorded')
+      if (this.db.prepare('SELECT 1 FROM agent_deleted_sessions WHERE agent = ? AND session_id = ?').get(s.agent, s.session)) {
+        throw new DeletedMaterialError('this hour cites a deleted agent session')
+      }
+    }
+    return out
   }
 
   /** The hour as every screen shows it: the user's latest correction of a field wins over the written text. */

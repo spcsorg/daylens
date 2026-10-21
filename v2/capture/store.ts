@@ -8,7 +8,7 @@ import type { Line, LineOf } from './protocol.ts'
 import { isBusy } from '../storage/tx.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 const FLUSH_INTERVAL_MS = 1000
 // The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
 export const MAX_ROW_SPAN_MS = 7 * 86_400_000
@@ -300,6 +300,7 @@ export class Store implements Sink {
       if (v === 1) v = this.migrateV1()
       if (v === 2) v = this.migrateV2()
       if (v === 3) v = this.migrateV3()
+      if (v === 4) v = this.migrateV4()
       if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
     }
     this.seedExclusions()
@@ -384,6 +385,13 @@ export class Store implements Sink {
     }
     this.db.prepare(`UPDATE capture_gaps SET end_wall_ms = max(?, start_wall_ms) WHERE reason = 'paused' AND end_wall_ms IS NULL`).run(end)
     this.db.prepare(`DELETE FROM meta WHERE key = 'pause'`).run()
+  }
+
+  // v5: hours cite the observations they rest on (storage adds the column). An older build would rewrite an hour
+  // and keep the previous text's citations, so it must refuse this database.
+  private migrateV4(): number {
+    this.db.prepare(`UPDATE meta SET value = '5' WHERE key = 'schema_version'`).run()
+    return 5
   }
 
   private seedExclusions(): void {

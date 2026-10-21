@@ -9,6 +9,9 @@ export const HOUR_FIELDS: readonly HourField[] = ['title', 'summary', 'detail', 
 export interface HourSource {
   app_id?: string
   site?: string
+  // An agent session the hour draws on; deleting the session clears the hour.
+  agent?: string
+  session?: string
 }
 
 export interface Hour {
@@ -23,6 +26,8 @@ export interface Hour {
   outcome: string | null
   suggestion: string | null
   sources: HourSource[]
+  // The observations every claim rests on.
+  observations: number[]
   writer: string | null
   version: number
   needs_rewrite: boolean
@@ -58,9 +63,9 @@ export function readHour(db: Database.Database, id: number): Hour | null {
 }
 
 function readHourNow(db: Database.Database, id: number): Hour | null {
-  const h = db.prepare('SELECT * FROM hours WHERE id = ?').get(id) as (Omit<Hour, 'sources' | 'needs_rewrite' | 'corrected'> & { sources: string; needs_rewrite: number }) | undefined
+  const h = db.prepare('SELECT * FROM hours WHERE id = ?').get(id) as (Omit<Hour, 'sources' | 'observations' | 'needs_rewrite' | 'corrected'> & { sources: string; observations: string; needs_rewrite: number }) | undefined
   if (!h) return null
-  const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }
+  const out: Hour = { ...h, sources: JSON.parse(h.sources) as HourSource[], observations: JSON.parse(h.observations) as number[], needs_rewrite: h.needs_rewrite === 1, corrected: [] }
   const fence = pendingVerdict(out, pendingTombstones(db))
   // A deletion that fenced this hour when planned applies even after it has cleared the hour's sources.
   for (const t of fencedBy(db, 'hour', id)) {
@@ -73,7 +78,7 @@ function readHourNow(db: Database.Database, id: number): Hour | null {
   if (fence.verdict === 'removed') return null
   if (fence.verdict === 'cleared') {
     for (const f of HOUR_FIELDS) out[f] = null
-    return { ...out, status: 'facts', writer: null, needs_rewrite: true, sources: out.sources.filter((s) => !fence.by.some((t) => sourceMatches(t, s))) }
+    return { ...out, status: 'facts', writer: null, needs_rewrite: true, observations: [], sources: out.sources.filter((s) => !fence.by.some((t) => sourceMatches(t, s))) }
   }
   const active = db.prepare('SELECT field, text FROM corrections WHERE hour_id = ? AND undone_wall_ms IS NULL ORDER BY id').all(id) as { field: HourField; text: string }[]
   for (const c of active) {
@@ -110,11 +115,22 @@ export function sourceMatches(t: Pick<Tombstone, 'kind' | 'app_id' | 'site'>, s:
 
 // The hour's text and the corrections on it may describe the deleted material; both go, and the hour waits for a rewrite.
 export function clearHour(db: Database.Database, id: number, sources: HourSource[], t: Pick<Tombstone, 'kind' | 'app_id' | 'site'>, nowWallMs: number): void {
-  const kept = sources.filter((s) => !sourceMatches(t, s))
+  clearHourKeeping(db, id, sources.filter((s) => !sourceMatches(t, s)), nowWallMs)
+}
+
+/** Every hour that draws on a deleted agent session loses its text, as for any other deleted source. */
+export function clearHoursCitingSession(db: Database.Database, agent: string, session: string, nowWallMs: number): number {
+  const rows = db.prepare(`SELECT h.id, h.sources FROM hours h, json_each(h.sources) s WHERE json_extract(s.value, '$.agent') = ? AND json_extract(s.value, '$.session') = ?`).all(agent, session) as { id: number; sources: string }[]
+  for (const h of rows) clearHourKeeping(db, h.id, (JSON.parse(h.sources) as HourSource[]).filter((s) => !(s.agent === agent && s.session === session)), nowWallMs)
+  return rows.length
+}
+
+// The cited observations go too: the rewrite cites what is left.
+function clearHourKeeping(db: Database.Database, id: number, kept: HourSource[], nowWallMs: number): void {
   db.prepare('DELETE FROM corrections WHERE hour_id = ?').run(id)
   db.prepare(
     `UPDATE hours SET status = 'facts', title = NULL, summary = NULL, detail = NULL, outcome = NULL, suggestion = NULL, writer = NULL,
-       sources = ?, needs_rewrite = 1, version = version + 1, updated_wall_ms = ? WHERE id = ?`,
+       sources = ?, observations = '[]', needs_rewrite = 1, version = version + 1, updated_wall_ms = ? WHERE id = ?`,
   ).run(JSON.stringify(kept), nowWallMs, id)
   indexHour(db, id)
 }

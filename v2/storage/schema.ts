@@ -368,6 +368,11 @@ const deletionAgent: Migration = {
     `),
 }
 
+const hourObservations: Migration = {
+  name: 'hour_observations',
+  up: (db) => db.exec(`ALTER TABLE hours ADD COLUMN observations TEXT NOT NULL DEFAULT '[]'`),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -394,4 +399,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   observationsByPresenceKind,
   exclusionPeriods,
   deletionAgent,
+  hourObservations,
 ]
