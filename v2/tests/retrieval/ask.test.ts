@@ -119,6 +119,25 @@ test('the limits cap what is sent, and captured text reaches the AI only as data
   s.close()
 })
 
+test('when the limits leave part of the record out, the AI is told how much, and told not to claim only, first, last or never', async () => {
+  const s = setup()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR))
+  for (let h = 1; h < 8; h++) s.r.feed(focus(notes, `Budget sheet ${h}`, T0 + h * HOUR, 'app_changed'))
+  s.r.store.flush()
+  const seen: AskRequest[] = []
+  const model = fakeModel(() => ({ answerable: false, statements: [] }), seen)
+  await ask('when did I open the budget sheet', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, { maxHours: 3, maxSources: 4, perGroup: 10 })
+  await ask('what did I do yesterday?', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, { maxHours: 3, maxSources: 4, perGroup: 10 })
+  await ask('what did I do yesterday?', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 100, perGroup: 10 })
+  const sent = seen.map((r) => JSON.parse(r.prompt) as { hours: unknown[]; hours_not_sent: number; sources_not_sent: number })
+  assert.deepEqual(sent.map((r) => [r.hours.length, r.hours_not_sent]), [[3, 5], [3, 5], [8, 0]])
+  assert.ok(sent[0]!.sources_not_sent > 0 && sent[1]!.sources_not_sent > 0)
+  assert.equal(sent[2]!.sources_not_sent, 0)
+  assert.match(seen[0]!.system, /"hours_not_sent" or "sources_not_sent" is above 0.*never say something happened only, first, last/)
+  s.close()
+})
+
 test('a failed AI call is reported, not swallowed, and nothing is charged', async () => {
   const s = setup()
   const failing: AskModel = { name: 'Fake', provider: 'fake', run: async () => Promise.reject(new Error('quota reached')) }
