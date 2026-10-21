@@ -1,17 +1,15 @@
 // Synthetic Claude Code and Codex log lines. Field order follows the real formats, because the readers classify
 // bulk records from the start of a line. No real log content is used anywhere in these tests.
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import type { AgentRecord, LineParser } from '../../capture/agents/types.ts'
+import { tempDir } from '../support/tmp.ts'
 
 export const T0 = Date.parse('2026-10-14T18:00:00.000Z')
 export const iso = (ms: number) => new Date(ms).toISOString()
 export const sec = (s: number) => T0 + s * 1000
 
 export function tmp(prefix = 'daylens-v2-agents-'): string {
-  return mkdtempSync(path.join(os.tmpdir(), prefix))
+  return tempDir(prefix)
 }
 
 export function run(parser: LineParser, lines: string[]): AgentRecord[] {

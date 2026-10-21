@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { DB_FILE, Store } from '../capture/store.ts'
 import { Storage } from '../storage/index.ts'
+import { tempDir } from './support/tmp.ts'
 
 const KEY = 'K'.repeat(43)
 
@@ -17,7 +17,7 @@ function open(dir: string, errors: string[], busyTimeoutMs?: number): { store: S
 }
 
 function withLegacyKey(): { dir: string; store: Store; errors: string[]; close: () => void } {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-fail-'))
+  const dir = tempDir('dl-scrub-fail-')
   const errors: string[] = []
   const { store, close } = open(dir, errors, 100)
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), key: KEY, origin: 'chrome-extension://x', paired_wall_ms: 1 }]))
@@ -64,7 +64,7 @@ test('a scrub whose marker write is blocked by another writer stays pending unti
 })
 
 test('a full queue drops neither the migration write nor the scrub marker, so the key really leaves the files', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-overflow-'))
+  const dir = tempDir('dl-scrub-overflow-')
   const errors: string[] = []
   const { store, close } = open(dir, errors, 50)
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), key: KEY, origin: 'chrome-extension://x', paired_wall_ms: 1 }]))
@@ -85,7 +85,7 @@ test('a full queue drops neither the migration write nor the scrub marker, so th
 })
 
 test('a scrub stays pending while a pairing row or any file still holds a key, even with the marker committed', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-verify-'))
+  const dir = tempDir('dl-scrub-verify-')
   const { store, close } = open(dir, [])
   store.setMeta('browser_pairings', JSON.stringify([{ id: 'A'.repeat(22), key: KEY, origin: 'chrome-extension://x', paired_wall_ms: 1 }]))
   assert.equal(await store.scrub([KEY]), false, 'the key is still in the row')

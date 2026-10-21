@@ -1,8 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import net from 'node:net'
-import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { BrowserPages } from '../capture/browser.ts'
@@ -13,6 +12,7 @@ import { ServiceNormalizer } from '../capture/pipeline.ts'
 import { DB_FILE, Store } from '../capture/store.ts'
 import { Storage } from '../storage/index.ts'
 import { app, focus } from './support/lines.ts'
+import { tempDir } from './support/tmp.ts'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -53,7 +53,7 @@ function client(p: string): Promise<{ sock: net.Socket; got: Record<string, unkn
 }
 
 test('host lines over the socket become page rows; storage pauses reach the host and refuse its lines', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-bs-'))
+  const dir = tempDir('dl-bs-')
   const store = new Store(path.join(dir, 'data'))
   const storage = new Storage(store, path.join(dir, 'data'))
   const privacy = new Privacy(store.exclusions())
@@ -119,7 +119,7 @@ test('host lines over the socket become page rows; storage pauses reach the host
 })
 
 test('a v2 database gains page addresses and site exclusions', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-mig-'))
+  const dir = tempDir('dl-mig-')
   const db = new Database(path.join(dir, DB_FILE))
   db.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -147,7 +147,7 @@ test('a v2 database gains page addresses and site exclusions', () => {
 })
 
 test('a database from the extension builds at version 3 opens, gains the run boot identity, and the pause that build kept ends', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-mig-ext-'))
+  const dir = tempDir('dl-mig-ext-')
   const T = 1_792_130_400_000
   new Store(dir, { now: () => T }).close()
   const db = new Database(path.join(dir, DB_FILE))

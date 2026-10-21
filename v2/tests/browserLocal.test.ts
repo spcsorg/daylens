@@ -14,6 +14,7 @@ import { ServiceNormalizer } from '../capture/pipeline.ts'
 import { app, focus } from './support/lines.ts'
 import { MemoryPause } from './support/memoryPause.ts'
 import { MemorySink } from './support/memorySink.ts'
+import { tempDir } from './support/tmp.ts'
 
 const ORIGIN = 'chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg'
 const chrome = app('com.google.Chrome', { pid: 500, registered_browser: true, name: 'Google Chrome' })
@@ -438,12 +439,12 @@ test('a pairing whose secret is gone from secure storage is unpaired, never trus
 
 
 test('after a legacy key moves to secure storage, its bytes are gone from the database files', async () => {
-  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const { readFileSync, existsSync } = await import('node:fs')
   const os = await import('node:os')
   const path = await import('node:path')
   const { Store, DB_FILE } = await import('../capture/store.ts')
   const { Storage } = await import('../storage/index.ts')
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-'))
+  const dir = tempDir('dl-scrub-')
   const store = new Store(dir)
   const storage = new Storage(store, dir)
   const pairing = newPairing(ORIGIN)
@@ -462,12 +463,12 @@ test('after a legacy key moves to secure storage, its bytes are gone from the da
 })
 
 test('a scrub blocked by an open reader stays pending, shows in health, and finishes once the reader is gone', async () => {
-  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const { readFileSync, existsSync } = await import('node:fs')
   const os = await import('node:os')
   const path = await import('node:path')
   const { Store, DB_FILE } = await import('../capture/store.ts')
   const { Storage } = await import('../storage/index.ts')
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-scrub-busy-'))
+  const dir = tempDir('dl-scrub-busy-')
   const store = new Store(dir)
   const storage = new Storage(store, dir)
   const pairing = newPairing(ORIGIN)

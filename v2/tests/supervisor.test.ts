@@ -1,12 +1,12 @@
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Normalizer, Privacy } from '../capture/normalize.ts'
 import { Store } from '../capture/store.ts'
 import { Supervisor, type SupervisorOptions } from '../capture/supervisor.ts'
+import { tempDir } from './support/tmp.ts'
 
 const FAKE = fileURLToPath(new URL('./support/fakeHelper.ts', import.meta.url))
 const CANARY = 'CANARY-91be-private-page'
@@ -28,7 +28,7 @@ async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
 }
 
 function harness(env: Record<string, string>, opts: Partial<SupervisorOptions> = {}) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-sup-'))
+  const dir = tempDir('daylens-v2-sup-')
   const logs: string[] = []
   const store = new Store(dir, { onError: (c) => logs.push(`storage ${c}`) })
   const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
@@ -96,7 +96,7 @@ test('a window kept in front with no change reported is still in front at each h
 })
 
 test('idle input ends the row in front, and when input returns the helper is asked for a fresh read', async () => {
-  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
+  const snapfile = path.join(tempDir('daylens-v2-snap-'), 'snaps')
   const h = harness({ FAKE_MODE: 'idle_cycle', FAKE_AFTER_MS: '300', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })
   h.sup.start()
   await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 2)
@@ -141,7 +141,7 @@ test('after a helper crash, the new helper\'s snapshot and heartbeats never reop
 })
 
 test('when the display comes back on, the helper is asked for a fresh read of the window in front', async () => {
-  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
+  const snapfile = path.join(tempDir('daylens-v2-snap-'), 'snaps')
   const h = harness({ FAKE_MODE: 'display_cycle', FAKE_AFTER_MS: '200', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })
   h.sup.start()
   await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 2)
@@ -216,7 +216,7 @@ test('a missing helper binary is helper_unavailable, not a crash loop', async ()
 })
 
 test('lost lines are recorded and a fresh snapshot is requested', async () => {
-  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'snap-')), 'snaps')
+  const snapfile = path.join(tempDir('snap-'), 'snaps')
   const h = harness({ FAKE_MODE: 'skip_seq', FAKE_SNAPFILE: snapfile })
   h.sup.start()
   await waitFor(() => h.sup.stats.linesLost > 0)
@@ -292,7 +292,7 @@ test('a stuck title worker restarts the helper even while heartbeats continue, a
 })
 
 test('when the title channel recovers, a forced snapshot replaces the possibly stale title', async () => {
-  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'snap-')), 'snaps')
+  const snapfile = path.join(tempDir('snap-'), 'snaps')
   const h = harness({ FAKE_MODE: 'titles_recover', FAKE_AFTER_MS: '600', FAKE_SNAPFILE: snapfile, FAKE_FOCUS_MS: '100000' })
   h.sup.start()
   await waitFor(() => h.gaps().some((g) => g.reason === 'titles_unavailable' && g.end_wall_ms !== null))

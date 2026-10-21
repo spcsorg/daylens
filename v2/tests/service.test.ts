@@ -1,12 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { DB_FILE } from '../capture/store.ts'
+import { tempDir } from './support/tmp.ts'
 
 const SERVICE = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
 const FAKE = fileURLToPath(new URL('./support/fakeHelper.ts', import.meta.url))
@@ -60,7 +60,7 @@ async function stopService(proc: ChildProcess): Promise<void> {
 }
 
 function setup() {
-  const work = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-svc-'))
+  const work = tempDir('daylens-v2-svc-')
   return { work, dataDir: path.join(work, 'data') }
 }
 

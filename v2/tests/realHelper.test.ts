@@ -2,13 +2,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { parseLine } from '../capture/protocol.ts'
 import { DB_FILE } from '../capture/store.ts'
+import { tempDir } from './support/tmp.ts'
 
 const HELPER = fileURLToPath(new URL('../native/macos/.build/release/daylens-capture-macos', import.meta.url))
 const SERVICE = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
@@ -88,7 +88,7 @@ test('closing stdin makes the real helper exit at once', { skip }, async () => {
 })
 
 test('kill -9 of the real helper: crash gap, restart, recovery', { skip }, async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const dir = tempDir('daylens-v2-real-')
   const svc = startService(dir)
   await waitFor(() => svc.log().includes('helper hello'))
   await sleep(1500)
@@ -106,7 +106,7 @@ test('kill -9 of the real helper: crash gap, restart, recovery', { skip }, async
 })
 
 test('a frozen real helper (SIGSTOP) is detected as hung, replaced, and the gap explained', { skip }, async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const dir = tempDir('daylens-v2-real-')
   const svc = startService(dir)
   await waitFor(() => svc.log().includes('helper hello'))
   await sleep(1500)
@@ -123,7 +123,7 @@ test('a frozen real helper (SIGSTOP) is detected as hung, replaced, and the gap 
 })
 
 test('a real helper whose title worker is stuck while its main loop lives is restarted, with a bounded titles gap', { skip }, async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-real-'))
+  const dir = tempDir('daylens-v2-real-')
   const svc = startService(dir, { DAYLENS_CAPTURE_FAULT: 'block_titles' })
   await waitFor(() => svc.log().includes('title worker stuck') && (svc.log().match(/helper hello/g) ?? []).length >= 2)
   await sleep(500)
@@ -174,7 +174,7 @@ test('the real helper reports the OS-verified Team ID of a running signed app, a
 })
 
 test('with the real helper, a window kept in front stays recorded past its focus line, heartbeat by heartbeat', { skip }, async (t) => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-steady-'))
+  const dir = tempDir('daylens-v2-steady-')
   // Idle never starts in this run, whoever is at this Mac.
   const { proc } = startService(dir, {}, ['--idle-threshold-s', '86400'])
   const started = Date.now()

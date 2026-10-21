@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -9,12 +9,13 @@ import { Normalizer, Privacy } from '../capture/normalize.ts'
 import { assertNotV1, DB_FILE, Store, type StoreHealth } from '../capture/store.ts'
 import { wireStorageRecovery } from '../capture/supervisor.ts'
 import { app, focus, line } from './support/lines.ts'
+import { tempDir } from './support/tmp.ts'
 
 const T0 = 1_792_130_000_000
 const CANARY = 'CANARY-5c1d-browser-title'
 
 function tmp(): string {
-  return mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-store-'))
+  return tempDir('daylens-v2-store-')
 }
 
 test('the V1 data folders and database files are refused', () => {

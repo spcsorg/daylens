@@ -1,17 +1,17 @@
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
-import os from 'node:os'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Normalizer, Privacy, type OrderingPoint } from '../../capture/normalize.ts'
 import type { Line } from '../../capture/protocol.ts'
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
+import { tempDir } from '../support/tmp.ts'
 
 export const T0 = 1_792_130_400_000 // an hour boundary in Africa/Kigali (UTC+2)
 export const MIN = 60_000
 export const HOUR = 60 * MIN
 
 export function tmpDir(): string {
-  return mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-storage-'))
+  return tempDir('daylens-v2-storage-')
 }
 
 /** A store, storage and normalizer wired the way the capture service wires them, on a clock the test moves. */
