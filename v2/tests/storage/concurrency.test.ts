@@ -442,7 +442,7 @@ test('contention that outlasts the report threshold shows in health while retrie
     await new Promise((resolve) => setTimeout(resolve, 400))
     assert.equal(store.storeHealth().contendedSinceWallMs, null)
     assert.equal(store.storeHealth().pendingOps, 0)
-    assert.deepEqual(errors, [])
+    assert.deepEqual(errors, ['write_contended'], 'reported once, when it passed the threshold')
   } finally {
     if (blocker.inTransaction) blocker.exec('COMMIT')
     blocker.close()

@@ -46,6 +46,9 @@ const heartbeatS = Number(values['heartbeat-s'])
 const log = (msg: string) => process.stderr.write(`[capture] ${msg}\n`)
 const dataDir = values['data-dir'] ?? defaultDataDir()
 const store = new Store(dataDir, { onError: (code) => log(`storage error code=${code}`) })
+// The app reads this from stdout: whether capture's writes fail, are held off by another writer, were dropped, or
+// still owe a scrub. Written whenever one of those changes, and once at the first write.
+store.onHealth = (h) => process.stdout.write(JSON.stringify({ op: 'capture_health', store: h }) + '\n')
 const storage = new Storage(store, dataDir, {
   onError: (code) => log(`storage error code=${code}`),
   orderingPoint: () => readOrderingPoint(values.helper!, values['helper-arg'] ?? [], log),

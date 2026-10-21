@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { Normalizer, Privacy } from '../capture/normalize.ts'
-import { assertNotV1, DB_FILE, Store } from '../capture/store.ts'
+import { assertNotV1, DB_FILE, Store, type StoreHealth } from '../capture/store.ts'
 import { wireStorageRecovery } from '../capture/supervisor.ts'
 import { app, focus, line } from './support/lines.ts'
 
@@ -160,6 +160,33 @@ test('a long storage outage that overflows the queue is recorded as a gap', () =
   n.handle(focus(app('com.apple.Terminal', { pid: 11 }), 't11', T0 + 70_000, 'reconcile'))
   store.flush()
   assert.equal(store.query<{ c: number }>(`SELECT count(*) AS c FROM observations WHERE title = 't11'`)[0]!.c, 1, 'the open row is re-inserted, not extended into a dropped id')
+  store.close()
+})
+
+test('a full write queue and writes held off by another writer are reported, and so is their end', () => {
+  const dir = tmp()
+  let now = T0
+  const errors: string[] = []
+  const store = new Store(dir, { busyTimeoutMs: 10, maxPendingOps: 5, contentionReportMs: 0, now: () => now, onError: (c) => errors.push(c) })
+  const health: StoreHealth[] = []
+  store.onHealth = (h) => health.push(h)
+  const n = new Normalizer(store)
+  const blocker = new Database(path.join(dir, DB_FILE))
+  blocker.exec('BEGIN EXCLUSIVE')
+  for (let i = 0; i < 12; i++) n.handle(focus(app('com.apple.Terminal', { pid: i }), `t${i}`, T0 + i))
+  store.flush()
+  assert.deepEqual(errors, ['write_queue_full', 'write_contended'])
+  const during = health.at(-1)!
+  assert.equal(during.droppedOps, 7)
+  assert.equal(during.contendedSinceWallMs, T0)
+  now = T0 + 60_000
+  blocker.exec('COMMIT')
+  blocker.close()
+  store.flush()
+  const after = health.at(-1)!
+  assert.equal(after.contendedSinceWallMs, null, 'the end of the contention is published')
+  assert.equal(after.droppedOps, 7, 'what was dropped stays in health')
+  assert.deepEqual(errors, ['write_queue_full', 'write_contended'], 'each is reported once per episode')
   store.close()
 })
 

@@ -255,6 +255,10 @@ export class Store implements Sink {
   private readonly releaseLock: () => void
   onOverflow: () => void = () => {}
   onRecovered: () => void = () => {}
+  // Store health, each time whether writes fail, are held off, were dropped or owe a scrub changes.
+  onHealth: (health: StoreHealth) => void = () => {}
+  private reported = ''
+  private contentionReported = false
   // Storage decides what may be written (pause, tombstones); a refused observation is never queued.
   acceptObservation: (row: ObservationRow) => boolean = () => true
   // Whether a row may be extended from its current last sighting to a later one (nothing forbidden in between).
@@ -478,6 +482,7 @@ export class Store implements Sink {
   private scrubPending(): boolean {
     this.health.scrubPending = true
     this.onError('scrub_failed')
+    this.publishHealth()
     if (!this.scrubTimer) {
       this.scrubTimer = setInterval(() => void this.retryScrub(), SCRUB_RETRY_MS)
       this.scrubTimer.unref?.()
@@ -490,6 +495,7 @@ export class Store implements Sink {
     this.health.scrubPending = false
     if (this.scrubTimer) clearInterval(this.scrubTimer)
     this.scrubTimer = null
+    this.publishHealth()
     return true
   }
 
@@ -697,8 +703,10 @@ export class Store implements Sink {
         this.droppedSinceFailure++
         if (!this.overflowing) {
           this.overflowing = true
+          this.onError('write_queue_full')
           this.onOverflow()
         }
+        this.publishHealth()
       }
     }
     this.pending.push({ sql, params, ...metadata })
@@ -777,6 +785,7 @@ export class Store implements Sink {
     try {
       return this.flushNow()
     } finally {
+      this.publishHealth()
       if (--this.flushDepth === 0) {
         this.db.pragma(`busy_timeout = ${busyTimeout}`)
         if ((!this.contended || this.closing || !this.writerYields()) && this.writeHeld) {
@@ -873,7 +882,14 @@ export class Store implements Sink {
 
   private retryContention(): false {
     this.contended = true
-    if (this.contention === null) this.contention = { sinceWallMs: this.now(), sinceMono: performance.now(), waitMs: CONTENTION_RETRY_MS }
+    if (this.contention === null) {
+      this.contention = { sinceWallMs: this.now(), sinceMono: performance.now(), waitMs: CONTENTION_RETRY_MS }
+      this.contentionReported = false
+    }
+    if (!this.contentionReported && performance.now() - this.contention.sinceMono >= this.contentionReportMs) {
+      this.contentionReported = true
+      this.onError('write_contended')
+    }
     // A writer that yields to capture lets go within one short transaction; backing off would retry long after that,
     // so within the flush budget the first interval is kept.
     else if (!this.writerYields() || performance.now() - this.contention.sinceMono >= FLUSH_BUDGET_MS) this.contention.waitMs = Math.min(this.contention.waitMs * 2, MAX_CONTENTION_RETRY_MS)
@@ -912,6 +928,15 @@ export class Store implements Sink {
     }).immediate()
   }
 
+  // Publishes health when anything but the queue length and the last commit time changed since it was last published.
+  private publishHealth(): void {
+    const h = this.storeHealth()
+    const key = JSON.stringify([h.failingSinceWallMs, h.contendedSinceWallMs, h.droppedOps, h.scrubPending])
+    if (key === this.reported) return
+    this.reported = key
+    this.onHealth(h)
+  }
+
   storeHealth(): StoreHealth {
     const c = this.contention
     const contendedSinceWallMs = c !== null && performance.now() - c.sinceMono >= this.contentionReportMs ? c.sinceWallMs : null
@@ -930,6 +955,7 @@ export class Store implements Sink {
     if (unwritten > 0) {
       this.health.droppedOps += unwritten
       this.onError(`unwritten_at_close_${unwritten}`)
+      this.publishHealth()
     }
     this.db.close()
     this.releaseLock()
