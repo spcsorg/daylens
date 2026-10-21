@@ -145,3 +145,26 @@ test('a v2 database gains page addresses and site exclusions', () => {
   assert.deepEqual(store.query(`SELECT url FROM observations`), [{ url: null }])
   store.close()
 })
+
+test('a database from the extension builds at version 3 opens, gains the run boot identity, and the pause that build kept ends', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-mig-ext-'))
+  const T = 1_792_130_400_000
+  new Store(dir, { now: () => T }).close()
+  const db = new Database(path.join(dir, DB_FILE))
+  db.exec(`
+    ALTER TABLE capture_runs DROP COLUMN boot_identity;
+    UPDATE meta SET value = '3' WHERE key = 'schema_version';
+    INSERT INTO meta (key, value) VALUES ('pause', '{"since_wall_ms":${T},"until_wall_ms":null,"done":[]}');
+    INSERT INTO capture_gaps (id, reason, scope, start_wall_ms) VALUES (1, 'paused', 'all', ${T}), (2, 'paused', 'all', ${T + 60_000});
+  `)
+  db.close()
+  const store = new Store(dir, { now: () => T + 3_600_000 })
+  assert.equal(store.meta('schema_version'), '4')
+  assert.equal(store.meta('pause'), null, "the extension build's pause marker is gone")
+  assert.deepEqual(store.query(`SELECT id, end_wall_ms FROM capture_gaps ORDER BY id`), [{ id: 1, end_wall_ms: T + 3_600_000 }, { id: 2, end_wall_ms: T + 3_600_000 }])
+  assert.equal(store.query<{ n: number }>(`SELECT count(*) AS n FROM pragma_table_info('capture_runs') WHERE name = 'boot_identity'`)[0]!.n, 1)
+  const storage = new Storage(store, dir, { now: () => T + 3_600_000 })
+  assert.equal(storage.paused(), null, 'nothing is paused')
+  storage.stop()
+  store.close()
+})

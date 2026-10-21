@@ -339,23 +339,49 @@ export class Store implements Sink {
     return 3
   }
 
-  // v4 adds page addresses and site exclusions; the exclusions CHECK is rebuilt the same way as v2's gaps.
+  // v4 adds page addresses and site exclusions; the exclusions CHECK is rebuilt the same way as v2's gaps. A database
+  // from the browser extension's own builds is also at 3, but its 3 added the addresses and site exclusions, not the
+  // run boot identity, and its capture kept a pause of its own (meta 'pause', and a 'paused' gap left open across
+  // restarts) that storage's pauses do not know; that pause ends here.
   private migrateV3(): number {
     this.db.transaction(() => {
-      this.db.exec(`
-        ALTER TABLE observations ADD COLUMN url TEXT;
-        ALTER TABLE exclusions RENAME TO exclusions_v3;
-        ${SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS exclusions'))}
-        INSERT INTO exclusions SELECT * FROM exclusions_v3;
-        DROP TABLE exclusions_v3;
-      `)
+      const has = (table: string, column: string) => this.db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column) !== undefined
+      const extensionBuild = has('observations', 'url')
+      if (!extensionBuild) {
+        this.db.exec(`
+          ALTER TABLE observations ADD COLUMN url TEXT;
+          ALTER TABLE exclusions RENAME TO exclusions_v3;
+          ${SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS exclusions'))}
+          INSERT INTO exclusions SELECT * FROM exclusions_v3;
+          DROP TABLE exclusions_v3;
+        `)
+      }
+      if (!has('capture_runs', 'boot_identity')) this.db.exec('ALTER TABLE capture_runs ADD COLUMN boot_identity TEXT')
       if (this.db.prepare(`SELECT value FROM meta WHERE key = 'exclusions_seeded'`).get()) {
         const ins = this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 1)')
         for (const r of DEFAULT_SITE_EXCLUSIONS) ins.run(r.match, r.value, r.label)
       }
+      if (extensionBuild) this.endExtensionPause()
       this.db.prepare(`UPDATE meta SET value = '4' WHERE key = 'schema_version'`).run()
     })()
     return 4
+  }
+
+  // The pause ends where it was set to end if that has passed, else now; every 'paused' gap still open ends with it.
+  private endExtensionPause(): void {
+    const now = this.now()
+    let end = now
+    const raw = (this.db.prepare(`SELECT value FROM meta WHERE key = 'pause'`).get() as { value: string } | undefined)?.value
+    if (raw !== undefined) {
+      try {
+        const until = (JSON.parse(raw) as { until_wall_ms?: unknown }).until_wall_ms
+        if (typeof until === 'number' && until < now) end = until
+      } catch {
+        // An unreadable marker ends now, like one with no end.
+      }
+    }
+    this.db.prepare(`UPDATE capture_gaps SET end_wall_ms = max(?, start_wall_ms) WHERE reason = 'paused' AND end_wall_ms IS NULL`).run(end)
+    this.db.prepare(`DELETE FROM meta WHERE key = 'pause'`).run()
   }
 
   private seedExclusions(): void {
