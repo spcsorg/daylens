@@ -718,3 +718,19 @@ test('a flush contended by a writer that yields to capture lands as soon as that
     store.close()
   }
 })
+
+test('while the deletion worker has work, capture leaves checkpointing to it, and takes it back when the worker is idle', async () => {
+  const r = rig()
+  for (let i = 0; i < 200; i++) r.store.insertObservation(row(T0 + i * 1000, 'com.example.chat', `checkpoint canary ${i}`))
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  const setting = () => Number(r.store.database.pragma('wal_autocheckpoint', { simple: true }))
+  assert.equal(setting(), 1000)
+  const handle = r.storage.deleteSource('com.example.chat')
+  assert.equal(setting(), 0, 'a capture commit never copies the worker\'s log back while the worker writes')
+  await handle.done
+  await handle.purged
+  await r.storage.deletionsSettled()
+  assert.equal(setting(), 1000)
+  r.close()
+})

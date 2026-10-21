@@ -790,6 +790,16 @@ export class DeletionWorker {
     return this.pending.size > 0
   }
 
+  /** Called when the worker goes from idle to having work, and back. */
+  onBusy: (busy: boolean) => void = () => {}
+  private wasBusy = false
+
+  private notifyBusy(): void {
+    if (this.busy === this.wasBusy) return
+    this.wasBusy = this.busy
+    this.onBusy(this.wasBusy)
+  }
+
   /** Capture is about to write (true) or done (false); the worker starts no write transaction in between. */
   captureWriting(on: boolean): void {
     if (on) Atomics.add(this.want, 0, 1)
@@ -830,6 +840,7 @@ export class DeletionWorker {
     w.ref()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { worker: w, resolve, reject })
+      this.notifyBusy()
       w.postMessage({ id, ...job })
     })
   }
@@ -842,6 +853,7 @@ export class DeletionWorker {
     w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)
+      this.notifyBusy()
       if (![...this.pending.values()].some((p) => p.worker === w)) {
         w.unref()
         this.idle = setTimeout(() => void this.close(), DeletionWorker.IDLE_EXIT_MS)
@@ -866,6 +878,7 @@ export class DeletionWorker {
       this.pending.delete(id)
       p.reject(err)
     }
+    this.notifyBusy()
   }
 
   async close(): Promise<void> {

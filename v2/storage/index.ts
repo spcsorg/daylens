@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3'
 import type { ExclusionRule } from '../capture/defaults.ts'
 import { canonicalKeptTitleId, keptTitleIdentity, knownBrowser, Privacy, type GapPoint, type KeptTitleApp, type OrderingPoint, type ObservationRow } from '../capture/normalize.ts'
 import type { AppIdentity } from '../capture/protocol.ts'
-import { Store } from '../capture/store.ts'
+import { Store, WAL_AUTOCHECKPOINT } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
 import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
@@ -186,6 +186,11 @@ export class Storage {
       admit: (row) => this.rules.accepts(row.event_wall_ms, row.app_id, row.url),
     })
     this.deletions = new DeletionWorker(store.file)
+    // The worker's large writes would otherwise be checkpointed inside capture's next commit, on the capture thread;
+    // while it has work its own connection checkpoints after each of its commits instead.
+    this.deletions.onBusy = (busy) => {
+      if (this.db.open) this.db.pragma(`wal_autocheckpoint = ${busy ? 0 : WAL_AUTOCHECKPOINT}`)
+    }
     store.onWriteStart = () => this.deletions.captureWriting(true)
     store.onWriteEnd = () => this.deletions.captureWriting(false)
     store.writerYields = () => this.deletions.busy

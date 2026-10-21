@@ -12,6 +12,8 @@ const SCHEMA_VERSION = 4
 const FLUSH_INTERVAL_MS = 1000
 // The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
 export const MAX_ROW_SPAN_MS = 7 * 86_400_000
+// Pages of write-ahead log after which a commit on the capture connection checkpoints (SQLite's default).
+export const WAL_AUTOCHECKPOINT = 1000
 const FLUSH_AT_OPS = 256
 // Contended flushes retry after a wait that starts short and doubles up to the cap.
 const CONTENTION_RETRY_MS = 10
@@ -289,7 +291,7 @@ export class Store implements Sink {
     this.db.pragma('synchronous = NORMAL')
     this.db.pragma(`busy_timeout = ${opts.busyTimeoutMs ?? 1000}`)
     this.db.pragma('cache_size = -2000')
-    this.db.pragma('wal_autocheckpoint = 1000')
+    this.db.pragma(`wal_autocheckpoint = ${WAL_AUTOCHECKPOINT}`)
     this.db.exec(SCHEMA)
     const version = this.db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined
     if (!version) this.db.prepare(`INSERT INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION))
