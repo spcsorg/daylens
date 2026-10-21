@@ -8,6 +8,7 @@ import { Store, WAL_AUTOCHECKPOINT } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
 import { DeletionWorker, fenceEdges, fenceGaps, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
+import { readFacts, type HourFacts } from './facts.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
 import { planAgentDeletion } from './agentDeletion.ts'
@@ -21,6 +22,7 @@ import type { Agent } from '../capture/agents/types.ts'
 import { immediate, isBusy } from './tx.ts'
 
 export type { DeletionResult } from './deletion.ts'
+export type { FactGap, FactInterval, HourFacts } from './facts.ts'
 export { HOUR_FIELDS, readHour, type Hour, type HourField, type HourSource } from './hours.ts'
 export type { PauseState, Tombstone } from './rules.ts'
 
@@ -630,6 +632,22 @@ export class Storage {
     const h = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(startWallMs) as { version: number } | undefined
     const d = this.db.prepare('SELECT max(id) AS id FROM deletions').get() as { id: number | null }
     return { version: h?.version ?? null, deletion: d.id ?? 0 }
+  }
+
+  /**
+   * What was recorded in [from, to) as one snapshot, captured lines flushed first. Refused while a deletion that
+   * overlaps the span is still being carried out, so nothing it covers can be written into an hour.
+   */
+  hourFacts(fromWallMs: number, toWallMs: number): HourFacts {
+    this.flushOrThrow()
+    return this.db.transaction(() => {
+      for (const t of pendingTombstones(this.db)) {
+        if ((t.from_wall_ms === null || toWallMs > t.from_wall_ms) && (t.to_wall_ms === null || fromWallMs < t.to_wall_ms)) {
+          throw new PendingDeletionError('material in this span is being deleted')
+        }
+      }
+      return readFacts(this.db, this.agentTables(), fromWallMs, toWallMs)
+    })()
   }
 
   writeHour(h: HourInput, basis: HourBasis): Hour {
