@@ -13,6 +13,7 @@ import { applyMigrations } from './migrations.ts'
 import type { Span } from '../capture/agents/withheld.ts'
 import { DAY_MS, fencedBy, pauseEnd, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
+import { scrubAvailable } from './scrub.ts'
 import { immediate, isBusy } from './tx.ts'
 
 export type { DeletionResult } from './deletion.ts'
@@ -197,6 +198,8 @@ export class Storage {
 
   /** Arms the pause and retention timers, and resumes work left unfinished: derivation, and deletions still pending. */
   start(): void {
+    // Without the scrub, no deletion or retention is ever reported purged; say so once at start as well.
+    if (!scrubAvailable(this.db)) this.onError('scrub_unavailable')
     this.backfill = this.runBackfill()
     this.backfill.catch(() => {})
     if (this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get()) this.retentionPurge = this.checkpointWhenFree()

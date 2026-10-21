@@ -11,7 +11,8 @@ import { MAX_ROW_SPAN_MS } from '../capture/store.ts'
 import { Derived, HOUR_MS, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
-import { beforeWrite, immediateRetrying, isBusy } from './tx.ts'
+import { immediateRetrying } from './tx.ts'
+import { ScrubUnavailableError, scrubAll, scrubAvailable } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
 
 export interface DeletionResult {
@@ -153,9 +154,11 @@ export interface PruneResult {
  */
 export const RETENTION_PURGE_PENDING = `INSERT INTO meta (key, value) VALUES ('retention_purge_pending', '1') ON CONFLICT (key) DO NOTHING`
 
-// secure_delete leaves removed text in index pages' free space, so a removal is only gone from disk after VACUUM.
-// The value counts removals, so one committed during a VACUUM keeps the marker.
-export const VACUUM_PENDING = `INSERT INTO meta (key, value) VALUES ('vacuum_pending', '1') ON CONFLICT (key) DO UPDATE SET value = value + 1`
+// secure_delete leaves copies of removed text in free space inside pages, so a removal is only gone from disk after a
+// scrub. The value counts removals, so one committed during a scrub keeps the marker.
+export const SCRUB_PENDING = `INSERT INTO meta (key, value) VALUES ('page_scrub_pending', '1') ON CONFLICT (key) DO UPDATE SET value = value + 1`
+// Set by builds that rewrote the file with VACUUM instead; a file that still has it is scrubbed too.
+const SCRUB_MARKERS = `SELECT key, value FROM meta WHERE key IN ('page_scrub_pending', 'vacuum_pending')`
 
 export function pruneStep(db: Database.Database, cutoff: number | null, logKeepFrom: number, batch = ROWS_PER_STEP, onTransaction: (ms: number) => void = () => {}): { removed: number; data: number } {
   // Each transaction that removes content also records that the log must still be purged, so a crash before the
@@ -167,7 +170,7 @@ export function pruneStep(db: Database.Database, cutoff: number | null, logKeepF
       const result = fn()
       if ((db.prepare('SELECT total_changes() AS n').get() as { n: number }).n > before.n) {
         db.prepare(RETENTION_PURGE_PENDING).run()
-        db.prepare(VACUUM_PENDING).run()
+        db.prepare(SCRUB_PENDING).run()
       }
       return result
     })
@@ -305,32 +308,37 @@ export class Deleter {
       r.batches++
       if (step.removed === 0) break
     }
-    r.purged = this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get() === undefined || this.checkpointRetention()
+    try {
+      r.purged = this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get() === undefined || this.checkpointRetention()
+    } catch (err) {
+      // The removal is done either way; without a scrub it stays unpurged, and storage's retries report why.
+      if (!(err instanceof ScrubUnavailableError)) throw err
+      r.purged = false
+    }
     return r
   }
 
   /** Checkpoints and, if it completed, clears the retention purge marker; false while a reader still holds old pages. */
   checkpointRetention(): boolean {
-    if (!this.vacuumIfPending() || !this.checkpoint()) return false
+    if (!this.scrubIfPending() || !this.checkpoint()) return false
     immediateRetrying(this.db, () => this.db.prepare(`DELETE FROM meta WHERE key = 'retention_purge_pending'`).run())
     return true
   }
 
   /**
-   * Rewrites the file once since the last removal, so the checkpoint after it leaves no removed text on disk. False
-   * while another connection's snapshot blocks it; the caller retries, as for the checkpoint.
+   * Zeroes free space inside every b-tree page once since the last removal, in slices that each hold the lock for
+   * about FTS_STEP_MS and give capture the lock first, so the checkpoint after it leaves no removed text on disk.
+   * Throws ScrubUnavailableError on a build without sqlite_dbpage: nothing is then reported purged.
    */
-  vacuumIfPending(): boolean {
-    const marker = this.db.prepare(`SELECT value FROM meta WHERE key = 'vacuum_pending'`).get() as { value: string } | undefined
-    if (marker === undefined) return true
-    beforeWrite()
-    try {
-      this.db.exec('VACUUM')
-    } catch (err) {
-      if (isBusy(err)) return false
-      throw err
-    }
-    immediateRetrying(this.db, () => this.db.prepare(`DELETE FROM meta WHERE key = 'vacuum_pending' AND value = ?`).run(marker.value))
+  scrubIfPending(): boolean {
+    const markers = this.db.prepare(SCRUB_MARKERS).all() as { key: string; value: string }[]
+    if (markers.length === 0) return true
+    if (!scrubAvailable(this.db)) throw new ScrubUnavailableError()
+    scrubAll(this.db, FTS_STEP_MS, (fn) => immediateRetrying(this.db, fn))
+    immediateRetrying(this.db, () => {
+      const clear = this.db.prepare('DELETE FROM meta WHERE key = ? AND value = ?')
+      for (const m of markers) clear.run(m.key, m.value)
+    })
     return true
   }
 
@@ -489,7 +497,7 @@ export class Deleter {
       db.prepare(`DELETE FROM deletion_work WHERE tombstone_id = ?`).run(tombstoneId)
       db.prepare(`DELETE FROM deletion_fence WHERE tombstone_id = ?`).run(tombstoneId)
       db.prepare(`UPDATE deletions SET state = 'done' WHERE id = ? AND state = 'pending'`).run(tombstoneId)
-      db.prepare(VACUUM_PENDING).run()
+      db.prepare(SCRUB_PENDING).run()
     })
     return r
   }
@@ -499,7 +507,7 @@ export class Deleter {
    * holds them (the caller retries). Waits only briefly, since a reader may hold its snapshot for a long time.
    */
   purge(tombstoneId: number): boolean {
-    if (!this.vacuumIfPending() || !this.checkpoint()) return false
+    if (!this.scrubIfPending() || !this.checkpoint()) return false
     this.db.prepare(`UPDATE deletions SET state = 'purged' WHERE id = ? AND state = 'done'`).run(tombstoneId)
     return true
   }

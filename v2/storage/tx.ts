@@ -15,16 +15,11 @@ export function immediate<T>(db: Database.Database, fn: () => T): T {
 }
 
 const parked = new Int32Array(new SharedArrayBuffer(4))
-let waitForCapture: () => void = () => {}
+let beforeWrite: () => void = () => {}
 
 /** Called before every retrying write transaction: the deletion worker waits there while capture wants the lock. */
 export function setBeforeWrite(fn: () => void): void {
-  waitForCapture = fn
-}
-
-/** Waits while capture wants the writer lock, for writes outside immediateRetrying such as VACUUM. */
-export function beforeWrite(): void {
-  waitForCapture()
+  beforeWrite = fn
 }
 
 /**

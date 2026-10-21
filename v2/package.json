@@ -8,9 +8,11 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 'tests/**/*.test.ts'",
+    "test:large": "node --test --test-concurrency=1 'tests/large/*.large.ts'",
     "typecheck": "tsc --noEmit -p .",
     "capture": "node capture/service.ts",
-    "build:js": "tsc -p tsconfig.build.json"
+    "build:js": "tsc -p tsconfig.build.json",
+    "build:sqlite": "node tools/buildSqlite.ts"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3"

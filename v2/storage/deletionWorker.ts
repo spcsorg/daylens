@@ -2,6 +2,7 @@
 import Database from 'better-sqlite3'
 import { parentPort, workerData } from 'node:worker_threads'
 import { Deleter } from './deletion.ts'
+import { ScrubUnavailableError } from './scrub.ts'
 import { setBeforeWrite } from './tx.ts'
 
 const { file, want } = workerData as { file: string; want: Int32Array }
@@ -32,7 +33,12 @@ parentPort!.on('message', (job: { id: number; op: 'delete' | 'purge' | 'prune' |
       return
     }
     const result = deleter.run(job.tombstone, job.now)
-    result.purged = deleter.purge(job.tombstone)
+    // The removal is done either way; without a scrub it stays unpurged, and storage's retries report why.
+    try {
+      result.purged = deleter.purge(job.tombstone)
+    } catch (err) {
+      if (!(err instanceof ScrubUnavailableError)) throw err
+    }
     parentPort!.postMessage({ id: job.id, result })
   } catch (err) {
     parentPort!.postMessage({ id: job.id, error: `${(err as { code?: string }).code ?? 'error'}: ${(err as Error).message}` })

@@ -7,7 +7,7 @@ import { threadId } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 import { admitsAt, admitsSpan, type Span } from './withheld.ts'
-import { VACUUM_PENDING } from '../../storage/deletion.ts'
+import { SCRUB_PENDING } from '../../storage/deletion.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
 const KEY_FILE = 'agent-fingerprint.key'
@@ -431,7 +431,7 @@ export class AgentStore {
           WHEN 'codex' THEN json_remove(json_set(state, '$.recentUsers', json('[]')), '$.lastUser')
           ELSE json_set(state, '$.queued', json('{}')) END
         WHERE agent = ? AND session_id = ? AND state IS NOT NULL`).run(agent, session)
-      this.db.prepare(VACUUM_PENDING).run()
+      this.db.prepare(SCRUB_PENDING).run()
     })()
     const dir = this.dataDir
     if (dir !== null) removeStaging(dir)
