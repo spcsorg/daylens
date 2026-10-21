@@ -16,6 +16,8 @@ const FLUSH_AT_OPS = 256
 // Contended flushes retry after a wait that starts short and doubles up to the cap.
 const CONTENTION_RETRY_MS = 10
 const MAX_CONTENTION_RETRY_MS = 250
+// Capture's flush budget: a write should land within this long.
+const FLUSH_BUDGET_MS = 100
 // Contention lasting longer than this is reported in health while retries continue.
 const CONTENTION_REPORT_MS = 5000
 const MAX_RETRY_MS = 30_000
@@ -723,7 +725,9 @@ export class Store implements Sink {
   private retryContention(): false {
     this.contended = true
     if (this.contention === null) this.contention = { sinceWallMs: this.now(), sinceMono: performance.now(), waitMs: CONTENTION_RETRY_MS }
-    else this.contention.waitMs = Math.min(this.contention.waitMs * 2, MAX_CONTENTION_RETRY_MS)
+    // A writer that yields to capture lets go within one short transaction; backing off would retry long after that,
+    // so within the flush budget the first interval is kept.
+    else if (!this.writerYields() || performance.now() - this.contention.sinceMono >= FLUSH_BUDGET_MS) this.contention.waitMs = Math.min(this.contention.waitMs * 2, MAX_CONTENTION_RETRY_MS)
     this.schedule(this.contention.waitMs)
     return false
   }

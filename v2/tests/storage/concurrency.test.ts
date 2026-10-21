@@ -503,3 +503,24 @@ test('a deletion whose announcements meet a lock held past the busy timeout fini
     r.close()
   }
 })
+
+test('a flush contended by a writer that yields to capture lands as soon as that writer lets go', async () => {
+  const dir = tmpDir()
+  const store = new Store(dir, { now: () => T0 })
+  store.writerYields = () => true
+  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(dir, DB_FILE), ms: 75 } })
+  const exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
+  try {
+    await new Promise((resolve) => worker.once('message', resolve))
+    const start = performance.now()
+    store.insertObservation(row(T0, 'com.example.editor', 'behind a yielding writer'))
+    store.flush()
+    while (store.storeHealth().pendingOps > 0 && performance.now() - start < 2000) await new Promise((resolve) => setTimeout(resolve, 1))
+    const landed = performance.now() - start
+    assert.equal(store.storeHealth().pendingOps, 0)
+    assert.ok(landed < 100, `landed after ${landed.toFixed(1)} ms behind a 75 ms transaction`)
+  } finally {
+    await exited
+    store.close()
+  }
+})
