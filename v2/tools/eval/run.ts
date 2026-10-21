@@ -5,7 +5,7 @@
 //   node tools/eval/run.ts --gold <dir> grade <grader> <candidate>
 //   node tools/eval/run.ts --gold <dir> sample             (hours to check by hand)
 //   node tools/eval/run.ts --gold <dir> summary
-// Existing results are kept; a call is only made for an hour with no successful result yet.
+// A result is kept only while it was made from the same packet, prompt and previous hour; anything else is written again.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -119,6 +119,48 @@ function versions(): Record<string, string> {
   return { claude: v('claude'), codex: v('codex'), node: process.version }
 }
 
+export interface WriteRecord {
+  packet_sha256: string
+  prompt_sha256: string
+  previous_hour: Packet['previous_hour'] | null
+  final: CallResult
+  validation: Validation | null
+}
+
+/**
+ * The candidate's own previous hour, as the engine passes it: only an hour that was written and passed validation.
+ * When there is none, `missing` says why, so a failed or rejected hour is never dropped from the next one unnoticed.
+ */
+export function previousHour(h: number, hours: readonly number[], recordOf: (h: number) => WriteRecord | null): { previous: Packet['previous_hour'] | null; missing: string | null } {
+  const at = h === 0 ? '23 of the day before' : hh(h - 1)
+  if (!hours.includes(h - 1)) return { previous: null, missing: `no packet for hour ${at}` }
+  const rec = recordOf(h - 1)
+  if (!rec) return { previous: null, missing: `hour ${at} not written yet` }
+  if (rec.final.error) return { previous: null, missing: `hour ${at} failed: ${rec.final.error.slice(0, 120)}` }
+  const v = rec.validation
+  if (!v?.ok || !v.hour) return { previous: null, missing: `hour ${at} was rejected: ${v?.errors.map((e) => e.code).join(', ') || 'no output'}` }
+  return { previous: { title: v.hour.title, summary: v.hour.summary }, missing: null }
+}
+
+/**
+ * The packet the writer gets: the frozen packet with the previous hour added where `buildPacket` adds it. Frozen
+ * packets come from a day with no stored hours, so they carry no previous hour, open threads or corrections.
+ */
+export function writerPacket(frozen: Packet, previous: Packet['previous_hour'] | null): Packet {
+  if (frozen.previous_hour || frozen.open_threads || frozen.corrections) throw new Error(`packet ${frozen.hour} already carries context from stored hours`)
+  return previous ? { ...frozen, previous_hour: previous } : frozen
+}
+
+export function isCurrent(rec: WriteRecord | null, want: { packet_sha256: string; prompt_sha256: string; previous_hour: Packet['previous_hour'] | null }): boolean {
+  return (
+    rec !== null &&
+    !rec.final.error &&
+    rec.packet_sha256 === want.packet_sha256 &&
+    rec.prompt_sha256 === want.prompt_sha256 &&
+    JSON.stringify(rec.previous_hour ?? null) === JSON.stringify(want.previous_hour)
+  )
+}
+
 async function write(gold: Gold, name: string): Promise<void> {
   const c = CANDIDATES[name]
   if (!c) throw new Error(`unknown candidate ${name}; one of ${Object.keys(CANDIDATES).join(', ')}`)
@@ -126,15 +168,19 @@ async function write(gold: Gold, name: string): Promise<void> {
   try {
     const writer: HourWriter = c.kind === 'none' ? noAi : cliWriter(backendFor(c, scratch))
     const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), versions: versions() }
-    for (const h of gold.hours) {
-      const out = path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`)
-      if (existsSync(out) && !readJson<{ final: CallResult }>(out).final.error) continue
-      const { packet, refs, sha256 } = gold.packet(h)
+    const outOf = (h: number) => path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`)
+    const recordOf = (h: number) => (existsSync(outOf(h)) ? readJson<WriteRecord>(outOf(h)) : null)
+    for (const h of [...gold.hours].sort((a, b) => a - b)) {
+      const out = outOf(h)
+      const { packet: frozen, refs, sha256 } = gold.packet(h)
+      const { previous, missing } = previousHour(h, gold.hours, recordOf)
+      if (isCurrent(recordOf(h), { packet_sha256: sha256, prompt_sha256: meta.prompt_sha256, previous_hour: previous })) continue
+      const packet = writerPacket(frozen, previous)
       const started = new Date().toISOString()
       const { final, attempts } = await withAttempts(() => writer.write(packet), () => null)
       const validation = final.text === null ? null : validateHour(final.text, packet, refs)
-      writeJson(out, { ...meta, hour: hh(h), packet_sha256: sha256, started, final, attempts: attempts.map(({ raw: _raw, ...a }) => a), validation })
-      console.log(name, hh(h), final.error ? `ERROR ${final.error.slice(0, 200)}` : `ok ${final.latency_ms}ms valid=${validation?.ok}`)
+      writeJson(out, { ...meta, hour: hh(h), packet_sha256: sha256, previous_hour: previous, previous_hour_missing: missing, started, final, attempts: attempts.map(({ raw: _raw, ...a }) => a), validation })
+      console.log(name, hh(h), final.error ? `ERROR ${final.error.slice(0, 200)}` : `ok ${final.latency_ms}ms valid=${validation?.ok}`, missing ? `(no previous hour: ${missing})` : '')
       if (final.quota) {
         console.log(name, 'stopped: usage limit reached')
         return
