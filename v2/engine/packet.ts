@@ -177,10 +177,11 @@ export function buildPacket(storage: Storage, hour: PacketHour, opts: PacketOpti
     if (!entry) {
       const item: PacketItem = { id: '', app: i.app_name, min: 0, from: '', to: '', times: 0 }
       if (i.title) item.title = i.title
-      else item.title_note = page ? 'page not known' : (TITLE_NOTES[i.title_state ?? ''] ?? 'no title')
+      else if (!page || !i.url) item.title_note = page ? 'page not known' : (TITLE_NOTES[i.title_state ?? ''] ?? 'no title')
+      // A page's site and title say what was open; its full address only when it has no title.
       if (page) {
         item.site = i.site
-        if (i.url) item.url = i.url
+        if (!i.title && i.url) item.url = i.url
       }
       entry = { item, ids: [], spans: [], first: s, last: e }
       items.set(key, entry)
@@ -283,6 +284,7 @@ export function buildPacket(storage: Storage, hour: PacketHour, opts: PacketOpti
 /**
  * For each interval in the hour whose title may not describe the work, why: the title has not changed in its window
  * for at least `staleMs`, or Daylens could no longer read it. Without a window ID each title counts as its own window.
+ * Only the stale span before the hour is read, so the time given is the earliest sighting within it.
  */
 function staleTitles(intervals: readonly FactInterval[], start: number, end: number, staleMs: number, clock: (ms: number) => string): Map<number, string> {
   const out = new Map<number, string>()
@@ -297,7 +299,7 @@ function staleTitles(intervals: readonly FactInterval[], start: number, end: num
     if (i.possibly_stale_since_wall_ms !== null && i.possibly_stale_since_wall_ms < i.end_wall_ms) {
       out.set(i.obs_id, `title unreadable since ${clock(i.possibly_stale_since_wall_ms)}`)
     } else if (Math.min(i.end_wall_ms, end) - from >= staleMs) {
-      out.set(i.obs_id, `title unchanged since ${clock(from)}`)
+      out.set(i.obs_id, `title unchanged since at least ${clock(from)}`)
     }
   }
   return out

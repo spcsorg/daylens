@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 'tests/**/*.test.ts'",
     "test:large": "node --test --test-concurrency=1 'tests/large/*.large.ts'",
+    "test:gold": "node --test --test-concurrency=1 'tests/gold/*.gold.ts'",
     "typecheck": "tsc --noEmit -p .",
     "capture": "node capture/service.ts",
     "build:js": "tsc -p tsconfig.build.json",

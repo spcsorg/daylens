@@ -104,8 +104,8 @@ test('a title that stays unchanged in its window for the stale span, or that cou
   r.clock.t = T0 + 2 * HOUR
   const { packet } = buildPacket(r.storage, HOUR_AT(T0), OPTS)
   const by = (title: string) => packet.windows.find((w) => w.title === title)!
-  assert.equal(by('λ watch build').stale, 'title unchanged since 06:00')
-  assert.equal(by('notes.md').stale, 'title unchanged since 06:05')
+  assert.equal(by('λ watch build').stale, 'title unchanged since at least 06:00')
+  assert.equal(by('notes.md').stale, 'title unchanged since at least 06:05')
   assert.equal(by('top').stale, 'title unreadable since 08:25')
 
   const fresh = buildPacket(r.storage, HOUR_AT(T0), { ...OPTS, staleTitleMs: 4 * HOUR }).packet
