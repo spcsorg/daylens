@@ -126,6 +126,19 @@ export class Reader {
     this.db.close()
   }
 
+  /**
+   * Reads the search index and its entries once, in order, so the first searches after the reader opens do not wait
+   * on scattered disk reads; the system keeps the file in its cache, not this process. Returns the bytes read.
+   */
+  warmSearch(): number {
+    const sum = (sql: string) => this.db.prepare(sql).pluck().get() as number
+    return (
+      sum('SELECT coalesce(sum(length(block)), 0) FROM search_data') +
+      sum('SELECT coalesce(sum(length(sz)), 0) FROM search_docsize') +
+      sum(`SELECT coalesce(sum(length(title) + length(url) + length(files) + length(hour_text)), 0) FROM search_docs`)
+    )
+  }
+
   /** The hour as every screen shows it (corrections win, pending deletions already applied), or null. */
   writtenHour(id: number): Hour | null {
     return readHour(this.db, id)
