@@ -36,6 +36,17 @@ interface CliResult {
   usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }
   modelUsage?: Record<string, unknown>
   permission_denials?: unknown[]
+  // Claude Code's own words when it fails, such as a usage limit or a sign-in problem.
+  result?: unknown
+}
+
+/** What Claude Code said went wrong: its result text when its output is the JSON result, else the raw text. */
+function failure(stdout: string, stderr: string): string {
+  try {
+    const r = JSON.parse(stdout) as CliResult
+    if (typeof r.result === 'string' && r.result.trim()) return r.result.trim().slice(0, 300)
+  } catch {}
+  return stderr.trim().slice(0, 300) || stdout.trim().slice(0, 300)
 }
 
 export function parseCliResult(stdout: string): AskReply {
@@ -45,7 +56,7 @@ export function parseCliResult(stdout: string): AskReply {
   } catch {
     throw new Error('Claude Code returned something other than its JSON result')
   }
-  if (r.is_error || r.subtype !== 'success') throw new Error(`Claude Code reported ${r.subtype ?? 'an error'}`)
+  if (r.is_error || r.subtype !== 'success') throw new Error(`Claude Code reported ${r.subtype && r.subtype !== 'success' ? r.subtype : 'an error'}: ${failure(stdout, '')}`)
   if (r.permission_denials && r.permission_denials.length > 0) throw new Error('Claude Code tried to use a tool')
   if (r.structured_output === undefined) throw new Error('Claude Code returned no structured answer')
   const u = r.usage ?? {}
@@ -84,7 +95,7 @@ export function claudeCli(opts: ClaudeCliOptions): AskModel {
         child.on('error', (err) => done(() => reject(err)))
         child.on('close', (code) => {
           if (child.killed) return
-          if (code !== 0) return done(() => reject(new Error(`Claude Code exited with ${code}: ${stderr.trim().slice(0, 300) || stdout.trim().slice(0, 300)}`)))
+          if (code !== 0) return done(() => reject(new Error(`Claude Code exited with ${code}: ${failure(stdout, stderr)}`)))
           let reply: AskReply
           try {
             reply = parseCliResult(stdout)

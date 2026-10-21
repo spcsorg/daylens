@@ -152,6 +152,13 @@ let input = ''
 process.stdin.on('data', (c) => (input += c)).on('end', () => {
   fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), files: fs.readdirSync(process.cwd()), input }))
   if (input === 'slow') return setTimeout(() => {}, 10000)
+  // As Claude Code prints a failed run: its message comes after several hundred characters of usage fields.
+  const failed = (exitCode, text) => {
+    console.log(JSON.stringify({ duration_api_ms: 0, session_id: 'x'.repeat(36), usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 0 }, padding: 'p'.repeat(300) }, is_error: true, subtype: 'success', result: text }))
+    process.exitCode = exitCode
+  }
+  if (input === 'limit') return failed(1, 'Usage limit reached, resets at 6pm')
+  if (input === 'error') return failed(0, 'Not signed in')
   if (input === 'tool') return console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash' }], structured_output: {} }))
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], structured_output: { answerable: false, statements: [] },
     usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 500, output_tokens: 40 }, modelUsage: { 'claude-test': {} } }))
@@ -174,6 +181,8 @@ process.stdin.on('data', (c) => (input += c)).on('end', () => {
   assert.equal(existsSync(call.cwd), false, 'the folder it ran in is removed')
 
   await assert.rejects(model.run({ system: 's', prompt: 'tool', schema: {} }), /tried to use a tool/)
+  await assert.rejects(model.run({ system: 's', prompt: 'limit', schema: {} }), /exited with 1: Usage limit reached, resets at 6pm$/, 'Claude Code’s own message is shown, not the start of its JSON')
+  await assert.rejects(model.run({ system: 's', prompt: 'error', schema: {} }), /reported an error: Not signed in$/)
   await assert.rejects(claudeCli({ timeoutMs: 300, command: fake }).run({ system: 's', prompt: 'slow', schema: {} }), /no answer within 300 ms/)
   await assert.rejects(claudeCli({ timeoutMs: 5000, command: path.join(dir, 'missing') }).run({ system: 's', prompt: 'x', schema: {} }), /ENOENT/)
   assert.throws(() => claudeCli({ timeoutMs: 0 }), RangeError)
