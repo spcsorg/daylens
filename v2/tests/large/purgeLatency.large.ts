@@ -2,7 +2,7 @@
 // deletion is purged. Minutes long, so it runs on its own: npm run test:large
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { statSync } from 'node:fs'
+import { rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { ObservationRow } from '../../capture/normalize.ts'
 import { DB_FILE, Store } from '../../capture/store.ts'
@@ -80,6 +80,8 @@ async function deleteWhileCapturing(): Promise<Run> {
     clearInterval(capture)
     storage.stop()
     store.close()
+    // Each run works on a 400 MB clone of the cached database; it is not kept.
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
