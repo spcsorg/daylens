@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p .",
     "capture": "node capture/service.ts",
     "build:js": "tsc -p tsconfig.build.json",
-    "build:sqlite": "node tools/buildSqlite.ts"
+    "build:sqlite": "node tools/buildSqlite.ts",
+    "eval:search": "node tools/evalSearch.ts"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3"
