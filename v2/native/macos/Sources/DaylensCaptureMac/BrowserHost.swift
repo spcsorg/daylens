@@ -93,7 +93,7 @@ private final class Host {
         replyToExtension(HostReply.notRunning())
         return
       }
-      if let line = HostReply.control(m) { writeSocket(line + "\n") }
+      if let line = HostReply.control(m, browser: browser) { writeSocket(line + "\n") }
     }
   }
 

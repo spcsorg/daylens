@@ -61,8 +61,10 @@ public class NativeMessagingTests
     public void OnlyWellFormedMessagesPass()
     {
         static ExtensionMessage? P(string s) => ExtensionMessage.Parse(Encoding.UTF8.GetBytes(s));
-        Assert.Equal(new ExtensionMessage.Pause("hour"), P("""{"t":"pause","for":"hour"}"""));
-        Assert.Null(P("""{"t":"pause","for":"forever"}"""));
+        Assert.Equal(new ExtensionMessage.Pause(1792134000000), P("""{"t":"pause","until_wall_ms":1792134000000}"""));
+        Assert.Equal(new ExtensionMessage.Pause(null), P("""{"t":"pause","until_wall_ms":null}"""));
+        Assert.Null(P("""{"t":"pause","for":"hour"}"""));
+        Assert.Null(P("""{"t":"pause","until_wall_ms":"tomorrow"}"""));
         Assert.Null(P("""{"t":"tab","state":"page","trigger":"focus","window":"1"}"""));
         Assert.Null(P("""{"t":"tab","state":"unknown","trigger":"focus","reason":"private_window"}"""));
         Assert.Null(P("""{"t":"tab","state":"page","trigger":"keylogger","window":"1","url":"https://x"}"""));
@@ -97,7 +99,12 @@ public class NativeMessagingTests
         Assert.Equal("""{"t":"snapshot"}""", Encoding.UTF8.GetString(HostReply.FromService("""{"op":"snapshot"}"""u8)!));
         Assert.Null(HostReply.FromService("""{"op":"status","capture":"exfiltrate"}"""u8));
         Assert.Null(HostReply.FromService("garbage"u8));
-        Assert.Equal("{\"op\":\"pause\",\"for\":\"until_resumed\"}\n", Encoding.UTF8.GetString(HostReply.Control(new ExtensionMessage.Pause("until_resumed"))!));
+        var chrome = new AppInfo(@"C:\Program Files\Google\Chrome\Application\chrome.exe", "Google Chrome", @"C:\Program Files\Google\Chrome\Application\chrome.exe", 9120, false, IdentityState.Ok, null);
+        var pause = JsonNode.Parse(HostReply.Control(new ExtensionMessage.Pause(null), chrome)!)!;
+        Assert.Equal("browser_pause", (string?)pause["op"]);
+        Assert.Null(pause["until_wall_ms"]);
+        Assert.Equal(chrome.AppId, (string?)pause["browser"]!["app_id"]);
+        Assert.Equal("browser_resume", (string?)JsonNode.Parse(HostReply.Control(new ExtensionMessage.Resume(), chrome)!)!["op"]);
     }
 
     [Fact]

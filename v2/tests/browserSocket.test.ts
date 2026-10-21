@@ -8,9 +8,10 @@ import Database from 'better-sqlite3'
 import { BrowserPages } from '../capture/browser.ts'
 import { BrowserSocket, statusMsg } from '../capture/browserSocket.ts'
 import { Privacy } from '../capture/normalize.ts'
-import { Pause } from '../capture/pause.ts'
+import { storagePause } from '../capture/pause.ts'
 import { ServiceNormalizer } from '../capture/pipeline.ts'
 import { DB_FILE, Store } from '../capture/store.ts'
+import { Storage } from '../storage/index.ts'
 import { app, focus } from './support/lines.ts'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -51,20 +52,17 @@ function client(p: string): Promise<{ sock: net.Socket; got: Record<string, unkn
   })
 }
 
-test('host lines over the socket become page rows; control ops pause and report status', async () => {
+test('host lines over the socket become page rows; storage pauses reach the host and refuse its lines', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'dl-bs-'))
   const store = new Store(path.join(dir, 'data'))
+  const storage = new Storage(store, path.join(dir, 'data'))
   const privacy = new Privacy(store.exclusions())
   const pages = new BrowserPages(store, privacy)
+  const norm = new ServiceNormalizer(store, privacy, pages)
+  storage.attachCapture({ interrupt: () => norm.interrupt({ wall_ms: Date.now(), mono_us: null, boot: null }), setPrivacy: (p) => { norm.setPrivacy(p); pages.setPrivacy(p) } })
+  const pause = storagePause(storage)
   let socket: BrowserSocket
-  let norm: ServiceNormalizer
-  const pause = new Pause(store, {
-    onChange: (s, at) => {
-      norm.interrupt(at)
-      socket.broadcast(statusMsg(s))
-    },
-  })
-  norm = new ServiceNormalizer(store, privacy, pause, pages)
+  storage.bus.on((c) => { if (c.kind === 'pause') socket.broadcast(statusMsg(pause.state())) })
   const logs: string[] = []
   socket = new BrowserSocket(pages, pause, { path: path.join(dir, 'b', 'browser.sock'), log: (m) => logs.push(m) })
   assert.ok(await socket.start())
@@ -83,26 +81,41 @@ test('host lines over the socket become page rows; control ops pause and report 
   c.sock.write('{"v":1,"kind":"focus"}\n')
   c.sock.write('x'.repeat(20_000) + '\n')
   c.sock.write(tabLine(1, now + 20, { url: 'https://example.com/q?search=plan', title: 'Plan' }) + '\n')
-  c.sock.write('{"op":"pause","for":"until_resumed"}\n')
+  await waitFor(() => store.query(`SELECT 1 FROM observations WHERE kind = 'page'`).length > 0)
+
+  storage.pause('until_resumed')
   await waitFor(() => c.got.some((m) => m.capture === 'paused'))
   c.sock.write(tabLine(2, Date.now() + 5, { url: 'https://example.com/while-paused', title: 'Paused page' }) + '\n')
-  c.sock.write('{"op":"resume"}\n')
+  c.sock.write('{"op":"pause","for":"until_resumed"}\n')
+  await waitFor(() => logs.includes('browser control rejected reason=unknown_op'))
+  storage.resume()
   await waitFor(() => c.got.filter((m) => m.capture === 'running').length >= 2)
+
+  c.sock.write(JSON.stringify({ op: 'browser_pause', until_wall_ms: null, browser: chrome }) + '\n')
+  await waitFor(() => storage.pausedApps().length === 1)
+  assert.equal(storage.paused(), null, 'pausing one browser pauses nothing else')
+  norm.handle(focus(chrome, null, Date.now() + 10, 'app_changed'))
+  c.sock.write(tabLine(3, Date.now() + 20, { url: 'https://example.com/browser-paused', title: 'Browser paused page' }) + '\n')
+  c.sock.write(JSON.stringify({ op: 'browser_resume', browser: chrome }) + '\n')
+  await waitFor(() => storage.pausedApps().length === 0)
+  c.sock.write(JSON.stringify({ op: 'browser_pause', until_wall_ms: null, browser: { ...chrome, identity_state: 'gone', app_id: null } }) + '\n')
+  await waitFor(() => logs.some((l) => l.startsWith('browser control failed op=browser_pause')))
   c.sock.end()
   await waitFor(() => logs.some((l) => l.startsWith('browser disconnected')))
   await socket.stop()
+  storage.stop()
   store.close()
 
   const db = new Database(path.join(dir, 'data', DB_FILE), { readonly: true })
-  const rows = db.prepare(`SELECT state, url, title FROM observations WHERE kind = 'page' ORDER BY id`).all()
+  const rows = db.prepare(`SELECT state, url, title FROM observations WHERE kind = 'page' AND state = 'normal' ORDER BY id`).all()
   const gaps = db.prepare(`SELECT reason FROM capture_gaps WHERE reason = 'paused'`).all()
   db.close()
   assert.deepEqual(rows, [{ state: 'normal', url: 'https://example.com/q?search=plan', title: 'Plan' }])
-  assert.equal(gaps.length, 1)
+  assert.equal(gaps.length, 2, 'one gap for the pause of everything, one for the paused browser in front')
   assert.ok(logs.some((l) => l === 'browser line rejected reason=malformed'))
   assert.ok(logs.some((l) => l === 'browser line rejected reason=too_long'))
   const everything = readFileSync(path.join(dir, 'data', DB_FILE)).toString('latin1') + logs.join('\n')
-  assert.ok(!everything.includes('while-paused') && !everything.includes('pw@') && !everything.includes('token=abc'))
+  assert.ok(!everything.includes('while-paused') && !everything.includes('browser-paused') && !everything.includes('pw@') && !everything.includes('token=abc'))
 })
 
 test('a v2 database gains page addresses and site exclusions', () => {

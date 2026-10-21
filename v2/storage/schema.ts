@@ -308,6 +308,12 @@ const deletionFence: Migration = {
     `),
 }
 
+const pausesByApp: Migration = {
+  name: 'pauses_by_app',
+  // A pause scoped to one app (a browser paused from the Daylens extension); null pauses everything.
+  up: (db) => db.exec('ALTER TABLE pauses ADD COLUMN app_id TEXT'),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -329,4 +335,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   deletionState,
   deletionWork,
   deletionFence,
+  pausesByApp,
 ]

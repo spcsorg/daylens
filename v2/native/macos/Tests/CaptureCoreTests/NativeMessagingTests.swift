@@ -62,8 +62,10 @@ final class NativeMessagingTests: XCTestCase {
 
   func testOnlyWellFormedMessagesPass() {
     func p(_ s: String) -> ExtensionMessage? { ExtensionMessage.parse(Array(s.utf8)) }
-    XCTAssertEqual(p(#"{"t":"pause","for":"hour"}"#), .pause(.hour))
-    XCTAssertNil(p(#"{"t":"pause","for":"forever"}"#))
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":1792134000000}"#), .pause(untilWallMs: 1_792_134_000_000))
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":null}"#), .pause(untilWallMs: nil))
+    XCTAssertNil(p(#"{"t":"pause","for":"hour"}"#), "a pause says until when, or null")
+    XCTAssertNil(p(#"{"t":"pause","until_wall_ms":"tomorrow"}"#))
     XCTAssertNil(p(#"{"t":"tab","state":"page","trigger":"focus","window":"1"}"#), "a page needs an address")
     XCTAssertNil(p(#"{"t":"tab","state":"unknown","trigger":"focus","reason":"private_window"}"#))
     XCTAssertNil(p(#"{"t":"tab","state":"page","trigger":"keylogger","window":"1","url":"https://x"}"#))
@@ -83,7 +85,12 @@ final class NativeMessagingTests: XCTestCase {
     XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot"}"#), #"{"t":"snapshot"}"#)
     XCTAssertNil(HostReply.fromService(#"{"op":"status","capture":"exfiltrate"}"#))
     XCTAssertNil(HostReply.fromService("garbage"))
-    XCTAssertEqual(HostReply.control(.pause(.until_resumed)), #"{"op":"pause","for":"until_resumed"}"#)
+    let pause = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.pause(untilWallMs: nil), browser: dia)!.utf8)) as! NSDictionary
+    XCTAssertEqual(pause["op"] as? String, "browser_pause")
+    XCTAssertTrue(pause["until_wall_ms"] is NSNull)
+    XCTAssertEqual((pause["browser"] as? NSDictionary)?["app_id"] as? String, "company.thebrowser.dia")
+    let resume = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.resume, browser: dia)!.utf8)) as! NSDictionary
+    XCTAssertEqual(resume["op"] as? String, "browser_resume")
   }
 
   func testTheFocusEpochTravelsBothWays() {

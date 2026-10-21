@@ -98,14 +98,14 @@ public sealed record TabReport(string Trigger, bool Page, string? Reason, string
 public abstract record ExtensionMessage
 {
     public sealed record TabMsg(TabReport Report) : ExtensionMessage;
-    public sealed record Pause(string For) : ExtensionMessage;
+    /// This browser only, until a time or (null) until resumed.
+    public sealed record Pause(long? UntilWallMs) : ExtensionMessage;
     public sealed record Resume : ExtensionMessage;
     public sealed record Open : ExtensionMessage;
     public sealed record Status : ExtensionMessage;
 
     static readonly HashSet<string> Triggers = ["activated", "focus", "updated", "removed", "snapshot", "startup", "paused"];
     static readonly HashSet<string> Reasons = ["no_focused_window", "not_normal", "no_tab", "no_address", "paused"];
-    static readonly HashSet<string> PauseFor = ["hour", "tomorrow", "until_resumed"];
 
     /// Anything not exactly one of our messages is null and is dropped.
     public static ExtensionMessage? Parse(ReadOnlySpan<byte> json)
@@ -123,7 +123,10 @@ public abstract record ExtensionMessage
                 case "status": return new Status();
                 case "resume": return new Resume();
                 case "open": return new Open();
-                case "pause": return Str("for", 32) is { } f && PauseFor.Contains(f) ? new Pause(f) : null;
+                case "pause":
+                    if (!o.TryGetProperty("until_wall_ms", out var u)) return null;
+                    if (u.ValueKind == JsonValueKind.Null) return new Pause(null);
+                    return u.ValueKind == JsonValueKind.Number && u.TryGetInt64(out var until) && until >= 0 ? new Pause(until) : null;
                 case "tab":
                     var trigger = Str("trigger", 16);
                     if (trigger is null || !Triggers.Contains(trigger)) return null;
@@ -242,10 +245,16 @@ public static class HostReply
         catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
     }
 
-    public static byte[]? Control(ExtensionMessage m) => m switch
+    /// A pause or resume names the browser that started this host: an extension pauses only its own browser.
+    public static byte[]? Control(ExtensionMessage m, AppInfo browser) => m switch
     {
-        ExtensionMessage.Pause p => Line(Json(w => { w.WriteString("op", "pause"); w.WriteString("for", p.For); })),
-        ExtensionMessage.Resume => Line(Json(w => w.WriteString("op", "resume"))),
+        ExtensionMessage.Pause p => Line(Json(w =>
+        {
+            w.WriteString("op", "browser_pause");
+            if (p.UntilWallMs is long until) w.WriteNumber("until_wall_ms", until); else w.WriteNull("until_wall_ms");
+            Obs.WriteApp(w, "browser", browser);
+        })),
+        ExtensionMessage.Resume => Line(Json(w => { w.WriteString("op", "browser_resume"); Obs.WriteApp(w, "browser", browser); })),
         ExtensionMessage.Status => Line(Json(w => w.WriteString("op", "status"))),
         _ => null,
     };

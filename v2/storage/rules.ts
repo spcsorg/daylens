@@ -27,9 +27,15 @@ export interface PauseState {
   // Set once the pause is over; while null the pause is active.
   ended_wall_ms: number | null
   gap_id: number | null
+  // Lowercased; null when the pause covers everything.
+  app_id: string | null
 }
 
 /** Where a pause stops refusing material: when it ended, else when it was set to end, else never. */
+export function pauseCovers(p: Pick<PauseState, 'app_id'>, appId: string | null): boolean {
+  return p.app_id === null || (appId !== null && appId.toLowerCase() === p.app_id)
+}
+
 export function pauseEnd(p: PauseState): number {
   return p.ended_wall_ms ?? p.until_wall_ms ?? Number.POSITIVE_INFINITY
 }
@@ -116,7 +122,10 @@ export class Rules {
   }
 
   loadPauses(): void {
-    this.pauses = this.db.prepare('SELECT id, since_wall_ms, until_wall_ms, ended_wall_ms, gap_id FROM pauses ORDER BY id').all() as PauseState[]
+    this.pauses = (this.db.prepare('SELECT id, since_wall_ms, until_wall_ms, ended_wall_ms, gap_id, app_id FROM pauses ORDER BY id').all() as PauseState[]).map((p) => ({
+      ...p,
+      app_id: p.app_id?.toLowerCase() ?? null,
+    }))
   }
 
   loadExclusions(): void {
@@ -125,7 +134,7 @@ export class Rules {
 
   /** Paused, past retention, or deleted material is never written. */
   accepts(eventWallMs: number, appId: string | null, url: string | null): boolean {
-    for (const p of this.pauses) if (eventWallMs >= p.since_wall_ms && eventWallMs < pauseEnd(p)) return false
+    for (const p of this.pauses) if (eventWallMs >= p.since_wall_ms && eventWallMs < pauseEnd(p) && pauseCovers(p, appId)) return false
     if (this.retentionDays !== null && eventWallMs < this.now() - this.retentionDays * DAY_MS) return false
     for (const t of this.tombstones) {
       const inRange = (t.from_wall_ms === null || eventWallMs >= t.from_wall_ms) && (t.to_wall_ms === null || eventWallMs < t.to_wall_ms)
@@ -152,7 +161,7 @@ export class Rules {
   /** Whether a row seen at fromWallMs may be taken to cover (from, to]: no pause or deletion for it falls in between. */
   mayCover(appId: string | null, url: string | null, fromWallMs: number, toWallMs: number): boolean {
     const overlaps = (s: number, e: number) => s <= toWallMs && e > fromWallMs
-    for (const p of this.pauses) if (overlaps(p.since_wall_ms, pauseEnd(p))) return false
+    for (const p of this.pauses) if (overlaps(p.since_wall_ms, pauseEnd(p)) && pauseCovers(p, appId)) return false
     for (const t of this.tombstones) {
       if (overlaps(t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY) && tombstoneMatches(t, appId, url)) return false
     }
@@ -161,7 +170,7 @@ export class Rules {
 
   /** Derivation: where a row's interval must stop short (a pause or a deletion that applies to it begins). */
   cut(s: number, e: number, row: ObsRow): number {
-    for (const p of this.pauses) if (p.since_wall_ms > s && p.since_wall_ms < e) e = p.since_wall_ms
+    for (const p of this.pauses) if (p.since_wall_ms > s && p.since_wall_ms < e && pauseCovers(p, row.app_id)) e = p.since_wall_ms
     for (const t of this.tombstones) {
       if (t.from_wall_ms === null || t.from_wall_ms <= s || t.from_wall_ms >= e) continue
       if (tombstoneMatches(t, row.app_id, row.url)) e = t.from_wall_ms

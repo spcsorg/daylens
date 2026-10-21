@@ -9,10 +9,10 @@ import { BrowserPages } from '../capture/browser.ts'
 import { BrowserLocal, type ConfirmRequest, type PeerCheck } from '../capture/browserLocal.ts'
 import { Privacy } from '../capture/normalize.ts'
 import { newPairing, pairLink, type Pairing } from '../capture/pairing.ts'
-import { Pause } from '../capture/pause.ts'
 import { memorySecrets, type SecretStore } from '../capture/secrets.ts'
 import { ServiceNormalizer } from '../capture/pipeline.ts'
 import { app, focus } from './support/lines.ts'
+import { MemoryPause } from './support/memoryPause.ts'
 import { MemorySink } from './support/memorySink.ts'
 
 const ORIGIN = 'chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg'
@@ -46,13 +46,13 @@ async function freePorts(n: number): Promise<number[]> {
 async function service(ports: number[], peer: PeerCheck = async () => ({ ok: true, browser: chrome }), asks: ConfirmRequest[] = [], front = chrome, secrets: SecretStore = memorySecrets(), sink = new Sink()) {
   const privacy = new Privacy([])
   const pages = new BrowserPages(sink, privacy)
-  const pause = new Pause(sink)
-  const norm = new ServiceNormalizer(sink, privacy, pause, pages)
+  const pause = new MemoryPause()
+  const norm = new ServiceNormalizer(sink, privacy, pages)
   norm.handle(focus(front, null, Date.now() - 1000, 'app_changed'))
   const logs: string[] = []
   const local = new BrowserLocal(pages, pause, sink, { ports, peerCheck: peer, clock: () => norm.clock(), log: (m) => logs.push(m), handshakeMs: 2000, confirm: (r) => asks.push(r), secrets })
   assert.ok(await local.start())
-  return { sink, local, logs, norm }
+  return { sink, local, logs, norm, pause }
 }
 
 // The extension's WebSocket, as a browser makes it: the Origin header is the extension's and cannot be set by a page.
@@ -78,6 +78,26 @@ test('a paired extension connects, proves, and its pages reach the page gate', a
   assert.deepEqual(sink.rows.filter((x) => x.kind === 'page').map((x) => [x.state, x.url]), [['normal', 'https://example.com/a']])
   assert.ok(logs.includes('browser pairing confirmed replaced=0'))
   assert.ok(!logs.includes('browser pairing awaiting confirmation'), 'a Chromium origin is never asked about')
+  r.session.close()
+  await local.stop()
+})
+
+test('a pause from the extension pauses only the browser it runs in, named by the peer check', async () => {
+  const [p] = await freePorts(1)
+  const { local, pause } = await service([p!])
+  const pairing = newPairing(ORIGIN)
+  local.addPairLink(pairLink(pairing))
+  const { r, got } = await connect([p!], pairing)
+  assert.equal(r.kind, 'connected')
+  if (r.kind !== 'connected') return
+  r.session.send({ t: 'pause', until_wall_ms: 1_792_134_000_000 } as never)
+  await sleep(150)
+  assert.deepEqual(pause.browsers, [{ app_id: 'com.google.Chrome', until_wall_ms: 1_792_134_000_000 }])
+  r.session.send({ t: 'resume' } as never)
+  r.session.send({ t: 'pause', until_wall_ms: 'tomorrow' } as never)
+  await sleep(150)
+  assert.deepEqual(pause.browsers, [])
+  assert.ok(got.filter((m) => m.t === 'status').length >= 3, 'each request is answered with the current status')
   r.session.close()
   await local.stop()
 })
@@ -430,7 +450,7 @@ test('after a legacy key moves to secure storage, its bytes are gone from the da
   const [p] = await freePorts(1)
   const privacy = new Privacy([])
   const pages = new BrowserPages(store, privacy)
-  const local = new BrowserLocal(pages, new Pause(store), store, { ports: [p!], peerCheck: async () => ({ ok: true, browser: chrome }), clock: () => null, secrets: memorySecrets() })
+  const local = new BrowserLocal(pages, new MemoryPause(), store, { ports: [p!], peerCheck: async () => ({ ok: true, browser: chrome }), clock: () => null, secrets: memorySecrets() })
   assert.ok(await local.start())
   await local.stop()
   const bytes = [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`].map((f) => path.join(dir, f)).filter((f) => existsSync(f)).map((f) => readFileSync(f))
@@ -453,7 +473,7 @@ test('a scrub blocked by an open reader stays pending, shows in health, and fini
   reader.prepare('BEGIN').run()
   reader.prepare('SELECT count(*) FROM meta').get()
   const [p] = await freePorts(1)
-  const local = new BrowserLocal(new BrowserPages(store, new Privacy([])), new Pause(store), store, { ports: [p!], peerCheck: async () => ({ ok: true, browser: chrome }), clock: () => null, secrets: memorySecrets() })
+  const local = new BrowserLocal(new BrowserPages(store, new Privacy([])), new MemoryPause(), store, { ports: [p!], peerCheck: async () => ({ ok: true, browser: chrome }), clock: () => null, secrets: memorySecrets() })
   assert.ok(await local.start())
   await local.stop()
   assert.equal(store.storeHealth().scrubPending, true, 'the scrub could not finish and says so')

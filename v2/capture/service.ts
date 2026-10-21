@@ -13,7 +13,7 @@ import { BrowserPages } from './browser.ts'
 import { BrowserLocal, helperPeerCheck, localEnabled } from './browserLocal.ts'
 import { BrowserSocket, statusMsg } from './browserSocket.ts'
 import { Privacy } from './normalize.ts'
-import { Pause } from './pause.ts'
+import { storagePause } from './pause.ts'
 import { ServiceNormalizer } from './pipeline.ts'
 import { helperSecrets } from './secrets.ts'
 import { defaultDataDir, Store } from './store.ts'
@@ -55,19 +55,16 @@ const pages = new BrowserPages(store, privacy, { log })
 let supervisor: Supervisor | null = null
 let browserSocket: BrowserSocket | null = null
 let browserLocal: BrowserLocal | null = null
-const pause = new Pause(store, {
-  onChange: (state, at) => {
-    log(`capture ${state.paused ? 'paused' : 'resumed'}`)
-    normalizer.interrupt(at)
-    if (!state.paused) {
-      supervisor?.requestSnapshot()
-      pages.requestSnapshots()
-    }
-    browserSocket?.broadcast(statusMsg(state))
-    browserLocal?.status(state)
-  },
+const pause = storagePause(storage)
+// Every pause change reaches the extensions: a pause of everything shows in their status.
+storage.bus.on((change) => {
+  if (change.kind !== 'pause') return
+  const state = pause.state()
+  log(`capture ${state.paused ? 'paused' : 'resumed'}${change.payload.app ? ' scope=app' : ''}`)
+  browserSocket?.broadcast(statusMsg(state))
+  browserLocal?.status(state)
 })
-const normalizer = new ServiceNormalizer(store, privacy, pause, pages)
+const normalizer = new ServiceNormalizer(store, privacy, pages)
 supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
   helperArgs: [
@@ -86,6 +83,7 @@ storage.attachCapture({
   interrupt: () => {
     normalizer.interrupt(supervisor!.currentPoint())
     supervisor!.requestSnapshot()
+    pages.requestSnapshots()
   },
   setPrivacy: (privacy) => {
     normalizer.setPrivacy(privacy)
@@ -117,7 +115,6 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
   log(`stopping signal=${signal}`)
-  pause.stop()
   await browserSocket?.stop()
   await browserLocal?.stop()
   await supervisor!.stop()
@@ -134,7 +131,6 @@ if (process.platform === 'win32') process.on('SIGBREAK', () => void shutdown('SI
 if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
 
 log(`started pid=${process.pid}`)
-pause.restore()
 supervisor.start()
 storage.start()
 agents?.start().catch((err: unknown) => log(`agent reader failed code=${(err as { code?: unknown })?.code ?? 'unknown'}`))

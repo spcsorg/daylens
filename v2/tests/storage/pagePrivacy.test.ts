@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BrowserPages } from '../../capture/browser.ts'
 import { Privacy, type ObservationRow } from '../../capture/normalize.ts'
+import { app, focus } from '../support/lines.ts'
 import { MemorySink } from '../support/memorySink.ts'
 import { HOUR, rig, T0 } from './support.ts'
 
@@ -41,4 +42,26 @@ test('an exclusion added while running reaches the page gate', () => {
   })
   assert.ok(!JSON.stringify(sink.rows).includes('Wombatcanary'))
   assert.ok(sink.gaps.some((g) => g.reason === 'excluded'))
+})
+
+test('a browser paused on its own stores none of its pages or windows while others keep recording, and resumes', () => {
+  const r = rig()
+  const chrome = app('com.google.Chrome', { pid: 500, registered_browser: true, engine: 'browser' })
+  const notes = app('com.apple.Notes', { pid: 600 })
+  const p = r.storage.pauseApp('com.google.Chrome', 'hour')
+  assert.equal(p.until_wall_ms, T0 + HOUR)
+  assert.equal(r.storage.paused(), null, 'nothing else is paused')
+  r.feed(focus(chrome, 'Wombatcanary window', T0 + 1000, 'app_changed'))
+  r.store.insertObservation(page(T0 + 1500, 'https://example.org/private', 'Wombatcanary page'))
+  r.feed(focus(notes, 'Groceries', T0 + 2000, 'app_changed'))
+  assert.equal(r.storage.importObservations([page(T0 + 2500, 'https://example.org/imported', 'Wombatcanary import')]).refused, 1)
+  r.clock.t = T0 + 3000
+  r.storage.resumeApp('com.google.Chrome')
+  r.feed(focus(chrome, null, T0 + 4000, 'app_changed'))
+  const rows = r.q<{ app_id: string; kind: string; title: string | null; event_wall_ms: number }>(`SELECT app_id, kind, title, event_wall_ms FROM observations WHERE kind IN ('focus', 'page') ORDER BY event_wall_ms`)
+  assert.ok(!JSON.stringify(rows).includes('Wombatcanary'), JSON.stringify(rows))
+  assert.deepEqual(rows.map((x) => [x.app_id, x.event_wall_ms]), [['com.apple.Notes', T0 + 2000], ['com.google.Chrome', T0 + 4000]])
+  assert.deepEqual(r.q(`SELECT reason, start_wall_ms, end_wall_ms FROM capture_gaps WHERE reason = 'paused'`), [{ reason: 'paused', start_wall_ms: T0 + 1000, end_wall_ms: T0 + 2000 }])
+  assert.deepEqual(r.storage.pausedApps(), [])
+  r.close()
 })

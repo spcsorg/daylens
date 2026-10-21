@@ -255,13 +255,21 @@ function cancelReconnect(): void {
   void ext.alarms.clear(ALARM_RECONNECT).catch(() => {})
 }
 
+// Daylens records this browser's pause itself, so its pages and window titles both stop; it learns of each pause
+// and resume, and of the current one whenever it connects.
+function tellDaylensPause(): void {
+  post(browserPaused() ? { t: 'pause', until_wall_ms: browserPause!.until } : { t: 'resume' })
+}
+
 function onDaylensMessage(msg: Record<string, unknown>): void {
   if (msg.t === 'status') {
     retryMs = RETRY_MIN_MS
+    const connected = state.daylens !== 'connected' && msg.daylens === 'connected'
     state.daylens = msg.daylens === 'connected' ? 'connected' : 'not_running'
     state.capture = msg.capture === 'paused' ? 'paused' : 'running'
     state.until_wall_ms = typeof msg.until_wall_ms === 'number' ? msg.until_wall_ms : null
     applyPause()
+    if (connected) tellDaylensPause()
     wakeWaiters()
   } else if (msg.t === 'snapshot') {
     void tracker.snapshot(typeof msg.epoch === 'number' && Number.isSafeInteger(msg.epoch) && msg.epoch >= 0 ? msg.epoch : undefined)
@@ -369,6 +377,7 @@ async function pauseBrowser(f: PauseFor): Promise<boolean> {
   }
   browserPause = next
   applyPause()
+  tellDaylensPause()
   return true
 }
 
@@ -380,6 +389,7 @@ async function resumeBrowser(): Promise<boolean> {
   }
   browserPause = null
   applyPause()
+  tellDaylensPause()
   return true
 }
 

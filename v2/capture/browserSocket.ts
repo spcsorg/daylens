@@ -8,12 +8,11 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { BrowserPages } from './browser.ts'
-import type { Pause, PauseFor, PauseState } from './pause.ts'
-import { MAX_LINE_BYTES, parseLine } from './protocol.ts'
+import type { PauseControl, PauseState } from './pause.ts'
+import { MAX_LINE_BYTES, parseAppIdentity, parseLine } from './protocol.ts'
 
 export const SOCKET_ENV = 'DAYLENS_V2_BROWSER_SOCKET'
 const MAX_CONNECTIONS = 32
-const PAUSE_FOR: readonly PauseFor[] = ['hour', 'tomorrow', 'until_resumed']
 
 export function browserSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   if (env[SOCKET_ENV]) return env[SOCKET_ENV]!
@@ -50,13 +49,13 @@ export interface BrowserSocketOptions {
 
 export class BrowserSocket {
   private readonly pages: BrowserPages
-  private readonly pause: Pause
+  private readonly pause: PauseControl
   private readonly log: (msg: string) => void
   readonly path: string
   private server: net.Server | null = null
   private readonly sockets = new Set<net.Socket>()
 
-  constructor(pages: BrowserPages, pause: Pause, opts: BrowserSocketOptions = {}) {
+  constructor(pages: BrowserPages, pause: PauseControl, opts: BrowserSocketOptions = {}) {
     this.pages = pages
     this.pause = pause
     this.log = opts.log ?? (() => {})
@@ -161,12 +160,11 @@ export class BrowserSocket {
       this.log('browser line rejected reason=not_tab')
       return
     }
-    if (this.pause.blocks(r.line.t.wall_ms)) return
     this.pages.onTab(id, r.line)
   }
 
   private onControl(raw: string, send: (msg: object) => void): void {
-    let msg: { op?: unknown; for?: unknown }
+    let msg: { op?: unknown; until_wall_ms?: unknown; browser?: unknown }
     try {
       msg = JSON.parse(raw)
     } catch {
@@ -174,9 +172,16 @@ export class BrowserSocket {
       return
     }
     if (msg.op === 'status') return send(statusMsg(this.pause.state()))
-    if (msg.op === 'pause' && PAUSE_FOR.includes(msg.for as PauseFor)) this.pause.pause(msg.for as PauseFor)
-    else if (msg.op === 'resume') this.pause.resume()
-    else return this.log('browser control rejected reason=unknown_op')
-    this.broadcast(statusMsg(this.pause.state()))
+    const browser = msg.op === 'browser_pause' || msg.op === 'browser_resume' ? parseAppIdentity(msg.browser) : null
+    const until = msg.until_wall_ms
+    try {
+      if (msg.op === 'browser_pause' && browser && (until === null || (typeof until === 'number' && Number.isFinite(until)))) this.pause.pauseBrowser(browser, until as number | null)
+      else if (msg.op === 'browser_resume' && browser) this.pause.resumeBrowser(browser)
+      else return this.log('browser control rejected reason=unknown_op')
+    } catch (err) {
+      this.log(`browser control failed op=${String(msg.op)} code=${(err as { code?: string }).code ?? (err as Error).message}`)
+      return send({ op: 'error', for: msg.op })
+    }
+    send(statusMsg(this.pause.state()))
   }
 }

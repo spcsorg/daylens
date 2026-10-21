@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BrowserPages } from '../capture/browser.ts'
 import { Privacy } from '../capture/normalize.ts'
-import { Pause } from '../capture/pause.ts'
 import { ServiceNormalizer } from '../capture/pipeline.ts'
 import type { AppIdentity, LineOf, TabObs } from '../capture/protocol.ts'
 import { app, focus } from './support/lines.ts'
@@ -77,8 +76,7 @@ class Host {
 function setup(rules = new Privacy([])) {
   const sink = new Sink()
   const pages = new BrowserPages(sink, rules)
-  const pause = new Pause(sink, { now: () => 0 })
-  const norm = new ServiceNormalizer(sink, rules, pause, pages)
+  const norm = new ServiceNormalizer(sink, rules, pages)
   const pageRows = () => sink.rows.filter((r) => r.kind === 'page').map((r) => ({ t: r.event_wall_ms, state: r.state, url: r.url ?? null, title: r.title, seen: r.last_seen_wall_ms, detail: r.detail }))
   return { sink, pages, norm, pageRows }
 }

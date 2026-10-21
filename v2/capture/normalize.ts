@@ -138,7 +138,9 @@ export function cleanTitle(raw: string): CleanTitle {
 export type TitleReason = 'browser_engine' | 'web_runtime_not_listed' | 'engine_uncertain'
 
 export interface Classification {
+  // Nothing of the app is stored; `paused` when that is because the app is paused on its own, not excluded.
   excluded: boolean
+  paused?: boolean
   title: 'allowed' | 'withheld_browser' | 'withheld_unknown_app' | 'unknown'
   reason?: TitleReason
 }
@@ -224,8 +226,10 @@ export class Privacy {
   private readonly trustedApps: readonly TrustedApp[]
   private readonly keptApps: ReadonlyMap<string, KeptTitleApp>
   private readonly currentBoot: OrderingPoint | null
+  private readonly pausedApps: ReadonlySet<string>
 
-  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS, keptApps: readonly KeptTitleApp[] = [], currentBoot: OrderingPoint | null = null) {
+  constructor(rules: readonly ExclusionRule[] = DEFAULT_EXCLUSIONS, trustedApps: readonly TrustedApp[] = TRUSTED_WEB_RUNTIME_APPS, keptApps: readonly KeptTitleApp[] = [], currentBoot: OrderingPoint | null = null, pausedApps: readonly string[] = []) {
+    this.pausedApps = new Set(pausedApps.map((a) => a.toLowerCase()))
     this.keptApps = new Map(keptApps.map((a) => [a.id, a]))
     this.currentBoot = currentBoot
     this.trustedApps = trustedApps
@@ -255,6 +259,7 @@ export class Privacy {
     const exe = app.path ? basename(app.path) : null
     const aumid = app.store?.aumid.toLowerCase() ?? null
     if (this.excludes(app.app_id, app.path, aumid)) return { excluded: true, title: 'withheld_unknown_app' }
+    if (appId !== null && this.pausedApps.has(appId)) return { excluded: true, paused: true, title: 'withheld_unknown_app' }
     if (app.identity_state !== 'ok' || (appId === null && exe === null)) {
       return { excluded: false, title: 'withheld_unknown_app' }
     }
@@ -321,6 +326,7 @@ export class Normalizer {
   private focus: OpenRow | null = null
   private readonly lastState = new Map<'input' | 'session' | 'power', OpenRow>()
   private excludedGap: number | null = null
+  private excludedGapReason: 'excluded' | 'paused' = 'excluded'
   private resumedAtWall: number | null = null
   private titleChannel: ChannelState = 'ok'
   private readonly sink: Sink
@@ -408,8 +414,14 @@ export class Normalizer {
 
     if (c.excluded) {
       this.focus = null
+      const reason = c.paused ? 'paused' : 'excluded'
+      if (this.excludedGap !== null && this.excludedGapReason !== reason) {
+        this.sink.closeGap(this.excludedGap, point(line))
+        this.excludedGap = null
+      }
       if (this.excludedGap === null) {
-        this.excludedGap = this.sink.openGap({ reason: 'excluded', scope: 'all', run: line.run, start: point(line), detail: null })
+        this.excludedGap = this.sink.openGap({ reason, scope: 'all', run: line.run, start: point(line), detail: null })
+        this.excludedGapReason = reason
       }
       return
     }

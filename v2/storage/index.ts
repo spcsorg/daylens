@@ -211,11 +211,7 @@ export class Storage {
       }
       if (t.state === 'done') this.purgeWhenFree(t.id).catch((err: Error) => this.onError(`purge_${err.message}`))
     }
-    const p = this.paused()
-    if (p) {
-      if (p.until_wall_ms !== null && this.now() >= p.until_wall_ms) this.expirePause()
-      else this.armPauseTimer()
-    }
+    this.expireDuePauses()
     this.scheduleRetention(60_000)
   }
 
@@ -616,88 +612,114 @@ export class Storage {
 
   /** Pauses capture for an hour, until tomorrow, until resumed, or until a given time. Nothing stamped inside is stored. */
   pause(until: PauseFor | number | null): PauseState {
-    return this.privacyWrite(true, () => this.startPause(until))
+    return this.privacyWrite(true, () => this.startPause(until, null))
   }
 
-  private startPause(until: PauseFor | number | null): PauseState {
-    if (this.paused()) this.endPause('replaced')
+  /**
+   * Pauses one app (a browser paused from the Daylens extension): nothing it shows is stored, neither its pages nor
+   * its windows, and the time it is in front is a paused gap. Other apps keep recording.
+   */
+  pauseApp(appId: string, until: PauseFor | number | null): PauseState {
+    return this.privacyWrite(true, () => this.startPause(until, appId.toLowerCase()))
+  }
+
+  private startPause(until: PauseFor | number | null, appId: string | null): PauseState {
+    const prior = this.activePauses().find((p) => p.app_id === appId)
+    if (prior) this.endPause(prior, 'replaced')
     const since = this.now()
     const untilWallMs =
       typeof until === 'number' ? until : until === 'hour' ? since + HOUR_MS : until === 'tomorrow' ? nextLocalMidnight(since) : null
     const state = this.bus.commit(
       'pause',
-      { since_wall_ms: since, until_wall_ms: untilWallMs },
+      { since_wall_ms: since, until_wall_ms: untilWallMs, ...(appId === null ? {} : { app: true }) },
       () => {
-        const gap = this.store.writeGapNow({ reason: 'paused', scope: 'all', run: null, start: this.point(since), detail: null }, untilWallMs === null ? null : this.point(untilWallMs))
-        const id = Number(this.db.prepare('INSERT INTO pauses (since_wall_ms, until_wall_ms, gap_id) VALUES (?, ?, ?)').run(since, untilWallMs, gap).lastInsertRowid)
-        return { id, since_wall_ms: since, until_wall_ms: untilWallMs, ended_wall_ms: null, gap_id: gap }
+        // A paused app's gap is written while it is in front; a pause of everything is one gap.
+        const gap = appId === null
+          ? this.store.writeGapNow({ reason: 'paused', scope: 'all', run: null, start: this.point(since), detail: null }, untilWallMs === null ? null : this.point(untilWallMs))
+          : null
+        const id = Number(this.db.prepare('INSERT INTO pauses (since_wall_ms, until_wall_ms, gap_id, app_id) VALUES (?, ?, ?, ?)').run(since, untilWallMs, gap, appId).lastInsertRowid)
+        return { id, since_wall_ms: since, until_wall_ms: untilWallMs, ended_wall_ms: null, gap_id: gap, app_id: appId }
       },
-      () => {
-        this.rules.loadPauses()
-        this.store.flush(true)
-        this.capture?.interrupt()
-      },
+      () => this.installPauses(true),
     )
     this.armPauseTimer()
     return state
   }
 
   resume(): void {
-    if (this.paused()) this.endPause('resumed')
-  }
-
-  /** The active pause, if any. */
-  paused(): PauseState | null {
-    return this.rules.pauses.find((p) => p.ended_wall_ms === null) ?? null
-  }
-
-  private endPause(reason: 'resumed' | 'expired' | 'replaced'): void {
     const p = this.paused()
-    if (!p) return
-    if (this.pauseTimer) clearTimeout(this.pauseTimer)
-    this.pauseTimer = null
+    if (p) this.endPause(p, 'resumed')
+  }
+
+  resumeApp(appId: string): void {
+    const p = this.activePauses().find((x) => x.app_id === appId.toLowerCase())
+    if (p) this.endPause(p, 'resumed')
+  }
+
+  /** The active pause of everything, if any. */
+  paused(): PauseState | null {
+    return this.activePauses().find((p) => p.app_id === null) ?? null
+  }
+
+  /** Apps paused on their own, with when each pause ends. */
+  pausedApps(): PauseState[] {
+    return this.activePauses().filter((p) => p.app_id !== null)
+  }
+
+  private activePauses(): PauseState[] {
+    return this.rules.pauses.filter((p) => p.ended_wall_ms === null)
+  }
+
+  private installPauses(interrupt: boolean): void {
+    this.rules.loadPauses()
+    this.store.flush(true)
+    this.installPrivacy()
+    if (interrupt) this.capture?.interrupt()
+  }
+
+  private endPause(p: PauseState, reason: 'resumed' | 'expired' | 'replaced'): void {
     const end = p.until_wall_ms !== null && reason === 'expired' ? p.until_wall_ms : Math.max(p.since_wall_ms, this.now())
     this.privacyWrite(false, () => this.bus.commit(
       'pause',
-      { ended: reason, at_wall_ms: end },
+      { ended: reason, at_wall_ms: end, ...(p.app_id === null ? {} : { app: true }) },
       () => {
         if (p.gap_id !== null) this.store.setGapEndNow(p.gap_id, this.point(end))
         this.db.prepare('UPDATE pauses SET ended_wall_ms = ? WHERE id = ?').run(end, p.id)
       },
-      () => {
-        this.rules.loadPauses()
-        this.store.flush(true)
-        if (reason !== 'replaced') this.capture?.interrupt()
-      },
+      () => this.installPauses(reason !== 'replaced'),
     ))
+    this.armPauseTimer()
   }
 
   private expiryRetryMs = 0
 
   // A pause whose end cannot be written yet stays in force; the end is retried with backoff, and nothing is thrown.
-  private expirePause(): void {
-    try {
-      this.endPause('expired')
-      this.expiryRetryMs = 0
-    } catch (err) {
-      this.onError(`pause_expiry_${(err as { code?: string }).code ?? 'failed'}`)
-      this.expiryRetryMs = Math.min(Math.max(this.expiryRetryMs * 2, 100), 30_000)
-      this.armPauseTimer(this.expiryRetryMs)
+  private expireDuePauses(): void {
+    for (const p of this.activePauses()) {
+      if (p.until_wall_ms === null || this.now() < p.until_wall_ms) continue
+      try {
+        this.endPause(p, 'expired')
+        this.expiryRetryMs = 0
+      } catch (err) {
+        this.onError(`pause_expiry_${(err as { code?: string }).code ?? 'failed'}`)
+        this.expiryRetryMs = Math.min(Math.max(this.expiryRetryMs * 2, 100), 30_000)
+        this.armPauseTimer(this.expiryRetryMs)
+        return
+      }
     }
+    this.armPauseTimer()
   }
 
   private armPauseTimer(minWaitMs = 0): void {
-    const p = this.paused()
-    if (!p || p.until_wall_ms === null) return
     if (this.pauseTimer) clearTimeout(this.pauseTimer)
+    this.pauseTimer = null
+    const ends = this.activePauses().flatMap((p) => (p.until_wall_ms === null ? [] : [p.until_wall_ms]))
+    if (ends.length === 0) return
     // Timers run on monotonic time and drift across sleep; re-arm until the wall clock reaches the end.
-    const wait = Math.max(minWaitMs, Math.min(Math.max(0, p.until_wall_ms - this.now()), 3_600_000))
+    const wait = Math.max(minWaitMs, Math.min(Math.max(0, Math.min(...ends) - this.now()), 3_600_000))
     this.pauseTimer = setTimeout(() => {
       this.pauseTimer = null
-      if (this.stopped) return
-      const active = this.paused()
-      if (active && active.until_wall_ms !== null && this.now() >= active.until_wall_ms) this.expirePause()
-      else this.armPauseTimer()
+      if (!this.stopped) this.expireDuePauses()
     }, wait)
     this.pauseTimer.unref?.()
   }
@@ -725,7 +747,8 @@ export class Storage {
   private installPrivacy(): void {
     const kept = this.keptTitleApps()
     if (kept.length > 0 && this.bootPoint === null) this.readBootPoint()
-    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, kept, kept.length > 0 ? this.bootPoint : null))
+    const paused = this.pausedApps().map((p) => p.app_id!)
+    this.capture?.setPrivacy(new Privacy(this.store.exclusions(), undefined, kept, kept.length > 0 ? this.bootPoint : null, paused))
   }
 
   private async readOrdering(): Promise<OrderingPoint | null> {
@@ -766,7 +789,7 @@ export class Storage {
 
   /** Time nothing may be kept from, whatever the app: pauses, deleted ranges and anything older than retention. */
   withheld(): Span[] {
-    const spans: Span[] = this.rules.pauses.map((p) => [p.since_wall_ms, pauseEnd(p)] as const)
+    const spans: Span[] = this.rules.pauses.filter((p) => p.app_id === null).map((p) => [p.since_wall_ms, pauseEnd(p)] as const)
     for (const t of this.rules.tombstones) {
       if (t.kind === 'range') spans.push([t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY])
     }

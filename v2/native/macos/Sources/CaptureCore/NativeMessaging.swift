@@ -91,8 +91,6 @@ public struct FrameReader {
   }
 }
 
-public enum PauseChoice: String { case hour, tomorrow, until_resumed }
-
 public struct TabReport: Equatable {
   public var trigger: String
   public var page: Bool
@@ -106,7 +104,8 @@ public struct TabReport: Equatable {
 
 public enum ExtensionMessage: Equatable {
   case tab(TabReport)
-  case pause(PauseChoice)
+  /// This browser only, until a time or (nil) until resumed.
+  case pause(untilWallMs: Int64?)
   case resume
   case open
   case status
@@ -128,7 +127,9 @@ public enum ExtensionMessage: Equatable {
     case "status": return .status
     case "resume": return .resume
     case "open": return .open
-    case "pause": return (o["for"] as? String).flatMap(PauseChoice.init(rawValue:)).map(ExtensionMessage.pause)
+    case "pause":
+      guard o.keys.contains("until_wall_ms"), let until = epoch(o["until_wall_ms"]) else { return nil }
+      return .pause(untilWallMs: until)
     case "tab":
       guard let trigger = o["trigger"] as? String, triggers.contains(trigger), let state = o["state"] as? String, let ep = epoch(o["epoch"]) else { return nil }
       if state == "unknown" {
@@ -182,10 +183,12 @@ public enum HostReply {
     return JSON.object([("t", .string("status")), ("daylens", .string("connected")), ("capture", .string(capture)), ("until_wall_ms", until)]).serialized()
   }
 
-  public static func control(_ m: ExtensionMessage) -> String? {
+  /// A pause or resume names the browser that started this host: an extension pauses only its own browser.
+  public static func control(_ m: ExtensionMessage, browser: AppInfo) -> String? {
     switch m {
-    case .pause(let p): return JSON.object([("op", .string("pause")), ("for", .string(p.rawValue))]).serialized()
-    case .resume: return JSON.object([("op", .string("resume"))]).serialized()
+    case .pause(let until):
+      return JSON.object([("op", .string("browser_pause")), ("until_wall_ms", until.map { .int($0) } ?? .null), ("browser", browser.json)]).serialized()
+    case .resume: return JSON.object([("op", .string("browser_resume")), ("browser", browser.json)]).serialized()
     case .status: return JSON.object([("op", .string("status"))]).serialized()
     default: return nil
     }

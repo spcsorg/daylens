@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto'
 import http from 'node:http'
 import type net from 'node:net'
 import type { BrowserPages } from './browser.ts'
-import type { Pause, PauseState } from './pause.ts'
+import type { PauseControl, PauseState } from './pause.ts'
 import {
   extensionOfOrigin,
   isNonce,
@@ -115,6 +115,8 @@ type ExtMessage =
   | { t: 'tab'; trigger: string; state: 'unknown'; reason: string; epoch?: number }
   | { t: 'status' }
   | { t: 'ping' }
+  | { t: 'pause'; until_wall_ms: number | null }
+  | { t: 'resume' }
 
 function idOrNull(v: unknown): string | null | undefined {
   if (v === null || v === undefined) return null
@@ -131,7 +133,8 @@ export function parseExtensionMessage(raw: string): ExtMessage | null {
   } catch {
     return null
   }
-  if (o.t === 'status' || o.t === 'ping') return { t: o.t }
+  if (o.t === 'status' || o.t === 'ping' || o.t === 'resume') return { t: o.t }
+  if (o.t === 'pause') return o.until_wall_ms === null || (typeof o.until_wall_ms === 'number' && Number.isSafeInteger(o.until_wall_ms)) ? { t: 'pause', until_wall_ms: o.until_wall_ms } : null
   if (o.t !== 'tab' || typeof o.trigger !== 'string' || !TRIGGERS.has(o.trigger)) return null
   if (o.epoch !== undefined && !(typeof o.epoch === 'number' && Number.isSafeInteger(o.epoch) && o.epoch >= 0)) return null
   const tag = typeof o.epoch === 'number' ? { epoch: o.epoch } : {}
@@ -189,7 +192,7 @@ class Conn {
 
 export class BrowserLocal {
   private readonly pages: BrowserPages
-  private readonly pause: Pause
+  private readonly pause: PauseControl
   private readonly store: PairingStore
   private readonly ports: readonly number[]
   private readonly peerCheck: PeerCheck
@@ -209,7 +212,7 @@ export class BrowserLocal {
   private readonly confirm: (req: ConfirmRequest) => void
   port: number | null = null
 
-  constructor(pages: BrowserPages, pause: Pause, store: PairingStore, opts: BrowserLocalOptions) {
+  constructor(pages: BrowserPages, pause: PauseControl, store: PairingStore, opts: BrowserLocalOptions) {
     this.pages = pages
     this.pause = pause
     this.store = store
@@ -547,6 +550,17 @@ export class BrowserLocal {
     if (!m) return this.log('browser line rejected reason=bad_message')
     if (m.t === 'ping') return
     if (m.t === 'status') return c.send(this.statusOf(this.pause.state()))
+    if (m.t === 'pause' || m.t === 'resume') {
+      try {
+        if (!c.browser) throw new Error('browser_unidentified')
+        if (m.t === 'pause') this.pause.pauseBrowser(c.browser, m.until_wall_ms)
+        else this.pause.resumeBrowser(c.browser)
+      } catch (err) {
+        this.log(`browser control failed op=${m.t} code=${(err as { code?: string }).code ?? (err as Error).message}`)
+        return c.send({ t: 'error', for: m.t })
+      }
+      return c.send(this.statusOf(this.pause.state()))
+    }
     const clk = this.clock()
     if (!clk) return this.log('browser line rejected reason=no_helper_clock')
     const wall = this.now()
@@ -574,7 +588,6 @@ export class BrowserLocal {
     }
     const r = parseLine(JSON.stringify(line))
     if (!r.ok || r.line.kind !== 'tab') return this.log(`browser line rejected reason=${r.ok ? 'not_tab' : r.reason}`)
-    if (this.pause.blocks(wall)) return
     this.pages.onTab(c.pagesId!, r.line as Line & { kind: 'tab' })
   }
 

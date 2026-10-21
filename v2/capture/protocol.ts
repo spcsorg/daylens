@@ -268,6 +268,15 @@ function appIdentity(v: unknown): AppIdentity {
   }
 }
 
+/** An app identity as a control message carries it, checked like a line's; null if it does not validate. */
+export function parseAppIdentity(v: unknown): AppIdentity | null {
+  try {
+    return appIdentity(v)
+  } catch {
+    return null
+  }
+}
+
 function windowInfo(v: unknown): WindowInfo {
   const o = obj(v, 'window')
   const title = strOrNull(o, 'title', MAX_TITLE_CHARS)

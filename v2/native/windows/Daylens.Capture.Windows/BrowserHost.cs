@@ -175,7 +175,7 @@ internal static unsafe class BrowserHost
                     break;
                 default:
                     if (!Connected && !Connect()) { Reply(HostReply.NotRunning()); break; }
-                    if (HostReply.Control(m) is { } line) WritePipe(line);
+                    if (HostReply.Control(m, _browser) is { } line) WritePipe(line);
                     break;
             }
         }
