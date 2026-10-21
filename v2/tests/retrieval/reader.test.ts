@@ -57,6 +57,31 @@ test('an hour is its recorded facts, plus the written hour through readHour with
   r.close()
 })
 
+test('a day of hours reads presence and capture gaps once, not once per hour, and each hour gets its own part', () => {
+  const r = rig()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  // Four hours each active for 30 minutes, then locked: a lock spans every hour boundary.
+  for (let h = 0; h < 4; h++) {
+    const t = T0 + h * HOUR
+    r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+    for (let m = 0; m < 30; m++) r.feed(focus(notes, `Draft ${h}`, t + m * MIN, m === 0 ? 'app_changed' : undefined))
+    r.feed(line('session', { state: 'locked', snapshot: false }, t + 30 * MIN))
+  }
+  r.store.flush()
+  const reader = Reader.open(file(r))
+  const prepare = reader.db.prepare.bind(reader.db)
+  let presenceReads = 0
+  reader.db.prepare = ((sql: string) => {
+    if (/FROM observations/.test(sql)) presenceReads++
+    return prepare(sql)
+  }) as typeof reader.db.prepare
+  const hours = reader.hours(T0, T0 + 4 * HOUR)
+  assert.deepEqual(hours.map((h) => [(h.start_wall_ms - T0) / HOUR, h.recorded_ms / MIN, h.gaps]), [0, 1, 2, 3].map((h) => [h, 30, [{ reason: 'locked', ms: 30 * MIN }]]))
+  assert.equal(presenceReads, 1)
+  reader.close()
+  r.close()
+})
+
 test('an app deleted across all time is gone up to the deletion and found again after it, pending or done', async () => {
   const editor = app('com.example.editor', { name: 'Editor' })
   for (const hold of [true, false]) {

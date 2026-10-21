@@ -201,10 +201,12 @@ export class Reader {
       if (h) hourRows.set(w.start_wall_ms, h)
     }
     const starts = [...new Set([...byHour.keys(), ...hourRows.keys()])].sort((a, b) => a - b)
+    const ends = new Map(starts.map((s) => [s, hourRows.get(s)?.end_wall_ms ?? s + HOUR_MS]))
+    const gaps = starts.length ? this.gapsOver(starts[0]!, Math.max(...ends.values())) : () => []
     return starts.map((start) => {
       const slot = byHour.get(start)
       const hour = hourRows.get(start) ?? null
-      const end = hour?.end_wall_ms ?? start + HOUR_MS
+      const end = ends.get(start)!
       return {
         start_wall_ms: start,
         end_wall_ms: end,
@@ -213,23 +215,28 @@ export class Reader {
         recorded_ms: slot?.recorded ?? 0,
         apps: [...(slot?.apps.values() ?? [])].sort((a, b) => b.ms - a.ms),
         sources: [...(slot?.sources.values() ?? [])].sort((a, b) => b.ms - a.ms || a.first_wall_ms - b.first_wall_ms),
-        gaps: this.gaps(start, end),
+        gaps: gaps(start, end),
       }
     })
   }
 
-  private gaps(from: number, to: number): HourGap[] {
-    const out = new Map<string, number>()
-    const add = (reason: string, s: number, e: number) => {
-      const ms = Math.min(e, to) - Math.max(s, from)
-      if (ms > 0) out.set(reason, (out.get(reason) ?? 0) + ms)
-    }
-    const captured = this.db
+  /**
+   * Gaps in [from, to), read once and then cut to each hour: the presence read looks back for the last state before
+   * `from`, which costs about as much as the read itself on a large file, so it must not run once per hour.
+   */
+  private gapsOver(from: number, to: number): (hourFrom: number, hourTo: number) => HourGap[] {
+    const spans: { reason: string; s: number; e: number }[] = this.db
       .prepare(`SELECT reason, start_wall_ms AS s, coalesce(end_wall_ms, ?) AS e FROM capture_gaps WHERE scope = 'all' AND start_wall_ms < ? AND coalesce(end_wall_ms, ?) > ?`)
       .all(to, to, to, from) as { reason: string; s: number; e: number }[]
-    for (const g of captured) add(g.reason, g.s, g.e)
     const presence = presenceFromCapture(this.db, from, to)
-    for (const k of ['locked', 'asleep', 'idle'] as const) for (const p of presence[k]) add(k, p.start, p.end)
-    return [...out].map(([reason, ms]) => ({ reason, ms })).sort((a, b) => b.ms - a.ms)
+    for (const k of ['locked', 'asleep', 'idle'] as const) for (const p of presence[k]) spans.push({ reason: k, s: p.start, e: p.end })
+    return (hourFrom, hourTo) => {
+      const out = new Map<string, number>()
+      for (const g of spans) {
+        const ms = Math.min(g.e, hourTo) - Math.max(g.s, hourFrom)
+        if (ms > 0) out.set(g.reason, (out.get(g.reason) ?? 0) + ms)
+      }
+      return [...out].map(([reason, ms]) => ({ reason, ms })).sort((a, b) => b.ms - a.ms)
+    }
   }
 }
