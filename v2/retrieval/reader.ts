@@ -2,6 +2,8 @@
 // the capture service owns the schema, and a schema this build was not written for is refused, not guessed at.
 import Database from 'better-sqlite3'
 import { presenceFromCapture } from '../capture/agents/attribution.ts'
+import { dbHostLookup, resolveHost } from '../capture/agents/store.ts'
+import type { Agent } from '../capture/agents/types.ts'
 import { HOUR_MS, hoursOf, MAX_INTERVAL_MS } from '../storage/derive.ts'
 import { readHour, type Hour } from '../storage/hours.ts'
 import { matchesSite, pendingTombstones, type Tombstone } from '../storage/rules.ts'
@@ -50,6 +52,26 @@ export interface HourView {
   gaps: HourGap[]
 }
 
+export interface AgentTurn {
+  start_wall_ms: number
+  // The turn's end, else its last activity: the agent never counts as working past it.
+  end_wall_ms: number
+  end_state: string | null
+}
+
+export interface AgentSessionWork {
+  agent: string
+  session_id: string
+  origin: string
+  project_dir: string | null
+  branch: string | null
+  // The app the session ran in, when known.
+  app_id: string | null
+  turns: AgentTurn[]
+  // When the person sent a message to the agent; what was said is never read.
+  user_messages_wall_ms: number[]
+}
+
 interface IntervalRow {
   start_wall_ms: number
   end_wall_ms: number
@@ -74,7 +96,7 @@ export function openReadOnly(file: string): Database.Database {
   return db
 }
 
-function checkSchema(db: Database.Database): void {
+export function checkSchema(db: Database.Database): void {
   const meta = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'migrations')`).all()
   if (meta.length < 2) throw new UnknownSchemaError('this is not a Daylens V2 database that storage has set up')
   const v = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined
@@ -218,6 +240,50 @@ export class Reader {
         gaps: gaps(start, end),
       }
     })
+  }
+
+  /**
+   * Agent sessions with a turn in [from, to), as a pending deletion will leave them: a deleted range removes turns that
+   * begin in it and cuts turns that cross its start, and a deleted app removes the sessions that ran in it. Null when
+   * the agent reader has never been enabled on this database.
+   */
+  agentWork(fromWallMs: number, toWallMs: number): AgentSessionWork[] | null {
+    if (!this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_turns'`).get()) return null
+    return this.db.transaction(() => this.agentWorkNow(fromWallMs, toWallMs))()
+  }
+
+  private agentWorkNow(from: number, to: number): AgentSessionWork[] {
+    const pending = pendingTombstones(this.db)
+    const ranges = pending.filter((t) => t.kind === 'range').map((t) => [t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY] as const)
+    const apps = new Set(pending.filter((t) => t.kind === 'source').map((t) => t.app_id!))
+    const hosts = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() ? dbHostLookup(this.db) : null
+    const turns = this.db
+      .prepare(
+        `SELECT t.agent, t.session_id, t.start_wall_ms, coalesce(t.end_wall_ms, t.last_activity_wall_ms) AS end_wall_ms, t.end_state,
+                coalesce(s.origin, 'interactive') AS origin, coalesce(t.project_dir, s.project_dir) AS project_dir, coalesce(t.branch, s.branch) AS branch
+         FROM agent_turns t LEFT JOIN agent_sessions s ON s.agent = t.agent AND s.session_id = t.session_id
+         WHERE t.replayed = 0 AND t.start_wall_ms < ? AND coalesce(t.end_wall_ms, t.last_activity_wall_ms) >= ? ORDER BY t.start_wall_ms, t.id`,
+      )
+      .all(to, from) as (AgentTurn & { agent: Agent; session_id: string; origin: string; project_dir: string | null; branch: string | null })[]
+    const sessions = new Map<string, AgentSessionWork>()
+    for (const t of turns) {
+      if (ranges.some(([a, b]) => t.start_wall_ms >= a && t.start_wall_ms < b)) continue
+      const end = Math.min(t.end_wall_ms, ...ranges.filter(([a]) => a > t.start_wall_ms).map(([a]) => a))
+      if (end < from) continue
+      const host = hosts ? resolveHost(hosts, t.agent, t.session_id, t.start_wall_ms) : null
+      if (host?.app_id && apps.has(host.app_id.toLowerCase())) continue
+      const key = `${t.agent}\u0000${t.session_id}`
+      let s = sessions.get(key)
+      if (!s) sessions.set(key, (s = { agent: t.agent, session_id: t.session_id, origin: t.origin, project_dir: t.project_dir, branch: t.branch, app_id: host?.app_id ?? null, turns: [], user_messages_wall_ms: [] }))
+      s.turns.push({ start_wall_ms: t.start_wall_ms, end_wall_ms: end, end_state: end < t.end_wall_ms ? null : t.end_state })
+    }
+    const acts = this.db.prepare(`SELECT wall_ms FROM agent_events WHERE kind = 'user' AND detail IN ('prompt', 'queued', 'steer', 'answer') AND agent = ? AND session_id = ? AND wall_ms >= ? AND wall_ms < ? ORDER BY wall_ms`)
+    for (const s of sessions.values()) {
+      for (const { wall_ms } of acts.all(s.agent, s.session_id, from, to) as { wall_ms: number }[]) {
+        if (s.turns.some((t) => wall_ms >= t.start_wall_ms && wall_ms <= t.end_wall_ms)) s.user_messages_wall_ms.push(wall_ms)
+      }
+    }
+    return [...sessions.values()]
   }
 
   /**
