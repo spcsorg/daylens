@@ -437,16 +437,15 @@ export class Supervisor {
 
     switch (line.kind) {
       case 'hello':
+        this.normalizer.handle(line)
         return
       case 'heartbeat':
         return this.onHeartbeat(line, point)
       case 'power':
-        this.normalizer.handle(line)
-        if (line.obs.state === 'resume') this.send({ op: 'snapshot' })
+        if (this.normalizer.handle(line) || line.obs.state === 'resume') this.send({ op: 'snapshot' })
         return
       case 'session':
-        this.normalizer.handle(line)
-        if (line.obs.state === 'unlocked' && !line.obs.snapshot) this.send({ op: 'snapshot' })
+        if (this.normalizer.handle(line) || (line.obs.state === 'unlocked' && !line.obs.snapshot)) this.send({ op: 'snapshot' })
         return
       case 'loss': {
         const o = line.obs

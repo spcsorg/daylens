@@ -3,7 +3,7 @@
 import type { BrowserPages } from './browser.ts'
 import type { ClockPoint } from './browserLocal.ts'
 import { Normalizer, type GapPoint, type Privacy, type Sink } from './normalize.ts'
-import type { Line } from './protocol.ts'
+import type { Line, LineOf } from './protocol.ts'
 
 export class ServiceNormalizer extends Normalizer {
   private readonly pages: BrowserPages
@@ -14,10 +14,18 @@ export class ServiceNormalizer extends Normalizer {
     this.pages = pages
   }
 
-  override handle(line: Line): void {
+  override handle(line: Line): boolean {
     this.last = { boot: line.boot, wall_ms: line.t.wall_ms, mono_us: line.t.mono_us }
-    super.handle(line)
-    if (line.kind === 'focus') this.pages.onFront(line)
+    return super.handle(line)
+  }
+
+  protected override onFront(line: LineOf<'focus'>): void {
+    this.pages.onFront(line)
+  }
+
+  // The page in front ends with the row it divides; the next focus line asks the extension again.
+  protected override onStopChanged(at: GapPoint): void {
+    this.pages.interrupt(at)
   }
 
   // The helper's clock as of its latest line, for lines the service stamps itself.

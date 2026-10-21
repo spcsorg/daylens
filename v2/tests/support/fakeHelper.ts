@@ -96,6 +96,10 @@ setTimeout(() => {
       }, 400)
       break
     }
+    case 'display_cycle':
+      emit('power', { state: 'display_off' })
+      setTimeout(() => emit('power', { state: 'display_on' }), 200)
+      break
     case 'session_unregistered':
       emit('session', { state: 'locked', snapshot: false })
       emit('session', { state: 'unlocked', snapshot: false })

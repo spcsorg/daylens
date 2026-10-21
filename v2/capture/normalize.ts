@@ -322,8 +322,16 @@ function point(line: Line): GapPoint {
   return { wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot }
 }
 
+// Lock states, as derivation and presence read them.
+const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
+const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
+// What ends the row in front, as it ends intervals in derivation.
+type Stop = 'locked' | 'asleep' | 'display_off'
+
 export class Normalizer {
   private focus: OpenRow | null = null
+  // When each stop in effect began.
+  private readonly stops = new Map<Stop, number>()
   private readonly lastState = new Map<'input' | 'session' | 'power', OpenRow>()
   private excludedGap: number | null = null
   private excludedGapReason: 'excluded' | 'paused' = 'excluded'
@@ -342,43 +350,81 @@ export class Normalizer {
     this.privacy = privacy
   }
 
-  handle(line: Line): void {
+  /** Returns true when the line ended the last stop in effect: the window in front then needs a fresh read. */
+  handle(line: Line): boolean {
     switch (line.kind) {
       case 'focus':
-        return this.onFocus(line)
+        this.onFocus(line)
+        return false
       case 'input':
         this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
-        return this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
-      case 'session':
+        this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
+        return false
+      case 'session': {
         this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
         if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') {
           this.endExcluded(line)
         }
-        return this.onState(line, 'session', line.obs.state, null)
-      case 'power':
-        if (line.obs.state === 'resume') this.resumedAtWall ??= line.t.wall_ms
-        this.onPresenceEvidence(line, line.obs.state === 'resume_user')
-        if (line.obs.state === 'sleep') {
+        this.onState(line, 'session', line.obs.state, null)
+        if (LOCK_START.has(line.obs.state)) return this.setStop('locked', true, line)
+        if (LOCK_END.has(line.obs.state)) return this.setStop('locked', false, line)
+        return false
+      }
+      case 'power': {
+        const s = line.obs.state
+        if (s === 'resume') this.resumedAtWall ??= line.t.wall_ms
+        this.onPresenceEvidence(line, s === 'resume_user')
+        if (s === 'sleep') {
           this.resumedAtWall = null
           this.endExcluded(line)
         }
-        return this.onState(line, 'power', line.obs.state, null)
+        this.onState(line, 'power', s, null)
+        if (s === 'sleep' || s === 'display_off') return this.setStop(s === 'sleep' ? 'asleep' : 'display_off', true, line)
+        if (s === 'resume' || s === 'resume_user') return this.setStop('asleep', false, line)
+        return this.setStop('display_off', false, line)
+      }
       case 'clock': {
         // Clock changes are events, not states: every one is kept with its own time.
         const row = envelopeRow(line, 'clock')
         row.state = line.obs.change
         this.sink.insertObservation(row)
-        return
+        return false
       }
       case 'hello':
+        // A helper that is running is on an awake machine; no helper reports whether the display is on, so assume it is.
+        this.stops.delete('asleep')
+        this.stops.delete('display_off')
+        return false
       case 'heartbeat':
       case 'loss':
       case 'bye':
       // Tab lines come only from the browser host, never through a helper.
       case 'tab':
-        return
+        return false
     }
   }
+
+  // Time on either side of a stop is never one row: the row in front ends at every change, so the window is recorded
+  // again from a fresh read once nothing stops it.
+  private setStop(stop: Stop, on: boolean, line: Line): boolean {
+    if (this.stops.has(stop) === on) return false
+    if (on) this.stops.set(stop, line.t.wall_ms)
+    else this.stops.delete(stop)
+    this.focus = null
+    this.onStopChanged(point(line))
+    return !on && this.stops.size === 0
+  }
+
+  private stoppedAt(wallMs: number): boolean {
+    for (const since of this.stops.values()) if (wallMs >= since) return true
+    return false
+  }
+
+  /** A stop began or ended (for what follows the front, such as browser pages). */
+  protected onStopChanged(_at: GapPoint): void {}
+
+  /** A focus line that was taken (not one stamped inside a stop). */
+  protected onFront(_line: LineOf<'focus'>): void {}
 
   // Title channel health: a title that cannot update is not evidence of current work.
   onTitleChannel(state: ChannelState, wallMs: number): void {
@@ -409,6 +455,14 @@ export class Normalizer {
   }
 
   private onFocus(line: LineOf<'focus'>): void {
+    // The snapshot after a wake, while the screen is still locked, is not a row. A line stamped before the stop is kept;
+    // the stop's end still ends its row.
+    if (this.stoppedAt(line.t.wall_ms)) return
+    this.takeFocus(line)
+    this.onFront(line)
+  }
+
+  private takeFocus(line: LineOf<'focus'>): void {
     const { app, window: win } = line.obs
     const c = this.privacy.classify(app, { boot: line.boot, mono_us: line.t.mono_us })
 

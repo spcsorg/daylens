@@ -1,6 +1,6 @@
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -81,6 +81,17 @@ test('a healthy helper: startup gap closes at hello, focus is stored, browser ti
   assert.ok(rows.some((r) => r.app_id === 'com.apple.Terminal' && r.title?.startsWith('zsh')))
   assert.ok(rows.filter((r) => r.app_id === 'com.google.Chrome').every((r) => r.title === null && r.title_state === 'withheld_browser'))
   assert.equal(h.sup.stats.hangs + h.sup.stats.crashes, 0)
+  await h.finish()
+})
+
+test('when the display comes back on, the helper is asked for a fresh read of the window in front', async () => {
+  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
+  const h = harness({ FAKE_MODE: 'display_cycle', FAKE_AFTER_MS: '200', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })
+  h.sup.start()
+  await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 2)
+  h.store.flush()
+  const rows = h.store.query<{ kind: string; state: string | null }>(`SELECT kind, state FROM observations WHERE kind IN ('focus', 'power') ORDER BY event_wall_ms, id`)
+  assert.deepEqual(rows.map((r) => (r.kind === 'focus' ? 'focus' : r.state)), ['focus', 'display_off', 'display_on', 'focus'])
   await h.finish()
 })
 

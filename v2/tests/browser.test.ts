@@ -4,7 +4,7 @@ import { BrowserPages } from '../capture/browser.ts'
 import { Privacy } from '../capture/normalize.ts'
 import { ServiceNormalizer } from '../capture/pipeline.ts'
 import type { AppIdentity, LineOf, TabObs } from '../capture/protocol.ts'
-import { app, focus } from './support/lines.ts'
+import { app, focus, line } from './support/lines.ts'
 import { MemorySink } from './support/memorySink.ts'
 
 class Sink extends MemorySink {
@@ -205,6 +205,25 @@ test('a helper interruption forgets the page; the gap covers the time', () => {
   norm.handle(focus(chrome, null, 2200, 'snapshot'))
   h.page('https://example.com/', 'x', 2210)
   assert.equal(pageRows().length, 2)
+})
+
+test('after an unlock the page in front is asked for again and recorded as a new row', () => {
+  const { pages, norm, pageRows } = setup()
+  const h = new Host(pages, chrome)
+  norm.handle(focus(chrome, null, 1000, 'app_changed'))
+  h.page('https://example.com/', 'x', 1010)
+  norm.handle(line('session', { state: 'locked', snapshot: false }, 2000))
+  h.page('https://example.com/', 'x', 2100)
+  norm.handle(focus(chrome, null, 2200, 'snapshot'))
+  assert.equal(pageRows().length, 1, 'nothing while locked')
+  norm.handle(line('session', { state: 'unlocked', snapshot: false }, 9000))
+  norm.handle(focus(chrome, null, 9010, 'snapshot'))
+  assert.deepEqual(h.sent, ['snapshot', 'snapshot'], 'the fresh read of the browser asks the extension again')
+  h.page('https://example.com/', 'x', 9020)
+  assert.deepEqual(pageRows().map((r) => [r.t, r.seen]), [
+    [1010, 1010],
+    [9020, 9020],
+  ])
 })
 
 test('addresses are cleaned before storage and pages with no address are unknown', () => {

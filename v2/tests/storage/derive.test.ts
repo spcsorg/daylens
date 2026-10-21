@@ -50,7 +50,10 @@ test('intervals and search documents built as capture flushes equal a rebuild fr
     const a = i % 3 === 0 ? chat : editor
     r.feed(focus(a, `item ${i % 17}.md - ${a.name}`, t))
     if (i % 5 === 0) r.feed(focus(a, `item ${i % 17}.md - ${a.name}`, t + 30_000, 'reconcile'))
-    if (i % 50 === 49) r.feed(line('session', { state: 'locked', snapshot: false }, t + 40_000))
+    if (i % 50 === 49) {
+      r.feed(line('session', { state: 'locked', snapshot: false }, t + 40_000))
+      r.feed(line('session', { state: 'unlocked', snapshot: false }, t + 45_000))
+    }
     t += 50_000 + (i % 7) * 10_000
     if (i % 20 === 0) r.store.flush()
   }
