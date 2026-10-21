@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import type { GapReason } from '../../capture/normalize.ts'
 import { DB_FILE, Store } from '../../capture/store.ts'
 import { Reader, UnknownSchemaError } from '../../retrieval/reader.ts'
 import { search } from '../../retrieval/search.ts'
@@ -137,4 +138,24 @@ test('what a pending deletion covers is already gone from what the reader return
   assert.deepEqual(wholeReader.hours(T0 - HOUR, T0 + 2 * HOUR), [])
   wholeReader.close()
   whole.close()
+})
+
+test('a pending range deletion already takes its part out of an hour’s gaps and its lock, sleep and idle, as the deletion leaves them', async () => {
+  for (const hold of [true, false]) {
+    const r = rig(undefined, { holdDeletions: hold })
+    day(r)
+    const at = (m: number) => ({ wall_ms: T0 + m * MIN, mono_us: (T0 + m * MIN) * 1000, boot: 'boot-test' })
+    const gap = (reason: GapReason, from: number, to: number) => r.store.writeGapNow({ reason, scope: 'all', run: 'run-test', start: at(from), detail: null }, at(to))
+    gap('helper_crashed', 22, 28)
+    gap('helper_crashed', 40, 45)
+    gap('paused', 46, 48)
+    r.clock.t = T0 + 2 * HOUR
+    const handle = r.storage.deleteRange(T0 + 25 * MIN, T0 + 50 * MIN)
+    if (!hold) await handle.done
+    const reader = Reader.open(file(r))
+    // The lock at 31 minutes is inside the range; the gap crossing its start ends there; a pause stays, as deletion keeps it.
+    assert.deepEqual(reader.hourAt(T0)!.gaps, [{ reason: 'helper_crashed', ms: 3 * MIN }, { reason: 'paused', ms: 2 * MIN }], `hold=${hold}`)
+    reader.close()
+    r.close()
+  }
 })
