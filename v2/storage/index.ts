@@ -203,7 +203,7 @@ export class Storage {
     for (const t of this.rules.tombstones) {
       if (t.state === 'pending') {
         this.track(this.finishDeletion(t.id))
-          .then((r) => (r.purged ? undefined : this.purgeWhenFree(t.id)))
+          .then(() => this.purgeWhenFree(t.id))
           .catch((err: Error) => this.onError(`deletion_resume_${err.message}`))
       }
       if (t.state === 'done') this.purgeWhenFree(t.id).catch((err: Error) => this.onError(`purge_${err.message}`))
@@ -362,7 +362,8 @@ export class Storage {
     }
     if (this.holdDeletions) return { tombstone, done: new Promise(() => {}), purged: new Promise(() => {}) }
     const done = this.track(this.finishDeletion(tombstone))
-    return { tombstone, done, purged: done.then((r) => (r.purged ? undefined : this.purgeWhenFree(tombstone))) }
+    // A removal that purged as it finished has its announcement registered there; purgeWhenFree returns it.
+    return { tombstone, done, purged: done.then(() => this.purgeWhenFree(tombstone)) }
   }
 
   private readonly inFlight = new Set<Promise<unknown>>()
@@ -381,13 +382,38 @@ export class Storage {
 
   private async finishDeletion(tombstone: number): Promise<DeletionResult> {
     const result = await this.deletions.run(tombstone, this.now())
-    this.bus.commit('deletion', { state: 'done', tombstone }, () => {}, () => this.rules.loadTombstones())
-    if (result.purged) this.announcePurged(tombstone)
+    void this.announceDeletion('done', tombstone)
+    if (result.purged) this.purges.set(tombstone, this.announcePurged(tombstone))
     return result
   }
 
-  private announcePurged(tombstone: number): void {
-    this.bus.commit('deletion', { state: 'purged', tombstone }, () => {}, () => this.rules.loadTombstones())
+  private announcePurged(tombstone: number): Promise<void> {
+    return this.announceDeletion('purged', tombstone)
+  }
+
+  /**
+   * Announces a deletion's state from the capture thread without waiting on the lock: while another connection holds
+   * it, the announcement is retried with backoff and each failed try is reported. Settles once committed; stopping
+   * leaves it unsettled.
+   */
+  private announceDeletion(state: 'done' | 'purged', tombstone: number): Promise<void> {
+    return new Promise((resolve) => {
+      const attempt = (retryMs: number) => {
+        if (this.stopped) return
+        const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }))
+        this.db.pragma('busy_timeout = 0')
+        try {
+          this.bus.commit('deletion', { state, tombstone }, () => {}, () => this.rules.loadTombstones())
+          resolve()
+        } catch (err) {
+          this.onError(`deletion_announce_${(err as { code?: string }).code ?? 'failed'}`)
+          setTimeout(() => attempt(Math.min(retryMs * 2, 30_000)), retryMs).unref()
+        } finally {
+          this.db.pragma(`busy_timeout = ${busyTimeout}`)
+        }
+      }
+      attempt(100)
+    })
   }
 
   private readonly purges = new Map<number, Promise<void>>()
@@ -429,10 +455,7 @@ export class Storage {
           if (this.stopped) return never()
           this.onError(`purge_${(err as Error).message}`)
         }
-        if (ok) {
-          this.announcePurged(tombstone)
-          return
-        }
+        if (ok) return this.announcePurged(tombstone)
         await new Promise<void>((r) => setTimeout(r, wait).unref())
       }
     })()
