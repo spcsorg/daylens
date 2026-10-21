@@ -82,7 +82,7 @@ export function cleanEnv(from: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   return env
 }
 
-const QUOTA = /usage limit|rate limit|quota|limit reached|resets? (at|in)|hit your .*limit/i
+const QUOTA = /usage limit|rate limit|quota|limit reached|resets? (at|in)|hit your .*limit|requires usage credits/i
 
 interface CliOptions {
   // Must be an empty folder: the CLI reads nothing from it.

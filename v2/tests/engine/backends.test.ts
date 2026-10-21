@@ -45,6 +45,8 @@ test('a claude -p failure is an error, and a usage limit says so', () => {
   assert.equal(limit.text, null)
   assert.ok(limit.error?.includes('session limit'))
   assert.equal(limit.quota, true)
+  const credits = parseClaude(ran(JSON.stringify({ is_error: true, result: 'This model requires usage credits. Switch to another model to continue.' }), 1))
+  assert.equal(credits.quota, true, 'a model the plan does not include will not start working on a retry')
   const garbage = parseClaude(ran('not json', 1, 'boom'))
   assert.ok(garbage.error?.startsWith('unreadable output'))
   assert.equal(garbage.quota, false)
