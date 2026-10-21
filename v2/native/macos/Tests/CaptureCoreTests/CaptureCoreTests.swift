@@ -295,3 +295,29 @@ final class CaptureCoreTests: XCTestCase {
     XCTAssertEqual(s.evaluate(secondsSinceInput: 119.99).nextCheckS, 0.5)
   }
 }
+
+final class HostWalkTests: XCTestCase {
+  // pid -> (parent, app) as a process table; the walk sees only these two functions.
+  func walk(_ table: [Int32: (Int32, String?)], from pid: Int32) -> String? {
+    hostAncestor(of: pid, parent: { table[$0]?.0 }, app: { table[$0]?.1 })
+  }
+
+  func testATerminalSessionFindsTheTerminal() {
+    let table: [Int32: (Int32, String?)] = [500: (400, nil), 400: (300, nil), 300: (100, nil), 100: (1, "com.mitchellh.ghostty")]
+    XCTAssertEqual(walk(table, from: 500), "com.mitchellh.ghostty")
+  }
+
+  func testTheNearestAppWins() {
+    let table: [Int32: (Int32, String?)] = [500: (400, nil), 400: (200, "com.microsoft.VSCode"), 200: (100, nil), 100: (1, "com.apple.dock")]
+    XCTAssertEqual(walk(table, from: 500), "com.microsoft.VSCode")
+  }
+
+  func testADetachedOrRemoteSessionHasNoHost() {
+    XCTAssertNil(walk([500: (400, nil), 400: (1, nil)], from: 500), "tmux server or sshd under launchd")
+    XCTAssertNil(walk([:], from: 500), "a process that is gone")
+  }
+
+  func testALoopInTheTableEnds() {
+    XCTAssertNil(walk([500: (400, nil), 400: (500, nil)], from: 500))
+  }
+}
