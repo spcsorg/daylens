@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { graderMessage, inconsistencies, keySections, parseVerdict, type Verdict } from '../../tools/eval/grade.ts'
-import { disagreements, handCheckSample, listPrice, rank, scoreModel, type HourResult } from '../../tools/eval/score.ts'
+import { disagreements, handCheckSample, listPrice, rank, scoreModel, standings, type HourResult } from '../../tools/eval/score.ts'
 
 const verdict = (grade: Verdict['grade'], over: Partial<Verdict> = {}): Verdict => ({
   grade, reason: 'r', must_missed: [], should_missed: [], must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [], ...over,
@@ -78,6 +78,24 @@ test('ranking is correctness first, then cost, then speed', () => {
     mk('fast', { cost_per_call_usd: 0.01, latency_mean_ms: 2000 }),
   ]).map((s) => s.model)
   assert.deepEqual(order, ['fast', 'slow', 'pricey', 'claims', 'cheap-but-wrong'])
+})
+
+test('more correct hours and fewer wrong ones outrank fewer claims, and the no-AI baseline is set apart, not ranked', () => {
+  const s = (model: string, grades: Partial<Record<Verdict['grade'], number>>, claims: number, cost: number) => ({
+    ...scoreModel(model, [], null),
+    grades: { right: 0, partly: 0, wrong: 0, only_you: 0, ...grades },
+    unsupported_claims: claims,
+    cost_per_call_usd: cost,
+  })
+  const { baseline, ranked } = standings([
+    s('no-ai', { right: 5, partly: 8, wrong: 1, only_you: 2 }, 0, 0),
+    s('timid', { right: 2, partly: 12, only_you: 2 }, 0, 0.001),
+    s('bold', { right: 9, partly: 3, wrong: 3, only_you: 1 }, 6, 0.01),
+    s('careful', { right: 9, partly: 5, wrong: 1, only_you: 1 }, 1, 0.03),
+  ], 'no-ai')
+  assert.equal(baseline?.model, 'no-ai')
+  assert.deepEqual(ranked.map((r) => r.model), ['careful', 'bold', 'timid'])
+  assert.deepEqual(ranked[0]!.vs_baseline, { correct: 3, wrong: 0 })
 })
 
 test('grader disagreements and the hand-check sample: every wrong hour and a quarter of the right ones', () => {

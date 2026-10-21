@@ -17,10 +17,11 @@ import { WRITER_PROMPT } from '../../engine/prompt.ts'
 import { validateHour, type Validation, type WrittenHour } from '../../engine/validate.ts'
 import { parseHours } from '../goldReplay.ts'
 import { GRADER_PROMPT, graderMessage, inconsistencies, keySections, parseVerdict, type Checklists, type Grade, type Verdict } from './grade.ts'
-import { disagreements, handCheckSample, rank, scoreModel, type HourResult, type Rate } from './score.ts'
+import { disagreements, handCheckSample, scoreModel, standings, type HourResult, type ModelScore, type Rate } from './score.ts'
 
 // Codex's base instructions in the first run; kept so its results stay comparable.
 const CODEX_BASE = 'You are a helpful assistant.'
+const BASELINE = 'no-ai'
 const ATTEMPTS = 3
 
 interface Candidate {
@@ -245,19 +246,20 @@ function sample(gold: Gold): void {
 function summary(gold: Gold): void {
   const names = Object.keys(CANDIDATES).filter((n) => existsSync(path.join(gold.dir, 'results/grades/opus-5.5', n)))
   const scores = names.map((n) => scoreModel(n, loadResults(gold, 'opus-5.5', n), CANDIDATES[n]!.rate))
-  const ranked = rank(scores)
+  const { baseline, ranked } = standings(scores, BASELINE)
   const perHour: Record<string, Record<string, Grade | null>> = {}
   for (const n of names) for (const r of loadResults(gold, 'opus-5.5', n)) (perHour[r.hour] ??= {})[n] = r.hand?.grade ?? r.verdict?.grade ?? null
   const second = existsSync(path.join(gold.dir, 'results/grades/gpt-6.1-sol/opus-5.5'))
     ? disagreements(verdictsOf(gold, 'opus-5.5', 'opus-5.5'), verdictsOf(gold, 'gpt-6.1-sol', 'opus-5.5'))
     : null
-  writeJson(path.join(gold.dir, 'results/summary.json'), { ranked, per_hour: perHour, grader_disagreements_on_opus: second })
+  writeJson(path.join(gold.dir, 'results/summary.json'), { baseline, ranked, per_hour: perHour, grader_disagreements_on_opus: second })
   const money = (x: number | null) => (x === null ? 'n/a' : `$${x.toFixed(4)}`)
+  const row = (s: ModelScore, label: string) =>
+    `| ${label} | ${s.grades.right} | ${s.grades.partly} | ${s.grades.wrong} | ${s.grades.only_you} | ${s.unsupported_claims} | ${s.invented_ids} | ${s.wrong_attribution} | ${s.must_missed}/${s.should_missed} | ${s.rejected} | ${money(s.cost_per_call_usd)} | ${s.latency_mean_ms === null ? 'n/a' : (s.latency_mean_ms / 1000).toFixed(1) + ' s'} |`
   console.log('| Model | Right | Partly | Wrong | Only you | Unsupported | Invented IDs | Wrong attribution | Missed (must/should) | Rejected | Cost/call | Mean latency |')
   console.log('|---|---|---|---|---|---|---|---|---|---|---|---|')
-  for (const s of ranked) {
-    console.log(`| ${s.model} | ${s.grades.right} | ${s.grades.partly} | ${s.grades.wrong} | ${s.grades.only_you} | ${s.unsupported_claims} | ${s.invented_ids} | ${s.wrong_attribution} | ${s.must_missed}/${s.should_missed} | ${s.rejected} | ${money(s.cost_per_call_usd)} | ${s.latency_mean_ms === null ? 'n/a' : (s.latency_mean_ms / 1000).toFixed(1) + ' s'} |`)
-  }
+  ranked.forEach((s, i) => console.log(row(s, `${i + 1}. ${s.model}`)))
+  if (baseline) console.log(row(baseline, `${baseline.model} (baseline)`))
   if (second) console.log('\nGrader disagreements on opus-5.5:', JSON.stringify(second))
 }
 

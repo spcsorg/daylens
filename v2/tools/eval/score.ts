@@ -96,21 +96,40 @@ export function scoreModel(model: string, results: HourResult[], rate: Rate | nu
   }
 }
 
+// An only-you hour graded only_you is correct: the writer left unknown what only the person could know.
+const correct = (s: ModelScore) => s.grades.right + s.grades.only_you
+const claims = (s: ModelScore) => s.unsupported_claims + s.invented_ids + s.wrong_attribution
+
 /**
- * Correctness first: fewest wrong hours, then fewest unsupported claims (invented IDs and wrong attribution
- * included), then most hours fully right. Then cost per call, then mean latency.
+ * Correctness first: correct hours minus wrong hours, then fewer wrong hours, then fewer unsupported claims (invented
+ * IDs and wrong attribution included). Then cost per call, then mean latency. A failed call is already graded wrong.
  */
 export function rank(scores: ModelScore[]): ModelScore[] {
-  const claims = (s: ModelScore) => s.unsupported_claims + s.invented_ids + s.wrong_attribution
-  const good = (s: ModelScore) => s.grades.right + s.grades.only_you
   return [...scores].sort(
     (a, b) =>
-      a.grades.wrong + a.failed_calls - (b.grades.wrong + b.failed_calls) ||
+      correct(b) - b.grades.wrong - (correct(a) - a.grades.wrong) ||
+      a.grades.wrong - b.grades.wrong ||
       claims(a) - claims(b) ||
-      good(b) - good(a) ||
       (a.cost_per_call_usd ?? Infinity) - (b.cost_per_call_usd ?? Infinity) ||
       (a.latency_mean_ms ?? Infinity) - (b.latency_mean_ms ?? Infinity),
   )
+}
+
+export interface Standings {
+  // What the facts alone score; candidates are measured against it and it is never ranked among them.
+  baseline: ModelScore | null
+  ranked: (ModelScore & { vs_baseline: { correct: number; wrong: number } | null })[]
+}
+
+export function standings(scores: ModelScore[], baseline: string): Standings {
+  const base = scores.find((s) => s.model === baseline) ?? null
+  return {
+    baseline: base,
+    ranked: rank(scores.filter((s) => s.model !== baseline)).map((s) => ({
+      ...s,
+      vs_baseline: base ? { correct: correct(s) - correct(base), wrong: s.grades.wrong - base.grades.wrong } : null,
+    })),
+  }
 }
 
 /** Hours where two graders gave different grades for the same written hour. */
