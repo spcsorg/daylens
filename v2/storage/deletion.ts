@@ -14,6 +14,7 @@ import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
 import { immediateRetrying } from './tx.ts'
 import { ScrubUnavailableError, scrubAll, scrubBlocked } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
+import { leafRowid, readStructure, segmentCount, type FtsSegment, type FtsStructure } from './ftsStructure.ts'
 import { dbHostLookup, resolveHost } from '../capture/agents/store.ts'
 import type { Agent } from '../capture/agents/types.ts'
 
@@ -131,8 +132,113 @@ const FTS_STEP_MS = 20
 // Search index pages one merge step starts with; it follows how long each step takes, like the scrub's batches.
 const MERGE_PAGES = 16
 const MAX_MERGE_PAGES = 1024
-// An index segment's rows in search_data are numbered from (segment id << 37) up.
-const SEGMENT_SHIFT = 37
+// FTS5_MAX_LEVEL: a merge of all segments puts them on level min(levels + 1, 64) - 1.
+const FTS_MAX_LEVEL = 64
+
+interface SegmentAtStart extends FtsSegment {
+  last: Buffer | null
+}
+
+interface MergeRound {
+  level: number
+  // The oldest input: the first segment of the merge level until the merge finishes and removes its inputs. Inputs
+  // keep their ids while it runs, so no other segment can take this one meanwhile.
+  firstId: number
+  inProgress: boolean
+  oldest: boolean
+  start: SegmentAtStart[]
+}
+
+/**
+ * Where a merge of every segment started now would run, if its output would be the oldest segment; null if not. This
+ * follows fts5IndexOptimizeStruct: segments on more than one level all move, oldest first, to a new last level; if
+ * they are already on one level they stay there, and the output is the oldest only if that is one of the last two.
+ * A merge in progress whose inputs are all segments but its own output is continued as it is: null.
+ */
+function mergePlan(s: FtsStructure, total: number): { level: number; firstId: number } | null {
+  if (total < 2) return null
+  for (const [i, l] of s.levels.entries()) {
+    const n = l.segments.length
+    if (n === total) return i >= s.levels.length - 2 ? { level: i, firstId: l.segments[0]!.id } : null
+    if (n > 0 && n === total - 1 && l.nMerge === n) return null
+  }
+  const deepest = s.levels.findLast((l) => l.segments.length > 0)!
+  return { level: Math.min(s.levels.length + 1, FTS_MAX_LEVEL) - 1, firstId: deepest.segments[0]!.id }
+}
+
+function oursInProgress(s: FtsStructure, r: MergeRound): boolean {
+  const l = s.levels[r.level]
+  return l !== undefined && l.nMerge > 0 && l.segments[0]?.id === r.firstId
+}
+
+// FTS5 keeps a delete marker unless the merge's output is the only segment on the last level.
+function outputIsOldest(s: FtsStructure, level: number): boolean {
+  return s.levels.length === level + 2 && s.levels[level + 1]!.segments.length === 1
+}
+
+function intact(s: FtsStructure, x: SegmentAtStart, leaf: Database.Statement): boolean {
+  return s.levels.some((l) =>
+    l.segments.some((g) => g.id === x.id && g.pgnoFirst === x.pgnoFirst && g.pgnoLast === x.pgnoLast && (x.last === null || x.last.equals(leaf.get(leafRowid(g.id, g.pgnoLast)) as Buffer))),
+  )
+}
+
+// FTS5's 'rebuild' reads columns by the index's names, and search_docs names the address url; 'delete-all' removes
+// every index row and starts the structure over, and the entries are then indexed again as they are.
+function reindex(db: Database.Database): void {
+  db.exec(`INSERT INTO search (search) VALUES ('delete-all')`)
+  db.exec('INSERT INTO search (rowid, title, address, files, hour_text) SELECT id, title, url, files, hour_text FROM search_docs')
+}
+
+/**
+ * One transaction that starts a merge of every segment, or prepares the index so the next one can. 'clean' when the
+ * index holds nothing a removal left behind: it has no segments, or it was rebuilt from search_docs. 'prepared' when
+ * this transaction only made a merge with the oldest output possible next time. Otherwise the round started: whether
+ * its output is the oldest segment, and whether it is still in progress.
+ */
+function startMergeRound(db: Database.Database, pages: number, merge: (n: number) => void, leaf: Database.Statement): MergeRound | 'clean' | 'prepared' {
+  const s = readStructure(db)
+  const total = s === null ? 0 : segmentCount(s)
+  if (s === null || total === 0) return 'clean'
+  let plan = mergePlan(s, total)
+  const oldest = plan !== null
+  if (plan === null) {
+    const onlyLevel0 = s.levels[0] !== undefined && s.levels[0].segments.length === total
+    if (onlyLevel0) {
+      // Every segment on level 0 above empty levels. A new segment lands on level 0 and moves any segment no bigger
+      // than itself there, so an index of a page or so stays in this shape; one no bigger than a first merge step
+      // is rebuilt instead. A bigger one is merged to level 1 first, which leaves room for a new segment below it.
+      const indexPages = s.levels[0]!.segments.reduce((n, g) => n + (g.pgnoLast > 0 ? g.pgnoLast - g.pgnoFirst + 1 : 0), 0)
+      if (indexPages <= MERGE_PAGES) {
+        reindex(db)
+        return 'clean'
+      }
+      if (total >= 2) plan = { level: 0, firstId: s.levels[0]!.segments[0]!.id }
+    }
+    if (plan === null) {
+      // Rewriting one entry as it is adds a segment on level 0, which puts the segments on two levels (or two on
+      // level 0) for the next merge. With no entries left, the rebuild has nothing to read.
+      const id = db.prepare('SELECT max(id) FROM search_docs').pluck().get() as number | null
+      if (id === null) {
+        reindex(db)
+        return 'clean'
+      }
+      db.prepare('UPDATE search_docs SET title = title WHERE id = ?').run(id)
+      return 'prepared'
+    }
+  }
+  const start = s.levels.flatMap((l) => l.segments.map((g) => ({ ...g, last: g.pgnoLast > 0 ? (leaf.get(leafRowid(g.id, g.pgnoLast)) as Buffer) : null })))
+  merge(-pages)
+  const after = readStructure(db)!
+  const { level } = plan
+  const round: MergeRound = { ...plan, inProgress: false, oldest, start }
+  round.inProgress = oursInProgress(after, round)
+  if (!oldest) return round
+  const others = after.levels.some((l, i) => l.nMerge > 0 && i !== level)
+  const left = segmentCount(after)
+  const done = after.levels.length === level + 2 && left <= 1 && after.levels[level + 1]!.segments.length === left
+  if (others || (round.inProgress ? !outputIsOldest(after, level) : !done)) throw new Error('the search index merge did not start as planned; nothing is reported purged')
+  return round
+}
 
 // Reads the search index into the cache outside any write transaction, so merging it finds its pages in memory.
 export function warmSearchIndex(db: Database.Database): void {
@@ -420,50 +526,69 @@ export class Deleter {
   }
 
   /**
-   * Merges the search index once since the last removal of search entries: merge steps in their own transactions,
-   * each about FTS_STEP_MS and giving capture the lock first, until every segment that existed when it began has been
-   * merged away (or nothing is left to merge), which drops the removed entries' terms. The first step starts one merge
-   * of all segments; later steps continue it, so segments capture adds meanwhile do not restart it. Each step owes a
-   * scrub: the segments it replaces leave their pages' free space behind.
+   * Merges the search index once since the last removal of search entries, in steps that each hold the lock for about
+   * FTS_STEP_MS and give capture the lock first. A removal leaves the entry in its segment and adds a delete marker
+   * that carries the same terms. A merge drops an entry whose marker is among its inputs, but it drops the marker
+   * itself only when its output is the oldest segment (FTS5's fts5IndexMergeLevel). So the index is clean once a merge
+   * of every segment that existed when the round began has finished with its output the oldest segment at every step.
+   * One merge of all segments is started per round (startMergeRound); later steps continue it, so segments capture
+   * adds meanwhile neither join nor restart it. Each step owes a scrub: the pages it replaces leave free space behind.
    */
   mergeSearchIfPending(onTransaction: (ms: number) => void = () => {}): void {
     const db = this.db
     const marker = db.prepare(`SELECT value FROM meta WHERE key = 'fts_merge_pending'`).pluck().get() as string | undefined
     if (marker === undefined) return
     warmSearchIndex(db)
-    const segments = db.prepare(`SELECT DISTINCT id >> ${SEGMENT_SHIFT} FROM search_data WHERE id >= ${2 ** SEGMENT_SHIFT}`).pluck()
-    const before = new Set(segments.all() as number[])
     const changes = db.prepare('SELECT total_changes() AS n').pluck()
+    const leaf = db.prepare('SELECT block FROM search_data WHERE id = ?').pluck()
     const autocheckpoint = db.pragma('wal_autocheckpoint', { simple: true }) as number
     db.pragma('wal_autocheckpoint = 0')
+    let pages = MERGE_PAGES
+    const step = <T>(fn: () => T): T => {
+      const t = performance.now()
+      const out = immediateRetrying(db, () => {
+        const n = changes.get() as number
+        const r = fn()
+        // The merge command itself counts as one change.
+        if ((changes.get() as number) - n >= 2) db.prepare(SCRUB_PENDING).run()
+        return r
+      })
+      const ms = performance.now() - t
+      onTransaction(ms)
+      db.pragma('wal_checkpoint(PASSIVE)')
+      if (ms > FTS_STEP_MS) pages = Math.max(1, Math.floor(pages / 2))
+      else if (ms < FTS_STEP_MS / 2) pages = Math.min(MAX_MERGE_PAGES, Math.ceil(pages * 1.5))
+      return out
+    }
+    // FTS5 rejects a bound value for the page count.
+    const merge = (n: number) => db.exec(`INSERT INTO search (search, rank) VALUES ('merge', ${n})`)
     try {
-      for (let pages = MERGE_PAGES, start = true; before.size > 0; ) {
-        const t = performance.now()
-        const worked = immediateRetrying(db, () => {
-          const n = changes.get() as number
-          // A negative count starts a merge of every segment; a positive one continues the merge in progress. FTS5
-          // rejects a bound value here.
-          db.exec(`INSERT INTO search (search, rank) VALUES ('merge', ${start ? -pages : pages})`)
-          // Fewer than two changes: the command found nothing to merge.
-          const did = (changes.get() as number) - n >= 2
-          if (did) db.prepare(SCRUB_PENDING).run()
-          return did
-        })
-        const ms = performance.now() - t
-        onTransaction(ms)
-        db.pragma('wal_checkpoint(PASSIVE)')
-        const left = new Set(segments.all() as number[])
-        if (![...before].some((s) => left.has(s))) break
-        if (!worked) {
-          // Nothing in progress and too few segments for a plain merge: start a merge of all of them, unless that
-          // was just tried, which leaves one segment holding no removed entry beside its delete marker.
-          if (start) break
-          start = true
-          continue
+      for (;;) {
+        const round = step(() => startMergeRound(db, pages, merge, leaf))
+        if (round === 'clean') break
+        if (round === 'prepared') continue
+        let { oldest } = round
+        let ours = round.inProgress
+        for (;;) {
+          const settled = step(() => {
+            const s = readStructure(db)!
+            if (ours) {
+              if (!oursInProgress(s, round)) ours = false
+              else if (oldest && !outputIsOldest(s, round.level)) throw new Error('the search index merge left the oldest segment; nothing is reported purged')
+            }
+            if (!ours && s.levels.every((l) => l.nMerge === 0)) {
+              // A partly merged segment always belongs to a merge in progress, so with none in progress a segment
+              // of the round's start is either gone or exactly as it was.
+              if (round.start.some((x) => intact(s, x, leaf))) oldest = false
+              return true
+            }
+            merge(pages)
+            if (ours && !oursInProgress(readStructure(db)!, round)) ours = false
+            return false
+          })
+          if (settled) break
         }
-        start = false
-        if (ms > FTS_STEP_MS) pages = Math.max(1, Math.floor(pages / 2))
-        else if (ms < FTS_STEP_MS / 2) pages = Math.min(MAX_MERGE_PAGES, Math.ceil(pages * 1.5))
+        if (oldest) break
       }
     } finally {
       db.pragma(`wal_autocheckpoint = ${autocheckpoint}`)

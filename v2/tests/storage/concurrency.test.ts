@@ -7,7 +7,8 @@ import { DB_FILE, Store } from '../../capture/store.ts'
 import { diskContains, HOUR, rig, T0, tmpDir } from './support.ts'
 import Database from 'better-sqlite3'
 import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
-import { Deleter } from '../../storage/deletion.ts'
+import { Deleter, FTS_MERGE_PENDING } from '../../storage/deletion.ts'
+import { readStructure } from '../../storage/ftsStructure.ts'
 import { app } from '../support/lines.ts'
 
 function row(t: number, app: string, title: string): ObservationRow {
@@ -102,6 +103,139 @@ test('removing search entries rewrites no index page in place; they stop matchin
   assert.deepEqual(r.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
   assert.deepEqual(diskContains(r.dir, 'Quokkacanary'), [])
   assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'editor'`)[0]!.n, 2000, 'what was kept still matches')
+  r.close()
+})
+
+// The tables that hold the search index's terms: its segments' pages and their page index.
+function indexHolds(db: Database.Database, term: string): string[] {
+  const needle = Buffer.from(term)
+  const tables: string[] = []
+  if ((db.prepare('SELECT block FROM search_data').pluck().all() as Buffer[]).some((b) => b.includes(needle))) tables.push('search_data')
+  if ((db.prepare('SELECT term FROM search_idx').pluck().all() as Buffer[]).some((b) => Buffer.from(b).includes(needle))) tables.push('search_idx')
+  return tables
+}
+
+// A purge that is still merging after this many steps is not going to finish; the tests fail instead of hanging.
+const MERGE_STEP_CAP = 500
+
+function cappedSteps(each: (step: number) => void = () => {}): () => void {
+  let steps = 0
+  return () => {
+    if (++steps > MERGE_STEP_CAP) throw new Error(`the index merge was still running after ${MERGE_STEP_CAP} steps`)
+    each(steps)
+  }
+}
+
+test('the purge merge finishes while search entries are added between its steps, and leaves none of the removed terms', () => {
+  const r = rig(tmpDir(), { holdDeletions: true })
+  seedShuffledSearchDocs(r.dir, 3000)
+  const db = r.store.database
+  r.clock.t = T0 + 12 * HOUR
+  const { tombstone } = r.storage.deleteSource('com.example.chat')
+  const deleter = new Deleter(db)
+  assert.equal(deleter.run(tombstone, r.clock.t).searchDocs, 1000)
+  assert.ok(indexHolds(db, 'quokkacanary').includes('search_data'))
+  // Capture's entries go in between steps, one transaction each: each a new segment, which FTS5 numbers with the
+  // lowest id not in use, so they take the ids of segments the merge has removed.
+  const add = db.prepare(`INSERT INTO search_docs (kind, hour_start_wall_ms, app_id, app_name, title, url, first_wall_ms, last_wall_ms) VALUES ('activity', ?, 'com.example.editor', 'Editor', ?, '', ?, ?)`)
+  let added = 0
+  deleter.mergeSearchIfPending(
+    cappedSteps((n) => {
+      const h = T0 + 24 * HOUR + n
+      add.run(h, `live entry ${n}`, h, h)
+      added = n
+    }),
+  )
+  assert.deepEqual(r.q(`SELECT key FROM meta WHERE key = 'fts_merge_pending'`), [])
+  assert.deepEqual(indexHolds(db, 'quokkacanary'), [], 'no removed term is left in the index')
+  assert.deepEqual(r.q(`SELECT rowid FROM search WHERE search MATCH 'Quokkacanary'`), [])
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'live'`)[0]!.n, added)
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'editor'`)[0]!.n, 2000)
+  r.close()
+})
+
+// Writes and merges replayed in order, to bring the index's segments into a given shape: 'kept n' and 'canary n'
+// add entries in one transaction, 'del' removes every canary entry, '-N' merges all segments and '+n' merges n pages.
+function replayIndex(db: Database.Database, ops: readonly string[]): void {
+  const ins = db.prepare(`INSERT INTO search_docs (kind, hour_start_wall_ms, app_id, app_name, title, url, first_wall_ms, last_wall_ms) VALUES ('activity', ?, ?, 'x', ?, '', ?, ?)`)
+  let c = 0
+  for (const op of ops) {
+    const [kind, arg] = op.startsWith('+') || op.startsWith('-') ? ['merge', op] : op.split(' ')
+    const n = Number(arg)
+    const add = (app: string, title: (c: number) => string) =>
+      db.transaction(() => {
+        for (let i = 0; i < n; i++, c++) ins.run(T0 + (c % 50) * HOUR, app, title(c + 1), T0, T0)
+      })()
+    if (kind === 'kept') add('com.example.editor', (c) => `kept ${c} a${c} b${c}`)
+    else if (kind === 'canary') add('com.example.chat', (c) => `zebracanary ${c} q${c}`)
+    else if (kind === 'del') db.exec(`DELETE FROM search_docs WHERE app_id = 'com.example.chat'`)
+    else db.exec(`INSERT INTO search (search, rank) VALUES ('merge', ${op === '-N' ? -100000 : n})`)
+  }
+}
+
+function structureShape(db: Database.Database) {
+  const s = readStructure(db)!
+  const used = s.levels.flatMap((l, i) => (l.segments.length > 0 ? [{ level: i, segments: l.segments.length, merging: l.nMerge > 0 }] : []))
+  return { levels: s.levels.length, used }
+}
+
+function mergeOnly(db: Database.Database): void {
+  db.prepare(FTS_MERGE_PENDING).run()
+  new Deleter(db).mergeSearchIfPending(cappedSteps())
+  assert.deepEqual(db.prepare(`SELECT key FROM meta WHERE key = 'fts_merge_pending'`).all(), [])
+  db.exec(`INSERT INTO search (search) VALUES ('integrity-check')`)
+}
+
+test('the purge keeps merging when a merge of every segment would keep the delete markers, which carry the removed terms', () => {
+  const r = rig(tmpDir(), { holdDeletions: true })
+  const db = r.store.database
+  replayIndex(db, ['kept 137', '+4', '-N', 'del', 'kept 37', 'kept 190', '-N', 'canary 132', 'canary 148', 'kept 3', '+25', '-N', 'canary 82', 'kept 45', 'kept 139', 'canary 173', 'kept 71', 'canary 64', 'canary 24', 'kept 64', 'del'])
+  // Every segment on level 1 above empty levels: merging them writes level 2, which is not the last, so FTS5 keeps
+  // the delete markers.
+  const shape = structureShape(db)
+  assert.equal(shape.used.length, 1)
+  assert.equal(shape.used[0]!.level, 1)
+  assert.ok(shape.levels > 3 && shape.used[0]!.segments >= 2 && !shape.used[0]!.merging)
+  assert.deepEqual(r.q(`SELECT rowid FROM search WHERE search MATCH 'zebracanary'`), [])
+  assert.ok(indexHolds(db, 'zebracanary').includes('search_data'))
+  const kept = r.q<{ n: number }>(`SELECT count(*) AS n FROM search_docs`)[0]!.n
+  mergeOnly(db)
+  assert.deepEqual(indexHolds(db, 'zebracanary'), [])
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'kept'`)[0]!.n, kept)
+  r.close()
+})
+
+test('the purge leaves no removed term when every segment is on level 0 above empty levels', () => {
+  const r = rig(tmpDir(), { holdDeletions: true })
+  const db = r.store.database
+  replayIndex(db, ['kept 86', 'kept 92', '+29', 'del', '+10', '-N', 'canary 161', '+2', '+17', 'canary 196', 'del'])
+  const shape = structureShape(db)
+  assert.equal(shape.used.length, 1)
+  assert.equal(shape.used[0]!.level, 0)
+  assert.ok(shape.levels > 2 && shape.used[0]!.segments >= 2)
+  assert.ok(indexHolds(db, 'zebracanary').includes('search_data'))
+  const kept = r.q<{ n: number }>(`SELECT count(*) AS n FROM search_docs`)[0]!.n
+  mergeOnly(db)
+  assert.deepEqual(indexHolds(db, 'zebracanary'), [])
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'kept'`)[0]!.n, kept)
+  r.close()
+})
+
+test('the purge rebuilds an index no bigger than one merge step when every segment is on level 0 above empty levels', () => {
+  const r = rig(tmpDir(), { holdDeletions: true })
+  const db = r.store.database
+  replayIndex(db, ['kept 12', 'kept 9', '-N', '+19', '-N', 'kept 5', '-N', 'del', 'canary 1', '+15', '+24', 'del', 'del', 'canary 18', '-N', 'canary 18', 'canary 19', 'kept 2', 'canary 7', 'canary 20', 'del', 'del', 'kept 19', '+27', '+18', 'kept 4', 'canary 14', 'canary 1', 'kept 8', '-N', 'del'])
+  // A new segment of one page moves any segment of one page to level 0, so no merge can leave this shape.
+  const shape = structureShape(db)
+  assert.equal(shape.used.length, 1)
+  assert.equal(shape.used[0]!.level, 0)
+  assert.ok(shape.levels > 2)
+  assert.ok(indexHolds(db, 'zebracanary').includes('search_data'))
+  const kept = r.q<{ n: number }>(`SELECT count(*) AS n FROM search_docs`)[0]!.n
+  mergeOnly(db)
+  assert.deepEqual(indexHolds(db, 'zebracanary'), [])
+  assert.equal(r.q<{ n: number }>(`SELECT count(*) AS n FROM search WHERE search MATCH 'kept'`)[0]!.n, kept)
+  assert.equal(structureShape(db).levels <= 2, true, 'the rebuild starts the index over')
   r.close()
 })
 
