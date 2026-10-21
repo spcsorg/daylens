@@ -202,6 +202,20 @@ function writtenHour(rec: { final: CallResult; validation: Validation | null }):
   }
 }
 
+interface GradeRecord {
+  written?: string
+  verdict: Verdict | null
+}
+
+/** Which write a grade is of: a rewritten hour needs a new grade. */
+export function writeId(rec: { started: string; final: CallResult }): string {
+  return sha(`${rec.started}\u0000${rec.final.text ?? rec.final.error ?? ''}`)
+}
+
+export function gradeIsCurrent(g: GradeRecord | null, written: string): boolean {
+  return g !== null && g.verdict !== null && g.written === written
+}
+
 async function grade(gold: Gold, graderName: string, name: string): Promise<void> {
   const g = GRADERS[graderName]
   if (!g) throw new Error(`unknown grader ${graderName}; one of ${Object.keys(GRADERS).join(', ')}`)
@@ -211,18 +225,19 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
     const meta = { grader: graderName, ...g, candidate: name, grader_prompt_sha256: sha(GRADER_PROMPT), checklists_sha256: sha(JSON.stringify(gold.checklists)), versions: versions() }
     for (const h of gold.hours) {
       const out = path.join(gold.dir, 'results/grades', graderName, name, `hour_${hh(h)}.json`)
-      if (existsSync(out) && readJson<{ verdict: Verdict | null }>(out).verdict) continue
-      const rec = readJson<{ final: CallResult; validation: Validation | null }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
+      const rec = readJson<WriteRecord & { started: string }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
+      const written = writeId(rec)
+      if (existsSync(out) && gradeIsCurrent(readJson<GradeRecord>(out), written)) continue
       const checklist = gold.checklists.hours[hh(h)]
       if (!checklist) throw new Error(`no checklist for hour ${hh(h)}`)
       const onlyUser = checklist.only_user === true
       const hour = writtenHour(rec)
       if (!hour) {
         const verdict: Verdict = { grade: 'wrong', reason: rec.final.error ? `no hour was written: ${rec.final.error.slice(0, 120)}` : 'the output is not a readable hour', must_missed: checklist.must, should_missed: checklist.should, must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
-        writeJson(out, { ...meta, hour: hh(h), automatic: true, verdict, inconsistencies: [] })
+        writeJson(out, { ...meta, hour: hh(h), written, automatic: true, verdict, inconsistencies: [] })
         continue
       }
-      const message = graderMessage(gold.checklists.rules, checklist, gold.key[hh(h)] ?? '', gold.packet(h).packet, hour)
+      const message = graderMessage(gold.checklists.rules, checklist, gold.key[hh(h)] ?? '', writerPacket(gold.packet(h).packet, rec.previous_hour ?? null), hour)
       let verdict: Verdict | null = null
       const { final, attempts } = await withAttempts(
         () => backend.call(message),
@@ -232,7 +247,7 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
           return p.error
         },
       )
-      writeJson(out, { ...meta, hour: hh(h), final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
+      writeJson(out, { ...meta, hour: hh(h), written, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
       console.log(graderName, name, hh(h), verdict ? (verdict as Verdict).grade : `ERROR ${final.error ?? attempts.at(-1)?.problem}`)
       if (final.quota) {
         console.log(graderName, 'stopped: usage limit reached')

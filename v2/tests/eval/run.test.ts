@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { CallResult } from '../../engine/backends.ts'
 import { buildPacket } from '../../engine/packet.ts'
 import type { Validation } from '../../engine/validate.ts'
-import { isCurrent, previousHour, writerPacket, type WriteRecord } from '../../tools/eval/run.ts'
+import { gradeIsCurrent, isCurrent, previousHour, writeId, writerPacket, type WriteRecord } from '../../tools/eval/run.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 
@@ -35,6 +35,18 @@ test('a stored result is kept only when its packet, prompt and previous hour are
   assert.equal(isCurrent(rec(), want), false, 'made without the previous hour')
   assert.equal(isCurrent(rec({ previous_hour: { title: 'A', summary: 'B' }, final: call('quota') }), want), false, 'the call failed')
   assert.equal(isCurrent(null, want), false)
+})
+
+test('a grade is kept only for the write it graded', () => {
+  const first = writeId({ started: '2026-10-21T10:00:00Z', final: call() })
+  const again = writeId({ started: '2026-10-21T11:00:00Z', final: call() })
+  assert.notEqual(first, again)
+  const verdict = { grade: 'right' as const, reason: 'ok', must_missed: [], should_missed: [], must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
+  assert.equal(gradeIsCurrent({ written: first, verdict }, first), true)
+  assert.equal(gradeIsCurrent({ written: first, verdict }, again), false, 'the hour was written again')
+  assert.equal(gradeIsCurrent({ verdict }, first), false, 'a grade that does not say which write it graded')
+  assert.equal(gradeIsCurrent({ written: first, verdict: null }, first), false)
+  assert.equal(gradeIsCurrent(null, first), false)
 })
 
 test('the evaluation passes the previous hour exactly as the engine does once that hour is stored', () => {
