@@ -4,6 +4,8 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { DB_FILE, Store } from '../../capture/store.ts'
 import { Reader, UnknownSchemaError } from '../../retrieval/reader.ts'
+import { search } from '../../retrieval/search.ts'
+import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
 import { day } from './support.ts'
 
@@ -53,6 +55,34 @@ test('an hour is its recorded facts, plus the written hour through readHour with
   assert.equal(reader.hourAt(T0 + HOUR), null)
   reader.close()
   r.close()
+})
+
+test('an app deleted across all time is gone up to the deletion and found again after it, pending or done', async () => {
+  const editor = app('com.example.editor', { name: 'Editor' })
+  for (const hold of [true, false]) {
+    const r = rig(undefined, { holdDeletions: hold })
+    day(r)
+    r.clock.t = T0 + 2 * HOUR
+    const handle = r.storage.deleteSource('com.example.editor')
+    if (!hold) await handle.done
+    const t = T0 + 3 * HOUR
+    r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+    for (let m = 0; m < 10; m++) {
+      r.clock.t = t + m * MIN
+      r.feed(focus(editor, 'q4-budget-final.xlsx - Editor', t + m * MIN, m === 0 ? 'app_changed' : undefined))
+    }
+    r.clock.t = T0 + 4 * HOUR
+    r.store.flush()
+    const reader = Reader.open(file(r))
+    assert.ok(!reader.hourAt(T0)!.apps.some((a) => a.app_id === 'com.example.editor'), `hold=${hold}: before the deletion, hidden`)
+    const after = reader.hourAt(t)
+    assert.deepEqual(after?.apps.map((a) => a.app_id), ['com.example.editor'], `hold=${hold}: after the deletion, recorded again`)
+    assert.deepEqual(after!.sources.map((s) => s.file), ['q4-budget-final.xlsx'])
+    const res = search(reader, 'budget xlsx', { perGroup: 5 })
+    assert.deepEqual(res.files.map((f) => [f.file, f.seen_in.map((s) => s.hour_start_wall_ms)]), [['q4-budget-final.xlsx', [t]]], `hold=${hold}: search finds only what came after`)
+    reader.close()
+    r.close()
+  }
 })
 
 test('what a pending deletion covers is already gone from what the reader returns', () => {
