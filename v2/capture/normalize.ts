@@ -325,8 +325,8 @@ function point(line: Line): GapPoint {
 // Lock states, as derivation and presence read them.
 const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
 const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
-// What ends the row in front, as it ends intervals in derivation.
-type Stop = 'locked' | 'asleep' | 'display_off'
+// What ends the row in front: what ends intervals in derivation, and idle input, which presence counts as away.
+type Stop = 'locked' | 'asleep' | 'display_off' | 'idle'
 
 export class Normalizer {
   private focus: OpenRow | null = null
@@ -359,7 +359,7 @@ export class Normalizer {
       case 'input':
         this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
         this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
-        return false
+        return this.setStop('idle', line.obs.state === 'idle', line)
       case 'session': {
         this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
         if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') {
@@ -415,9 +415,24 @@ export class Normalizer {
     return !on && this.stops.size === 0
   }
 
+  // Idle is not here: switching apps is input, and its focus line can arrive before the input line that ends idle.
   private stoppedAt(wallMs: number): boolean {
-    for (const since of this.stops.values()) if (wallMs >= since) return true
+    for (const [stop, since] of this.stops) if (stop !== 'idle' && wallMs >= since) return true
     return false
+  }
+
+  /**
+   * A heartbeat: the helper is running and has reported no change, so the window in front is still in front. Helpers
+   * report focus only when it changes; without this, a window kept in front would end CONTINUITY_MS after it was last
+   * reported. Nothing is extended while a stop is in effect. Returns true when storage refused the extension (a
+   * pause, a deletion, the longest row), so the window needs a fresh read.
+   */
+  sighted(wallMs: number): boolean {
+    const f = this.focus
+    if (f === null || this.stops.size > 0) return false
+    if (this.sink.extendObservation(f.id, wallMs) !== false) return false
+    this.focus = null
+    return true
   }
 
   /** A stop began or ended (for what follows the front, such as browser pages). */

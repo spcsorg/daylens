@@ -447,6 +447,9 @@ export class Supervisor {
       case 'session':
         if (this.normalizer.handle(line) || (line.obs.state === 'unlocked' && !line.obs.snapshot)) this.send({ op: 'snapshot' })
         return
+      case 'input':
+        if (this.normalizer.handle(line)) this.send({ op: 'snapshot' })
+        return
       case 'loss': {
         const o = line.obs
         this.o.log(`helper dropped focus work count=${o.count}`)
@@ -519,8 +522,11 @@ export class Supervisor {
       this.stats.heartbeatMaxGapMs = Math.max(this.stats.heartbeatMaxGapMs, awakeGapMs)
       if (awakeGapMs > this.o.heartbeatMs * 2.5) {
         this.o.log(`helper stalled between heartbeats awake_ms=${awakeGapMs}`)
+        // No row is carried across the gap by the heartbeat that ends it.
+        this.normalizer.interrupt(prev.point)
         const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { awake_silence_ms: awakeGapMs } })
         this.store.closeGap(id, point)
+        this.send({ op: 'snapshot' })
       }
     }
     this.stats.heartbeats++
@@ -540,6 +546,7 @@ export class Supervisor {
       this.child.kill('SIGKILL')
       return
     }
+    if (this.normalizer.sighted(line.t.wall_ms)) this.send({ op: 'snapshot' })
     const titlesDown = line.obs.titles !== 'ok'
     if (titlesDown && this.titlesGap === null) {
       this.titlesGap = this.store.openGap({ reason: 'titles_unavailable', scope: 'titles', run: this.run, start: point, detail: { state: line.obs.titles } })

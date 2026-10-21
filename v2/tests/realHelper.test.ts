@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,9 +31,9 @@ function helperPid(servicePid: number): number | null {
   }
 }
 
-function startService(dataDir: string, env: Record<string, string> = {}): { proc: ChildProcess; log: () => string } {
+function startService(dataDir: string, env: Record<string, string> = {}, args: string[] = []): { proc: ChildProcess; log: () => string } {
   let log = ''
-  const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200'], {
+  const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200', ...args], {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ...env },
   })
@@ -171,4 +171,25 @@ test('the real helper reports the OS-verified Team ID of a running signed app, a
     claude = execFileSync('pgrep', ['-x', 'Claude']).toString().trim().split('\n')[0]
   } catch {}
   if (claude) assert.equal(out(claude), 'Q6L2SF6YDW', 'Claude, signed by Anthropic')
+})
+
+test('with the real helper, a window kept in front stays recorded past its focus line, heartbeat by heartbeat', { skip }, async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-steady-'))
+  // Idle never starts in this run, whoever is at this Mac.
+  const { proc } = startService(dir, {}, ['--idle-threshold-s', '86400'])
+  const started = Date.now()
+  try {
+    await sleep(6000)
+  } finally {
+    await stop(proc)
+  }
+  const db = new Database(path.join(dir, DB_FILE), { readonly: true })
+  const rows = db.prepare(`SELECT event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus' AND event_wall_ms >= ?`).all(started) as { event_wall_ms: number; last_seen_wall_ms: number }[]
+  const stopped = db.prepare(`SELECT 1 FROM observations WHERE (kind = 'session' AND state IN ('locked', 'console_disconnect', 'remote_disconnect', 'logoff')) OR (kind = 'power' AND state IN ('sleep', 'display_off'))`).get()
+  db.close()
+  rmSync(dir, { recursive: true, force: true })
+  if (stopped) return t.skip('the screen was locked, dark or asleep during the run')
+  const covered = rows.reduce((n, r) => n + (r.last_seen_wall_ms - r.event_wall_ms), 0)
+  assert.ok(rows.length > 0)
+  assert.ok(covered >= 3000, `focus rows cover ${covered} ms of a 6 s run (${rows.length} rows)`)
 })

@@ -84,6 +84,46 @@ test('a healthy helper: startup gap closes at hello, focus is stored, browser ti
   await h.finish()
 })
 
+test('a window kept in front with no change reported is still in front at each heartbeat', async () => {
+  const h = harness({ FAKE_FOCUS_MS: '3600000' })
+  h.sup.start()
+  await waitFor(() => h.sup.stats.heartbeats >= 8)
+  h.store.flush()
+  const rows = h.store.query<{ event_wall_ms: number; last_seen_wall_ms: number }>(`SELECT event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus'`)
+  assert.equal(rows.length, 1, 'one focus line, from the start-up snapshot')
+  assert.ok(rows[0]!.last_seen_wall_ms - rows[0]!.event_wall_ms >= 500, `the row reaches the latest heartbeat (${rows[0]!.last_seen_wall_ms - rows[0]!.event_wall_ms} ms)`)
+  await h.finish()
+})
+
+test('idle input ends the row in front, and when input returns the helper is asked for a fresh read', async () => {
+  const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
+  const h = harness({ FAKE_MODE: 'idle_cycle', FAKE_AFTER_MS: '300', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })
+  h.sup.start()
+  await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 2)
+  await waitFor(() => h.sup.stats.heartbeats >= 12)
+  h.store.flush()
+  const input = h.store.query<{ state: string; event_wall_ms: number }>(`SELECT state, event_wall_ms FROM observations WHERE kind = 'input' AND state = 'idle'`)
+  const rows = h.store.query<{ event_wall_ms: number; last_seen_wall_ms: number }>(`SELECT event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
+  assert.equal(input.length, 1)
+  assert.equal(rows.length, 2, 'the row before idle, and the fresh read after it')
+  assert.ok(rows[0]!.last_seen_wall_ms <= input[0]!.event_wall_ms, 'no heartbeat carried the first row into idle time')
+  assert.ok(rows[1]!.last_seen_wall_ms > rows[1]!.event_wall_ms, 'heartbeats carry the new row')
+  await h.finish()
+})
+
+test('a heartbeat that ends a stall gap does not carry the row across it; the window is read again', async () => {
+  const h = harness({ FAKE_MODE: 'heartbeat_gap', FAKE_AFTER_MS: '400', FAKE_FOCUS_MS: '3600000' })
+  h.sup.start()
+  await waitFor(() => h.gaps().some((g) => g.reason === 'helper_stalled'))
+  await waitFor(() => h.sup.stats.heartbeats >= 12)
+  const stall = h.gaps().find((g) => g.reason === 'helper_stalled')!
+  const rows = h.store.query<{ event_wall_ms: number; last_seen_wall_ms: number }>(`SELECT event_wall_ms, last_seen_wall_ms FROM observations WHERE kind = 'focus' ORDER BY id`)
+  assert.equal(rows.length, 2)
+  assert.ok(rows[0]!.last_seen_wall_ms <= stall.start_wall_ms, 'the row before the stall ends at its start')
+  assert.ok(rows[1]!.event_wall_ms >= stall.end_wall_ms!, 'a fresh row after it')
+  await h.finish()
+})
+
 test('when the display comes back on, the helper is asked for a fresh read of the window in front', async () => {
   const snapfile = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-v2-snap-')), 'snaps')
   const h = harness({ FAKE_MODE: 'display_cycle', FAKE_AFTER_MS: '200', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })

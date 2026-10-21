@@ -5,7 +5,8 @@ import { immediate } from './tx.ts'
 import { hasColumn } from './migrations.ts'
 
 export const HOUR_MS = 3_600_000
-// How far past its last sighting a focus row may run toward the next one: the helper reconciles every 60 s.
+// How far past its last sighting (a focus line, or a heartbeat while nothing stops the row) a focus row may run toward
+// the next one.
 export const CONTINUITY_MS = 90_000
 
 export function hourStart(wallMs: number, tzOffsetMin: number): number {

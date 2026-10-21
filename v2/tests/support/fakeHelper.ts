@@ -96,6 +96,14 @@ setTimeout(() => {
       }, 400)
       break
     }
+    case 'idle_cycle':
+      emit('input', { state: 'idle', last_input_wall_ms: Date.now() - 120_000, threshold_s: 120, snapshot: false })
+      setTimeout(() => emit('input', { state: 'active', last_input_wall_ms: Date.now(), threshold_s: 120, snapshot: false }), 300)
+      break
+    case 'heartbeat_gap':
+      heartbeats = false
+      setTimeout(() => (heartbeats = true), 500)
+      break
     case 'display_cycle':
       emit('power', { state: 'display_off' })
       setTimeout(() => emit('power', { state: 'display_on' }), 200)
