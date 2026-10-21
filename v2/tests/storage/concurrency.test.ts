@@ -489,9 +489,9 @@ test('a deletion whose announcements meet a lock held past the busy timeout fini
   }
   try {
     const handle = r.storage.deleteSource('com.example.chat')
-    const t0 = performance.now()
     assert.equal((await handle.done).observations, 1)
-    assert.ok(performance.now() - t0 < 500, 'the deletion finished without waiting out the busy timeout')
+    // Measured from when the other connection holds the lock: starting its thread is not the deletion's wait.
+    assert.ok(performance.now() - lockedAt < 500, 'the deletion finished without waiting out the busy timeout')
     await handle.purged
     // The other connection holds the lock for 1500 ms after it reports holding it.
     assert.ok(performance.now() - lockedAt >= 1400, 'purged is announced only once the lock is free')
