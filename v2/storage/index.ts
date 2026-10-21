@@ -14,6 +14,9 @@ import type { Span } from '../capture/agents/withheld.ts'
 import { DAY_MS, fencedBy, pauseEnd, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 import { scrubAvailable } from './scrub.ts'
+import { AgentStore, deleteAgentSession, type SessionHost } from '../capture/agents/store.ts'
+import { isKnownAgentHost } from '../capture/agents/host.ts'
+import type { Agent } from '../capture/agents/types.ts'
 import { immediate, isBusy } from './tx.ts'
 
 export type { DeletionResult } from './deletion.ts'
@@ -94,8 +97,16 @@ export interface CaptureControl {
 }
 
 /** A deletion is in force (capture and import refuse the material) when this returns; `done` settles once it is removed. */
+export interface AgentSessionRef {
+  agent: Agent
+  session_id: string
+}
+
 export interface DeletionHandle {
   tombstone: number
+  // Deleting an app: the agent sessions in its time whose app is not known. They are not deleted; the confirmation
+  // can offer them (deleteAgentSession).
+  unknownAgentSessions?: AgentSessionRef[]
   // Removed from every table and the search index.
   done: Promise<DeletionResult>
   // Also gone from the files on disk (the write-ahead log can hold old pages while a reader uses them).
@@ -329,9 +340,58 @@ export class Storage {
     return this.delete({ kind: 'range', from_wall_ms: fromWallMs, to_wall_ms: toWallMs, app_id: null, site: null })
   }
 
-  /** Deletes one app's material, in a range or across all time. */
+  /** Deletes one app's material, in a range or across all time, with the agent sessions known to have run in it. */
   deleteSource(appId: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionHandle {
-    return this.delete({ kind: 'source', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: appId.toLowerCase(), site: null })
+    const unknown = this.unknownHostSessions(range?.from_wall_ms ?? Number.MIN_SAFE_INTEGER, range?.to_wall_ms ?? Number.MAX_SAFE_INTEGER)
+    const handle = this.delete({ kind: 'source', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: appId.toLowerCase(), site: null })
+    return { ...handle, unknownAgentSessions: unknown }
+  }
+
+  private agentTables(): AgentStore | null {
+    if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() === undefined) return null
+    this.agentStore ??= new AgentStore(this.db, this.now)
+    return this.agentStore
+  }
+
+  private agentStore: AgentStore | null = null
+
+  // Sessions with a turn in [from, to) begun while the app they ran in was not known.
+  private unknownHostSessions(from: number, to: number): AgentSessionRef[] {
+    const agents = this.agentTables()
+    if (!agents) return []
+    const turns = this.db.prepare('SELECT agent, session_id, start_wall_ms FROM agent_turns WHERE start_wall_ms >= ? AND start_wall_ms < ? ORDER BY agent, session_id').all(from, to) as { agent: Agent; session_id: string; start_wall_ms: number }[]
+    const out = new Map<string, AgentSessionRef>()
+    for (const t of turns) {
+      const key = `${t.agent}\n${t.session_id}`
+      if (!out.has(key) && agents.hostAt(t.agent, t.session_id, t.start_wall_ms) === null) out.set(key, { agent: t.agent, session_id: t.session_id })
+    }
+    return [...out.values()]
+  }
+
+  /**
+   * Whether what an agent session did at a time is kept, given the app it ran in then: not when storage refuses that
+   * app's own rows at that time (excluded, or deleted). With the app not known, not while any app that runs agent
+   * sessions is excluded, since the session may have run in it.
+   */
+  agentHostAllowed(host: SessionHost | null, atWallMs: number): boolean {
+    if (host?.app_id) return this.rules.accepts(atWallMs, host.app_id, null) && !this.rules.privacy.excludes(host.app_id, host.app_path)
+    return !this.agentHostExcluded()
+  }
+
+  private agentHostExcluded(): boolean {
+    const rules = this.store.exclusions().filter((r) => r.match !== 'site')
+    if (rules.length === 0) return false
+    if (rules.some((r) => r.match === 'app_id' && isKnownAgentHost(r.value))) return true
+    if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() === undefined) return false
+    const seen = this.db.prepare('SELECT DISTINCT app_id, app_path FROM agent_hosts WHERE app_id IS NOT NULL').all() as SessionHost[]
+    return seen.some((h) => this.rules.privacy.excludes(h.app_id, h.app_path))
+  }
+
+  /** Deletes one agent session for good (one a deleted app's confirmation offered); resolves once it is purged. */
+  async deleteAgentSession(agent: Agent, session: string): Promise<boolean> {
+    if (!this.agentTables()) return true
+    this.privacyWrite(true, () => this.bus.commit('deletion', { agent_session: true }, () => deleteAgentSession(this.db, agent, session, this.now())))
+    return (await this.store.purgeFile?.()) ?? false
   }
 
   /** Deletes one site (and its subdomains), in a range or across all time. */

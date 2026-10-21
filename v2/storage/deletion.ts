@@ -37,6 +37,10 @@ function hasAgentTables(db: Database.Database): boolean {
   return db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_events'`).get() !== undefined
 }
 
+function hasAgentHosts(db: Database.Database): boolean {
+  return db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() !== undefined
+}
+
 function hasUrl(db: Database.Database): boolean {
   return db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'url'`).get() !== undefined
 }
@@ -274,6 +278,44 @@ export class Deleter {
   }
 
   /**
+   * Agent records of sessions known to have run in the app, for the time they ran in it within [from, to), and of
+   * their subagents that ran nowhere else; a session left with no turns goes. Sessions whose app is not known stay.
+   */
+  private deleteAgentHost(app: string, from: number, to: number): number {
+    const db = this.db
+    const spans = db
+      .prepare(
+        `SELECT agent, session_id, from_wall_ms AS s,
+           (SELECT min(n.from_wall_ms) FROM agent_hosts n WHERE n.agent = h.agent AND n.session_id = h.session_id AND n.from_wall_ms > h.from_wall_ms) AS e
+         FROM agent_hosts h WHERE lower(app_id) = ?`,
+      )
+      .all(app) as { agent: string; session_id: string; s: number; e: number | null }[]
+    const children = db.prepare(
+      `SELECT session_id FROM agent_sessions c WHERE agent = ? AND parent_session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = c.agent AND h.session_id = c.session_id)`,
+    )
+    const events = db.prepare(`SELECT id, detail FROM agent_events WHERE agent = @agent AND session_id = @session AND wall_ms >= @s AND wall_ms < @e LIMIT ${ROWS_PER_STEP}`)
+    const turns = db.prepare(`SELECT id, project_dir FROM agent_turns WHERE agent = @agent AND session_id = @session AND start_wall_ms >= @s AND start_wall_ms < @e LIMIT ${ROWS_PER_STEP}`)
+    let n = 0
+    for (const sp of spans) {
+      const s = Math.max(sp.s, from)
+      const e = Math.min(sp.e ?? Number.MAX_SAFE_INTEGER, to)
+      if (s >= e) continue
+      const sessions = [sp.session_id, ...(children.all(sp.agent, sp.session_id) as { session_id: string }[]).map((c) => c.session_id)]
+      for (const session of sessions) {
+        const args = { agent: sp.agent, session, s, e }
+        n += this.removeById('agent_events', () => events.all(args) as { id: number }[])
+        n += this.removeById('agent_turns', () => turns.all(args) as { id: number }[])
+        immediateRetrying(db, () => {
+          n += db.prepare(`DELETE FROM agent_sessions WHERE agent = ? AND session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id)`).run(sp.agent, session).changes
+          // Parser state of the session's logs can describe what was removed (an open turn, message fingerprints).
+          db.prepare('UPDATE agent_sources SET state = NULL WHERE agent = ? AND session_id = ? AND state IS NOT NULL').run(sp.agent, session)
+        })
+      }
+    }
+    return n
+  }
+
+  /**
    * Removes rows by id until `candidates` names none. Candidates are read outside any write transaction, which also
    * brings their pages into the cache, and each transaction removes them one at a time until FTS_STEP_MS has passed:
    * a batch sized by how long the last one took can still meet pages the disk has to supply, with the lock held.
@@ -442,6 +484,7 @@ export class Deleter {
       })
     }
     if (t.kind === 'range' && hasAgentTables(db)) r.agentRecords += this.deleteAgentRange(from, to)
+    if (t.kind === 'source' && t.app_id !== null && hasAgentTables(db) && hasAgentHosts(db)) r.agentRecords += this.deleteAgentHost(t.app_id, from, to)
     if (t.kind === 'range') {
       immediateRetrying(db, () => {
         db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)

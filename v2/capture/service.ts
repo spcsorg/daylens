@@ -3,9 +3,11 @@
 //        [--agent-sessions]   reads Claude Code and Codex session logs (agent session metadata is recorded only with permission)
 
 import os from 'node:os'
+import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { createInterface } from 'node:readline'
 import { backfill } from './agents/backfill.ts'
+import { HostResolver } from './agents/host.ts'
 import { AgentReader, homeRoots } from './agents/reader.ts'
 import { AgentStore, removeStaging } from './agents/store.ts'
 import { WslDiscovery } from './agents/wsl.ts'
@@ -93,20 +95,24 @@ storage.attachCapture({
 function agentStore(): AgentStore {
   const s = new AgentStore(store.database)
   s.withheld = () => storage.withheld()
+  s.hostAllowed = (host, at) => storage.agentHostAllowed(host, at)
   return s
 }
 
 const wsl = process.platform === 'win32' ? new WslDiscovery() : null
+const hosts = process.platform === 'darwin' ? new HostResolver({ claudeDir: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), helper: values.helper, helperArgs: values['helper-arg'] ?? [] }) : null
 const agents = values['agent-sessions']
   ? new AgentReader(agentStore(), homeRoots(os.homedir()), {
       reconcileMs: Number(values['reconcile-s']) * 1000,
       log,
       backfill: async (roots) => {
-        const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, () => storage.withheld())
+        const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, () => storage.withheld(), (host, at) => storage.agentHostAllowed(host, at))
         if (r.child) log(`agent backfill files=${r.child.files_read} mb=${r.child.mb_read} wall_ms=${r.child.wall_ms} merge_ms=${r.merge_ms}`)
         return r.merged
       },
       ...(wsl ? { discover: () => wsl.discover() } : {}),
+      // Only the macOS helper can name the app a process runs in; elsewhere sessions have no known app.
+      ...(hosts ? { resolveHost: (agent, session, file) => hosts.resolve(agent, session, file) } : {}),
     })
   : null
 

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
 import { admitsAt, admitsSpan, nextWithheld, type Span } from './withheld.ts'
-import { AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE } from './store.ts'
+import { AgentStore, loadFingerprintKey, removeStaging, STAGING_FILE, type SessionHost } from './store.ts'
 import { addCounts } from './types.ts'
 
 export interface BackfillStats {
@@ -141,7 +141,7 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 }
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
-export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = []): void {
+export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = [], hostAllowed: (host: SessionHost | null, at: number) => boolean = () => true): void {
   db.function('agent_admits', { deterministic: false }, (at: number | null) => (admitsAt(spans, at) ? 1 : 0))
   // A turn's activity and end stop where withheld time begins after its start.
   db.function('agent_clip', { deterministic: false }, (start: number, at: number | null) => {
@@ -150,20 +150,35 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
   })
   db.function('agent_end', { deterministic: false }, (start: number, at: number | null) => (at === null || admitsSpan(spans, start, at) ? at : null))
   const live = (t: string) => `NOT EXISTS (SELECT 1 FROM main.agent_deleted_sessions d WHERE d.agent = ${t}.agent AND d.session_id = ${t}.session_id)`
+  // What storage refuses for the app a session ran in at that time, the merge leaves out, as the live reader does.
+  // The function runs inside the merge's statements, so only a known app is judged there; the unknown case is
+  // decided once, before them.
+  const unknownOk = hostAllowed(null, Date.now()) ? 1 : 0
+  db.function('agent_host_ok', { deterministic: false }, (appId: string | null, appPath: string | null, at: number) =>
+    appId === null ? unknownOk : hostAllowed({ app_id: appId, app_path: appPath }, at) ? 1 : 0,
+  )
+  const host = (t: string, at: string, col: string) =>
+    `(SELECT h.${col} FROM agent_hosts h WHERE h.agent = ${t}.agent AND h.session_id = ${t}.session_id AND h.from_wall_ms <= ${t}.${at} ORDER BY h.from_wall_ms DESC, h.id DESC LIMIT 1)`
+  const hostOk = (t: string, at: string) => `agent_host_ok(${host(t, at, 'app_id')}, ${host(t, at, 'app_path')}, ${t}.${at})`
   db.prepare('ATTACH DATABASE ? AS staging').run(staging)
   try {
     // A worker stopped before its tables were set up left nothing to merge; the newest column marks them complete.
     if (db.prepare(`SELECT 1 FROM pragma_table_info('agent_sources', 'staging') WHERE name = 'turnless'`).get() === undefined) return
     db.transaction(() => {
+      if (db.prepare(`SELECT 1 FROM staging.sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() !== undefined) {
+        db.exec(`INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms)
+          SELECT agent, session_id, app_id, app_name, app_path, basis, from_wall_ms FROM staging.agent_hosts s WHERE ${live('s')}
+            AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.from_wall_ms)`)
+      }
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
-          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(first_wall_ms) AND ${live('s')}
+          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(first_wall_ms) AND ${live('s')} AND ${hostOk('s', 'first_wall_ms')}
           ON CONFLICT (agent, session_id) DO UPDATE SET first_wall_ms = min(first_wall_ms, excluded.first_wall_ms), last_wall_ms = max(last_wall_ms, excluded.last_wall_ms);
         INSERT INTO agent_turns (agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms)
-          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns s WHERE agent_admits(start_wall_ms) AND ${live('s')}
+          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns s WHERE agent_admits(start_wall_ms) AND ${live('s')} AND ${hostOk('s', 'start_wall_ms')}
           ON CONFLICT (agent, turn_key) DO NOTHING;
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
-          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms) AND ${live('s')}
+          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms) AND ${live('s')} AND ${hostOk('s', 'wall_ms')}
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
           SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN ${live('s')} THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE true
@@ -183,6 +198,7 @@ export async function backfill(
   sliceBytes = SLICE_BYTES,
   sliceTimeoutMs = SLICE_TIMEOUT_MS,
   withheld: () => readonly Span[] = () => [],
+  hostAllowed: (host: SessionHost | null, at: number) => boolean = () => true,
 ): Promise<BackfillResult> {
   const staging = path.join(dataDir, STAGING_FILE)
   const clean = () => removeStaging(dataDir)
@@ -232,7 +248,7 @@ export async function backfill(
       }
     }
     const t0 = performance.now()
-    mergeStaging(db, staging, withheld())
+    mergeStaging(db, staging, withheld(), hostAllowed)
     // Health is decided once over every slice, so a clean last slice cannot hide a problem in an earlier one.
     const store = new AgentStore(db)
     for (const r of counts.values()) {

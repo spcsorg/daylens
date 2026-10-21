@@ -46,6 +46,9 @@ export type AgentRecord =
       branch: string | null
       at: number
     }
+  // The client the session runs in from `at` on (Claude Code's entrypoint, Codex's originator); a session resumed
+  // elsewhere changes it.
+  | { t: 'client'; session: string; client: string | null; at: number }
   | { t: 'turn'; key: string; session: string; dir: string | null; branch: string | null; opener: TurnOpener; start: number; replayed: boolean }
   | { t: 'turn_dir'; key: string; dir: string; at: number | null }
   | { t: 'turn_opener'; key: string; opener: TurnOpener; at: number | null }

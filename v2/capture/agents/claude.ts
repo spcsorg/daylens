@@ -22,6 +22,7 @@ interface ClaudeState {
   dir: string | null
   branch: string | null
   automated: boolean
+  client?: string | null
   turn: OpenTurn | null
   // An instruction not from the person (a command, a notice, another session) waiting for the agent's reply.
   // `last` is the latest such record; a reply that points at it answers the instruction, not the turn before.
@@ -212,7 +213,10 @@ export class ClaudeParser implements LineParser {
   private meta(o: Record<string, unknown>, at: number): AgentRecord[] {
     if (typeof o.cwd === 'string') this.s.dir = o.cwd
     if (typeof o.gitBranch === 'string' && o.gitBranch !== '') this.s.branch = o.gitBranch
-    if (this.s.announced) return []
+    const client = typeof o.entrypoint === 'string' ? o.entrypoint : null
+    const changed: AgentRecord[] = this.s.announced && client !== (this.s.client ?? null) ? [{ t: 'client', session: this.session, client, at }] : []
+    this.s.client = client
+    if (this.s.announced) return changed
     this.s.announced = true
     this.s.automated = o.entrypoint === 'sdk-cli'
     const session = this.subagentFile ? (typeof o.agentId === 'string' ? o.agentId : this.fileSession) : (o.sessionId as string)
@@ -223,11 +227,12 @@ export class ClaudeParser implements LineParser {
         session,
         origin: this.subagentFile ? 'subagent' : this.s.automated ? 'automated' : 'interactive',
         parent: this.subagentFile ? this.parent : null,
-        client: typeof o.entrypoint === 'string' ? o.entrypoint : null,
+        client,
         dir: this.s.dir,
         branch: this.s.branch,
         at,
       },
+      { t: 'client', session, client, at },
     ]
   }
 

@@ -122,6 +122,15 @@ export async function codexSessionPids(file: string): Promise<number[]> {
   return out === null ? [] : out.split('\n').filter((l) => /^\d+$/.test(l)).map(Number)
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as { code?: string }).code === 'EPERM'
+  }
+}
+
 export interface HostResolverOptions {
   claudeDir: string
   helper: string
@@ -139,11 +148,12 @@ export class HostResolver {
   }
 
   async resolve(agent: Agent, session: string, file: string): Promise<HostFinding | null> {
-    const pids = agent === 'claude_code' ? [await claudeSessionPid(this.opts.claudeDir, session, this.opts.now)].filter((p): p is number => p !== null) : await codexSessionPids(file)
-    if (pids.length === 0) return null
     const key = `${agent}:${session}`
     const cached = this.cache.get(key)
-    if (cached && pids.includes(cached.pid)) return cached.finding
+    // While the process it was traced to runs, the session is in the same app; nothing is spawned to ask again.
+    if (cached && alive(cached.pid)) return cached.finding
+    const pids = agent === 'claude_code' ? [await claudeSessionPid(this.opts.claudeDir, session, this.opts.now)].filter((p): p is number => p !== null) : await codexSessionPids(file)
+    if (pids.length === 0) return null
     const found = await readHostOf(this.opts.helper, this.opts.helperArgs ?? [], pids)
     for (const pid of pids) {
       const finding = found.get(pid)

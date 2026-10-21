@@ -6,6 +6,7 @@ import { open, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { ClaudeParser } from './claude.ts'
 import { CodexParser } from './codex.ts'
+import type { HostFinding } from './host.ts'
 import { readAppended, CompressedTail, AppendedTail } from './tail.ts'
 import type { AgentStore, HealthState, SourceRow } from './store.ts'
 import { addCounts, emptyCounts, subCounts, type Agent, type AgentRecord, type LineParser, type ParseCounts } from './types.ts'
@@ -76,6 +77,8 @@ export interface ReaderOptions {
   backfill?: (roots: Omit<AgentRoot, 'available'>[]) => Promise<boolean>
   // False when health is decided by the caller from the counts of several readers (the backfill children).
   recordHealth?: boolean
+  // The app a running session is in, for logs read live; null when the session's process cannot be found.
+  resolveHost?: (agent: Agent, session: string, file: string) => Promise<HostFinding | null>
 }
 
 export interface RootCounts {
@@ -155,6 +158,24 @@ export class AgentReader {
     this.discover = opts.discover ?? null
     this.backfill = opts.backfill ?? null
     this.healthOn = opts.recordHealth ?? true
+    this.resolveHost = opts.resolveHost ?? null
+  }
+
+  private readonly resolveHost: ReaderOptions['resolveHost'] | null
+  // When a session's process was last looked for and not found; looked for again after a reconcile interval.
+  private readonly hostMisses = new Map<string, number>()
+
+  private async traceHost(agent: Agent, session: string, file: string, from: number): Promise<void> {
+    if (!this.resolveHost) return
+    const missed = this.hostMisses.get(file)
+    if (missed !== undefined && Date.now() - missed < this.reconcileMs) return
+    const found = await this.resolveHost(agent, session, file)
+    if (!found) {
+      this.hostMisses.set(file, Date.now())
+      return
+    }
+    this.hostMisses.delete(file)
+    this.store.recordHost(agent, session, found.app, found.basis, from)
   }
 
   private readonly healthOn: boolean
@@ -432,6 +453,9 @@ export class AgentReader {
       this.leftOver = true
       return
     }
+    // A log read as it is written belongs to a running session: the app it runs in covers what was appended since
+    // the last read, or the whole log the first time it is seen.
+    if (this.budget === null && !info.compressed) await this.traceHost(root.agent, info.session, file, row ? (this.store.sourceUpdatedAt(file) ?? st.mtimeMs) : 0)
     const saved = info.compressed && !this.tails.has(file) ? null : (row?.state ?? null)
     const parser = makeParser(root, info, saved, this.store.fingerprintKey())
     const prior = row?.state ? (JSON.parse(row.state) as { _readCounts?: ParseCounts; _drift?: number }) : null

@@ -270,7 +270,10 @@ export class CodexParser implements LineParser {
     const git = p.git as { branch?: unknown } | undefined
     if (typeof git?.branch === 'string') this.s.branch = git.branch
     const started = parseTime(p.timestamp) ?? at
-    return [{ t: 'session', session: p.id, origin: this.s.origin, parent, client: originator, dir: this.s.dir, branch: this.s.branch, at: started }]
+    return [
+      { t: 'session', session: p.id, origin: this.s.origin, parent, client: originator, dir: this.s.dir, branch: this.s.branch, at: started },
+      { t: 'client', session: p.id, client: originator, at: started },
+    ]
   }
 
   private event(sub: string | undefined, p: Record<string, unknown>, at: number): AgentRecord[] {
