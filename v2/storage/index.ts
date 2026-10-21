@@ -178,6 +178,11 @@ export class Storage {
     store.onWriteStart = () => this.deletions.captureWriting(true)
     store.onWriteEnd = () => this.deletions.captureWriting(false)
     store.writerYields = () => this.deletions.busy
+    store.purgeFile = () =>
+      this.deletions.purgeFile().catch((err: Error) => {
+        this.onError(`purge_file_${err.message}`)
+        return false
+      })
     store.acceptObservation = (row) => this.admit(row)
     store.acceptExtension = (row, from, to) => this.rules.mayCover(row.app_id, (row as { url?: string | null }).url ?? null, from, to)
     store.onFlushed = () => {
@@ -212,6 +217,8 @@ export class Storage {
       if (t.state === 'done') this.purgeWhenFree(t.id).catch((err: Error) => this.onError(`purge_${err.message}`))
     }
     this.expireDuePauses()
+    // A pairing-key scrub an earlier run could not finish; the store retries it every minute until it completes.
+    if (this.store.scrubOwed()) void this.store.retryScrub()
     this.scheduleRetention(60_000)
   }
 

@@ -22,6 +22,9 @@ const FLUSH_BUDGET_MS = 100
 const CONTENTION_REPORT_MS = 5000
 const MAX_RETRY_MS = 30_000
 const SCRUB_KEY = 'scrub_pending'
+// secure_delete leaves copies of removed text in free space inside pages, so a removal is only gone from disk after a
+// page scrub (storage/scrub.ts). The value counts removals, so one committed during a scrub keeps the marker.
+export const SCRUB_PENDING = `INSERT INTO meta (key, value) VALUES ('page_scrub_pending', '1') ON CONFLICT (key) DO UPDATE SET value = value + 1`
 const SCRUB_RETRY_MS = 60_000
 const SCAN_CHUNK = 1 << 20
 
@@ -300,8 +303,11 @@ export class Store implements Sink {
     this.nextObsId = Math.max(maxId + 1, mark ? Number(mark.value) : 0)
     this.persistedNextObsId = this.nextObsId
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
-    // A scrub an earlier run could not finish is tried again now and then every minute until it completes.
-    if (this.meta(SCRUB_KEY) === '1') this.retryScrub()
+  }
+
+  /** Whether a scrub an earlier run could not finish is still owed; storage retries it once it can purge. */
+  scrubOwed(): boolean {
+    return this.meta(SCRUB_KEY) === '1'
   }
 
   // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
@@ -400,33 +406,42 @@ export class Store implements Sink {
     else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value], { keep: opts.keep })
   }
 
-  // Removes every older copy of rewritten rows from the files (WAL frames and free pages) after a secret is moved out
-  // of the database. Pending until a checkpoint reports it completed; an open reader elsewhere can hold it up.
-  scrub(keys: readonly string[] = []): boolean {
+  /**
+   * Zeroes and checkpoints away the old copies of rewritten rows, off the capture thread (storage's deletion worker);
+   * true once done. Set by storage; without it a scrub stays pending.
+   */
+  purgeFile: (() => Promise<boolean>) | null = null
+  private scrubbing: Promise<boolean> | null = null
+
+  // Removes every older copy of rewritten rows from the files (free space inside pages and WAL frames) after a secret
+  // is moved out of the database. Pending until the purge completes; an open reader elsewhere can hold it up.
+  scrub(keys: readonly string[] = []): Promise<boolean> {
     for (const k of keys) if (k) this.scrubKeys.push(Buffer.from(k))
     this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [], { keep: true })
+    this.enqueue(SCRUB_PENDING, [], { keep: true })
     return this.retryScrub()
   }
 
-  retryScrub(): boolean {
+  retryScrub(): Promise<boolean> {
+    this.scrubbing ??= this.scrubNow().finally(() => (this.scrubbing = null))
+    return this.scrubbing
+  }
+
+  private async scrubNow(): Promise<boolean> {
     // Until the marker itself is committed nothing is known to be safe; a failed write is still pending.
     if (!this.flush()) return this.scrubPending()
     if (this.meta(SCRUB_KEY) !== '1') return this.scrubDone()
-    try {
-      const first = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
-      this.db.exec('VACUUM')
-      const second = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
-      if (first[0]?.busy !== 0 || second[0]?.busy !== 0) return this.scrubPending()
-      if (this.holdsLegacyKey()) {
-        this.onError('scrub_key_remains')
-        return this.scrubPending()
-      }
-      this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
-      this.db.pragma('wal_checkpoint(TRUNCATE)')
-    } catch (err) {
-      this.onError(errorCode(err))
+    if (this.purgeFile === null) {
+      this.onError('scrub_unavailable')
       return this.scrubPending()
     }
+    if (!(await this.purgeFile())) return this.scrubPending()
+    if (this.holdsLegacyKey()) {
+      this.onError('scrub_key_remains')
+      return this.scrubPending()
+    }
+    this.enqueue('DELETE FROM meta WHERE key = ?', [SCRUB_KEY], { keep: true })
+    if (!this.flush()) return this.scrubPending()
     return this.scrubDone()
   }
 
@@ -464,7 +479,7 @@ export class Store implements Sink {
     this.health.scrubPending = true
     this.onError('scrub_failed')
     if (!this.scrubTimer) {
-      this.scrubTimer = setInterval(() => this.retryScrub(), SCRUB_RETRY_MS)
+      this.scrubTimer = setInterval(() => void this.retryScrub(), SCRUB_RETRY_MS)
       this.scrubTimer.unref?.()
     }
     return false

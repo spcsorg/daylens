@@ -7,7 +7,7 @@ import { Worker } from 'node:worker_threads'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ObservationRow } from '../capture/normalize.ts'
-import { MAX_ROW_SPAN_MS } from '../capture/store.ts'
+import { MAX_ROW_SPAN_MS, SCRUB_PENDING } from '../capture/store.ts'
 import { Derived, HOUR_MS, MAX_INTERVAL_MS } from './derive.ts'
 import { clearHour, sourceMatches, type HourSource } from './hours.ts'
 import { Rules, tombstoneMatches, type Tombstone } from './rules.ts'
@@ -154,9 +154,6 @@ export interface PruneResult {
  */
 export const RETENTION_PURGE_PENDING = `INSERT INTO meta (key, value) VALUES ('retention_purge_pending', '1') ON CONFLICT (key) DO NOTHING`
 
-// secure_delete leaves copies of removed text in free space inside pages, so a removal is only gone from disk after a
-// scrub. The value counts removals, so one committed during a scrub keeps the marker.
-export const SCRUB_PENDING = `INSERT INTO meta (key, value) VALUES ('page_scrub_pending', '1') ON CONFLICT (key) DO UPDATE SET value = value + 1`
 // Set by builds that rewrote the file with VACUUM instead; a file that still has it is scrubbed too.
 const SCRUB_MARKERS = `SELECT key, value FROM meta WHERE key IN ('page_scrub_pending', 'vacuum_pending')`
 
@@ -344,6 +341,11 @@ export class Deleter {
       for (const m of markers) clear.run(m.key, m.value)
     })
     return true
+  }
+
+  /** A scrub owed by any removal, then the checkpoint: true once no old copy is left in the files. */
+  purgeFile(): boolean {
+    return this.scrubIfPending() && this.checkpoint()
   }
 
   /** Moves old pages out of the write-ahead log; false while a reader's snapshot still holds them. Waits only briefly. */
@@ -561,6 +563,10 @@ export class DeletionWorker {
 
   checkpoint(): Promise<boolean> {
     return this.send({ op: 'checkpoint' }) as Promise<boolean>
+  }
+
+  purgeFile(): Promise<boolean> {
+    return this.send({ op: 'purge_file' }) as Promise<boolean>
   }
 
   private send(job: Record<string, unknown>): Promise<unknown> {

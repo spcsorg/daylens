@@ -7,7 +7,7 @@ import { threadId } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 import { admitsAt, admitsSpan, type Span } from './withheld.ts'
-import { SCRUB_PENDING } from '../../storage/deletion.ts'
+import { SCRUB_PENDING } from '../store.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
 const KEY_FILE = 'agent-fingerprint.key'
