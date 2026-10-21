@@ -151,3 +151,53 @@ test('re-deriving a row rewrites every field of its interval, not just its times
   assert.deepEqual(r.q(`SELECT app_id, app_name, title, files FROM intervals WHERE obs_id = ?`, id), [{ app_id: 'com.example.editor', app_name: 'Editor', title: 'new.md - Editor', files: 'new.md' }])
   r.close()
 })
+
+test('browser pages from the extension divide the browser time into intervals per page, searchable by title and address', () => {
+  const out: IntervalRow[] = []
+  const b = new IntervalBuilder((i) => out.push(i))
+  const row = (id: number, kind: string, t: number, last: number, o: Partial<{ app_id: string; state: string; title: string; url: string }> = {}) =>
+    ({ id, kind, state: o.state ?? null, event_wall_ms: t, last_seen_wall_ms: last, tz_offset_min: 120, app_id: o.app_id ?? 'com.google.chrome', app_name: 'Browser', title: o.title ?? null, title_state: o.title ? 'ok' : null, url: o.url ?? null })
+  b.push(row(1, 'focus', T0, T0 + 9 * MIN))
+  b.push(row(2, 'page', T0 + MIN, T0 + MIN, { state: 'normal', title: 'Budget sheet', url: 'https://docs.example.com/d/1' }))
+  b.push(row(3, 'page', T0 + 3 * MIN, T0 + 3 * MIN, { state: 'normal', title: 'Flights', url: 'https://travel.example.org/q' }))
+  b.push(row(4, 'page', T0 + 4 * MIN, T0 + 4 * MIN, { state: 'normal', app_id: 'com.other.browser', title: 'Not in front', url: 'https://x.example/' }))
+  b.push(row(5, 'page', T0 + 5 * MIN, T0 + 5 * MIN, { state: 'unknown' }))
+  b.push(row(6, 'focus', T0 + 8 * MIN, T0 + 9 * MIN, { app_id: 'com.apple.notes', title: 'Groceries' }))
+  b.push(row(7, 'page', T0 + 8 * MIN + 1000, T0 + 8 * MIN + 1000, { state: 'normal', title: 'Behind notes', url: 'https://y.example/' }))
+  b.finish()
+  assert.deepEqual(
+    out.map((i) => [i.obs_id, (i.start_wall_ms - T0) / MIN, (i.end_wall_ms - T0) / MIN, i.app_id, i.title, i.url]),
+    [
+      [1, 0, 1, 'com.google.chrome', null, null],
+      [2, 1, 3, 'com.google.chrome', 'Budget sheet', 'https://docs.example.com/d/1'],
+      [3, 3, 5, 'com.google.chrome', 'Flights', 'https://travel.example.org/q'],
+      [5, 5, 8, 'com.google.chrome', null, null],
+      [6, 8, 9, 'com.apple.notes', 'Groceries', null],
+    ],
+  )
+  assert.equal(out[1]!.site, 'docs.example.com')
+})
+
+test('pages captured by the extension reach intervals and search through storage', () => {
+  const r = rig()
+  const page = (t: number, title: string | null, url: string | null, state = 'normal') =>
+    ({ run: 'ext', seq: 0, boot: 'b', platform: 'macos' as const, source: 'browser_ext', kind: 'page' as const, event_wall_ms: t, event_mono_us: t * 1000, tz: 'Africa/Kigali',
+      tz_offset_min: 120, app_id: 'com.google.Chrome', app_name: 'Google Chrome', app_path: null, pid: 500, window: 'ext:1', title, title_raw: null, title_state: title ? ('ok' as const) : null, state, detail: null, url })
+  const chrome = app('com.google.Chrome', { pid: 500, registered_browser: true, engine: 'browser', name: 'Google Chrome' })
+  r.feed(focus(chrome, null, T0, 'app_changed'))
+  r.store.insertObservation(page(T0 + MIN, 'Quarterly budget review', 'https://docs.example.com/d/1'))
+  // The helper's reconciliation sights the browser in front every minute.
+  r.feed(focus(chrome, null, T0 + 2 * MIN, 'reconcile'))
+  r.store.insertObservation(page(T0 + 3 * MIN, null, null, 'unknown'))
+  r.feed(focus(chrome, null, T0 + 3 * MIN + 30_000, 'reconcile'))
+  r.feed(focus(editor, 'notes.md', T0 + 4 * MIN, 'app_changed'))
+  r.store.flush()
+  const iv = r.q<{ title: string | null; url: string | null; start_wall_ms: number; end_wall_ms: number }>(`SELECT title, url, start_wall_ms, end_wall_ms FROM intervals WHERE app_id = 'com.google.Chrome' ORDER BY start_wall_ms`)
+  assert.deepEqual(iv.map((i) => [i.title, i.url, (i.start_wall_ms - T0) / MIN, (i.end_wall_ms - T0) / MIN]), [
+    [null, null, 0, 1],
+    ['Quarterly budget review', 'https://docs.example.com/d/1', 1, 3],
+    [null, null, 3, 4],
+  ])
+  assert.deepEqual(r.storage.search('budget review').map((h) => h.url), ['https://docs.example.com/d/1'])
+  r.close()
+})

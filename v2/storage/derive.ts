@@ -84,13 +84,15 @@ function isStop(r: ObsRow): boolean {
   )
 }
 
-/** Turns observations (focus rows and the events that end them), in id order, into intervals. */
+/** Turns observations (focus rows, the browser pages within them, and the events that end them), in order, into intervals. */
 // The earliest point in (start, end) where this row's coverage must stop (a capture gap, a pause, a deletion), else end.
 export type Cut = (startWallMs: number, endWallMs: number, row: ObsRow) => number
 // Whether a row may appear at all; a refused row (deleted, paused) still ends the row before it.
 export type Admit = (row: ObsRow) => boolean
 
 export class IntervalBuilder {
+  // The row in front (a focus row), and the row whose interval is open: the focus row itself, or a page of it.
+  private front: ObsRow | null = null
   private open: ObsRow | null = null
   private readonly emit: (i: IntervalRow) => void
   private readonly cut: Cut
@@ -105,8 +107,16 @@ export class IntervalBuilder {
   push(r: ObsRow): void {
     if (r.kind === 'focus') {
       this.close(r.event_wall_ms)
+      this.front = this.open = this.admit(r) ? r : null
+    } else if (r.kind === 'page') {
+      // A page divides the time of the browser in front; a page of any other app was not what was in front.
+      if (this.front === null || this.front.app_id?.toLowerCase() !== r.app_id?.toLowerCase()) return
+      this.close(r.event_wall_ms)
       this.open = this.admit(r) ? r : null
-    } else if (isStop(r)) this.close(r.event_wall_ms)
+    } else if (isStop(r)) {
+      this.close(r.event_wall_ms)
+      this.front = null
+    }
   }
 
   finish(): void {
@@ -115,9 +125,11 @@ export class IntervalBuilder {
 
   private close(nextWallMs: number | null): void {
     const o = this.open
-    if (!o) return
+    const f = this.front
+    if (!o || !f) return
     this.open = null
-    let end = o.last_seen_wall_ms
+    // The browser's own row is what keeps being sighted while it stays in front; a page lasts as long.
+    let end = f.last_seen_wall_ms
     // Up to the next row, but never more than CONTINUITY_MS past the last sighting.
     if (nextWallMs !== null) end = Math.min(Math.max(end, Math.min(nextWallMs, end + CONTINUITY_MS)), nextWallMs)
     end = Math.max(this.cut(o.event_wall_ms, end, o), o.event_wall_ms)
@@ -263,7 +275,7 @@ export class Derived {
 
   // The leading range on event_wall_ms lets the index bound the scan; the OR alone would read every row each flush.
   pageSql(): string {
-    return `SELECT ${this.obsColumns} FROM observations WHERE event_wall_ms >= ? AND (event_wall_ms > ? OR id >= ?) AND (kind = 'focus' OR ${STOPS})
+    return `SELECT ${this.obsColumns} FROM observations WHERE event_wall_ms >= ? AND (event_wall_ms > ? OR id >= ?) AND (kind IN ('focus', 'page') OR ${STOPS})
        ORDER BY event_wall_ms, id LIMIT 1000`
   }
 
