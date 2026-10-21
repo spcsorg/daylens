@@ -100,8 +100,6 @@ test('deletion reaches everything: one app, across days, and the hours that drew
 test('deletion reaches everything: a site and its subdomains, once page addresses are captured', async () => {
   resetSeq()
   const r = rig()
-  // The browser step adds this column; deletion and search already use it when present.
-  r.store.database.exec('ALTER TABLE observations ADD COLUMN url TEXT')
   r.close()
   const r2 = rig(r.dir)
   const rows = [

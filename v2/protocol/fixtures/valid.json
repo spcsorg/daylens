@@ -677,5 +677,165 @@
     "to_wall_ms": 1792130411000
    }
   }
+ },
+ {
+  "name": "host_mac_tab_page",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "activated",
+    "state": "page",
+    "reason": null,
+    "browser": {
+     "app_id": "company.thebrowser.dia",
+     "name": "Dia",
+     "path": "/Applications/Dia.app",
+     "pid": 812,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": "1785",
+    "tab": "1790",
+    "url": "https://example.com/search?q=budget",
+    "title": "Budget — “Q4” 日本語"
+   }
+  }
+ },
+ {
+  "name": "host_mac_tab_unknown",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "focus",
+    "state": "unknown",
+    "reason": "no_focused_window",
+    "browser": {
+     "app_id": "company.thebrowser.dia",
+     "name": "Dia",
+     "path": "/Applications/Dia.app",
+     "pid": 812,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": null,
+    "tab": null,
+    "url": null,
+    "title": null
+   }
+  }
+ },
+ {
+  "name": "host_win_tab_page",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "updated",
+    "state": "page",
+    "reason": null,
+    "browser": {
+     "app_id": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+     "name": "Google Chrome",
+     "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+     "pid": 9120,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": "2",
+    "tab": "7",
+    "url": "https://docs.example.com/d/1AbC/edit",
+    "title": "Plan"
+   }
+  }
+ },
+ {
+  "name": "host_win_tab_unknown_firefox",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "focus",
+    "state": "unknown",
+    "reason": "not_normal",
+    "browser": {
+     "app_id": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+     "name": "Firefox",
+     "path": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+     "pid": 4410,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "browser@daylens.app",
+    "window": null,
+    "tab": null,
+    "url": null,
+    "title": null
+   }
+  }
  }
 ]

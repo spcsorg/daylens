@@ -51,12 +51,13 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 | `clock` | `change`: `time_changed` or `timezone_changed`. |
 | `loss` | `channel` (`focus`), `count`, `from_wall_ms`, `to_wall_ms`. Focus work was dropped inside the helper before it became a line (an internal queue was full), so no `seq` shows it. Sent once the queue drains. |
 | `bye` | `reason`. Last line of a clean exit. |
+| `tab` | Browser host only, never a capture helper. `trigger` (`activated`, `focus`, `updated`, `removed`, `snapshot`, `startup`, `paused`), `state` (`page` or `unknown`), `reason`, `browser`, `extension`, `window`, `tab`, `url`, `title`. See [Browser host](#browser-host). |
 
 `trigger`: `app_changed`, `window_changed`, `title_changed`, `reconcile`, `snapshot`.
 
 `app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
 
-`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet; browser windows get it with the browser step. A `private` window never has its title stored.
+`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet. A `private` window never has its title stored. A browser window's title stays withheld even while the extension reports pages, because the window in front may be one the extension cannot see.
 
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 
@@ -77,3 +78,133 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 ## Contract tests
 
 `fixtures/valid.json` holds one golden line per kind and platform; `fixtures/invalid.json` holds lines the service must reject, with the reason. The TypeScript validator, the Swift encoder and the C# encoder are all tested against these files.
+
+## Browser host
+
+The Daylens browser extension talks to a native messaging host: the capture helper started by the browser, which then forwards to the capture service. The helper runs as the host only when the browser starts it with an extension origin (Chromium: `chrome-extension://<id>/`, plus `--parent-window=` on Windows; Firefox: the host manifest path and the add-on ID) and the ID is on the helper's allowlist. In this mode it captures nothing.
+
+### Transport
+
+- The capture service listens on a local endpoint. macOS and Linux: a Unix socket, `<per-user temp folder>/daylens-v2/browser.sock` (macOS: `confstr(_CS_DARWIN_USER_TEMP_DIR)`; Linux: `$XDG_RUNTIME_DIR`), in a folder only the user can open, socket mode 0600. Windows: the named pipe `\\.\pipe\daylens-v2-browser-<user name>`. `DAYLENS_V2_BROWSER_SOCKET` overrides the path for both sides.
+- The host checks that the listener runs as the same user (`getpeereid` on macOS, the pipe server's process token on Windows) before sending anything.
+- Host to service: one JSON line per message, UTF-8, at most 16 KiB. A line is either a protocol line of kind `tab` with the host's own `run` and `seq`, or a control op: `{"op":"pause","for":"hour"|"tomorrow"|"until_resumed"}`, `{"op":"resume"}`, `{"op":"status"}`.
+- Service to host: `{"op":"status","capture":"running"|"paused","until_wall_ms":<ms>|null}` on connect, on every pause change and in answer to `status`; `{"op":"snapshot","epoch":<n>|null}` when the service needs the present state (a new app or window came to the front, or lines were lost). The host passes `epoch` to the extension, and the extension's answer carries it back.
+- A host that cannot reach the service retries on every extension message, and on macOS when the socket folder changes; on Windows every 30 s.
+
+### `tab`
+
+| Field | Meaning |
+|---|---|
+| `trigger` | The browser event behind the line. |
+| `state` | `page`: the focused tab of a focused normal window. `unknown`: anything the extension cannot see or does not count: another app, a private window, devtools, a popup, no window. |
+| `reason` | `null` for a page; for unknown one of `no_focused_window`, `not_normal`, `no_tab`, `no_address`, `paused`. |
+| `browser` | The process that started the host, found by the host from its own parent (on Windows, the parent of `cmd.exe` when Chromium puts it in between), in the same shape as `app`. Never reported by the extension. `registered_browser` is not read for tab lines. |
+| `extension` | The extension ID: 32 letters `a`–`p` for Chromium, the add-on ID for Firefox. |
+| `window`, `tab` | The browser's own IDs, as strings; only meaningful within one browser run. |
+| `url` | The page address after the [address rule](#address-rule), at most 2048 characters. Present exactly when `state` is `page`. |
+| `title` | The tab title, at most 1024 UTF-16 code units, or `null`. Only with `page`. |
+| `epoch` | Optional. Present only on an answer to a snapshot request: the focus epoch that request named. |
+
+`t` is when the host received the message. Every helper focus line that changes the app or the window starts a new focus epoch, ends the current page, and sends a snapshot request naming the epoch. The service stores a page only while the helper's latest focus line shows that same browser in front (same `pid`, same `app_id`) and the evidence belongs to the current epoch: an answer naming it, or a line whose `t.mono_us` on the same `boot` is not before the epoch began. Arrival order never decides. Everything else is stored as browser time with no page.
+
+
+### Address rule
+
+`capture/address.ts`, shared by the extension and the history readers. It keeps the page address and a short list of
+search and page-identity parameters; everything else is removed.
+
+- Only `http`, `https` and `file` addresses are kept. The user name, password and fragment are removed. The path is
+  kept as written, so a secret in the path is not detected.
+- A query parameter is kept only by its name, compared lowercased with separators removed:
+  - searches, any text that is not a JSON object or array: `q`, `query`, `search`, `search_query`, `term`, `_nkw`;
+  - the short search aliases `s` and `k`, the same, and not key-shaped (below);
+  - identities, any value: `id`, `ids`, `v`, `list`, `resid`, `cid`, `eid`, `file`, `doc`, `item`, `video`, `post`,
+    `node`, `node-id`, `sha`, `commit`, `rev`, `sourcedoc`, `th`;
+  - `p` and `page`, digits only; `t`, a time only (digits, or `1h2m30s` and its parts);
+  - display settings: `hl`, `lang`, `m`, `tab`, `view`, `usp`, `dl`, `sort`, `filter`, `category`, `cat`, unless the
+    value is a UUID, 32 or more hex digits, or key-shaped.
+- Key-shaped means 20 or more characters that are either hex mixing digits and letters, or base64 or base64url with
+  at most 10% separators, two of lower case, upper case and digits, at least 3.5 bits of entropy per character, and a
+  digit or at least four capitals after the first character.
+- A name that contains a secret word (token, key, session, sid, password, signature, auth and the like) or is a click
+  or campaign tracking ID (`utm_*`, `mc_*`, `hs*`, names ending in `clid` or `clkid`, `igshid`, `srsltid`, `gbraid`,
+  `wbraid` and the like) is never kept.
+- A kept parameter is also removed when its value, with C0 controls stripped and percent-decoded up to three times,
+  is at any step a `Bearer` token, a `Basic` token whose base64 contains a colon byte, a JWT (three parts) or JWE
+  (five parts) whose first part decodes to a JSON object with `alg`, a `javascript:`, `data:`, `vbscript:` or `blob:`
+  address, or an address from which this rule would remove anything; or when the decoding is ambiguous. In a search
+  or alias, only a form that starts with a scheme and `//`, with `//` or `\`, or is an absolute URL with a host counts
+  as an address; anything else is text, so `F# tutorial` and `site:example.com` stay. A kept value is never rewritten.
+- Over 2048 characters, the query is removed, then the path.
+
+## Local connection
+
+Where the browser cannot find a native messaging host (the Microsoft Store package on Windows), the extension talks to
+the capture service directly over a WebSocket on `127.0.0.1`. Store builds use it only on Windows and only after native
+messaging reports that the host is not installed; the dev builds allow it everywhere. The service listens only on
+Windows, or anywhere with `DAYLENS_V2_BROWSER_LOCAL=1`.
+
+### Listener
+
+- The first free port of 27481, 37471, 46417, on `127.0.0.1` only, path `/daylens/browser`. Every other request gets
+  404. At most 32 connections.
+- An upgrade is refused unless the peer address is `127.0.0.1`, `Host` is exactly `127.0.0.1:<port>` (no DNS
+  rebinding), and `Origin` is an allowed extension: `chrome-extension://<id>` with an ID on the list in
+  `capture/pairing.ts`, or any `moz-extension://<uuid>` (Firefox gives each install its own UUID).
+- The service then asks the capture helper which process owns the other end: `<helper> --tcp-peer <service port>
+  <peer port>` prints `{"ok":true,"browser":<app identity>}` or `{"ok":false,"reason":"no_socket"|"other_user"|"no_app"}`.
+  macOS finds the socket with libproc and climbs to the nearest regular app; Windows reads the TCP table and climbs
+  through parents running the same executable. Every process on the way must belong to this user. That identity is
+  the `browser` of every tab line on the connection, exactly as a native host would stamp it.
+
+### Pairing
+
+- The extension makes a pairing (`id`: 16 random bytes, `key`: 32 random bytes, both base64url, and its own origin)
+  and opens `daylens://pair?v=1&id=<id>&key=<key>&origin=<origin>`. The operating system hands the link to the Daylens
+  app, which writes `{"op":"pair","link":"<link>"}` to the service's stdin. The key never crosses the socket.
+- A link only makes a pending pairing (at most 8, oldest dropped), kept in memory. It becomes stored only when a
+  connection from that same origin proves it, and then replaces earlier pairings for that origin. The app can remove
+  one with `{"op":"unpair","id":"<id>"}`.
+- A stored pairing's key is kept in the platform's secure storage through the capture helper:
+  `<helper> --secret set|get|delete <id>`, with the key on stdin (`set`) or stdout (`get`), never on the command line;
+  exit 2 means no such item. macOS: a generic password in the login Keychain, service `app.daylens.browser.pairing`,
+  account `<id>`. Windows: a generic credential in Credential Manager, target `Daylens/browser-pairing/<id>`. The
+  database (meta key `browser_pairings`) keeps only `id`, `origin` and `paired_wall_ms`. A key found in the database by
+  an earlier version moves to secure storage at start, and the database is then checkpointed and vacuumed so no older
+  copy of the row is left in the files. Another open reader can hold that up: the database keeps a `scrub_pending`
+  marker, store health reports `scrubPending`, and the scrub is retried at every start and every minute until a
+  checkpoint reports it complete, no `browser_pairings` entry still has a `key` field, and no database file still
+  holds one of the migrated keys. Those keys are held in memory only while the scrub runs; a scrub resumed after a
+  restart relies on the checkpoint and vacuum alone. The rewritten row and the marker are never the writes dropped when the write queue
+  is full. A pairing whose key is missing from secure storage is removed
+  and the browser shows Connect again; unpairing or replacing a pairing deletes its key.
+- A Firefox origin (`moz-extension://`) cannot be pinned, so any Firefox extension could make and prove its own
+  pairing. A new Firefox pairing therefore waits for the person: once proven, the service holds the connection in a
+  confirm phase, sends the extension `{"t":"awaiting"}`, and writes `{"op":"confirm_pairing","id":"<id>","browser":"<app
+  name>"}` to its stdout. The app shows one line with Allow and Don't allow and answers on stdin with
+  `{"op":"pair_decision","id":"<id>","allow":true|false}`. Allow completes the held connection (and any later one for
+  that pairing, without asking again). Don't allow drops the pairing and sends `{"t":"denied"}`; the extension forgets
+  it and shows Connect again. Nothing about pages is accepted before Allow. Chromium origins, pinned to known IDs, are
+  never asked about.
+
+### Handshake
+
+All messages are JSON text frames, at most 16 KiB. No page is sent before step 4.
+
+1. Extension: `{"t":"hello","v":1,"pair":"<id>","nonce":"<32 random bytes>"}`.
+2. Service: `{"t":"unpaired"}` and close, or `{"t":"challenge","v":1,"nonce":"<32 random bytes>","proof":<P_service>}`.
+3. The extension checks `P_service` and only then sends `{"t":"proof","proof":<P_extension>}`. A server without the
+   key never sees a proof it could replay.
+4. Service checks `P_extension`. A new Firefox pairing first waits for Allow (above). Then the service sends `status`
+   and `snapshot`; from here the connection is a browser host.
+
+`P_role = HMAC-SHA256(key, "daylens-browser-pair-v1\n<role>\n<origin>\n127.0.0.1:<port>\n<id>\n<extension nonce>\n<service nonce>")`,
+base64url, compared in constant time. Binding the port means a squatter on one port cannot relay a proof made by the
+real service on another.
+
+### Messages after the handshake
+
+Extension to service: the same `tab` messages the extension sends a native host, plus `{"t":"status"}` and
+`{"t":"ping"}` every 20 s (Chrome stops an idle service worker after 30 s). The service builds the protocol line
+itself: its own `run` and `seq`, `t` from the helper's clock, `browser` from `--tcp-peer`, `extension` from `Origin`.
+Service to extension: `{"t":"status",...}` and `{"t":"snapshot"}`, as from a native host.

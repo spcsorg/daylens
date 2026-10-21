@@ -12,7 +12,7 @@ import {
 } from './defaults.ts'
 import type { AppIdentity, ChannelState, Line, LineOf } from './protocol.ts'
 
-export type RowKind = 'focus' | 'input' | 'session' | 'power' | 'clock' | 'presence'
+export type RowKind = 'focus' | 'input' | 'session' | 'power' | 'clock' | 'presence' | 'page'
 export type StoredTitleState =
   | 'ok'
   | 'empty'
@@ -46,6 +46,7 @@ export interface ObservationRow {
   title_state: StoredTitleState | null
   state: string | null
   detail: string | null
+  url?: string | null
 }
 
 export type GapReason =
@@ -218,6 +219,7 @@ export function knownBrowser(app: AppIdentity): boolean {
 export class Privacy {
   private readonly byAppId = new Set<string>()
   private readonly byExe = new Set<string>()
+  private readonly bySite = new Set<string>()
 
   private readonly trustedApps: readonly TrustedApp[]
   private readonly keptApps: ReadonlyMap<string, KeptTitleApp>
@@ -227,7 +229,17 @@ export class Privacy {
     this.keptApps = new Map(keptApps.map((a) => [a.id, a]))
     this.currentBoot = currentBoot
     this.trustedApps = trustedApps
-    for (const r of rules) (r.match === 'app_id' ? this.byAppId : this.byExe).add(r.value.toLowerCase())
+    for (const r of rules) (r.match === 'app_id' ? this.byAppId : r.match === 'site' ? this.bySite : this.byExe).add(r.value.toLowerCase())
+  }
+
+  siteExcluded(host: string | null): boolean {
+    if (host === null) return false
+    for (let h = host.toLowerCase(); ; ) {
+      if (this.bySite.has(h)) return true
+      const dot = h.indexOf('.')
+      if (dot < 0) return false
+      h = h.slice(dot + 1)
+    }
   }
 
   /** The exclusion rule itself, shared by capture and by every other way rows enter storage (import). */
@@ -356,6 +368,8 @@ export class Normalizer {
       case 'heartbeat':
       case 'loss':
       case 'bye':
+      // Tab lines come only from the browser host, never through a helper.
+      case 'tab':
         return
     }
   }

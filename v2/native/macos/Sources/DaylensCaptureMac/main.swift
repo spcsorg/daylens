@@ -8,6 +8,10 @@ import CoreGraphics
 import Foundation
 import IOKit.pwr_mgt
 
+BrowserHost.runIfLaunchedByBrowser()
+TcpPeer.runIfAsked()
+SecretTool.runIfAsked()
+
 let helperVersion = "2.0.0-dev"
 
 func intArg(_ name: String, _ fallback: Int, max: Int) -> Int {

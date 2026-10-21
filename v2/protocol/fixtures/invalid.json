@@ -73,5 +73,35 @@
   "name": "loss_backwards",
   "reason": "malformed",
   "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 19, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"windows\", \"source\": \"helper\", \"kind\": \"loss\", \"obs\": {\"channel\": \"focus\", \"count\": 12, \"from_wall_ms\": 1792130412000, \"to_wall_ms\": 1792130410000}}"
+ },
+ {
+  "name": "tab_page_without_url",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_with_title",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": \"no_tab\", \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_without_reason",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": null}}"
+ },
+ {
+  "name": "tab_bad_extension_id",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"chrome-extension://x/\", \"window\": \"1\", \"tab\": \"2\", \"url\": \"https://example.com/\", \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_url_too_long",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": \"https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_reason",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Africa/Kigali\", \"tz_offset_min\": 120}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": \"private_window\", \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": null}}"
  }
 ]

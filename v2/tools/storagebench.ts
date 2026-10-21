@@ -78,8 +78,6 @@ const clock = { t: START }
 const now = () => clock.t
 
 const store = new Store(dir, { now })
-// The browser step adds page addresses; a heavy year includes them.
-store.database.exec('ALTER TABLE observations ADD COLUMN url TEXT')
 store.close()
 const store2 = new Store(dir, { now })
 const ins = store2.database.prepare('UPDATE observations SET url = ? WHERE id = ?')

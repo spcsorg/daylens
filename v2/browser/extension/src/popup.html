@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Daylens</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <header>
+    <img src="icons/icon-32.png" width="20" height="20" alt="">
+    <h1>Daylens</h1>
+  </header>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div id="main">
+    <button id="connect" class="primary" type="button" hidden>Connect</button>
+    <button id="pause" class="primary" type="button" hidden>Pause</button>
+    <div id="choices" role="group" aria-label="Pause" hidden>
+      <button type="button" data-for="hour">For an hour</button>
+      <button type="button" data-for="tomorrow">Until tomorrow</button>
+      <button type="button" data-for="until_resumed">Until you resume</button>
+    </div>
+    <button id="resume" class="primary" type="button" hidden>Resume</button>
+  </div>
+  <button id="open" class="link" type="button" hidden>Open Daylens</button>
+  <p id="error" class="error" role="alert" hidden></p>
+</body>
+</html>

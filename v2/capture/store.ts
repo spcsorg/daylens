@@ -1,14 +1,14 @@
 import Database from 'better-sqlite3'
-import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs'
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { DEFAULT_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
+import { DEFAULT_EXCLUSIONS, DEFAULT_SITE_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
 import type { GapDetail, GapPoint, GapReason, GapStart, ObservationRow, Sink } from './normalize.ts'
 import type { Line, LineOf } from './protocol.ts'
 import { isBusy } from '../storage/tx.ts'
 
 export const DB_FILE = 'daylens-v2.sqlite'
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 const FLUSH_INTERVAL_MS = 1000
 // The longest a single row may span; a later sighting starts a new row. Deletion's edge scans rely on it.
 export const MAX_ROW_SPAN_MS = 7 * 86_400_000
@@ -21,6 +21,9 @@ const FLUSH_BUDGET_MS = 100
 // Contention lasting longer than this is reported in health while retries continue.
 const CONTENTION_REPORT_MS = 5000
 const MAX_RETRY_MS = 30_000
+const SCRUB_KEY = 'scrub_pending'
+const SCRUB_RETRY_MS = 60_000
+const SCAN_CHUNK = 1 << 20
 
 export function defaultDataDir(): string {
   if (process.env.DAYLENS_V2_DATA_DIR) return process.env.DAYLENS_V2_DATA_DIR
@@ -131,7 +134,8 @@ CREATE TABLE IF NOT EXISTS observations (
   title_state TEXT,
   state TEXT,
   detail TEXT,
-  possibly_stale_since_wall_ms INTEGER
+  possibly_stale_since_wall_ms INTEGER,
+  url TEXT
 );
 CREATE INDEX IF NOT EXISTS observations_event_wall ON observations(event_wall_ms);
 CREATE TABLE IF NOT EXISTS capture_gaps (
@@ -150,7 +154,7 @@ CREATE TABLE IF NOT EXISTS capture_gaps (
 CREATE INDEX IF NOT EXISTS capture_gaps_start ON capture_gaps(start_wall_ms);
 CREATE TABLE IF NOT EXISTS exclusions (
   id INTEGER PRIMARY KEY,
-  match TEXT NOT NULL CHECK (match IN ('app_id', 'exe')),
+  match TEXT NOT NULL CHECK (match IN ('app_id', 'exe', 'site')),
   value TEXT NOT NULL,
   label TEXT NOT NULL,
   is_default INTEGER NOT NULL,
@@ -158,11 +162,13 @@ CREATE TABLE IF NOT EXISTS exclusions (
 );
 `
 
+// A kept op is never the one dropped when the queue is full: the scrub depends on it.
 type Op = {
   sql: string
   params: unknown[]
   extension?: { sourceId: number; sighting: ObservationRow; replacementId?: number; missing?: boolean }
   flagSourceId?: number
+  keep?: boolean
 }
 
 export interface StoreHealth {
@@ -172,6 +178,8 @@ export interface StoreHealth {
   contendedSinceWallMs: number | null
   droppedOps: number
   pendingOps: number
+  // A rewrite that must not leave old bytes in the files (a moved secret) has not been fully checkpointed yet.
+  scrubPending: boolean
 }
 
 // The last point the service is known to have been running, written in execution order. Wall clocks can move
@@ -211,6 +219,16 @@ function errorCode(err: unknown): string {
   return typeof code === 'string' ? code : 'unknown'
 }
 
+function pairingRowHasKey(row: string | null): boolean {
+  if (row === null) return false
+  try {
+    const list: unknown = JSON.parse(row)
+    return Array.isArray(list) && list.some((p) => !!p && typeof p === 'object' && 'key' in p)
+  } catch {
+    return false
+  }
+}
+
 export class Store implements Sink {
   readonly file: string
   private readonly db: Database.Database
@@ -223,7 +241,10 @@ export class Store implements Sink {
   private nextObsId: number
   private persistedNextObsId = 0
   private nextGapId: number
-  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, contendedSinceWallMs: null, droppedOps: 0, pendingOps: 0 }
+  private health: StoreHealth = { committedWallMs: null, failingSinceWallMs: null, contendedSinceWallMs: null, droppedOps: 0, pendingOps: 0, scrubPending: false }
+  private scrubTimer: ReturnType<typeof setInterval> | null = null
+  // The exact keys being moved out, held only in memory until the scrub completes.
+  private scrubKeys: Buffer[] = []
   private droppedSinceFailure = 0
   private failingStart: GapPoint | null = null
   private retryMs = FLUSH_INTERVAL_MS
@@ -269,6 +290,7 @@ export class Store implements Sink {
       let v = Number(version.value)
       if (v === 1) v = this.migrateV1()
       if (v === 2) v = this.migrateV2()
+      if (v === 3) v = this.migrateV3()
       if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
     }
     this.seedExclusions()
@@ -278,6 +300,8 @@ export class Store implements Sink {
     this.nextObsId = Math.max(maxId + 1, mark ? Number(mark.value) : 0)
     this.persistedNextObsId = this.nextObsId
     this.nextGapId = ((this.db.prepare('SELECT max(id) AS m FROM capture_gaps').get() as { m: number | null }).m ?? 0) + 1
+    // A scrub an earlier run could not finish is tried again now and then every minute until it completes.
+    if (this.meta(SCRUB_KEY) === '1') this.retryScrub()
   }
 
   // v2 widens the gap scopes; SQLite cannot alter a CHECK, so the table is rebuilt.
@@ -303,6 +327,25 @@ export class Store implements Sink {
       this.db.prepare(`UPDATE meta SET value = '3' WHERE key = 'schema_version'`).run()
     })()
     return 3
+  }
+
+  // v4 adds page addresses and site exclusions; the exclusions CHECK is rebuilt the same way as v2's gaps.
+  private migrateV3(): number {
+    this.db.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE observations ADD COLUMN url TEXT;
+        ALTER TABLE exclusions RENAME TO exclusions_v3;
+        ${SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS exclusions'))}
+        INSERT INTO exclusions SELECT * FROM exclusions_v3;
+        DROP TABLE exclusions_v3;
+      `)
+      if (this.db.prepare(`SELECT value FROM meta WHERE key = 'exclusions_seeded'`).get()) {
+        const ins = this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 1)')
+        for (const r of DEFAULT_SITE_EXCLUSIONS) ins.run(r.match, r.value, r.label)
+      }
+      this.db.prepare(`UPDATE meta SET value = '4' WHERE key = 'schema_version'`).run()
+    })()
+    return 4
   }
 
   private seedExclusions(): void {
@@ -345,6 +388,94 @@ export class Store implements Sink {
     // A pause outlives the service that started it; storage owns its gap and ends it on resume.
     this.db.prepare(`UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = ?, end_boot = ? WHERE end_wall_ms IS NULL AND reason != 'paused'`).run(end.wall_ms, end.mono_us, end.boot)
     this.db.prepare(`UPDATE capture_runs SET ended_wall_ms = coalesce(last_heartbeat_wall_ms, started_wall_ms), end_reason = 'service_died' WHERE ended_wall_ms IS NULL`).run()
+  }
+
+  meta(key: string): string | null {
+    const r = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined
+    return r?.value ?? null
+  }
+
+  setMeta(key: string, value: string | null, opts: { keep?: boolean } = {}): void {
+    if (value === null) this.enqueue('DELETE FROM meta WHERE key = ?', [key], { keep: opts.keep })
+    else this.enqueue('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value], { keep: opts.keep })
+  }
+
+  // Removes every older copy of rewritten rows from the files (WAL frames and free pages) after a secret is moved out
+  // of the database. Pending until a checkpoint reports it completed; an open reader elsewhere can hold it up.
+  scrub(keys: readonly string[] = []): boolean {
+    for (const k of keys) if (k) this.scrubKeys.push(Buffer.from(k))
+    this.enqueue(`INSERT INTO meta (key, value) VALUES ('${SCRUB_KEY}', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [], { keep: true })
+    return this.retryScrub()
+  }
+
+  retryScrub(): boolean {
+    // Until the marker itself is committed nothing is known to be safe; a failed write is still pending.
+    if (!this.flush()) return this.scrubPending()
+    if (this.meta(SCRUB_KEY) !== '1') return this.scrubDone()
+    try {
+      const first = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
+      this.db.exec('VACUUM')
+      const second = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[]
+      if (first[0]?.busy !== 0 || second[0]?.busy !== 0) return this.scrubPending()
+      if (this.holdsLegacyKey()) {
+        this.onError('scrub_key_remains')
+        return this.scrubPending()
+      }
+      this.db.prepare('DELETE FROM meta WHERE key = ?').run(SCRUB_KEY)
+      this.db.pragma('wal_checkpoint(TRUNCATE)')
+    } catch (err) {
+      this.onError(errorCode(err))
+      return this.scrubPending()
+    }
+    return this.scrubDone()
+  }
+
+  // Whether a pairing row still has a key field, or any of the database's files still holds one of the migrated keys.
+  private holdsLegacyKey(): boolean {
+    if (pairingRowHasKey(this.meta('browser_pairings'))) return true
+    if (this.scrubKeys.length === 0) return false
+    const overlap = Math.max(...this.scrubKeys.map((k) => k.length)) - 1
+    for (const f of [this.file, `${this.file}-wal`, `${this.file}-shm`]) {
+      if (!existsSync(f)) continue
+      const fd = openSync(f, 'r')
+      try {
+        const buf = Buffer.alloc(SCAN_CHUNK + overlap)
+        let carry = 0
+        let pos = 0
+        for (;;) {
+          const n = readSync(fd, buf, carry, SCAN_CHUNK, pos)
+          if (n === 0) break
+          const total = carry + n
+          const window = buf.subarray(0, total)
+          if (this.scrubKeys.some((k) => window.includes(k))) return true
+          pos += n
+          // Keeps the tail so a key split across two reads is still seen.
+          carry = Math.min(overlap, total)
+          buf.copy(buf, 0, total - carry, total)
+        }
+      } finally {
+        closeSync(fd)
+      }
+    }
+    return false
+  }
+
+  private scrubPending(): boolean {
+    this.health.scrubPending = true
+    this.onError('scrub_failed')
+    if (!this.scrubTimer) {
+      this.scrubTimer = setInterval(() => this.retryScrub(), SCRUB_RETRY_MS)
+      this.scrubTimer.unref?.()
+    }
+    return false
+  }
+
+  private scrubDone(): boolean {
+    this.scrubKeys = []
+    this.health.scrubPending = false
+    if (this.scrubTimer) clearInterval(this.scrubTimer)
+    this.scrubTimer = null
+    return true
   }
 
   markServiceStarted(wallMs: number): void {
@@ -443,12 +574,12 @@ export class Store implements Sink {
   private observationInsert(id: number, row: ObservationRow): Op {
     return {
       sql: `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
-         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, possibly_stale_since_wall_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, possibly_stale_since_wall_ms, url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         id, row.run, row.seq, row.boot, row.platform, row.source, row.kind, row.event_wall_ms, row.event_mono_us, row.tz, row.tz_offset_min,
         this.now(), row.event_wall_ms, row.app_id, row.app_name, row.app_path, row.pid, row.window, row.title, row.title_raw, row.title_state,
-        row.state, row.detail, row.possibly_stale_since_wall_ms ?? null,
+        row.state, row.detail, row.possibly_stale_since_wall_ms ?? null, row.url ?? null,
       ],
     }
   }
@@ -541,15 +672,18 @@ export class Store implements Sink {
 
   // --- batching ---------------------------------------------------------
 
-  private enqueue(sql: string, params: unknown[], metadata: Pick<Op, 'extension' | 'flagSourceId'> = {}): void {
+  private enqueue(sql: string, params: unknown[], metadata: Pick<Op, 'extension' | 'flagSourceId' | 'keep'> = {}): void {
     if (this.pending.length >= this.maxPendingOps) {
-      this.failingStart ??= { wall_ms: this.now(), mono_us: null, boot: null }
-      this.pending.shift()
-      this.health.droppedOps++
-      this.droppedSinceFailure++
-      if (!this.overflowing) {
-        this.overflowing = true
-        this.onOverflow()
+      const oldest = this.pending.findIndex((op) => !op.keep)
+      if (oldest >= 0) {
+        this.failingStart ??= { wall_ms: this.now(), mono_us: null, boot: null }
+        this.pending.splice(oldest, 1)
+        this.health.droppedOps++
+        this.droppedSinceFailure++
+        if (!this.overflowing) {
+          this.overflowing = true
+          this.onOverflow()
+        }
       }
     }
     this.pending.push({ sql, params, ...metadata })
@@ -772,6 +906,8 @@ export class Store implements Sink {
   /** One last write, waiting at most the busy timeout; whatever still cannot be written is reported, never dropped silently. */
   close(): void {
     this.closing = true
+    if (this.scrubTimer) clearInterval(this.scrubTimer)
+    this.scrubTimer = null
     this.flush()
     if (this.timer) clearTimeout(this.timer)
     this.timer = null

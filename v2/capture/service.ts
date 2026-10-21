@@ -4,11 +4,18 @@
 
 import os from 'node:os'
 import { parseArgs } from 'node:util'
+import { createInterface } from 'node:readline'
 import { backfill } from './agents/backfill.ts'
 import { AgentReader, homeRoots } from './agents/reader.ts'
 import { AgentStore, removeStaging } from './agents/store.ts'
 import { WslDiscovery } from './agents/wsl.ts'
-import { Normalizer, Privacy } from './normalize.ts'
+import { BrowserPages } from './browser.ts'
+import { BrowserLocal, helperPeerCheck, localEnabled } from './browserLocal.ts'
+import { BrowserSocket, statusMsg } from './browserSocket.ts'
+import { Privacy } from './normalize.ts'
+import { Pause } from './pause.ts'
+import { ServiceNormalizer } from './pipeline.ts'
+import { helperSecrets } from './secrets.ts'
 import { defaultDataDir, Store } from './store.ts'
 import { Supervisor } from './supervisor.ts'
 import { readOrderingPoint } from './ordering.ts'
@@ -43,8 +50,25 @@ const storage = new Storage(store, dataDir, {
 })
 // A first read cut short after its merge leaves its staging copy; with or without agent access it is removed here.
 removeStaging(dataDir)
-const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
-const supervisor = new Supervisor(store, normalizer, {
+const privacy = new Privacy(store.exclusions())
+const pages = new BrowserPages(store, privacy, { log })
+let supervisor: Supervisor | null = null
+let browserSocket: BrowserSocket | null = null
+let browserLocal: BrowserLocal | null = null
+const pause = new Pause(store, {
+  onChange: (state, at) => {
+    log(`capture ${state.paused ? 'paused' : 'resumed'}`)
+    normalizer.interrupt(at)
+    if (!state.paused) {
+      supervisor?.requestSnapshot()
+      pages.requestSnapshots()
+    }
+    browserSocket?.broadcast(statusMsg(state))
+    browserLocal?.status(state)
+  },
+})
+const normalizer = new ServiceNormalizer(store, privacy, pause, pages)
+supervisor = new Supervisor(store, normalizer, {
   helperPath: values.helper,
   helperArgs: [
     ...(values['helper-arg'] ?? []),
@@ -60,8 +84,8 @@ const supervisor = new Supervisor(store, normalizer, {
 
 storage.attachCapture({
   interrupt: () => {
-    normalizer.interrupt(supervisor.currentPoint())
-    supervisor.requestSnapshot()
+    normalizer.interrupt(supervisor!.currentPoint())
+    supervisor!.requestSnapshot()
   },
   setPrivacy: (privacy) => normalizer.setPrivacy(privacy),
 })
@@ -90,7 +114,10 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return
   stopping = true
   log(`stopping signal=${signal}`)
-  await supervisor.stop()
+  pause.stop()
+  await browserSocket?.stop()
+  await browserLocal?.stop()
+  await supervisor!.stop()
   await agents?.stop()
   storage.stop()
   store.close()
@@ -104,6 +131,34 @@ if (process.platform === 'win32') process.on('SIGBREAK', () => void shutdown('SI
 if (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_EXIT_ON_STDIN_EOF === '1') process.stdin.on('end', () => void shutdown('stdin_eof')).resume()
 
 log(`started pid=${process.pid}`)
+pause.restore()
 supervisor.start()
 storage.start()
 agents?.start().catch((err: unknown) => log(`agent reader failed code=${(err as { code?: unknown })?.code ?? 'unknown'}`))
+browserSocket = new BrowserSocket(pages, pause, { log })
+void browserSocket.start()
+if (localEnabled()) {
+  browserLocal = new BrowserLocal(pages, pause, store, {
+    peerCheck: helperPeerCheck(values.helper),
+    secrets: helperSecrets(values.helper),
+    clock: () => normalizer.clock(),
+    log,
+    // The app shows Allow / Don't allow and answers with pair_decision on stdin.
+    confirm: (req) => process.stdout.write(JSON.stringify(req) + '\n'),
+  })
+  void browserLocal.start()
+  // Only the parent (the Daylens app) writes here: daylens://pair links the operating system delivered to it.
+  createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (raw) => {
+    let msg: { op?: unknown; link?: unknown; id?: unknown; allow?: unknown }
+    try {
+      msg = JSON.parse(raw)
+    } catch {
+      return log('control rejected reason=not_json')
+    }
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return log('control rejected reason=not_object')
+    if (msg.op === 'pair' && typeof msg.link === 'string') browserLocal?.addPairLink(msg.link)
+    else if (msg.op === 'unpair' && typeof msg.id === 'string') browserLocal?.unpair(msg.id)
+    else if (msg.op === 'pair_decision' && typeof msg.id === 'string' && typeof msg.allow === 'boolean') browserLocal?.decide(msg.id, msg.allow)
+    else log('control rejected reason=unknown_op')
+  })
+}

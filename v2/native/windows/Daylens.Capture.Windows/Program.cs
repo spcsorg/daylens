@@ -27,6 +27,9 @@ internal static unsafe class Program
 
     static int Main(string[] args)
     {
+        if (BrowserHost.TryRun(args) is int hostExit) return hostExit;
+        if (TcpPeerHost.TryRun(args) is int peerExit) return peerExit;
+        if (SecretTool.TryRun(args) is int secretExit) return secretExit;
         if (args.Contains("--ordering-point"))
         {
             var boot = Clock.BootId();

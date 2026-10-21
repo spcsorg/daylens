@@ -125,33 +125,7 @@ public static class Obs
     public static Action<Utf8JsonWriter> Focus(FocusTrigger trigger, AppInfo app, WindowInfo window) => w =>
     {
         w.WriteString("trigger", Names.Of(trigger));
-        w.WriteStartObject("app");
-        // Clipped to the validator's limits: exe metadata is controlled by the exe, and one long field must not void the line.
-        WriteNullable(w, "app_id", Clip(app.AppId, 1024));
-        WriteNullable(w, "name", Clip(app.Name, 512));
-        WriteNullable(w, "path", Clip(app.Path, 2048));
-        if (app.Pid is int pid) w.WriteNumber("pid", pid); else w.WriteNull("pid");
-        w.WriteBoolean("registered_browser", app.RegisteredBrowser);
-        w.WriteString("engine", Names.Of(app.Engine));
-        WriteNullable(w, "signer", Clip(app.Signer, 256));
-        if (app.Version is { } v)
-        {
-            w.WriteStartObject("version_info");
-            WriteNullable(w, "original_filename", Clip(v.OriginalFilename, 260));
-            WriteNullable(w, "product_name", Clip(v.ProductName, 256));
-            w.WriteEndObject();
-        }
-        else w.WriteNull("version_info");
-        w.WriteString("identity_state", Names.Of(app.IdentityState));
-        if (app.Store is { } s)
-        {
-            w.WriteStartObject("store");
-            w.WriteString("aumid", s.Aumid);
-            WriteNullable(w, "package", s.Package);
-            w.WriteEndObject();
-        }
-        else w.WriteNull("store");
-        w.WriteEndObject();
+        WriteApp(w, "app", app);
         w.WriteStartObject("window");
         WriteNullable(w, "window", window.Window);
         WriteNullable(w, "title", window.Title);
@@ -184,6 +158,38 @@ public static class Obs
     };
 
     public static Action<Utf8JsonWriter> Bye(string reason) => w => w.WriteString("reason", reason);
+
+    /** An app identity as the protocol carries it, in focus lines and as the browser of tab lines. */
+    public static void WriteApp(Utf8JsonWriter w, string name, AppInfo app)
+    {
+        w.WriteStartObject(name);
+        // Clipped to the validator's limits: exe metadata is controlled by the exe, and one long field must not void the line.
+        WriteNullable(w, "app_id", Clip(app.AppId, 1024));
+        WriteNullable(w, "name", Clip(app.Name, 512));
+        WriteNullable(w, "path", Clip(app.Path, 2048));
+        if (app.Pid is int pid) w.WriteNumber("pid", pid); else w.WriteNull("pid");
+        w.WriteBoolean("registered_browser", app.RegisteredBrowser);
+        w.WriteString("engine", Names.Of(app.Engine));
+        WriteNullable(w, "signer", Clip(app.Signer, 256));
+        if (app.Version is { } v)
+        {
+            w.WriteStartObject("version_info");
+            WriteNullable(w, "original_filename", Clip(v.OriginalFilename, 260));
+            WriteNullable(w, "product_name", Clip(v.ProductName, 256));
+            w.WriteEndObject();
+        }
+        else w.WriteNull("version_info");
+        w.WriteString("identity_state", Names.Of(app.IdentityState));
+        if (app.Store is { } s)
+        {
+            w.WriteStartObject("store");
+            w.WriteString("aumid", s.Aumid);
+            WriteNullable(w, "package", s.Package);
+            w.WriteEndObject();
+        }
+        else w.WriteNull("store");
+        w.WriteEndObject();
+    }
 
     static string? Clip(string? s, int max)
     {
