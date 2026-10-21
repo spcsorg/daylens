@@ -81,6 +81,9 @@ const ALARM_AFTER_MS = 25_000
 const ALARM_RECONNECT = 'daylens-reconnect'
 const ALARM_PAIR = 'daylens-pair'
 let browserPause: { until: number | null } | null = null
+// Until the saved pause has been read, this browser counts as paused: an unreadable pause never resumes it.
+let pauseRead = false
+let platformRead = false
 let pauseTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = RETRY_MIN_MS
 let nextAttemptAt = 0
@@ -90,7 +93,14 @@ let openReply: ((ok: boolean) => void) | null = null
 let statusWaiters: (() => void)[] = []
 
 function popupState(): PopupState {
-  return { ...state, paused: browserPaused(), paused_until_wall_ms: browserPause?.until ?? null, connecting_pair: pairPending, awaiting_allow: awaitingAllow }
+  return {
+    ...state,
+    paused: browserPaused(),
+    paused_until_wall_ms: browserPause?.until ?? null,
+    pause_unreadable: !pauseRead,
+    connecting_pair: pairPending,
+    awaiting_allow: awaitingAllow,
+  }
 }
 
 function wakeWaiters(): void {
@@ -139,7 +149,9 @@ function post(msg: object): void {
     try {
       if (l.kind === 'native') l.port.disconnect()
       else l.session.close()
-    } catch {}
+    } catch {
+      // Already closed: the connection is dropped either way.
+    }
     state.daylens = 'not_running'
     backOff()
     wakeWaiters()
@@ -177,7 +189,21 @@ function connectNative(): void {
 }
 
 function onNativeMissing(): void {
+  // Without the platform, the local connection Windows needs would never be tried: it is asked again first.
+  if (!localAllowed && !platformRead) {
+    attempting = true
+    void readPlatform().then(() => {
+      attempting = false
+      if (localAllowed) return void connectLocalNow()
+      notInstalled()
+    })
+    return
+  }
   if (localAllowed) return void connectLocalNow()
+  notInstalled()
+}
+
+function notInstalled(): void {
   state.daylens = 'not_installed'
   backOff()
   wakeWaiters()
@@ -215,6 +241,7 @@ async function connectLocalNow(): Promise<void> {
     // Not allowed in Daylens: this pairing is finished; Connect starts a new one.
     finishPairing()
     pairing = null
+    // A pairing left behind is denied again at its next use, and then removed.
     await kv.set('pairing', undefined).catch(() => {})
     state.daylens = 'unpaired'
     return wakeWaiters()
@@ -252,13 +279,14 @@ function backOff(): void {
 function cancelReconnect(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   reconnectTimer = null
+  // An alarm that fires anyway finds a connection open and does nothing.
   void ext.alarms.clear(ALARM_RECONNECT).catch(() => {})
 }
 
 // Daylens records this browser's pause itself, so its pages and window titles both stop; it learns of each pause
-// and resume, and of the current one whenever it connects.
+// and resume, and of the current one whenever it connects. A pause that could not be read is a pause until resumed.
 function tellDaylensPause(): void {
-  post(browserPaused() ? { t: 'pause', until_wall_ms: browserPause!.until } : { t: 'resume' })
+  post(browserPaused() ? { t: 'pause', until_wall_ms: browserPause?.until ?? null } : { t: 'resume' })
 }
 
 function onDaylensMessage(msg: Record<string, unknown>): void {
@@ -269,7 +297,10 @@ function onDaylensMessage(msg: Record<string, unknown>): void {
     state.capture = msg.capture === 'paused' ? 'paused' : 'running'
     state.until_wall_ms = typeof msg.until_wall_ms === 'number' ? msg.until_wall_ms : null
     applyPause()
-    if (connected) tellDaylensPause()
+    if (connected) {
+      tellDaylensPause()
+      void readPause()
+    }
     wakeWaiters()
   } else if (msg.t === 'snapshot') {
     void tracker.snapshot(typeof msg.epoch === 'number' && Number.isSafeInteger(msg.epoch) && msg.epoch >= 0 ? msg.epoch : undefined)
@@ -329,6 +360,7 @@ function finishPairing(): void {
   pairPending = false
   if (pairRetry) clearTimeout(pairRetry)
   pairRetry = null
+  // An alarm that fires anyway finds no pairing pending; the tab may already have been closed by the person.
   void ext.alarms.clear(ALARM_PAIR).catch(() => {})
   if (pairTab !== null) void ext.tabs.remove(pairTab).catch(() => {})
   pairTab = null
@@ -352,18 +384,46 @@ function nextLocalMidnight(nowMs: number): number {
 }
 
 function browserPaused(): boolean {
+  if (!pauseRead) return true
   if (browserPause && browserPause.until !== null && Date.now() >= browserPause.until) {
     browserPause = null
+    // A saved pause that has ended is read as ended at the next start too.
     void kv.set('pause', undefined).catch(() => {})
   }
   return browserPause !== null
+}
+
+// Reads the saved pause; while it cannot be read, the browser stays paused and the read is tried again.
+async function readPause(): Promise<void> {
+  if (pauseRead) return
+  let saved: { until: number | null } | undefined
+  try {
+    saved = await kv.get<{ until: number | null }>('pause')
+  } catch {
+    return
+  }
+  if (pauseRead) return
+  pauseRead = true
+  browserPause = saved ?? null
+  applyPause()
+  tellDaylensPause()
+  wakeWaiters()
+}
+
+async function readPlatform(): Promise<void> {
+  try {
+    if (!localAllowed) localAllowed = (await ext.runtime.getPlatformInfo()).os === 'win'
+    platformRead = true
+  } catch {
+    // Asked again at the next connection attempt.
+  }
 }
 
 function applyPause(): void {
   if (pauseTimer) clearTimeout(pauseTimer)
   pauseTimer = null
   const mine = browserPaused()
-  if (mine && browserPause!.until !== null) pauseTimer = setTimeout(applyPause, Math.min(MAX_TIMER_MS, browserPause!.until - Date.now()))
+  if (mine && browserPause && browserPause.until !== null) pauseTimer = setTimeout(applyPause, Math.min(MAX_TIMER_MS, browserPause.until - Date.now()))
   void tracker.setPaused(mine || (state.daylens === 'connected' && state.capture === 'paused'))
 }
 
@@ -376,6 +436,7 @@ async function pauseBrowser(f: PauseFor): Promise<boolean> {
     return false
   }
   browserPause = next
+  pauseRead = true
   applyPause()
   tellDaylensPause()
   return true
@@ -388,6 +449,7 @@ async function resumeBrowser(): Promise<boolean> {
     return false
   }
   browserPause = null
+  pauseRead = true
   applyPause()
   tellDaylensPause()
   return true
@@ -429,20 +491,22 @@ ext.runtime.onMessage.addListener((req, _sender, reply) => {
     void (req.t === 'pause' ? pauseBrowser(req.for) : resumeBrowser()).then(() => answer())
     return true
   }
-  nextAttemptAt = 0
-  post({ t: 'status' })
-  whenStatus(() => answer())
+  void readPause().then(() => {
+    nextAttemptAt = 0
+    post({ t: 'status' })
+    whenStatus(() => answer())
+  })
   return true
 })
 
 async function init(): Promise<void> {
-  try {
-    if (!localAllowed) localAllowed = (await ext.runtime.getPlatformInfo()).os === 'win'
-  } catch {}
+  await readPlatform()
+  await readPause()
   try {
     pairing = (await kv.get<Pairing>('pairing')) ?? null
-    browserPause = (await kv.get<{ until: number | null }>('pause')) ?? null
-  } catch {}
+  } catch {
+    // Without its pairing this browser shows as not connected, and Connect pairs it again.
+  }
   ready = true
   applyPause()
   ensureLink()

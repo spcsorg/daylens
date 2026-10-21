@@ -13,6 +13,8 @@ export interface PopupState {
   // This browser only, paused from the popup. null until is "until you resume".
   paused: boolean
   paused_until_wall_ms: number | null
+  // The saved pause could not be read: the browser counts as paused until it can be, or until it is resumed.
+  pause_unreadable: boolean
   // Connect was pressed and Daylens has not confirmed yet.
   connecting_pair: boolean
   // Daylens is asking the person whether this browser may connect.
