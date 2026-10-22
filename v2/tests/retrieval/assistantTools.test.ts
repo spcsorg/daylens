@@ -7,7 +7,8 @@ import type { AgentRecord } from '../../capture/agents/types.ts'
 import { DB_FILE, Store } from '../../capture/store.ts'
 import { PendingDeletionError } from '../../storage/index.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
-import { READ_TOOLS, runReadTool, ToolInputError, type ToolContext } from '../../retrieval/assistantTools.ts'
+import { READ_TOOLS, runReadTool, ToolInputError, type ReadLog, type ToolContext } from '../../retrieval/assistantTools.ts'
+import { Deleter } from '../../storage/deletion.ts'
 import { Reader, UnknownSchemaError } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
@@ -93,6 +94,30 @@ test('a read a deletion under way would cover is refused and returns nothing', (
   s.close()
 })
 
+test('a deletion that begins and finishes between a read and its log entry refuses the read', () => {
+  const s = setup({ holdDeletions: true })
+  const deleter = new Deleter(s.r.store.database)
+  let deleted = false
+  // As if the deletion worker ran the whole deletion in the moment between the read and its log entry.
+  const log: ReadLog = {
+    recordRead: (r, mark) => {
+      if (!deleted) {
+        deleted = true
+        s.r.clock.t = T0 + 2 * HOUR
+        deleter.run(s.r.storage.deleteSite('docs.example.com').tombstone, s.r.clock.t)
+      }
+      return s.log.recordRead(r, mark)
+    },
+  }
+  assert.equal(s.r.q<{ state: string }>('SELECT state FROM deletions').length, 0)
+  assert.throws(() => runReadTool('search', { query: 'budget' }, { ...s.ctx, log }), PendingDeletionError)
+  assert.deepEqual(s.r.q<{ state: string }>('SELECT state FROM deletions').map((d) => d.state), ['done'])
+  assert.equal(s.reads().length, 0, 'nothing of the deleted site is in the log')
+  const again = runReadTool('search', { query: 'budget' }, { ...s.ctx, log }) as { pages: unknown[] }
+  assert.deepEqual(again.pages, [], 'read again, the site is gone')
+  s.close()
+})
+
 test('agent work shows sessions, turns and message times, as a deletion under way will leave them', () => {
   const s = setup({ holdDeletions: true })
   const agents = new AgentStore(s.r.store.database)
@@ -111,7 +136,7 @@ test('agent work shows sessions, turns and message times, as a deletion under wa
   s.r.storage.deleteSource('com.mitchellh.ghostty')
   s.r.storage.deleteRange(T0 + 3 * HOUR, T0 + 4 * HOUR)
   s.r.storage.deleteRange(T0 + 20 * MIN, T0 + 30 * MIN)
-  const ctx = { ...s.ctx, log: { recordAssistantRead: () => 0 } }
+  const ctx = { ...s.ctx, log: { recordRead: () => 0 } }
   const left = runReadTool('get_agent_work', { date: DATE }, ctx) as typeof all
   assert.deepEqual(left.sessions.map((x) => [x.project_dir, x.turns.map((t) => [t.start, t.end])]), [['/code/alpha', [['2026-10-16T08:05:00+02:00', '2026-10-16T08:20:00+02:00']]]])
   assert.deepEqual(left.sessions[0]!.user_messages_at, ['2026-10-16T08:05:00+02:00'])

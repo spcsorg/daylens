@@ -41,9 +41,10 @@ export interface AskModel {
   run(request: AskRequest): Promise<AskReply>
 }
 
-/** Where Ask records what it sent and what it cost; Storage provides both. */
+/** Where Ask records what it sent (AssistantStore.recordRead) and what it cost (Storage.recordUsage). */
 export interface AskLog {
-  recordAssistantRead(r: AssistantRead): number
+  // Refuses a read when any deletion began after `mark`, the deletion the read was taken at.
+  recordRead(r: AssistantRead, mark: number): number
   recordUsage(u: UsageEntry): number
 }
 
@@ -359,13 +360,13 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     })),
   }
 
-  // What is sent is logged before it is sent; a deletion under way refuses the log and so the call.
+  // What is sent is logged before it is sent; a deletion under way, or one begun since the reads, refuses the log and so the call.
   const spans = [...hours.flatMap((h) => [h.start_wall_ms, h.end_wall_ms]), ...sources.map((s) => s.last_wall_ms)]
   const readSources: HourSource[] = [
     ...new Set([...hours.flatMap((h) => h.apps.map((a) => a.app_id)), ...sources.map((s) => s.app_id)].filter((a): a is string => !!a)),
   ].map((app_id) => ({ app_id }))
   for (const site of new Set(sources.map((s) => siteOf(s.url)).filter((s): s is string => s !== null))) readSources.push({ site })
-  const readId = deps.log.recordAssistantRead({
+  const readId = deps.log.recordRead({
     assistant: `Ask (${deps.model.name})`,
     tool: 'ask',
     from_wall_ms: Math.min(...spans),
@@ -373,7 +374,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     query: question,
     hours: hours.flatMap((h) => (h.hour ? [h.hour.id] : [])),
     sources: readSources,
-  })
+  }, mark)
 
   let reply: AskReply
   try {

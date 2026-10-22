@@ -37,9 +37,14 @@ export class AssistantStore {
     this.db.close()
   }
 
-  /** The same entry Storage.recordAssistantRead writes, refused when a deletion under way covers what was read. */
-  recordAssistantRead(r: AssistantRead): number {
+  /**
+   * The same entry Storage.recordAssistantRead writes, for a read made after the deletion `mark` (Reader.deletionMark).
+   * Refused when a deletion under way covers what was read, or when any deletion began since the read: one that also
+   * finished in between is no longer pending, and the read may hold what it removed.
+   */
+  recordRead(r: AssistantRead, mark: number): number {
     return this.db.transaction(() => {
+      if (this.db.prepare('SELECT 1 FROM deletions WHERE id > ?').get(mark)) throw new PendingDeletionError('a deletion began while this was read; nothing was returned, try again')
       this.refuseFenced(r.hours ?? [], r.sources ?? [], r)
       const id = Number(
         this.db

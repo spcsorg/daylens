@@ -17,7 +17,8 @@ export interface ToolLimits {
 }
 
 export interface ReadLog {
-  recordAssistantRead(r: AssistantRead): number
+  // Refuses a read when any deletion began after `mark`, the deletion the read was taken at (AssistantStore does).
+  recordRead(r: AssistantRead, mark: number): number
 }
 
 export interface ToolContext {
@@ -37,7 +38,7 @@ export interface ReadTool {
   title: string
   description: string
   inputSchema: Record<string, unknown>
-  run(args: Record<string, unknown>, ctx: ToolContext): unknown
+  run(args: Record<string, unknown>, ctx: ToolContext, mark: number): unknown
 }
 
 const UNTRUSTED =
@@ -112,8 +113,8 @@ class Shown {
     this.sources.push({ site: s })
   }
 
-  logged(ctx: ToolContext, tool: string, from: number, to: number, query: string | null = null): void {
-    ctx.log.recordAssistantRead({ assistant: ctx.assistant, tool, from_wall_ms: from, to_wall_ms: to, query, hours: [...this.hours], sources: this.sources })
+  logged(ctx: ToolContext, mark: number, tool: string, from: number, to: number, query: string | null = null): void {
+    ctx.log.recordRead({ assistant: ctx.assistant, tool, from_wall_ms: from, to_wall_ms: to, query, hours: [...this.hours], sources: this.sources }, mark)
   }
 }
 
@@ -185,7 +186,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
     title: 'List recorded days',
     description: 'The local days from `from` to `to` (inclusive) that have anything recorded, with how much was recorded and how many hours are written.',
     inputSchema: { type: 'object', properties: { from: DATE, to: DATE }, required: ['from', 'to'], additionalProperties: false },
-    run(args, ctx) {
+    run(args, ctx, mark) {
       const [from, to] = dateSpan(args, ctx.limits.maxDays)
       const days = new Map<string, { date: string; recorded_ms: number; hours_written: number; hours_facts: number }>()
       for (const h of ctx.reader.hours(from, to)) {
@@ -196,7 +197,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         else d.hours_facts++
         days.set(date, d)
       }
-      new Shown().logged(ctx, 'list_days', from, to)
+      new Shown().logged(ctx, mark, 'list_days', from, to)
       return { days: [...days.values()].map(({ recorded_ms, ...d }) => ({ ...d, recorded_minutes: minutes(recorded_ms) })) }
     },
   },
@@ -205,12 +206,12 @@ export const READ_TOOLS: readonly ReadTool[] = [
     title: 'Read a day',
     description: `Every hour of a local day that has a record: its written title and summary if it has been written (status "written"), else only facts (status "facts"); fields the person edited; time per app; and gaps with their reason. ${UNTRUSTED}`,
     inputSchema: { type: 'object', properties: { date: DATE }, required: ['date'], additionalProperties: false },
-    run(args, ctx) {
+    run(args, ctx, mark) {
       const from = localDate(args.date, 'date')
       const to = nextDay(from)
       const shown = new Shown()
       const hours = ctx.reader.hours(from, to).map((h) => hourSummary(h, shown))
-      shown.logged(ctx, 'get_day', from, to)
+      shown.logged(ctx, mark, 'get_day', from, to)
       return { date: localDay(from), hours, note: UNTRUSTED }
     },
   },
@@ -223,7 +224,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       properties: { hour_id: { type: 'integer', minimum: 1 }, date: DATE, hour: { type: 'integer', minimum: 0, maximum: 23 } },
       additionalProperties: false,
     },
-    run(args, ctx) {
+    run(args, ctx, mark) {
       let start: number
       if (args.hour_id !== undefined) {
         if (args.date !== undefined || args.hour !== undefined) throw new ToolInputError('give hour_id, or date and hour, not both')
@@ -239,7 +240,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       const h = ctx.reader.hourAt(start)
       const shown = new Shown()
       if (!h) {
-        shown.logged(ctx, 'get_hour', start, start + HOUR_MS)
+        shown.logged(ctx, mark, 'get_hour', start, start + HOUR_MS)
         return { start: localIso(start), recorded: false, note: 'Nothing was recorded in this hour.' }
       }
       const out = {
@@ -257,7 +258,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         threads: h.hour ? threadsFor(ctx.reader, h.hour.id) : [],
         note: UNTRUSTED,
       }
-      shown.logged(ctx, 'get_hour', h.start_wall_ms, h.end_wall_ms)
+      shown.logged(ctx, mark, 'get_hour', h.start_wall_ms, h.end_wall_ms)
       return out
     },
   },
@@ -266,7 +267,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
     title: 'Search everything seen',
     description: `Full-text search across every day: page titles and addresses, file names, window titles and hour text. Results are grouped into pages, files, windows and hours; each item lists the hours it was seen in and how it opens. Optional from and to (local dates, inclusive) narrow it. ${UNTRUSTED}`,
     inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1 }, from: DATE, to: DATE }, required: ['query'], additionalProperties: false },
-    run(args, ctx) {
+    run(args, ctx, mark) {
       if (typeof args.query !== 'string' || args.query.trim() === '') throw new ToolInputError('query must be text')
       const from = args.from === undefined ? undefined : localDate(args.from, 'from')
       const to = args.to === undefined ? undefined : nextDay(localDate(args.to, 'to'))
@@ -303,7 +304,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         note: UNTRUSTED,
       }
       const now = (ctx.now ?? Date.now)()
-      shown.logged(ctx, 'search', from ?? (Number.isFinite(first) ? first : 0), to ?? (Number.isFinite(last) ? last : now), args.query)
+      shown.logged(ctx, mark, 'search', from ?? (Number.isFinite(first) ? first : 0), to ?? (Number.isFinite(last) ? last : now), args.query)
       return out
     },
   },
@@ -313,7 +314,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
     description:
       'Claude Code and Codex sessions on a local date, or from `from` to `to` (inclusive): project folder, branch, whether a person, a script or another agent drove it, each turn’s start and end, and when the person sent a message. What was said is never recorded.',
     inputSchema: { type: 'object', properties: { date: DATE, from: DATE, to: DATE }, additionalProperties: false },
-    run(args, ctx) {
+    run(args, ctx, mark) {
       let from: number
       let to: number
       if (args.date !== undefined) {
@@ -325,7 +326,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       }
       const shown = new Shown()
       const sessions = agentSessions(ctx.reader, from, to, shown)
-      shown.logged(ctx, 'get_agent_work', from, to)
+      shown.logged(ctx, mark, 'get_agent_work', from, to)
       return sessions === null ? { sessions: [], note: 'Reading Claude Code and Codex sessions is off on this computer.' } : { sessions }
     },
   },
@@ -336,5 +337,5 @@ export function runReadTool(name: string, args: Record<string, unknown>, ctx: To
   checkLimits(ctx.limits)
   const tool = READ_TOOLS.find((t) => t.name === name)
   if (!tool) throw new ToolInputError(`there is no tool ${name}`)
-  return tool.run(args ?? {}, ctx)
+  return tool.run(args ?? {}, ctx, ctx.reader.deletionMark())
 }
