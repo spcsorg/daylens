@@ -161,3 +161,25 @@ test('a pending range deletion already takes its part out of an hour’s gaps an
     r.close()
   }
 })
+
+test('an hour’s lock, sleep and idle are what attribution reads: away from the last input, a wake alone is not a return, and a lock whose end was deleted ends where the range begins', () => {
+  const r = rig(undefined, { holdDeletions: true })
+  const notes = app('com.example.notes', { name: 'Notes' })
+  for (let m = 0; m < 5; m++) r.feed(focus(notes, 'Draft', T0 + m * MIN, m === 0 ? 'app_changed' : undefined))
+  r.feed(line('input', { state: 'idle', last_input_wall_ms: T0 + 5 * MIN, threshold_s: 120, snapshot: false }, T0 + 7 * MIN))
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + 12 * MIN, threshold_s: 120, snapshot: false }, T0 + 12 * MIN))
+  r.feed(line('power', { state: 'sleep' }, T0 + 20 * MIN))
+  r.feed(line('power', { state: 'resume' }, T0 + 30 * MIN))
+  r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 35 * MIN))
+  r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 45 * MIN))
+  r.store.flush()
+  r.clock.t = T0 + 2 * HOUR
+  r.storage.deleteRange(T0 + 40 * MIN, T0 + 50 * MIN)
+  const reader = Reader.open(file(r))
+  const gaps = Object.fromEntries(reader.hourAt(T0)!.gaps.map((g) => [g.reason, g.ms / MIN]))
+  // Idle from the last input at 5 to 12; asleep 20 to 30; away from the wake at 30, with no input after it; the lock
+  // from 35 and that away both end at 40, where the deleted range begins.
+  assert.deepEqual(gaps, { idle: 7 + 10, asleep: 10, locked: 5 })
+  reader.close()
+  r.close()
+})

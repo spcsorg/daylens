@@ -1,6 +1,7 @@
 // Retrieval's own read-only view of the database, for search, Ask and the MCP server. It never migrates or writes:
 // the capture service owns the schema, and a schema this build was not written for is refused, not guessed at.
 import Database from 'better-sqlite3'
+import { presenceFromCapture } from '../capture/agents/attribution.ts'
 import { dbHostLookup, memoryHostLookup, resolveHost, type HostLookup, type HostSpan } from '../capture/agents/store.ts'
 import type { Agent } from '../capture/agents/types.ts'
 import { HOUR_MS, hoursOf, MAX_INTERVAL_MS } from '../storage/derive.ts'
@@ -146,44 +147,6 @@ function sourcesOf(i: IntervalRow): { kind: SourceKind; key: string; file: strin
   if (files.length > 0) return files.map((f) => ({ kind: 'file' as const, key: `f\u0000${(i.app_id ?? '').toLowerCase()}\u0000${f.toLowerCase()}`, file: f }))
   if (i.title) return [{ kind: 'window', key: `w\u0000${(i.app_id ?? '').toLowerCase()}\u0000${i.title}`, file: null }]
   return []
-}
-
-const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
-const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
-
-/**
- * Locked, asleep and idle spans in [from, to), as presenceFromCapture reads them from session, power and input rows,
- * leaving out the rows inside the given ranges, as deleting those ranges will.
- */
-function presenceSpans(db: Database.Database, from: number, to: number, ranges: readonly (readonly [number, number])[]): { reason: string; s: number; e: number }[] {
-  const kept = ranges.map(() => 'NOT (event_wall_ms >= ? AND event_wall_ms < ?)').join(' AND ') || '1'
-  const params = ranges.flatMap(([a, b]) => [a, b])
-  const rows = db
-    .prepare(
-      `SELECT kind, state, event_wall_ms AS at FROM observations
-       WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ? AND ${kept}
-         AND (event_wall_ms >= ? OR id IN (SELECT max(id) FROM observations WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ? AND ${kept} GROUP BY kind))
-       ORDER BY event_wall_ms, id`,
-    )
-    .all(to, ...params, from, from, ...params) as { kind: string; state: string; at: number }[]
-  const open: Record<'locked' | 'asleep' | 'idle', number | null> = { locked: null, asleep: null, idle: null }
-  const out: { reason: string; s: number; e: number }[] = []
-  const close = (k: 'locked' | 'asleep' | 'idle', at: number) => {
-    if (open[k] !== null) out.push({ reason: k, s: open[k]!, e: at })
-    open[k] = null
-  }
-  for (const r of rows) {
-    if (r.kind === 'session') {
-      if (LOCK_START.has(r.state)) open.locked ??= r.at
-      else if (LOCK_END.has(r.state)) close('locked', r.at)
-    } else if (r.kind === 'power') {
-      if (r.state === 'sleep') open.asleep ??= r.at
-      else if (r.state === 'resume' || r.state === 'resume_user') close('asleep', r.at)
-    } else if (r.state === 'idle') open.idle ??= r.at
-    else if (r.state === 'active') close('idle', r.at)
-  }
-  for (const k of ['locked', 'asleep', 'idle'] as const) close(k, to)
-  return out
 }
 
 export class Reader {
@@ -411,7 +374,7 @@ export class Reader {
    * Gaps in [from, to), read once and then cut to each hour: the presence read looks back for the last state before
    * `from`, which costs about as much as the read itself on a large file, so it must not run once per hour. A pending
    * range deletion already applies, as the deletion will leave them: a gap that begins inside it goes, pauses included,
-   * and lock, sleep and idle changes inside it are not read.
+   * and presence is read as attribution reads it.
    */
   private gapsOver(from: number, to: number, pending: readonly Tombstone[]): (hourFrom: number, hourTo: number) => HourGap[] {
     const ranges = pending.filter((t) => t.kind === 'range').map((t) => [t.from_wall_ms ?? Number.MIN_SAFE_INTEGER, t.to_wall_ms ?? Number.MAX_SAFE_INTEGER] as const)
@@ -421,7 +384,9 @@ export class Reader {
     const spans: { reason: string; s: number; e: number }[] = []
     // The deletion's fence has already cut and split the gaps crossing the range's edges; those inside it go.
     for (const g of rows) if (!ranges.some(([a, b]) => g.s >= a && g.s < b)) spans.push({ reason: g.reason, s: g.s, e: g.end ?? to })
-    for (const p of presenceSpans(this.db, from, to, ranges)) spans.push(p)
+    // Presence leaves out every range deletion's rows itself, pending or done, and ends a lock, sleep or idle where one begins.
+    const presence = presenceFromCapture(this.db, from, to)
+    for (const k of ['locked', 'asleep', 'idle'] as const) for (const p of presence[k]) spans.push({ reason: k, s: p.start, e: p.end })
     return (hourFrom, hourTo) => {
       const out = new Map<string, number>()
       for (const g of spans) {
