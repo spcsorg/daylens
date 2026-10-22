@@ -103,7 +103,10 @@ test('presence comes from the capture tables: locks, sleep, idle, helper runs an
   const inputs = presenceFromCapture(store.database, sec(0), sec(7200))
   assert.deepEqual(inputs.locked, [{ start: sec(1000), end: sec(2000) }])
   assert.deepEqual(inputs.asleep, [{ start: sec(3000), end: sec(4000) }])
-  assert.deepEqual(inputs.idle, [{ start: sec(4880), end: sec(5500) }], 'away from the last input, not from when idle was noticed')
+  assert.deepEqual(inputs.idle, [
+    { start: sec(4000), end: sec(5500) },
+    { start: sec(4880), end: sec(5500) },
+  ], 'away from the wake until the first input, and from the last input, not from when idle was noticed')
   assert.deepEqual(inputs.unknown, [{ start: sec(6000), end: sec(6100) }])
   assert.deepEqual(inputs.covered, [{ start: sec(0), end: sec(7200) }])
   // A window that starts while the screen is already locked still knows it is locked.
@@ -117,4 +120,24 @@ test('an imported or copied turn adds neither working nor waiting time', () => {
   const s = summarize(agentSegments([t], [], p), [], sec(0), sec(7200))
   assert.equal(s.working.present, 0)
   assert.equal(s.waiting, 0)
+})
+
+test('a machine that wakes by itself is not the person coming back: presence starts at the first input', () => {
+  const dir = tmp()
+  const store = new Store(dir)
+  const n = new Normalizer(store)
+  store.startRun(line('hello', { awake_us: 0, helper: 'test', boot_identity: 'kernel', version: '1', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, sec(0)) as never)
+  store.endRun('run-test', sec(7200), 'test')
+  n.handle(line('session', { state: 'unlocked', snapshot: true }, sec(0)))
+  n.handle(line('power', { state: 'sleep' }, sec(1000)))
+  n.handle(line('power', { state: 'resume' }, sec(2000)))
+  n.handle(line('input', { state: 'active', last_input_wall_ms: sec(2600), threshold_s: 120, snapshot: false }, sec(2600)))
+  n.handle(line('power', { state: 'sleep' }, sec(3000)))
+  n.handle(line('power', { state: 'resume_user' }, sec(4000)))
+  store.flush()
+  const inputs = presenceFromCapture(store.database, sec(0), sec(7200))
+  assert.deepEqual(inputs.asleep, [{ start: sec(1000), end: sec(2000) }, { start: sec(3000), end: sec(4000) }])
+  assert.deepEqual(inputs.idle, [{ start: sec(2000), end: sec(2600) }], 'away from the wake to the first input; a wake the person caused is presence at once')
+  assert.deepEqual(presenceFromCapture(store.database, sec(2200), sec(2400)).idle, [{ start: sec(2000), end: sec(2400) }], 'a window that starts after the wake still knows nobody is back')
+  store.close()
 })

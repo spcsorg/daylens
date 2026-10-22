@@ -202,15 +202,16 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
   const rows = db
     .prepare(
       `SELECT kind, state, event_wall_ms AS at, detail FROM observations
-       WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ?
-         AND (event_wall_ms >= ? OR id IN (SELECT max(id) FROM observations WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ? GROUP BY kind))
+       WHERE kind IN ('session', 'power', 'input', 'presence') AND event_wall_ms < ?
+         AND (event_wall_ms >= ? OR id IN (SELECT max(id) FROM observations WHERE kind IN ('session', 'power', 'input', 'presence') AND event_wall_ms < ? GROUP BY kind))
        ORDER BY event_wall_ms, id`,
     )
     .all(to, from, from) as { kind: string; state: string; at: number; detail: string | null }[]
-  const open: Record<'locked' | 'asleep' | 'idle', number | null> = { locked: null, asleep: null, idle: null }
+  // woke: the machine woke by itself and nobody has given evidence of being back yet, which is away like idle.
+  const open: Record<'locked' | 'asleep' | 'idle' | 'woke', number | null> = { locked: null, asleep: null, idle: null, woke: null }
   const inputs: PresenceInputs = { covered: [], locked: [], asleep: [], idle: [], unknown: [] }
-  const closeIf = (k: 'locked' | 'asleep' | 'idle', at: number) => {
-    if (open[k] !== null) inputs[k].push({ start: open[k]!, end: at })
+  const closeIf = (k: 'locked' | 'asleep' | 'idle' | 'woke', at: number) => {
+    if (open[k] !== null) inputs[k === 'woke' ? 'idle' : k].push({ start: open[k]!, end: at })
     open[k] = null
   }
   for (const r of rows) {
@@ -218,15 +219,24 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
       if (LOCK_START.has(r.state)) open.locked ??= r.at
       else if (LOCK_END.has(r.state)) closeIf('locked', r.at)
     } else if (r.kind === 'power') {
-      if (r.state === 'sleep') open.asleep ??= r.at
-      else if (r.state === 'resume' || r.state === 'resume_user') closeIf('asleep', r.at)
+      if (r.state === 'sleep') {
+        closeIf('woke', r.at)
+        open.asleep ??= r.at
+      } else if (r.state === 'resume' || r.state === 'resume_user') {
+        closeIf('asleep', r.at)
+        // Waking alone is not the person coming back: presence starts at the capture's evidence of them (below).
+        if (r.state === 'resume') open.woke ??= r.at
+        else closeIf('woke', r.at)
+      }
+    } else if (r.kind === 'presence') {
+      if (r.state === 'returned') closeIf('woke', r.at)
     } else if (r.kind === 'input') {
       // Away from the last input, not from when the helper noticed the idle threshold had passed.
       if (r.state === 'idle') open.idle ??= Math.min(r.at, lastInput(r.detail) ?? r.at)
       else if (r.state === 'active') closeIf('idle', r.at)
     }
   }
-  for (const k of ['locked', 'asleep', 'idle'] as const) closeIf(k, to)
+  for (const k of ['locked', 'asleep', 'idle', 'woke'] as const) closeIf(k, to)
   const runs = db
     .prepare('SELECT started_wall_ms AS s, coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) AS e FROM capture_runs WHERE started_wall_ms < ? AND coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) > ?')
     .all(to, from) as { s: number; e: number }[]
