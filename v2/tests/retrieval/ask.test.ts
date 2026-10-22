@@ -257,11 +257,11 @@ test('when the limits leave part of the record out, the AI is told how much, and
   assert.deepEqual(sent.map((r) => [r.hours.length, r.hours_not_sent]), [[3, 5], [3, 5], [8, 0]])
   assert.ok(sent[0]!.sources_not_sent > 0 && sent[1]!.sources_not_sent > 0)
   assert.equal(sent[2]!.sources_not_sent, 0)
-  assert.match(seen[0]!.system, /"incomplete" is true.*never say something happened only, first, last/)
+  assert.match(seen[0]!.system, /only, first, last, every time or never only when "days_asked" is not empty and "incomplete" is false/)
   s.close()
 })
 
-test('what search left out past its limit counts as left out, and then a claim of only, first, last or never is dropped', async () => {
+test('a claim of only, first, last or never stands only when the whole of the days asked was sent', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
   s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR))
@@ -291,9 +291,12 @@ test('what search left out past its limit counts as left out, and then a claim o
   assert.deepEqual(res.statements.map((x) => x.text.replace(/ledger-\d+/, 'ledger-n')), ['You opened ledger-n.xlsx.'])
   assert.equal(res.dropped, 2)
 
-  const all = await ask('which ledger xlsx', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  const found = await ask('which ledger xlsx', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.equal((JSON.parse(seen[1]!.prompt) as { incomplete: boolean }).incomplete, false)
-  assert.equal(all.kind === 'answer' && all.statements.length, 3, 'with the whole record sent, the claim stands')
+  assert.equal(found.kind === 'answer' && found.statements.length, 1, 'everything search found was sent, but search finds by words, so the record is not whole')
+  const day = await ask('which ledger xlsx yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.equal((JSON.parse(seen[2]!.prompt) as { incomplete: boolean }).incomplete, false)
+  assert.equal(day.kind === 'answer' && day.statements.length, 3, 'with the whole day sent, the claim about it stands')
   s.close()
 })
 
