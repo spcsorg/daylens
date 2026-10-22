@@ -158,3 +158,19 @@ test('presence reads use the index of presence rows, so a read does not scan the
   assert.ok(scans.every((d) => d.includes('USING INDEX observations_presence')), plan.join('\n'))
   r.close()
 })
+
+test('presence shows nothing from a range a deletion is still removing', () => {
+  const r = rig(undefined, { holdDeletions: true })
+  const H = 3_600_000
+  r.feed(line('session', { state: 'unlocked', snapshot: true }, T0))
+  r.feed(line('session', { state: 'locked', snapshot: false }, T0 + H + 600_000))
+  r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + H + 1_200_000))
+  r.feed(line('input', { state: 'idle', last_input_wall_ms: T0 + H + 1_300_000, threshold_s: 120, snapshot: false }, T0 + H + 1_420_000))
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + H + 1_500_000, threshold_s: 120, snapshot: false }, T0 + H + 1_500_000))
+  r.store.flush()
+  r.clock.t = T0 + 3 * H
+  r.storage.deleteRange(T0 + H, T0 + 2 * H)
+  const inputs = presenceFromCapture(r.store.database, T0, T0 + 3 * H)
+  assert.deepEqual([inputs.locked, inputs.idle], [[], []])
+  r.close()
+})

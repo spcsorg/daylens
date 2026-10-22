@@ -200,13 +200,16 @@ function lastInput(detail: string | null): number | null {
 
 // Presence inputs from the capture tables: session, power and input observations, helper runs, and capture gaps.
 export function presenceFromCapture(db: Database.Database, from: number, to: number): PresenceInputs {
+  // A deleted range keeps nothing, and one still being removed shows nothing: its rows and the gaps begun in it are left out.
+  const ranges = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'deletions'`).get() !== undefined
+  const kept = (col: string) => (ranges ? `AND NOT EXISTS (SELECT 1 FROM deletions d WHERE d.kind = 'range' AND ${col} >= d.from_wall_ms AND ${col} < d.to_wall_ms)` : '')
   // The state in force at `from` is the latest row of each kind before it; each lookup is one step down the index.
   const latest = (kind: string) =>
-    `SELECT * FROM (SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND kind = '${kind}' AND event_wall_ms < @from ORDER BY event_wall_ms DESC, id DESC LIMIT 1)`
+    `SELECT * FROM (SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND kind = '${kind}' AND event_wall_ms < @from ${kept('event_wall_ms')} ORDER BY event_wall_ms DESC, id DESC LIMIT 1)`
   const rows = db
     .prepare(
       `SELECT kind, state, event_wall_ms AS at, detail FROM (
-         SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND event_wall_ms >= @from AND event_wall_ms < @to
+         SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND event_wall_ms >= @from AND event_wall_ms < @to ${kept('event_wall_ms')}
          UNION ALL ${['session', 'power', 'input', 'presence'].map(latest).join(' UNION ALL ')}
        ) ORDER BY event_wall_ms, id`,
     )
@@ -248,7 +251,7 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
   const gaps = db
     .prepare(
       `SELECT start_wall_ms AS s, coalesce(end_wall_ms, ?) AS e FROM capture_gaps
-       WHERE scope IN ('all', 'session', 'power') AND reason != 'excluded' AND start_wall_ms < ? AND coalesce(end_wall_ms, ?) > ?`,
+       WHERE scope IN ('all', 'session', 'power') AND reason != 'excluded' AND start_wall_ms < ? AND coalesce(end_wall_ms, ?) > ? ${kept('start_wall_ms')}`,
     )
     .all(to, to, to, from) as { s: number; e: number }[]
   inputs.unknown = gaps.map((g) => ({ start: g.s, end: g.e }))
