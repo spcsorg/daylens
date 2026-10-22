@@ -109,12 +109,16 @@ function keyOf(g: Group, d: Pick<Doc, 'hour_id' | 'url' | 'files' | 'app_id' | '
 // Which entries each group draws from, as index queries, so a group whose matches are rare is found without reading
 // every entry the words match. A file is an entry whose file name has the words; a page, any other entry with an
 // address; a window, any other entry. A window has no address, so entries whose address has any of the words (a site
-// name typed as the query) are not read for windows. Entries are still checked exactly when read.
-const PASSES: readonly { group: Group; match: (q: string, any: string) => string }[] = [
-  { group: 'pages', match: (q) => `{title address files} : (${q}) NOT files : (${q})` },
-  { group: 'files', match: (q) => `files : (${q})` },
-  { group: 'windows', match: (q, any) => `{title files} : (${q}) NOT files : (${q}) NOT address : (${any})` },
-  { group: 'hours', match: (q) => `hour_text : (${q})` },
+// name typed as the query) are not read for windows. The first pass is read until pages are full, filling windows on
+// the way; the windows pass runs only if windows are still short and the first pass stopped early, since every window it
+// could find the first pass has seen. `only` keeps a pass to its groups' entries in the query. Entries are still checked
+// exactly when read.
+const PASSES: readonly { group: Group; fills: readonly Group[]; until: readonly Group[]; match: (q: string, any: string) => string; only: string }[] = [
+  { group: 'pages', fills: ['pages', 'windows'], until: ['pages'], match: (q) => `{title address files} : (${q}) NOT files : (${q})`, only: `d.kind = 'activity'` },
+  // A page whose title names a file is still a page: found here, it lands with the pages.
+  { group: 'files', fills: ['files', 'pages'], until: ['files'], match: (q) => `files : (${q})`, only: `d.kind = 'activity'` },
+  { group: 'windows', fills: ['windows'], until: ['windows'], match: (q, any) => `{title files} : (${q}) NOT files : (${q}) NOT address : (${any})`, only: `d.kind = 'activity' AND d.url = ''` },
+  { group: 'hours', fills: ['hours'], until: ['hours'], match: (q) => `hour_text : (${q})`, only: `d.kind = 'hour'` },
 ]
 
 const COLUMNS = 'd.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.files, d.hour_id, d.first_wall_ms, d.last_wall_ms'
@@ -140,47 +144,45 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
   return db.transaction(() => {
     const fence = searchFence(pendingTombstones(db))
     const where = `d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ? AND ${fence.sql}`
-    // Each group's matches best first (ties: newest entry first), ranked once and read in growing batches until the
-    // group has its items. Ordering by rank scores every match, so it is done once per group, not per batch. Across
-    // all time, ranking reads only the index and each batch's entries are read after; within dates, entries outside
-    // them are left out before ranking, so a narrow range ranks only its own.
-    const read = db.prepare(`SELECT d.id, ${COLUMNS} FROM json_each(?) j CROSS JOIN search_docs d ON d.id = j.value WHERE ${where}`)
-    const ranked = db.prepare('SELECT rowid FROM search WHERE search MATCH ? ORDER BY rank, rowid DESC').pluck()
-    const rankedIn = db.prepare(`SELECT d.id, ${COLUMNS} FROM search CROSS JOIN search_docs d ON d.id = search.rowid WHERE search MATCH ? AND ${where} ORDER BY search.rank, search.rowid DESC`)
+    // Each group's matches best first (ties: newest entry first), read one at a time and no further than the group
+    // needs. Ordering by rank scores every match, once per group; entries are read from the table only as they are
+    // reached. Across all time the ranking is the index's alone; within dates, entries outside them are left out
+    // before ranking, so a narrow range ranks only its own.
     const dated = opts.fromWallMs !== undefined || opts.toWallMs !== undefined
-    const docsOf = (rows: (Doc & { id: number })[]) => new Map(rows.map((d) => [d.id, d]))
-    function* batches(match: string): Generator<{ ids: number[]; docs: Map<number, Doc & { id: number }> }> {
-      const rows = dated ? (rankedIn.all(match, from, to, ...fence.params) as (Doc & { id: number })[]) : null
-      const ids = rows ? rows.map((d) => d.id) : (ranked.all(match) as number[])
-      const all = rows ? docsOf(rows) : null
-      for (let i = 0, n = 64; i < ids.length; i += n, n *= 2) {
-        const slice = ids.slice(i, i + n)
-        yield { ids: slice, docs: all ?? docsOf(read.all(JSON.stringify(slice), from, to, ...fence.params) as (Doc & { id: number })[]) }
-      }
-    }
+    const rows = (match: string, only: string) =>
+      db
+        .prepare(
+          dated
+            ? `SELECT d.id, ${COLUMNS} FROM search CROSS JOIN search_docs d ON d.id = search.rowid WHERE search MATCH ? AND ${only} AND ${where} ORDER BY search.rank, search.rowid DESC`
+            : `SELECT d.id, ${COLUMNS} FROM (SELECT rowid AS id FROM search WHERE search MATCH ? ORDER BY rank, rowid DESC LIMIT -1) m
+               CROSS JOIN search_docs d ON d.id = m.id WHERE ${only} AND ${where}`,
+        )
+        .iterate(match, from, to, ...fence.params) as IterableIterator<Doc & { id: number }>
     const chosen = new Map<Group, Map<string, Doc>>(GROUPS.map((g) => [g, new Map()]))
     // One item past the limit is chosen to learn whether the group has more; it is not read further.
     const full = (g: Group) => chosen.get(g)!.size > opts.perGroup
     const any = ftsQuery(text, 'any')!
+    const readToEnd = new Set<Group>()
     for (const pass of PASSES) {
-      if (full(pass.group)) continue
-      for (const { ids, docs } of batches(pass.match(q, any))) {
-        for (const id of ids) {
-          const d = docs.get(id)
-          if (!d) continue
-          // Pages and windows pass over the same entries: each lands in its own group, if there is room.
-          const g: Group = d.kind === 'hour' ? 'hours' : d.url !== '' ? 'pages' : pass.group === 'files' ? 'files' : 'windows'
-          if ((g === 'hours') !== (pass.group === 'hours') || full(g)) continue
-          const items = chosen.get(g)!
-          // An entry's files are every file name its title had, space-separated: each is its own file, if it has the words.
-          for (const one of g === 'files' ? fileNames(d.files).filter((f) => hasWords(f, text, match)).map((f) => ({ ...d, files: f })) : [d]) {
-            const k = keyOf(g, one)
-            if (!items.has(k) && !full(g)) items.set(k, one)
-          }
-          if (full(pass.group)) break
+      if (full(pass.group) || readToEnd.has(pass.group)) continue
+      let ended = true
+      // Nothing else may run on the connection while rows are read, and nothing does: choosing is done in code.
+      for (const d of rows(pass.match(q, any), pass.only)) {
+        // Pages and windows pass over the same entries: each lands in its own group, if there is room.
+        const g: Group = d.kind === 'hour' ? 'hours' : d.url !== '' ? 'pages' : pass.group === 'files' ? 'files' : 'windows'
+        if (!pass.fills.includes(g) || full(g)) continue
+        const items = chosen.get(g)!
+        // An entry's files are every file name its title had, space-separated: each is its own file, if it has the words.
+        for (const one of g === 'files' ? fileNames(d.files).filter((f) => hasWords(f, text, match)).map((f) => ({ ...d, files: f })) : [d]) {
+          const k = keyOf(g, one)
+          if (!items.has(k) && !full(g)) items.set(k, one)
         }
-        if (full(pass.group)) break
+        if (pass.until.every(full)) {
+          ended = false
+          break
+        }
       }
+      if (ended) for (const g of pass.fills) readToEnd.add(g)
     }
 
     // Every entry of a chosen item, whether or not it matched the words: the item's title may have changed between

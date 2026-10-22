@@ -155,3 +155,52 @@ test('a title with several file names gives each file on its own, never the name
   reader.close()
   r.close()
 })
+
+test('search reads ranked matches only until each group is full', () => {
+  const r = rig()
+  // Long window titles rank below the pages, whose addresses have the words too.
+  for (let i = 0; i < 200; i++) r.feed(focus(notes, `Budget draft ${i} with the notes from the long review meeting`, T0 + i * MIN, 'app_changed'))
+  for (let i = 0; i < 3; i++) {
+    const t = T0 + (200 + 2 * i) * MIN
+    r.feed(focus(chrome, null, t, 'app_changed'))
+    r.store.insertObservation({ ...page(t, `https://docs.example.com/budget-draft/${i}`, `Budget draft ${i}`), seq: 10 + i })
+    r.feed(focus(chrome, null, t + MIN))
+  }
+  r.store.flush()
+  const reader = open(r)
+  const prepare = reader.db.prepare.bind(reader.db)
+  let rows = 0
+  reader.db.prepare = ((sql: string) => {
+    const st = prepare(sql)
+    if (!/search MATCH/.test(sql)) return st
+    const all = st.all.bind(st)
+    const iterate = st.iterate.bind(st)
+    st.all = ((...a: unknown[]) => {
+      const out = all(...a) as unknown[]
+      rows += out.length
+      return out
+    }) as typeof st.all
+    st.iterate = ((...a: unknown[]) => {
+      const it = iterate(...a) as IterableIterator<unknown>
+      return {
+        next: () => {
+          const n = it.next()
+          if (!n.done) rows++
+          return n
+        },
+        return: (v?: unknown) => it.return?.(v) ?? { done: true, value: v },
+        [Symbol.iterator]() {
+          return this
+        },
+      }
+    }) as typeof st.iterate
+    return st
+  }) as typeof reader.db.prepare
+  const res = search(reader, 'budget draft', { perGroup: 2 })
+  assert.deepEqual([res.pages.length, res.windows.length, res.more], [2, 2, ['pages', 'windows']])
+  // Ranked best first, the pages come first: three of each chosen (one to learn there are more), then each chosen item's
+  // own sighting; nothing near the 200 windows that matched.
+  assert.ok(rows <= 40, `${rows} rows read`)
+  reader.close()
+  r.close()
+})
