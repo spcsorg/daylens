@@ -182,6 +182,24 @@ test('input is checked, the longest span is the one the person set, and limits h
   s.close()
 })
 
+test('a call refused for its input is logged, showing nothing', () => {
+  const s = setup()
+  s.r.clock.t = T0 + 5 * HOUR
+  assert.throws(() => runReadTool('get_hour', { hour_id: 999 }, s.ctx), /no hour 999/)
+  assert.throws(() => runReadTool('get_day', { date: 'yesterday' }, s.ctx), ToolInputError)
+  assert.throws(() => runReadTool('search', { query: '   ' }, s.ctx), ToolInputError)
+  assert.throws(() => runReadTool('delete_day', {}, s.ctx), ToolInputError)
+  const log = s.reads()
+  assert.deepEqual(log.map((x) => [x.tool, x.from_wall_ms, x.to_wall_ms, x.query]), [
+    ['get_hour', T0 + 5 * HOUR, T0 + 5 * HOUR, null],
+    ['get_day', T0 + 5 * HOUR, T0 + 5 * HOUR, null],
+    ['search', T0 + 5 * HOUR, T0 + 5 * HOUR, '   '],
+    ['delete_day', T0 + 5 * HOUR, T0 + 5 * HOUR, null],
+  ])
+  assert.deepEqual(log.flatMap((x) => s.items(x.id)), [])
+  s.close()
+})
+
 test('captured text that reads like an instruction comes back as data, with the warning', () => {
   const s = setup()
   const chrome = app('com.google.Chrome', { name: 'Chrome' })

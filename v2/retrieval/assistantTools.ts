@@ -333,10 +333,22 @@ export const READ_TOOLS: readonly ReadTool[] = [
   },
 ]
 
-/** Runs one read tool: input is checked, the read is logged, and only then is anything returned. */
+/**
+ * Runs one read tool: input is checked, the read is logged, and only then is anything returned. A call refused for
+ * its input is logged too, at the time it was made and showing nothing, so every call an assistant makes is listed.
+ */
 export function runReadTool(name: string, args: Record<string, unknown>, ctx: ToolContext): unknown {
   checkLimits(ctx.limits)
-  const tool = READ_TOOLS.find((t) => t.name === name)
-  if (!tool) throw new ToolInputError(`there is no tool ${name}`)
-  return tool.run(args ?? {}, ctx, ctx.reader.deletionMark())
+  try {
+    const tool = READ_TOOLS.find((t) => t.name === name)
+    if (!tool) throw new ToolInputError(`there is no tool ${name}`)
+    return tool.run(args ?? {}, ctx, ctx.reader.deletionMark())
+  } catch (err) {
+    if (err instanceof ToolInputError) {
+      const now = (ctx.now ?? Date.now)()
+      const query = name === 'search' && typeof args?.query === 'string' ? args.query : null
+      new Shown().logged(ctx, ctx.reader.deletionMark(), name, now, now, query)
+    }
+    throw err
+  }
 }
