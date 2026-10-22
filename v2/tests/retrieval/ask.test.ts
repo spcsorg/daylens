@@ -203,6 +203,24 @@ test('a source seen in two apps is withdrawn when a deletion during the answer t
   s.close()
 })
 
+test('a question about two days sends nothing from the days between them', async () => {
+  const s = setup()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  for (const [d, title] of [[1, 'Budget secret plan'], [2, 'Budget follow-up']] as const) {
+    const t = T0 + d * 24 * HOUR
+    s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+    s.r.feed(focus(notes, title, t, 'app_changed'))
+    s.r.feed(focus(notes, title, t + 5 * MIN))
+  }
+  s.r.store.flush()
+  const seen: AskRequest[] = []
+  await ask('which budget did I use on 2026-10-16 and 2026-10-18', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * 24 * HOUR }, LIMITS)
+  const sent = seen[0]!.prompt
+  assert.ok(sent.includes('Budget follow-up') && sent.includes('q4-budget.xlsx'), 'both days are sent')
+  assert.ok(!sent.includes('Budget secret plan'), 'the day between is not')
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)
