@@ -276,9 +276,10 @@ export const READ_TOOLS: readonly ReadTool[] = [
       let first = Number.POSITIVE_INFINITY
       let last = Number.NEGATIVE_INFINITY
       const item = (i: (typeof r.pages)[number]) => {
+        // The hours an item was seen in are shown by id only; its app, site and the read's span are what a deletion
+        // must find, and logging each hour would make one entry as long as the item's history.
         shown.app(i.app_id)
         shown.page(i.url)
-        for (const s of i.seen_in) shown.hour(s.hour_id)
         first = Math.min(first, i.first_wall_ms)
         last = Math.max(last, i.last_wall_ms)
         return {

@@ -118,6 +118,31 @@ test('a deletion that begins and finishes between a read and its log entry refus
   s.close()
 })
 
+test('a search’s log entry stays the same size however many hours its results were seen in, and a deletion still finds it', async () => {
+  const s = setup()
+  const chrome = app('com.google.Chrome', { name: 'Chrome' })
+  for (let h = 1; h <= 30; h++) {
+    const t = T0 + h * HOUR
+    s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+    s.r.feed(focus(chrome, 'Budget review - Google Docs', t, 'app_changed'))
+    s.r.store.insertObservation({ ...page(t, 'https://docs.example.com/d/budget', 'Budget review'), seq: h })
+    s.r.feed(focus(chrome, 'Budget review - Google Docs', t + 5 * MIN))
+    s.r.feed(line('session', { state: 'locked', snapshot: false }, t + 6 * MIN))
+    s.r.store.flush()
+    s.r.storage.writeHour({ start_wall_ms: t, tz: 'Africa/Kigali', status: 'written', title: `Reading ${h}`, sources: [{ app_id: 'com.google.chrome', site: 'docs.example.com' }] }, s.r.storage.hourBasis(t))
+  }
+  const found = runReadTool('search', { query: 'budget' }, s.ctx) as { pages: { seen_in: unknown[] }[] }
+  assert.equal(found.pages[0]!.seen_in.length, 31)
+  const read = s.reads().at(-1)!
+  const items = s.items(read.id)
+  assert.ok(items.length <= 5, `${items.length} entries`)
+  assert.deepEqual(items.filter((i) => i.hour_id !== null).map((i) => i.hour_id), [s.r.storage.hourAt(T0)!.id], 'only the hour shown in full')
+  s.r.clock.t = T0 + 40 * HOUR
+  await s.r.storage.deleteSite('docs.example.com').done
+  assert.equal(s.reads().some((x) => x.id === read.id), false, 'deleting the site removes the read')
+  s.close()
+})
+
 test('agent work shows sessions, turns and message times, as a deletion under way will leave them', () => {
   const s = setup({ holdDeletions: true })
   const agents = new AgentStore(s.r.store.database)
