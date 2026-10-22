@@ -162,7 +162,7 @@ test('what is deleted while the AI is answering is taken out of the answer, and 
 
     const all = await ask(q, { reader: s.reader, model: model(() => s.r.storage.deleteRange(T0, T0 + HOUR)), log: s.log, now: () => NEXT_DAY }, LIMITS)
     assert.deepEqual([all.kind, all.kind === 'withdrawn' && all.withdrawn], ['withdrawn', 2], `hold=${hold}`)
-    assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [], more: [] })
+    assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [], more: [], looser: false })
     s.close()
   }
 })

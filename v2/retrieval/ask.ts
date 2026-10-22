@@ -273,7 +273,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
   const days = daysIn(question, now)
   const words = searchWords(question)
   const range = days.length > 0 ? { fromWallMs: days[0]![0], toWallMs: days.at(-1)![1] } : {}
-  const find = () => (words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...range }) : { pages: [], files: [], windows: [], hours: [], more: [] })
+  const find = () => (words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...range }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false })
   let results = find()
   if (!deps.model) return { kind: 'search_only', results }
 

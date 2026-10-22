@@ -49,6 +49,8 @@ export interface SearchResults {
   hours: FoundHour[]
   // The groups that matched more items than they return.
   more: Group[]
+  // No entry had every word typed, so these are entries with any of them: looser matches, labelled as such.
+  looser: boolean
 }
 
 export interface SearchOptions {
@@ -56,7 +58,8 @@ export interface SearchOptions {
   perGroup: number
   fromWallMs?: number
   toWallMs?: number
-  // 'all': every word must appear (the search box). 'any': ranked by how many and how rare (Ask's question words).
+  // 'all': every word must appear (the search box), else any word does, as looser matches. 'any': ranked by how many
+  // and how rare (Ask's question words).
   match?: 'all' | 'any'
 }
 
@@ -99,11 +102,20 @@ const PASSES: readonly { group: Group; match: (q: string, any: string) => string
 
 const COLUMNS = 'd.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.files, d.hour_id, d.first_wall_ms, d.last_wall_ms'
 const GROUPS: readonly Group[] = ['pages', 'files', 'windows', 'hours']
-const EMPTY: SearchResults = { pages: [], files: [], windows: [], hours: [], more: [] }
+const EMPTY: SearchResults = { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
 
 export function search(reader: Reader, text: string, opts: SearchOptions): SearchResults {
   if (!Number.isInteger(opts.perGroup) || opts.perGroup < 1) throw new RangeError('perGroup must be a positive whole number')
-  const q = ftsQuery(text, opts.match)
+  const match = opts.match ?? 'all'
+  const found = searchWith(reader, text, opts, match)
+  const nothing = GROUPS.every((g) => found[g].length === 0)
+  if (!(match === 'all' && nothing && (text.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []).length > 1)) return found
+  const looser = searchWith(reader, text, opts, 'any')
+  return GROUPS.some((g) => looser[g].length > 0) ? { ...looser, looser: true } : found
+}
+
+function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'all' | 'any'): SearchResults {
+  const q = ftsQuery(text, match)
   if (q === null) return EMPTY
   const db = reader.db
   const from = opts.fromWallMs ?? Number.MIN_SAFE_INTEGER
@@ -171,7 +183,7 @@ export function search(reader: Reader, text: string, opts: SearchOptions): Searc
       return own.length > 0 ? own : [first]
     }
 
-    const out: SearchResults = { pages: [], files: [], windows: [], hours: [], more: GROUPS.filter(full) }
+    const out: SearchResults = { pages: [], files: [], windows: [], hours: [], more: GROUPS.filter(full), looser: false }
     for (const g of out.more) chosen.get(g)!.delete([...chosen.get(g)!.keys()].at(-1)!)
     const hourIdAt = db.prepare('SELECT id FROM hours WHERE start_wall_ms = ?').pluck()
     for (const g of GROUPS) {

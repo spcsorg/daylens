@@ -302,6 +302,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
           last = Math.max(last, h.end_wall_ms)
           return { hour_id: h.hour_id, start: localIso(h.start_wall_ms), end: localIso(h.end_wall_ms), status: h.status, title: h.title, summary: h.summary, edited_fields: h.corrected, open: openOf(h.open) }
         }),
+        ...(r.looser ? { looser_matches: 'No entry has every word of the query; these have some of them.' } : {}),
         note: UNTRUSTED,
       }
       const now = (ctx.now ?? Date.now)()
