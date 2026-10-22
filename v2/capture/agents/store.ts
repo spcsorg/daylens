@@ -169,6 +169,22 @@ export const agentDeletedSessionsMigration: Migration = {
     `),
 }
 
+// A session's time an app deletion reached: none of its records from then is written again, from any copy of its logs.
+// It keeps the session's id and the deletion's range, not which app the session ran in or when.
+export const agentDeletedSpansMigration: Migration = {
+  name: 'agent_deleted_spans_v1',
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_deleted_spans (
+        agent TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        from_wall_ms INTEGER NOT NULL,
+        to_wall_ms INTEGER NOT NULL,
+        PRIMARY KEY (agent, session_id, from_wall_ms, to_wall_ms)
+      ) WITHOUT ROWID;
+    `),
+}
+
 // Which app each session ran in, from when: a session resumed in another app has a span for each. A span with no
 // app says the app is not known from then on.
 export const agentHostsMigration: Migration = {
@@ -283,7 +299,7 @@ export function deleteAgentSession(db: Database.Database, agent: Agent, session:
     db.prepare('INSERT OR IGNORE INTO agent_deleted_sessions (agent, session_id, deleted_wall_ms) VALUES (?, ?, ?)').run(agent, session, nowWallMs)
     // Its apps, its logs' paths and read positions go too: the reader skips a log whose name is a deleted session.
     const tables = ['agent_events', 'agent_turns', 'agent_sessions', 'agent_sources']
-    if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get()) tables.push('agent_hosts')
+    for (const t of ['agent_hosts', 'agent_deleted_spans']) if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t)) tables.push(t)
     for (const table of tables) db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
     db.prepare(SCRUB_PENDING).run()
   })()
@@ -397,7 +413,8 @@ const SQL = {
   turnOpener: `UPDATE agent_turns SET opened_by = @opener WHERE agent = @agent AND turn_key = @key AND opened_by = 'unknown'`,
   activity: 'UPDATE agent_turns SET last_activity_wall_ms = max(last_activity_wall_ms, @at) WHERE agent = @agent AND turn_key = @key',
   deletedSession: 'SELECT 1 FROM agent_deleted_sessions WHERE agent = ? AND session_id = ?',
-  turnSpan: 'SELECT max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
+  turnSpan: 'SELECT session_id AS session, max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
+  deletedSpans: 'SELECT from_wall_ms, to_wall_ms FROM agent_deleted_spans WHERE agent = ? AND session_id = ?',
   // The first real end wins; 'missing' only ever gives way to a real one.
   // The end is kept apart from the last activity: a turn that fails after a stalled request ended late but did nothing since.
   end: `UPDATE agent_turns SET end_state = @state, end_wall_ms = CASE WHEN @at IS NULL THEN NULL ELSE max(@at, start_wall_ms) END
@@ -429,7 +446,7 @@ export class AgentStore {
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
-    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration], now)
+    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration], now)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -447,10 +464,17 @@ export class AgentStore {
     this.db.transaction(() => {
       const spans = this.withheld()
       let dropped = false
+      const sessionSpans = new Map<string, readonly Span[]>()
+      // Withheld time, and the session's own time an app deletion reached.
+      const spansOf = (session: string): readonly Span[] => {
+        let v = sessionSpans.get(session)
+        if (v === undefined) sessionSpans.set(session, (v = [...spans, ...this.deletedSpans(agent, session)]))
+        return v
+      }
       // A turn never stretches across withheld time: its last activity or end stays before the gap.
       const reaches = (key: string, at: number) => {
-        const t = this.stmt(SQL.turnSpan).get({ agent, key }) as { last: number } | undefined
-        return !t || admitsSpan(spans, t.last, at)
+        const t = this.stmt(SQL.turnSpan).get({ agent, key }) as { session: string; last: number } | undefined
+        return !t || admitsSpan(spansOf(t.session), t.last, at)
       }
       const latest = new Map<string, { at: number; session: string }>()
       const flushActivity = () => {
@@ -494,7 +518,9 @@ export class AgentStore {
           continue
         }
         const at = recordAt(r)
-        if (!admitted(r, ok) || ('session' in r && (isDeleted(r.session) || (at !== null && !hostOk(r.session, at))))) {
+        // A record that names only its turn is judged by the turn's session.
+        const owner = 'session' in r ? r.session : r.t === 'turn_dir' || r.t === 'turn_opener' ? ((this.stmt(SQL.turnSpan).get({ agent, key: r.key }) as { session: string } | undefined)?.session ?? null) : null
+        if (!admitted(r, ok) || (owner !== null && !admitted(r, (x) => admitsAt(spansOf(owner), x))) || ('session' in r && (isDeleted(r.session) || (at !== null && !hostOk(r.session, at))))) {
           dropped = true
           continue
         }
@@ -577,6 +603,18 @@ export class AgentStore {
    */
   recordHost(agent: Agent, session: string, app: HostApp | null, basis: HostRecordBasis, at: number): void {
     if (this.isDeletedSession(agent, session)) return
+    // Withheld or deleted time keeps no record of where the session ran; the app holds from where that time ends.
+    const spans = [...this.withheld(), ...this.deletedSpans(agent, session)]
+    for (let moved = true; moved; ) {
+      moved = false
+      for (const [from, to] of spans) {
+        if (at >= from && at < to) {
+          if (!Number.isFinite(to)) return
+          at = to
+          moved = true
+        }
+      }
+    }
     // An excluded app is kept only as excluded, which keeps the session's records out without naming the app. An app
     // deleted or paused for a time keeps its name: that is what refuses the session's records from that time.
     if (app !== null && this.hostExcluded({ app_id: app.app_id, app_path: app.path })) {
@@ -597,6 +635,10 @@ export class AgentStore {
   hostAt(agent: Agent, session: string, at: number): SessionHost | null {
     this.lookup ??= dbHostLookup(this.db)
     return resolveHost(this.lookup, agent, session, at)
+  }
+
+  deletedSpans(agent: Agent, session: string): Span[] {
+    return (this.stmt(SQL.deletedSpans).all(agent, session) as { from_wall_ms: number; to_wall_ms: number }[]).map((d) => [d.from_wall_ms, d.to_wall_ms] as const)
   }
 
   isDeletedSession(agent: Agent, session: string | null): boolean {

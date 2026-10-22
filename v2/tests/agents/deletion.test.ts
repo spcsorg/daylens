@@ -155,3 +155,46 @@ test('parser state is not kept from a batch with withheld records, and a range d
   assert.deepEqual(r.q<{ state: string | null }>('SELECT state FROM agent_sources').map((s) => s.state), [null])
   r.close()
 })
+
+const ghostty = { app_id: 'com.mitchellh.ghostty', name: 'Ghostty', path: '/Applications/Ghostty.app' }
+const logOf = (session: string, state: string | null) => ({ path: `/logs/${session}.jsonl`, agent: 'claude_code' as const, root: '/logs', session, dev: '1', ino: session, offset: 10, size: 10, state, turnless: false, counts: emptyCounts() })
+
+test('deleting everything leaves no app, log path or read position of the agent sessions it removed, and reading the logs again brings none back', async () => {
+  const r = rig()
+  const agents = new AgentStore(r.store.database, () => r.clock.t)
+  agents.withheld = () => r.storage.withheld()
+  agents.recordHost('claude_code', 's1', ghostty, 'responsible', T0)
+  r.clock.t = T0 + 20 * MIN
+  agents.apply('claude_code', turn('k', 's1', T0 + 10 * MIN, T0 + 20 * MIN), logOf('s1', '{"dir":"/code/alpha"}'))
+  r.clock.t = T0 + HOUR
+  await r.storage.deleteEverything().done
+  assert.deepEqual([rows(r, 'agent_hosts'), r.q('SELECT * FROM agent_sources')], [[], []])
+  r.clock.t = T0 + HOUR + MIN
+  agents.apply('claude_code', turn('k', 's1', T0 + 10 * MIN, T0 + 20 * MIN), logOf('s1', '{"dir":"/code/alpha"}'))
+  agents.recordHost('claude_code', 's1', ghostty, 'responsible', T0)
+  assert.deepEqual(rows(r, 'agent_turns'), [])
+  assert.deepEqual(r.q('SELECT state, updated_wall_ms FROM agent_sources'), [{ state: null, updated_wall_ms: T0 + HOUR + MIN }])
+  assert.deepEqual(r.q('SELECT from_wall_ms FROM agent_hosts'), [{ from_wall_ms: T0 + HOUR }], 'the app it runs in now holds from the deletion on')
+  r.close()
+})
+
+test('deleting a range leaves a surviving agent session no app it was seen in, nor a read time, from inside the range', async () => {
+  const r = rig()
+  const agents = new AgentStore(r.store.database, () => r.clock.t)
+  agents.withheld = () => r.storage.withheld()
+  agents.apply('claude_code', [{ t: 'client', session: 's1', client: 'claude-desktop', at: T0 }, ...turn('a', 's1', T0, T0 + 10 * MIN)])
+  agents.recordHost('claude_code', 's1', ghostty, 'responsible', T0 + HOUR + 10 * MIN)
+  r.clock.t = T0 + HOUR + 25 * MIN
+  agents.apply('claude_code', turn('b', 's1', T0 + HOUR + 10 * MIN, T0 + HOUR + 20 * MIN), logOf('s1', '{"dir":"/code/alpha"}'))
+  r.clock.t = T0 + 3 * HOUR
+  await r.storage.deleteRange(T0 + HOUR, T0 + 2 * HOUR).done
+  assert.deepEqual(rows(r, 'agent_turns').map((t) => t.turn_key), ['a'])
+  assert.deepEqual(r.q('SELECT app_id, from_wall_ms FROM agent_hosts ORDER BY from_wall_ms'), [
+    { app_id: 'com.anthropic.claudefordesktop', from_wall_ms: T0 },
+    { app_id: 'com.mitchellh.ghostty', from_wall_ms: T0 + 2 * HOUR },
+  ])
+  assert.deepEqual(r.q('SELECT state, updated_wall_ms FROM agent_sources'), [{ state: null, updated_wall_ms: T0 + 2 * HOUR }])
+  agents.apply('claude_code', [{ t: 'client', session: 's1', client: 'cli', at: T0 + HOUR + 30 * MIN }])
+  assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM agent_hosts WHERE from_wall_ms >= ? AND from_wall_ms < ?', T0 + HOUR, T0 + 2 * HOUR)[0]!.n, 0, 'a log read again adds no app inside the range')
+  r.close()
+})

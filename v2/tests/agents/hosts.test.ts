@@ -316,3 +316,37 @@ test('deleting an app for a range cuts agent work that ran in it from before the
   assert.deepEqual(r.q('SELECT first_wall_ms, last_wall_ms FROM agent_sessions'), [{ first_wall_ms: T0 + H - 5 * MIN, last_wall_ms: T0 + H }])
   r.close()
 })
+
+test('deleting an app for a range leaves no app, log path or read time from it, and no copy of the logs brings its work back', async () => {
+  const { r, agents, turn, turns } = setup()
+  const H = 60 * MIN
+  const log = (session: string) => ({ path: `/logs/${session}.jsonl`, agent: 'claude_code' as const, root: '/logs', session, dev: '1', ino: session, offset: 10, size: 10, state: '{"dir":"/w"}', turnless: false, counts: emptyCounts() })
+  agents.apply('claude_code', [{ t: 'client', session: 's', client: 'claude-desktop', at: T0 }, ...turn('s', 'a', T0 + MIN)])
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + H + 5 * MIN)
+  agents.recordHost('claude_code', 'u', ghostty, 'responsible', T0 + H + MIN)
+  r.clock.t = T0 + H + 20 * MIN
+  agents.apply('claude_code', turn('s', 'b', T0 + H + 10 * MIN), log('s'))
+  agents.apply('claude_code', turn('u', 'u1', T0 + H + 2 * MIN), log('u'))
+  r.clock.t = T0 + 2 * H
+  await r.storage.deleteSource('com.mitchellh.ghostty', { from_wall_ms: T0 + H, to_wall_ms: T0 + H + 30 * MIN }).done
+  assert.deepEqual([turns('s'), turns('u')], [['a'], []])
+  assert.deepEqual(r.q('SELECT last_wall_ms FROM agent_sessions'), [{ last_wall_ms: T0 + MIN + 1000 }], "the surviving session's span ends with the work it keeps")
+  assert.deepEqual(r.q('SELECT session_id, app_id, from_wall_ms FROM agent_hosts ORDER BY from_wall_ms'), [
+    { session_id: 's', app_id: 'com.anthropic.claudefordesktop', from_wall_ms: T0 },
+    { session_id: 's', app_id: 'com.mitchellh.ghostty', from_wall_ms: T0 + H + 30 * MIN },
+  ])
+  assert.deepEqual(r.q('SELECT session_id, state, updated_wall_ms FROM agent_sources'), [{ session_id: 's', state: null, updated_wall_ms: T0 + H + 30 * MIN }])
+  agents.apply('claude_code', [...turn('s', 'b', T0 + H + 10 * MIN), ...turn('u', 'u1', T0 + H + 2 * MIN)])
+  assert.deepEqual([turns('s'), turns('u')], [['a'], []], 'reading the logs again brings nothing back, though the app the session then seems to be in is kept')
+  const staging = path.join(r.dir, 'staging-app-range.sqlite')
+  const db = new Database(staging)
+  const s = new AgentStore(db)
+  s.recordHost('claude_code', 'u', ghostty, 'responsible', T0 + H + MIN)
+  s.apply('claude_code', [...turn('s', 'b', T0 + H + 10 * MIN), ...turn('u', 'u1', T0 + H + 2 * MIN)], log('u'))
+  db.close()
+  mergeStaging(r.store.database, staging, r.storage.withheld(), agents)
+  assert.deepEqual([turns('s'), turns('u')], [['a'], []], 'nor does the first read of a copy of them')
+  assert.deepEqual(r.q('SELECT count(*) AS n FROM agent_hosts WHERE from_wall_ms >= ? AND from_wall_ms < ?', T0 + H, T0 + H + 30 * MIN), [{ n: 0 }])
+  assert.deepEqual(r.q('SELECT state FROM agent_sources WHERE session_id = ?', 'u'), [{ state: null }])
+  r.close()
+})

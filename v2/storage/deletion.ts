@@ -375,6 +375,10 @@ export class Deleter {
     const db = this.db
     const events = db.prepare(`SELECT id, session_id, detail FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
     const turns = db.prepare(`SELECT id, session_id, project_dir, branch FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
+    const key = (x: { agent: Agent; session_id: string }) => `${x.agent}\n${x.session_id}`
+    const withRecords = new Map(
+      (db.prepare('SELECT agent, session_id FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to UNION SELECT agent, session_id FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to').all({ from, to }) as { agent: Agent; session_id: string }[]).map((x) => [key(x), x]),
+    )
     let n = this.removeById('agent_events', () => events.all({ from, to }) as { id: number }[])
     n += this.removeById('agent_turns', () => turns.all({ from, to }) as { id: number }[])
     const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
@@ -394,8 +398,46 @@ export class Deleter {
       n += db.prepare(`UPDATE agent_sessions SET last_wall_ms = @from WHERE first_wall_ms < @from AND last_wall_ms > @from AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`).run({ from }).changes
       // A log read since the range began may hold parser state (open turn, folder, message fingerprints) from inside it.
       db.prepare('UPDATE agent_sources SET state = NULL WHERE updated_wall_ms >= @from AND state IS NOT NULL').run({ from })
+      db.prepare('UPDATE agent_sources SET updated_wall_ms = @to WHERE updated_wall_ms >= @from AND updated_wall_ms < @to').run({ from, to })
     })
+    if (hasAgentHosts(db)) {
+      const hosted = db.prepare('SELECT DISTINCT agent, session_id FROM agent_hosts WHERE from_wall_ms >= @from AND from_wall_ms < @to').all({ from, to }) as { agent: Agent; session_id: string }[]
+      const sessions = new Map(hosted.map((x) => [key(x), x]))
+      for (const [k, x] of withRecords) sessions.set(k, x)
+      for (const [k, x] of sessions) immediateRetrying(db, () => this.forgetAgentTime(x.agent, x.session_id, from, to, null, withRecords.has(k)))
+    }
     return n
+  }
+
+  /**
+   * After a deletion of [from, to) has removed a session's records (`removed`): a session with nothing left keeps no
+   * app, log path or read position; the deletion's tombstones keep its logs from being imported again. Otherwise the
+   * session keeps no app it was seen in from inside the range (with `app`, only that app), though the app in force at
+   * `to` holds from `to`, and its logs keep no parser state, nor a read time inside the range.
+   */
+  private forgetAgentTime(agent: Agent, session: string, from: number, to: number, app: string | null, removed: boolean): void {
+    const db = this.db
+    const args = { agent, session, from, to, app }
+    const left = db
+      .prepare(
+        `SELECT 1 WHERE EXISTS (SELECT 1 FROM agent_sessions WHERE agent = @agent AND (session_id = @session OR parent_session_id = @session))
+           OR EXISTS (SELECT 1 FROM agent_turns WHERE agent = @agent AND session_id = @session) OR EXISTS (SELECT 1 FROM agent_events WHERE agent = @agent AND session_id = @session)`,
+      )
+      .get(args)
+    if (removed && left === undefined) {
+      db.prepare('DELETE FROM agent_hosts WHERE agent = @agent AND session_id = @session').run(args)
+      db.prepare('DELETE FROM agent_sources WHERE agent = @agent AND session_id = @session').run(args)
+      return
+    }
+    const match = app === null ? '1' : 'lower(app_id) = @app'
+    const inForce = db.prepare('SELECT * FROM agent_hosts WHERE agent = @agent AND session_id = @session AND from_wall_ms <= @to ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(args) as
+      | { app_id: string | null; app_name: string | null; app_path: string | null; basis: string; from_wall_ms: number }
+      | undefined
+    db.prepare(`DELETE FROM agent_hosts WHERE agent = @agent AND session_id = @session AND from_wall_ms >= @from AND from_wall_ms < @to AND ${match}`).run(args)
+    if (inForce && inForce.from_wall_ms >= from && inForce.from_wall_ms < to && (app === null || inForce.app_id?.toLowerCase() === app)) {
+      db.prepare('INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms) VALUES (@agent, @session, @app_id, @app_name, @app_path, @basis, @to)').run({ ...inForce, agent, session, to })
+    }
+    db.prepare('UPDATE agent_sources SET state = NULL, updated_wall_ms = CASE WHEN updated_wall_ms >= @from AND updated_wall_ms < @to THEN @to ELSE updated_wall_ms END WHERE agent = @agent AND session_id = @session').run(args)
   }
 
   /**
@@ -454,8 +496,9 @@ export class Deleter {
              last_wall_ms = (SELECT max(max(last_activity_wall_ms, coalesce(end_wall_ms, 0))) FROM agent_turns t WHERE ${own})
            WHERE agent = ? AND session_id = ?`,
         ).run(agent, session)
-        // Parser state of the session's logs can describe what was removed (an open turn, message fingerprints).
-        db.prepare('UPDATE agent_sources SET state = NULL WHERE agent = ? AND session_id = ? AND state IS NOT NULL').run(agent, session)
+        // What the session did in the app then is never imported again, whichever app its logs then seem to name.
+        db.prepare('INSERT OR IGNORE INTO agent_deleted_spans (agent, session_id, from_wall_ms, to_wall_ms) VALUES (?, ?, ?, ?)').run(agent, session, from, to)
+        this.forgetAgentTime(agent, session, from, to, app, true)
       })
     }
     return n

@@ -142,13 +142,42 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
 export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = [], hosts: HostPolicy = ALLOW_ALL_HOSTS): void {
-  db.function('agent_admits', { deterministic: false }, (at: number | null) => (admitsAt(spans, at) ? 1 : 0))
+  // The time an app deletion reached in a session, read before the merge: the functions below run inside its statements.
+  const deleted = new Map<string, Span[]>()
+  if (db.prepare(`SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'agent_deleted_spans'`).get() !== undefined) {
+    for (const d of db.prepare('SELECT agent, session_id, from_wall_ms, to_wall_ms FROM main.agent_deleted_spans').all() as { agent: string; session_id: string; from_wall_ms: number; to_wall_ms: number }[]) {
+      const k = `${d.agent}\n${d.session_id}`
+      deleted.set(k, [...(deleted.get(k) ?? []), [d.from_wall_ms, d.to_wall_ms]])
+    }
+  }
+  const spansOf = (agent: string, session: string): readonly Span[] => {
+    const own = deleted.get(`${agent}\n${session}`)
+    return own ? [...spans, ...own] : spans
+  }
+  db.function('agent_admits', { deterministic: false }, (agent: string, session: string, at: number | null) => (admitsAt(spansOf(agent, session), at) ? 1 : 0))
   // A turn's activity and end stop where withheld time begins after its start.
-  db.function('agent_clip', { deterministic: false }, (start: number, at: number | null) => {
-    if (at === null || admitsSpan(spans, start, at)) return at
-    return nextWithheld(spans, start) ?? at
+  db.function('agent_clip', { deterministic: false }, (agent: string, session: string, start: number, at: number | null) => {
+    const own = spansOf(agent, session)
+    if (at === null || admitsSpan(own, start, at)) return at
+    return nextWithheld(own, start) ?? at
   })
-  db.function('agent_end', { deterministic: false }, (start: number, at: number | null) => (at === null || admitsSpan(spans, start, at) ? at : null))
+  db.function('agent_end', { deterministic: false }, (agent: string, session: string, start: number, at: number | null) => (at === null || admitsSpan(spansOf(agent, session), start, at) ? at : null))
+  db.function('agent_deleted_span', { deterministic: false }, (agent: string, session: string) => (deleted.has(`${agent}\n${session}`) ? 1 : 0))
+  // Withheld or deleted time keeps no record of where a session ran; the app holds from where that time ends.
+  db.function('agent_host_from', { deterministic: false }, (agent: string, session: string, at: number) => {
+    const own = spansOf(agent, session)
+    for (let moved = true; moved; ) {
+      moved = false
+      for (const [from, to] of own) {
+        if (at >= from && at < to) {
+          if (!Number.isFinite(to)) return null
+          at = to
+          moved = true
+        }
+      }
+    }
+    return at
+  })
   const live = (t: string) => `NOT EXISTS (SELECT 1 FROM main.agent_deleted_sessions d WHERE d.agent = ${t}.agent AND d.session_id = ${t}.session_id)`
   // What storage refuses for the app a session ran in at that time, the merge leaves out, as the live reader does. The
   // function runs inside the merge's statements, where the connection can run no other, so the apps and parent links
@@ -167,9 +196,9 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
       if (db.prepare(`SELECT 1 FROM staging.sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() !== undefined) {
         // An excluded app is kept only as excluded, as the live reader keeps it.
         db.exec(`INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms)
-          SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, from_wall_ms
-          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x FROM staging.agent_hosts) s WHERE ${live('s')}
-            AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.from_wall_ms)`)
+          SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, at
+          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x, agent_host_from(agent, session_id, from_wall_ms) AS at FROM staging.agent_hosts ORDER BY from_wall_ms, id) s WHERE ${live('s')} AND at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.at)`)
       }
       const look = memoryHostLookup(
         db.prepare('SELECT agent, session_id, app_id, app_path, basis, from_wall_ms FROM main.agent_hosts ORDER BY from_wall_ms, id').all() as Parameters<typeof memoryHostLookup>[0],
@@ -184,16 +213,16 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
       }
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
-          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(first_wall_ms) AND ${live('s')} AND ${hostOk('s', 'first_wall_ms')}
+          SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(agent, session_id, first_wall_ms) AND ${live('s')} AND ${hostOk('s', 'first_wall_ms')}
           ON CONFLICT (agent, session_id) DO UPDATE SET first_wall_ms = min(first_wall_ms, excluded.first_wall_ms), last_wall_ms = max(last_wall_ms, excluded.last_wall_ms);
         INSERT INTO agent_turns (agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, last_activity_wall_ms, end_wall_ms, end_state, recorded_wall_ms)
-          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(start_wall_ms, last_activity_wall_ms), agent_end(start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns s WHERE agent_admits(start_wall_ms) AND ${live('s')} AND ${hostOk('s', 'start_wall_ms')}
+          SELECT agent, turn_key, session_id, project_dir, branch, opened_by, replayed, start_wall_ms, agent_clip(agent, session_id, start_wall_ms, last_activity_wall_ms), agent_end(agent, session_id, start_wall_ms, end_wall_ms), end_state, recorded_wall_ms FROM staging.agent_turns s WHERE agent_admits(agent, session_id, start_wall_ms) AND ${live('s')} AND ${hostOk('s', 'start_wall_ms')}
           ON CONFLICT (agent, turn_key) DO NOTHING;
         INSERT INTO agent_events (agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms)
-          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(wall_ms) AND agent_admits(end_wall_ms) AND ${live('s')} AND ${hostOk('s', 'wall_ms')}
+          SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(agent, session_id, wall_ms) AND agent_admits(agent, session_id, end_wall_ms) AND ${live('s')} AND ${hostOk('s', 'wall_ms')}
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
-          SELECT path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')}
+          SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN NOT agent_deleted_span(agent, session_id) THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')}
           ON CONFLICT (path) DO NOTHING;
       `)
     })()
