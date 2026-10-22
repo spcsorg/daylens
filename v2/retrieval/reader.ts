@@ -15,6 +15,13 @@ export class UnknownSchemaError extends Error {}
 
 export type SourceKind = 'page' | 'file' | 'window'
 
+/** When, and in which app, something was on screen: [from, to). */
+export interface Sighting {
+  app_id: string | null
+  from_wall_ms: number
+  to_wall_ms: number
+}
+
 export interface Source {
   kind: SourceKind
   app_id: string | null
@@ -26,6 +33,8 @@ export interface Source {
   ms: number
   first_wall_ms: number
   last_wall_ms: number
+  // Each stretch it was seen in this hour, with the app it was seen in: a page can be open in more than one.
+  sightings: Sighting[]
 }
 
 export interface AppTime {
@@ -230,13 +239,16 @@ export class Reader {
             const prev = slot.sources.get(src.key)
             if (prev) {
               prev.ms += ms
+              const last = prev.sightings.at(-1)!
+              if (last.app_id === i.app_id && cs <= last.to_wall_ms) last.to_wall_ms = Math.max(last.to_wall_ms, ce)
+              else prev.sightings.push({ app_id: i.app_id, from_wall_ms: cs, to_wall_ms: ce })
               prev.first_wall_ms = Math.min(prev.first_wall_ms, cs)
               if (ce >= prev.last_wall_ms) {
                 prev.last_wall_ms = ce
                 prev.title = i.title
               }
             } else {
-              slot.sources.set(src.key, { kind: src.kind, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: src.file, ms, first_wall_ms: cs, last_wall_ms: ce })
+              slot.sources.set(src.key, { kind: src.kind, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: src.file, ms, first_wall_ms: cs, last_wall_ms: ce, sightings: [{ app_id: i.app_id, from_wall_ms: cs, to_wall_ms: ce }] })
             }
           }
         }

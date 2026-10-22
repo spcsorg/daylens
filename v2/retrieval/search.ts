@@ -2,7 +2,7 @@
 // listed once, with every hour it was seen in, and says how it opens. Full-text only; no AI.
 import { readHour, type HourField } from '../storage/hours.ts'
 import { pendingTombstones, searchFence } from '../storage/rules.ts'
-import type { Reader } from './reader.ts'
+import type { Reader, Sighting } from './reader.ts'
 
 export type OpenAction =
   | { kind: 'url'; url: string }
@@ -27,6 +27,8 @@ export interface FoundItem {
   first_wall_ms: number
   last_wall_ms: number
   seen_in: SeenIn[]
+  // Every stretch it was seen, with the app: a page open in two browsers is one item seen in both.
+  sightings: Sighting[]
   open: OpenAction
 }
 
@@ -207,6 +209,7 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
           first_wall_ms: Math.min(...docs.map((d) => d.first_wall_ms)),
           last_wall_ms: latest.last_wall_ms,
           seen_in: starts.map((s) => ({ hour_start_wall_ms: s, hour_id: (hourIdAt.get(s) as number | undefined) ?? null })),
+          sightings: docs.map((d) => ({ app_id: d.app_id, from_wall_ms: d.first_wall_ms, to_wall_ms: d.last_wall_ms })),
         }
         const app: OpenAction = { kind: 'app', app_id: latest.app_id, app_name: latest.app_name }
         if (g === 'pages') out.pages.push({ kind: 'page', ...item, url: latest.url, file: null, open: { kind: 'url', url: latest.url } })

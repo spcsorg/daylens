@@ -9,7 +9,7 @@ import { claudeCli } from '../../retrieval/claudeCli.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
-import { day } from './support.ts'
+import { day, page } from './support.ts'
 
 const LIMITS = { maxHours: 5, maxSources: 10, perGroup: 5 }
 const NEXT_DAY = T0 + 24 * HOUR
@@ -165,6 +165,30 @@ test('what is deleted while the AI is answering is taken out of the answer, and 
     assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [], more: [], looser: false })
     s.close()
   }
+})
+
+test('a source seen in two apps is withdrawn when a deletion during the answer takes either sighting', async () => {
+  const s = setup()
+  const safari = app('com.apple.Safari', { name: 'Safari' })
+  const t = T0 + 2 * HOUR
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+  s.r.feed(focus(safari, null, t, 'app_changed'))
+  s.r.store.insertObservation({ ...page(t, 'https://docs.example.com/d/budget', 'Budget review'), app_id: 'com.apple.Safari', app_name: 'Safari', seq: 1 })
+  s.r.feed(focus(safari, null, t + 5 * MIN))
+  s.r.store.flush()
+  const model: AskModel = {
+    name: 'Fake',
+    provider: 'fake',
+    run: async (req) => {
+      const rec = JSON.parse(req.prompt) as { sources: { id: string; address?: string }[] }
+      s.r.clock.t = NEXT_DAY
+      await s.r.storage.deleteSource('com.google.Chrome', { from_wall_ms: T0, to_wall_ms: T0 + HOUR }).done
+      return { output: { answerable: true, statements: [{ text: 'You read the budget review page.', sources: [rec.sources.find((x) => x.address)!.id] }] }, model: 'fake-1', input_tokens: 1, output_tokens: 1, cost_micro_usd: 0 }
+    },
+  }
+  const res = await ask('budget review page', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual([res.kind, res.kind === 'withdrawn' && res.withdrawn], ['withdrawn', 1], 'its Chrome sighting was deleted, though it is kept under Safari')
+  s.close()
 })
 
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {

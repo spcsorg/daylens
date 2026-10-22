@@ -6,7 +6,7 @@
 import { HOUR_MS } from '../storage/derive.ts'
 import type { HourSource } from '../storage/hours.ts'
 import type { AssistantRead, UsageEntry } from '../storage/index.ts'
-import { deletionCovers, type HourView, type ReadSpan, type Reader } from './reader.ts'
+import { deletionCovers, type HourView, type ReadSpan, type Reader, type Sighting } from './reader.ts'
 import { search, type FoundItem, type OpenAction, type SearchResults } from './search.ts'
 
 /** How much of the record one question may send. Product decisions with no defaults: the caller states each. */
@@ -180,8 +180,8 @@ interface SentSource {
   last_wall_ms: number
   // The sent hours it was seen in.
   hour_starts: number[]
-  // Every hour it was seen in, sent or not.
-  seen_hours: number[]
+  // Every stretch it was seen, sent or not, with the app it was seen in.
+  sightings: Sighting[]
 }
 
 function siteOf(url: string | null): string | null {
@@ -308,7 +308,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       continue
     }
     const seen = i.seen_in.map((s) => s.hour_start_wall_ms)
-    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), seen_hours: seen })
+    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), sightings: [...i.sightings] })
   }
   const own = hours.flatMap((h) => h.sources.map((s) => ({ h, s }))).sort((a, b) => b.s.ms - a.s.ms)
   for (const { h, s } of own) {
@@ -316,7 +316,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     const prev = sent.get(key)
     if (prev) {
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
-      if (!prev.seen_hours.includes(h.start_wall_ms)) prev.seen_hours.push(h.start_wall_ms)
+      prev.sightings.push(...s.sightings)
       prev.ms = (prev.ms ?? 0) + s.ms
       continue
     }
@@ -324,7 +324,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       notSent.add(key)
       continue
     }
-    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], seen_hours: [h.start_wall_ms] })
+    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], sightings: [...s.sightings] })
   }
   const sources = [...sent.values()]
   if (hours.length === 0 && sources.length === 0) return { kind: 'no_answer', missing: null, results }
@@ -403,7 +403,8 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       if (covered([span])) gone.add(`h${i + 1}`)
     })
     sources.forEach((s, i) => {
-      if (covered(s.seen_hours.map((at) => ({ from: at, to: at + HOUR_MS, apps: [s.app_id], sites: [siteOf(s.url)] })))) gone.add(`s${i + 1}`)
+      // Every sighting behind it, in whichever app: the statement may rest on any of them.
+      if (covered(s.sightings.map((x) => ({ from: x.from_wall_ms, to: Math.max(x.to_wall_ms, x.from_wall_ms + 1), apps: [x.app_id], sites: [siteOf(s.url)] })))) gone.add(`s${i + 1}`)
     })
   }
   const byId = new Map<string, Citation>()
