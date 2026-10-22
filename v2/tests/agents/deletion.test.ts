@@ -198,3 +198,28 @@ test('deleting a range leaves a surviving agent session no app it was seen in, n
   assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM agent_hosts WHERE from_wall_ms >= ? AND from_wall_ms < ?', T0 + HOUR, T0 + 2 * HOUR)[0]!.n, 0, 'a log read again adds no app inside the range')
   r.close()
 })
+
+test('a turn cut by a deletion whose end was deleted says only that it ended, here and when its log is read again', async () => {
+  const r = rig()
+  const agents = new AgentStore(r.store.database, () => r.clock.t)
+  agents.withheld = () => r.storage.withheld()
+  agents.apply('claude_code', [...turn('cut', 's1', T0, T0 + 90 * MIN), ...turn('kept', 's1', T0 + 4 * HOUR, T0 + 4 * HOUR + 10 * MIN)])
+  agents.apply('claude_code', [{ t: 'turn', key: 'open', session: 's2', dir: null, branch: null, opener: 'user', start: T0, replayed: false }, { t: 'activity', key: 'open', session: 's2', at: T0 + 70 * MIN }])
+  r.clock.t = T0 + 5 * HOUR
+  await r.storage.deleteRange(T0 + HOUR, T0 + 2 * HOUR).done
+  const states = () => r.q<{ turn_key: string; end_state: string | null; end_wall_ms: number | null }>('SELECT turn_key, end_state, end_wall_ms FROM agent_turns ORDER BY turn_key')
+  assert.deepEqual(states(), [
+    { turn_key: 'cut', end_state: 'missing', end_wall_ms: T0 + HOUR },
+    { turn_key: 'kept', end_state: 'completed', end_wall_ms: T0 + 4 * HOUR + 10 * MIN },
+    { turn_key: 'open', end_state: null, end_wall_ms: null },
+  ])
+  agents.apply('claude_code', [{ t: 'end', key: 'open', state: 'failed', at: T0 + 80 * MIN }])
+  assert.deepEqual(states()[2], { turn_key: 'open', end_state: 'missing', end_wall_ms: null }, 'an end read inside the deleted range does not say how the turn ended')
+  const staging = path.join(r.dir, 'staging-end.sqlite')
+  const db = new Database(staging)
+  new AgentStore(db).apply('codex', [{ t: 'turn', key: 'm', session: 's3', dir: null, branch: null, opener: 'user', start: T0, replayed: false }, { t: 'end', key: 'm', state: 'aborted', at: T0 + 80 * MIN }])
+  db.close()
+  mergeStaging(r.store.database, staging, r.storage.withheld())
+  assert.deepEqual(r.q('SELECT end_state, end_wall_ms FROM agent_turns WHERE turn_key = ?', 'm'), [{ end_state: 'missing', end_wall_ms: null }], 'nor does the first read')
+  r.close()
+})

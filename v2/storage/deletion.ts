@@ -146,6 +146,9 @@ export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec
   db.prepare(`INSERT OR IGNORE INTO deletion_fence SELECT tombstone_id, kind, ref FROM deletion_work WHERE tombstone_id = ? AND kind IN ('hour', 'thread', 'read')`).run(tombstoneId)
 }
 
+// A turn cut where deleted time begins: an end inside that time (or one kept without a time) says only that it ended.
+const CUT_END_STATE = (cut: string) => `CASE WHEN end_state IS NOT NULL AND (end_wall_ms IS NULL OR (end_wall_ms > ${cut} AND end_wall_ms < @to)) THEN 'missing' ELSE end_state END`
+
 const ROWS_PER_STEP = 500
 const DOCS_PER_STEP = 50
 const HOURS_PER_STEP = 25
@@ -408,9 +411,10 @@ export class Deleter {
     immediateRetrying(db, () => {
       db.prepare('UPDATE agent_events SET end_wall_ms = @from WHERE wall_ms < @from AND end_wall_ms > @from').run({ from })
       db.prepare(
-        `UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @from), end_wall_ms = CASE WHEN end_wall_ms > @from THEN @from ELSE end_wall_ms END
+        `UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @from), end_wall_ms = CASE WHEN end_wall_ms > @from THEN @from ELSE end_wall_ms END,
+           end_state = ${CUT_END_STATE('@from')}
          WHERE start_wall_ms < @from AND (last_activity_wall_ms > @from OR end_wall_ms > @from)`,
-      ).run({ from })
+      ).run({ from, to })
       n += db.prepare(`DELETE FROM agent_sessions WHERE last_wall_ms >= @from AND first_wall_ms < @to AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own}) AND first_wall_ms >= @from`).run({ from, to }).changes
       db.prepare(
         `UPDATE agent_sessions SET
@@ -551,9 +555,10 @@ export class Deleter {
     })
     if (cuts.length === 0) return 0
     immediateRetrying(db, () => {
-      const turn = db.prepare('UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @at), end_wall_ms = CASE WHEN end_wall_ms > @at THEN @at ELSE end_wall_ms END WHERE id = @id')
+      const turn = db.prepare(`UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @at), end_wall_ms = CASE WHEN end_wall_ms > @at THEN @at ELSE end_wall_ms END,
+         end_state = ${CUT_END_STATE('@at')} WHERE id = @id`)
       const wait = db.prepare('UPDATE agent_events SET end_wall_ms = @at WHERE id = @id AND end_wall_ms > @at')
-      for (const c of cuts) (c.table === 'agent_turns' ? turn : wait).run({ id: c.id, at: c.at })
+      for (const c of cuts) (c.table === 'agent_turns' ? turn.run({ id: c.id, at: c.at, to }) : wait.run({ id: c.id, at: c.at }))
     })
     return cuts.length
   }

@@ -547,11 +547,14 @@ export class AgentStore {
             if (!prev || r.at > prev.at) latest.set(r.key, { at: r.at, session: r.session })
             break
           }
-          case 'end':
+          case 'end': {
             flushActivity()
-            // An end inside withheld time keeps the turn ended without saying when.
-            this.stmt(SQL.end).run({ agent, key: r.key, state: r.state, at: r.at !== null && reaches(r.key, r.at) ? r.at : null })
+            // An end across withheld time keeps the turn ended without saying when; one inside it, also without saying how.
+            const turn = this.stmt(SQL.turnSpan).get({ agent, key: r.key }) as { session: string } | undefined
+            const inside = r.at !== null && turn !== undefined && !admitsAt(spansOf(turn.session), r.at)
+            this.stmt(SQL.end).run({ agent, key: r.key, state: inside ? 'missing' : r.state, at: r.at !== null && reaches(r.key, r.at) ? r.at : null })
             break
+          }
           case 'user':
             this.stmt(SQL.user).run({ agent, key: r.key, session: r.session, turn: r.turn, act: r.act, basis: r.basis, at: r.at, now })
             break
