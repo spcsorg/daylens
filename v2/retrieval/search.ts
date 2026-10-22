@@ -74,6 +74,21 @@ export function ftsQuery(text: string, match: 'all' | 'any' = 'all'): string | n
 
 export type Group = 'pages' | 'files' | 'windows' | 'hours'
 
+// File names never hold a space (see derive.ts's FILE_NAME), so an entry's list splits exactly.
+const fileNames = (files: string) => files.split(' ').filter(Boolean)
+
+// Words as the index's tokenizer folds them: by case and by accent.
+const fold = (w: string) => w.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+const wordsOf = (t: string) => (t.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []).map(fold)
+
+/** Whether one file name has the words searched for, as the index matched them: the last word also as a prefix. */
+function hasWords(file: string, text: string, match: 'all' | 'any'): boolean {
+  const have = wordsOf(file)
+  const want = wordsOf(text)
+  const found = want.map((w, i) => have.some((h) => h === w || (i === want.length - 1 && h.startsWith(w))))
+  return match === 'all' ? found.every(Boolean) : found.some(Boolean)
+}
+
 interface Doc {
   kind: 'activity' | 'hour'
   hour_start_wall_ms: number
@@ -157,8 +172,11 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
           const g: Group = d.kind === 'hour' ? 'hours' : d.url !== '' ? 'pages' : pass.group === 'files' ? 'files' : 'windows'
           if ((g === 'hours') !== (pass.group === 'hours') || full(g)) continue
           const items = chosen.get(g)!
-          const k = keyOf(g, d)
-          if (!items.has(k)) items.set(k, d)
+          // An entry's files are every file name its title had, space-separated: each is its own file, if it has the words.
+          for (const one of g === 'files' ? fileNames(d.files).filter((f) => hasWords(f, text, match)).map((f) => ({ ...d, files: f })) : [d]) {
+            const k = keyOf(g, one)
+            if (!items.has(k) && !full(g)) items.set(k, one)
+          }
           if (full(pass.group)) break
         }
         if (full(pass.group)) break
@@ -181,7 +199,11 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
       if (words.length === 0) return [first]
       const phrase = `${field[g]} : (${words.map((w) => `"${w}"`).join(' ')})`
       const key = keyOf(g, first)
-      const own = (entriesOf.all(phrase, g, first.url, first.title, from, to, ...fence.params) as Doc[]).filter((d) => keyOf(g, d) === key)
+      const rows = entriesOf.all(phrase, g, first.url, first.title, from, to, ...fence.params) as Doc[]
+      const own =
+        g === 'files'
+          ? rows.flatMap((d) => fileNames(d.files).filter((f) => f.toLowerCase() === key).map((f) => ({ ...d, files: f })))
+          : rows.filter((d) => keyOf(g, d) === key)
       return own.length > 0 ? own : [first]
     }
 

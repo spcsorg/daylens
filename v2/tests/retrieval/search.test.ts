@@ -140,3 +140,18 @@ test('when no entry has every word typed, search shows entries with any of them,
   reader.close()
   r.close()
 })
+
+test('a title with several file names gives each file on its own, never the names run together', () => {
+  const r = rig()
+  for (let m = 0; m < 5; m++) r.feed(focus(editor, 'budget.ts and notes.md - Editor', T0 + m * MIN, m === 0 ? 'app_changed' : undefined))
+  for (let m = 5; m < 8; m++) r.feed(focus(editor, 'budget.ts - Editor', T0 + m * MIN, m === 5 ? 'app_changed' : undefined))
+  r.store.flush()
+  const reader = open(r)
+  const budget = search(reader, 'budget', { perGroup: 5 }).files
+  assert.deepEqual(budget.map((f) => [f.file, f.sightings.length]), [['budget.ts', 2]], 'seen under both titles')
+  assert.deepEqual(search(reader, 'notes', { perGroup: 5 }).files.map((f) => f.file), ['notes.md'])
+  const both = search(reader, 'budget notes', { perGroup: 5 })
+  assert.deepEqual([both.looser, both.files.map((f) => f.file).sort()], [true, ['budget.ts', 'notes.md']], 'no one file has both words: each is a looser match')
+  reader.close()
+  r.close()
+})
