@@ -84,6 +84,12 @@ test('an answer keeps only statements that cite what the AI was given, and each 
 test('Daylens’s own hour text is not sent as evidence, the person’s corrections are, and a statement must cite something from the time, day, app, site and file it names', async () => {
   const s = setup()
   const hourId = s.r.storage.hourAt(T0)!.id
+  // Mail was recorded on another day: not in the record, but known as an app.
+  const mail = app('com.apple.mail', { name: 'Mail' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 30 * HOUR))
+  s.r.feed(focus(mail, 'Inbox', T0 + 30 * HOUR, 'app_changed'))
+  s.r.feed(focus(mail, 'Inbox', T0 + 30 * HOUR + MIN))
+  s.r.store.flush()
   const seen: AskRequest[] = []
   type Rec = { hours: { id: string; title?: string; summary?: string; corrected?: Record<string, string> }[]; sources: { id: string; address?: string; file?: string; title: string }[] }
   const statements = (rec: Rec) => {
@@ -93,13 +99,18 @@ test('Daylens’s own hour text is not sent as evidence, the person’s correcti
     const groceries = rec.sources.find((x) => x.title === 'Groceries')!.id
     return [
       { text: 'At 8:05 you had q4-budget.xlsx open in Editor.', sources: [file] },
+      { text: 'You went through the Q4 numbers.', sources: [hour] },
       { text: 'You emailed the bank in Mail.', sources: [hour] },
+      { text: 'At 8:25 you had q4-budget.xlsx open.', sources: [file] },
       { text: 'At 15:00 you read the budget review.', sources: [page] },
       { text: 'You read docs.example.com.', sources: [file] },
       { text: 'You worked in Notes.', sources: [file] },
       { text: 'You edited q4-budget.xlsx.', sources: [groceries] },
+      { text: 'You also opened forecast.xlsx.', sources: [hour] },
       { text: 'On Monday you reviewed the budget.', sources: [hour] },
-      { text: 'Yesterday from 8:00 to 9:00 you were in Editor, Chrome and Notes.', sources: [hour] },
+      { text: 'Yesterday from 8:00 to 8:31 you were in Editor, Chrome and Notes.', sources: [hour] },
+      { text: 'Between 08:00 and 09:00 you were in Editor.', sources: [hour] },
+      { text: 'At 8:45 you were in Editor.', sources: [hour] },
       { text: 'You read the Budget review page on docs.example.com in Chrome.', sources: [page] },
     ]
   }
@@ -109,11 +120,12 @@ test('Daylens’s own hour text is not sent as evidence, the person’s correcti
   if (res.kind !== 'answer') return
   assert.deepEqual(res.statements.map((x) => x.text), [
     'At 8:05 you had q4-budget.xlsx open in Editor.',
-    'You emailed the bank in Mail.',
-    'Yesterday from 8:00 to 9:00 you were in Editor, Chrome and Notes.',
+    'You went through the Q4 numbers.',
+    'Yesterday from 8:00 to 8:31 you were in Editor, Chrome and Notes.',
+    'Between 08:00 and 09:00 you were in Editor.',
     'You read the Budget review page on docs.example.com in Chrome.',
-  ], 'what code cannot check (the bank) passes; a time, day, app, site or file the citations do not have does not')
-  assert.equal(res.dropped, 5)
+  ], 'what names nothing code can check passes; a time outside what was seen, or a day, app, site or file the citations do not have, does not')
+  assert.equal(res.dropped, 9, 'the screen locked at 8:31, so nothing was seen at 8:45')
   const sent = JSON.parse(seen[0]!.prompt) as Rec
   assert.deepEqual([sent.hours[0]!.title, sent.hours[0]!.summary, sent.hours[0]!.corrected], [undefined, undefined, undefined], 'the written hour is not evidence')
   assert.match(seen[0]!.system, /must cite an hour or source from that time, that day, that app, that site or that file/)
