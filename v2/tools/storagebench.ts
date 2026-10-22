@@ -53,7 +53,7 @@ const APPS: AppDef[] = [
       const site = skewed(SITES)
       return { title: `${sentence(2 + Math.floor(rand() * 5))} - ${site}`, url: `https://${rand() < 0.3 ? 'www.' : ''}${site}/${pick(WORDS)}/${Math.floor(rand() * 5000)}`, state: 'ok' }
     } },
-  { id: 'com.tinyspeck.slackmacgap', name: 'Slack', share: 12, title: () => ({ title: `${pick(['#', '#', 'DM '])}${rand() < 0.5 ? skewed(PEOPLE) : pick(WORDS)} - ${pick(['Acme', 'Andersen'])} - Slack`, url: null, state: 'ok' }) },
+  { id: 'com.tinyspeck.slackmacgap', name: 'Slack', share: 12, title: () => ({ title: `${pick(['#', '#', 'DM '])}${rand() < 0.5 ? skewed(PEOPLE) : pick(WORDS)} - ${pick(['Acme', 'Globex'])} - Slack`, url: null, state: 'ok' }) },
   { id: 'com.mitchellh.ghostty', name: 'Ghostty', share: 10, title: () => ({ title: `${pick(['npm test', 'git status', 'vim', 'node', 'ssh'])} ~/Code/${skewed(PROJECTS)}`, url: null, state: 'ok' }) },
   { id: 'com.apple.mail', name: 'Mail', share: 6, title: () => ({ title: `${sentence(3 + Math.floor(rand() * 6))} — ${skewed(PEOPLE)}`, url: null, state: 'ok' }) },
   { id: 'notion.id', name: 'Notion', share: 6, title: () => ({ title: `${sentence(2 + Math.floor(rand() * 3))}`, url: null, state: 'ok' }) },
