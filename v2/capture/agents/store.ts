@@ -458,10 +458,14 @@ export class AgentStore {
     return s
   }
 
-  // One transaction per batch: the records and the read position that produced them land together or not at all.
-  apply(agent: Agent, records: readonly AgentRecord[], source?: SourceUpdate): void {
+  /**
+   * One transaction per batch: the records and the read position that produced them land together or not at all.
+   * Returns false when the read position was not kept: the log belongs to a session in an excluded app, or one whose
+   * app is not known while it may be (hostAllowed), and nothing that names it is stored.
+   */
+  apply(agent: Agent, records: readonly AgentRecord[], source?: SourceUpdate): boolean {
     const now = this.now()
-    this.db.transaction(() => {
+    return this.db.transaction(() => {
       const spans = this.withheld()
       let dropped = false
       const sessionSpans = new Map<string, readonly Span[]>()
@@ -557,6 +561,10 @@ export class AgentStore {
         }
       }
       flushActivity()
+      if (source && source.session !== null) {
+        const host = resolveHost(look, agent, source.session, Number.MAX_SAFE_INTEGER)
+        if (host?.excluded || (host === null && !this.hostAllowed(null, now))) return false
+      }
       if (source) {
         this.stmt(SQL.source).run({
           path: source.path,
@@ -576,6 +584,7 @@ export class AgentStore {
           now,
         })
       }
+      return true
     })()
   }
 

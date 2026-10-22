@@ -211,6 +211,13 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
         const host = resolveHost(look, agent, session, at)
         return host === null ? unknownOk : !host.excluded && hosts.hostAllowed(host, at)
       }
+      // As the live reader keeps it: no log path or read position of a session in an excluded app, or of one whose
+      // app is not known while it may be.
+      db.function('agent_source_kept', { deterministic: false }, (agent: Agent, session: string | null) => {
+        if (session === null) return 1
+        const host = resolveHost(look, agent, session, Number.MAX_SAFE_INTEGER)
+        return host?.excluded || (host === null && !unknownOk) ? 0 : 1
+      })
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)
           SELECT agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms FROM staging.agent_sessions s WHERE agent_admits(agent, session_id, first_wall_ms) AND ${live('s')} AND ${hostOk('s', 'first_wall_ms')}
@@ -222,7 +229,7 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
           SELECT agent, event_key, session_id, turn_key, kind, detail, basis, wall_ms, end_wall_ms, recorded_wall_ms FROM staging.agent_events s WHERE agent_admits(agent, session_id, wall_ms) AND agent_admits(agent, session_id, end_wall_ms) AND ${live('s')} AND ${hostOk('s', 'wall_ms')}
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
-          SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN NOT agent_deleted_span(agent, session_id) THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')}
+          SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN NOT agent_deleted_span(agent, session_id) THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')} AND agent_source_kept(agent, session_id)
           ON CONFLICT (path) DO NOTHING;
       `)
     })()

@@ -183,6 +183,8 @@ export class AgentReader {
   private budget: number | null = null
   private budgetStart = 0
   private readonly tails = new Map<string, CompressedTail | AppendedTail>()
+  // Read positions of logs the store does not keep (a session in an excluded app), held only while this reader runs.
+  private readonly unkept = new Map<string, SourceRow>()
   private leftOver = false
   readonly deferredFiles: string[] = []
   progressed = false
@@ -428,7 +430,7 @@ export class AgentReader {
     if (!st.isFile()) return
     const dev = String(st.dev)
     const ino = String(st.ino)
-    let row: SourceRow | null = this.store.source(file)
+    let row: SourceRow | null = this.unkept.get(file) ?? this.store.source(file)
     if (!row) {
       // A rename (Codex archiving a session) keeps inode and session, so the read position moves; inodes alone get reused.
       const moved = this.store.sourcesByInode(dev, ino).find((s) => s.path !== file && s.session_id === info.session && !existsSync(s.path))
@@ -470,7 +472,9 @@ export class AgentReader {
       const c = parser.counts
       const delta = subCounts(c, flushed)
       flushed = { ...c }
-      this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c), _drift: drift }), turnless: drift > 0, counts: delta })
+      const kept = this.store.apply(root.agent, records, { path: file, agent: root.agent, root: root.dir, session: info.session, dev, ino, offset, size: st.size, state: JSON.stringify({ ...JSON.parse(parser.state()), _readCounts: addCounts(priorCounts, c), _drift: drift }), turnless: drift > 0, counts: delta })
+      if (kept) this.unkept.delete(file)
+      else this.unkept.set(file, { path: file, agent: root.agent, root: root.dir, session_id: info.session, dev, ino, offset, size: st.size, state: null, turnless: 0 })
       this.stats.records += records.length
       records = []
       r.counts = addCounts(r.counts, delta)

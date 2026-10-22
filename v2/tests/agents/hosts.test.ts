@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { backfill, mergeStaging } from '../../capture/agents/backfill.ts'
@@ -348,5 +348,43 @@ test('deleting an app for a range leaves no app, log path or read time from it, 
   assert.deepEqual([turns('s'), turns('u')], [['a'], []], 'nor does the first read of a copy of them')
   assert.deepEqual(r.q('SELECT count(*) AS n FROM agent_hosts WHERE from_wall_ms >= ? AND from_wall_ms < ?', T0 + H, T0 + H + 30 * MIN), [{ n: 0 }])
   assert.deepEqual(r.q('SELECT state FROM agent_sources WHERE session_id = ?', 'u'), [{ state: null }])
+  r.close()
+})
+
+test('a session in an excluded app leaves no log path or read position, read live or by the first read, and its log is not read again from the start', async () => {
+  const { r, agents } = setup()
+  const home = tmp()
+  const c = claudeCtx()
+  const desktop = claudeCtx({ entrypoint: 'claude-desktop' })
+  const dir = path.join(home, '.claude', 'projects', '-w-private-project')
+  mkdirSync(dir, { recursive: true })
+  const now = Date.now()
+  const lines = (x: typeof c, at: number, uuid: string) => [claude.prompt(x, at, 'hi', { uuid }), claude.assistant(x, at + 1000, 'end_turn')].map((l) => l + '\n').join('')
+  writeFileSync(path.join(dir, `${desktop.session}.jsonl`), lines(desktop, now, 'd1'))
+  r.storage.addExclusion({ match: 'app_id', value: 'com.anthropic.claudefordesktop', label: 'Claude' })
+  r.storage.addExclusion({ match: 'app_id', value: 'com.mitchellh.ghostty', label: 'Ghostty' })
+  const reader = new AgentReader(agents, homeRoots(home, {}), {
+    reconcileMs: 3_600_000,
+    followUpMs: 3_600_000,
+    coalesceMs: 20,
+    backfill: async (roots) => (await backfill(r.store.database, r.dir, roots, () => {}, undefined, undefined, () => r.storage.withheld(), agents)).merged,
+    resolveHost: async () => ({ app: ghostty, basis: 'responsible' }),
+  })
+  await reader.start()
+  assert.deepEqual(r.q('SELECT path FROM agent_sources'), [], 'the first read keeps no log of the excluded Claude app')
+  const file = path.join(dir, `${c.session}.jsonl`)
+  writeFileSync(file, lines(c, now, 'p1'))
+  await new Promise((res) => setTimeout(res, 200))
+  await reader.settle()
+  assert.deepEqual(r.q('SELECT path FROM agent_sources'), [], 'nor does a live read of a session in excluded Ghostty')
+  const before = reader.stats.bytesRead
+  const more = lines(c, now + 5000, 'p2')
+  appendFileSync(file, more)
+  await new Promise((res) => setTimeout(res, 200))
+  await reader.settle()
+  await reader.stop()
+  assert.equal(reader.stats.bytesRead - before, Buffer.byteLength(more), 'only what was appended is read')
+  assert.deepEqual(r.q('SELECT path FROM agent_sources'), [])
+  assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM agent_turns')[0]!.n, 0)
   r.close()
 })
