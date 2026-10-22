@@ -188,16 +188,25 @@ export function summarize(segments: readonly WorkSegment[], events: readonly Eve
 const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
 const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
 
+function lastInput(detail: string | null): number | null {
+  try {
+    const v = (JSON.parse(detail ?? 'null') as { last_input_wall_ms?: unknown } | null)?.last_input_wall_ms
+    return typeof v === 'number' ? v : null
+  } catch {
+    return null
+  }
+}
+
 // Presence inputs from the capture tables: session, power and input observations, helper runs, and capture gaps.
 export function presenceFromCapture(db: Database.Database, from: number, to: number): PresenceInputs {
   const rows = db
     .prepare(
-      `SELECT kind, state, event_wall_ms AS at FROM observations
+      `SELECT kind, state, event_wall_ms AS at, detail FROM observations
        WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ?
          AND (event_wall_ms >= ? OR id IN (SELECT max(id) FROM observations WHERE kind IN ('session', 'power', 'input') AND event_wall_ms < ? GROUP BY kind))
        ORDER BY event_wall_ms, id`,
     )
-    .all(to, from, from) as { kind: string; state: string; at: number }[]
+    .all(to, from, from) as { kind: string; state: string; at: number; detail: string | null }[]
   const open: Record<'locked' | 'asleep' | 'idle', number | null> = { locked: null, asleep: null, idle: null }
   const inputs: PresenceInputs = { covered: [], locked: [], asleep: [], idle: [], unknown: [] }
   const closeIf = (k: 'locked' | 'asleep' | 'idle', at: number) => {
@@ -212,7 +221,8 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
       if (r.state === 'sleep') open.asleep ??= r.at
       else if (r.state === 'resume' || r.state === 'resume_user') closeIf('asleep', r.at)
     } else if (r.kind === 'input') {
-      if (r.state === 'idle') open.idle ??= r.at
+      // Away from the last input, not from when the helper noticed the idle threshold had passed.
+      if (r.state === 'idle') open.idle ??= Math.min(r.at, lastInput(r.detail) ?? r.at)
       else if (r.state === 'active') closeIf('idle', r.at)
     }
   }

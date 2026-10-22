@@ -666,6 +666,17 @@ export class Store implements Sink {
     return true
   }
 
+  retractObservation(id: number, lastSeenWallMs: number): void {
+    if (id === Store.REFUSED) return
+    const open = this.openRows.get(id) ?? this.storedOpenRow(id)
+    if (!open || lastSeenWallMs >= open.lastSeen) return
+    const at = Math.max(open.row.event_wall_ms, lastSeenWallMs)
+    open.lastSeen = at
+    this.touchedFromWallMs = Math.min(this.touchedFromWallMs, open.row.event_wall_ms)
+    this.touched.add(id)
+    this.enqueue('UPDATE observations SET last_seen_wall_ms = ? WHERE id = ? AND last_seen_wall_ms > ?', [at, id, at])
+  }
+
   flagObservation(id: number, _flag: 'possibly_stale', wallMs: number): void {
     const open = this.openRows.get(id) ?? this.storedOpenRow(id)
     if (open) {

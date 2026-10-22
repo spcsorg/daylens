@@ -230,7 +230,7 @@ test('a heartbeat never carries a row into idle time, which counts as away; afte
   r.feed(focus(editor, 'notes.md - Editor', T0 + 10 * MIN + 10, 'snapshot'))
   beats(r, T0 + 10 * MIN, T0 + 15 * MIN)
   assert.deepEqual(editorRows(r), [
-    [0, 3 * MIN],
+    [0, MIN],
     [10 * MIN + 10, 15 * MIN],
   ])
   r.close()
@@ -360,5 +360,22 @@ test('after the helper restarts, a heartbeat never reopens the row that ended be
     [0, 5 * MIN],
     [7 * MIN + 10, 8 * MIN],
   ])
+  r.close()
+})
+
+test('idle counts from the last input: the window in front ends there, not when the idle threshold was noticed', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
+  beats(r, T0, T0 + 5 * MIN)
+  r.feed(line('input', { state: 'idle', last_input_wall_ms: T0 + 3 * MIN, threshold_s: 120, snapshot: false }, T0 + 5 * MIN))
+  beats(r, T0 + 5 * MIN, T0 + 8 * MIN)
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + 8 * MIN, threshold_s: 120, snapshot: false }, T0 + 8 * MIN))
+  r.feed(focus(editor, 'notes.md - Editor', T0 + 8 * MIN + 10, 'snapshot'))
+  assert.deepEqual(editorRows(r), [
+    [0, 3 * MIN],
+    [8 * MIN + 10, 8 * MIN + 10],
+  ])
+  assert.deepEqual(intervals(r).filter(([, , t]) => t !== null)[0], [0, 3 * MIN, 'notes.md - Editor'])
   r.close()
 })

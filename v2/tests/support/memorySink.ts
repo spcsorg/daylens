@@ -24,6 +24,10 @@ export class MemorySink implements Sink {
     r.last_seen_wall_ms = lastSeenWallMs
     r.repeat_count++
   }
+  retractObservation(id: number, lastSeenWallMs: number): void {
+    const r = this.rows[id - 1]!
+    r.last_seen_wall_ms = Math.max(r.event_wall_ms, Math.min(r.last_seen_wall_ms, lastSeenWallMs))
+  }
   flagObservation(id: number, flag: 'possibly_stale'): void {
     this.rows[id - 1]!.flags.push(flag)
   }

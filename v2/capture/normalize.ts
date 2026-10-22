@@ -88,6 +88,8 @@ export interface Sink {
   // false: the extension was refused (it would cover paused or deleted time); the row is no longer open.
   extendObservation(id: number, lastSeenWallMs: number): boolean | void
   flagObservation(id: number, flag: 'possibly_stale', wallMs: number): void
+  // Ends a row earlier than its last sighting, never before it began.
+  retractObservation(id: number, lastSeenWallMs: number): void
   openGap(gap: GapStart): number
   updateGap(id: number, patch: { reason?: GapReason; detail?: GapDetail }): void
   closeGap(id: number, end: GapPoint): void
@@ -361,6 +363,8 @@ export class Normalizer {
       case 'input':
         this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
         this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
+        // Away from the last input, not from when idle was noticed: the window in front ends there.
+        if (line.obs.state === 'idle' && this.focus !== null && !this.stops.has('idle')) this.sink.retractObservation(this.focus.id, line.obs.last_input_wall_ms)
         return this.setStop('idle', line.obs.state === 'idle', line)
       case 'session': {
         this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)

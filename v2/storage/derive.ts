@@ -76,13 +76,19 @@ export interface IntervalRow {
   files: string
 }
 
-const STOPS = `(kind = 'session' AND state IN ('locked', 'console_disconnect', 'remote_disconnect', 'logoff')) OR (kind = 'power' AND state IN ('sleep', 'display_off'))`
+const STOPS = `(kind = 'session' AND state IN ('locked', 'console_disconnect', 'remote_disconnect', 'logoff')) OR (kind = 'power' AND state IN ('sleep', 'display_off')) OR (kind = 'input' AND state = 'idle')`
 
 function isStop(r: ObsRow): boolean {
   return (
     (r.kind === 'session' && (r.state === 'locked' || r.state === 'console_disconnect' || r.state === 'remote_disconnect' || r.state === 'logoff')) ||
-    (r.kind === 'power' && (r.state === 'sleep' || r.state === 'display_off'))
+    (r.kind === 'power' && (r.state === 'sleep' || r.state === 'display_off')) ||
+    isIdle(r)
   )
+}
+
+// Capture ends the window in front at the last input when idle begins, so an interval ends at its last sighting.
+function isIdle(r: ObsRow): boolean {
+  return r.kind === 'input' && r.state === 'idle'
 }
 
 /** Turns observations (focus rows, the browser pages within them, and the events that end them), in order, into intervals. */
@@ -115,7 +121,7 @@ export class IntervalBuilder {
       this.close(r.event_wall_ms)
       this.open = this.admit(r) ? r : null
     } else if (isStop(r)) {
-      this.close(r.event_wall_ms)
+      this.close(isIdle(r) ? Math.min(r.event_wall_ms, this.front?.last_seen_wall_ms ?? r.event_wall_ms) : r.event_wall_ms)
       this.front = null
     }
   }

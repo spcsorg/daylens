@@ -103,7 +103,7 @@ test('presence comes from the capture tables: locks, sleep, idle, helper runs an
   const inputs = presenceFromCapture(store.database, sec(0), sec(7200))
   assert.deepEqual(inputs.locked, [{ start: sec(1000), end: sec(2000) }])
   assert.deepEqual(inputs.asleep, [{ start: sec(3000), end: sec(4000) }])
-  assert.deepEqual(inputs.idle, [{ start: sec(5000), end: sec(5500) }])
+  assert.deepEqual(inputs.idle, [{ start: sec(4880), end: sec(5500) }], 'away from the last input, not from when idle was noticed')
   assert.deepEqual(inputs.unknown, [{ start: sec(6000), end: sec(6100) }])
   assert.deepEqual(inputs.covered, [{ start: sec(0), end: sec(7200) }])
   // A window that starts while the screen is already locked still knows it is locked.
