@@ -81,6 +81,15 @@ test('the V1 import refuses an output folder that holds the V1 database, and rep
   assert.equal(readFileSync(path.join(out, `${DB_FILE}.backup`), 'utf8'), 'mine', 'a file that only starts with the name is not removed')
 })
 
+test('the search evaluation has no default queries folder: it must be named', () => {
+  // A home with nothing in it, so nothing private can be read or written whatever the tool would default to.
+  const home = tmpDir()
+  const run = spawnSync(process.execPath, ['tools/evalSearch.ts'], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home } })
+  assert.equal(run.status, 1)
+  assert.match(run.stderr, /--queries <folder> is required/)
+  assert.deepEqual(readdirSync(home), [])
+})
+
 test('the search evaluation fails loudly when its private queries or database are missing', () => {
   const noQueries = spawnSync(process.execPath, ['tools/evalSearch.ts', '--queries', path.join(tmpDir(), 'missing')], { cwd: V2, encoding: 'utf8' })
   assert.equal(noQueries.status, 1)

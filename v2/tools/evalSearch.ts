@@ -1,6 +1,6 @@
 // Recall of search on gold queries from real days. The queries and the database are private and live outside the
 // repository; this fails loudly when either is missing rather than measuring nothing.
-// Usage: npm run eval:search [-- --queries <folder>] [-- --db <daylens-v2.sqlite>] [-- --match all|any]
+// Usage: npm run eval:search -- --queries <folder> [--db <daylens-v2.sqlite>] [--match all|any]
 // Writes results-<date>.json beside queries.json and prints the summary.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -12,12 +12,16 @@ import { search, type FoundItem, type SearchResults } from '../retrieval/search.
 const HOME = os.homedir()
 const { values } = parseArgs({
   options: {
-    queries: { type: 'string', default: path.join(HOME, 'Projects', 'Daylens', 'Evaluation & decisions', '2026-10-21-search-queries') },
+    queries: { type: 'string' },
     db: { type: 'string', default: path.join(HOME, 'Library', 'Application Support', 'Daylens V2 Eval', 'daylens-v2.sqlite') },
     match: { type: 'string', default: 'all' },
   },
 })
 if (values.match !== 'all' && values.match !== 'any') throw new Error('--match all|any')
+if (!values.queries) {
+  process.stderr.write('eval:search: --queries <folder> is required: the folder holding queries.json, where results are written; nothing was measured.\n')
+  process.exit(1)
+}
 const match = values.match
 const folder = path.resolve(values.queries)
 const file = path.join(folder, 'queries.json')
