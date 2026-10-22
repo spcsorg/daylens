@@ -168,6 +168,29 @@ test('agent work shows sessions, turns and message times, as a deletion under wa
   s.close()
 })
 
+test('an app deleted for a range cuts the agent turn that crossed into it and leaves the rest, pending or done, as the deletion does', async () => {
+  for (const hold of [true, false]) {
+    const s = setup({ holdDeletions: hold })
+    const agents = new AgentStore(s.r.store.database)
+    agents.apply('claude_code', [
+      ...turn('t1', 's1', T0 + 115 * MIN, T0 + 150 * MIN),
+      { t: 'user', key: 't1-u2', session: 's1', turn: 't1', act: 'steer', basis: 'marked', at: T0 + 125 * MIN },
+      ...turn('t2', 's1', T0 + 125 * MIN, T0 + 130 * MIN),
+      ...turn('t3', 's1', T0 + 3 * HOUR, T0 + 3 * HOUR + 10 * MIN),
+    ])
+    agents.recordHost('claude_code', 's1', { app_id: 'com.mitchellh.ghostty', name: 'Ghostty', path: null }, 'log', T0)
+    s.r.clock.t = T0 + 5 * HOUR
+    const handle = s.r.storage.deleteSource('com.mitchellh.ghostty', { from_wall_ms: T0 + 2 * HOUR, to_wall_ms: T0 + 2 * HOUR + 15 * MIN })
+    if (!hold) await handle.done
+    const ctx = { ...s.ctx, log: { recordRead: () => 0 } }
+    const work = runReadTool('get_agent_work', { date: DATE }, ctx) as { sessions: { turns: { start: string; end: string }[]; user_messages_at: string[] }[] }
+    assert.deepEqual(work.sessions.map((x) => [x.turns.map((t) => [t.start.slice(11, 16), t.end.slice(11, 16)]), x.user_messages_at.map((m) => m.slice(11, 16))]), [
+      [[['09:55', '10:00'], ['11:00', '11:10']], ['09:55', '11:00']],
+    ], `hold=${hold}`)
+    s.close()
+  }
+})
+
 test('input is checked, the longest span is the one the person set, and limits have no defaults', () => {
   const s = setup()
   assert.throws(() => runReadTool('get_day', { date: '2026-02-30' }, s.ctx), ToolInputError)
