@@ -23,10 +23,28 @@ const { values } = parseArgs({
 })
 const v1File = path.resolve(values.v1)
 const out = path.resolve(values.out)
-// The imported database holds real days: it never goes where a cloud drive syncs it.
-for (const synced of [path.join(HOME, 'Projects'), path.join(HOME, 'Library', 'CloudStorage'), path.join(HOME, 'Google Drive')]) {
-  if (out === synced || out.startsWith(synced + path.sep)) throw new Error(`refusing ${out}: it syncs to a cloud drive`)
+// The imported database holds real days: it never goes where a cloud drive syncs it. The check is on the real path, so a
+// link into a synced folder (home folders linked into a drive, for one) is refused like the folder itself. Google Drive,
+// Dropbox, OneDrive and Box sync through ~/Library/CloudStorage, iCloud Drive through ~/Library/Mobile Documents, and
+// iCloud can sync Desktop and Documents.
+const SYNCED = [['Library', 'CloudStorage'], ['Library', 'Mobile Documents'], ['Google Drive'], ['iCloud Drive'], ['Desktop'], ['Documents'], ['Projects']].map((p) => path.join(HOME, ...p))
+// Home folders these apps make under names that start so: "OneDrive - Company", "Dropbox (Personal)", "Box Sync".
+const SYNCED_NAMED = ['OneDrive', 'Dropbox', 'Box']
+/** The real path of a folder that may not exist yet: its nearest existing parent resolved, the rest as given. */
+function realOf(p: string): string {
+  const rest: string[] = []
+  for (let at = p; ; at = path.dirname(at)) {
+    if (existsSync(at)) return path.join(realpathSync(at), ...rest.reverse())
+    rest.push(path.basename(at))
+    if (path.dirname(at) === at) return p
+  }
 }
+const realOut = realOf(out)
+const homes = [HOME, realOf(HOME)]
+const synced = (x: string) =>
+  SYNCED.flatMap((p) => [p, realOf(p)]).some((p) => x === p || x.startsWith(p + path.sep)) ||
+  homes.some((h) => x.startsWith(h + path.sep) && SYNCED_NAMED.some((n) => x.slice(h.length + 1).split(path.sep)[0]!.startsWith(n)))
+if (synced(out) || synced(realOut)) throw new Error(`refusing ${out}: it syncs to a cloud drive`)
 if (!existsSync(v1File)) throw new Error(`no V1 database at ${v1File}`)
 mkdirSync(out, { recursive: true })
 // The output folder's database is replaced; V1's file must never be one of the files that removes.

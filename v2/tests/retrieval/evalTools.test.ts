@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -61,6 +61,30 @@ test('the V1 import reads a copy, never changes V1, and builds V2 rows through i
   assert.notEqual(refused.status, 0)
   assert.match(refused.stderr, /syncs to a cloud drive/)
   assert.equal(existsSync(path.join(os.homedir(), 'Projects', 'daylens-import-refusal-check')), false)
+})
+
+test('the V1 import refuses every folder a cloud drive syncs, however the path reaches it', () => {
+  const v1 = v1Fixture()
+  // A home of its own, so nothing real is written whatever the tool would do.
+  const home = tmpDir()
+  const drive = path.join(home, 'Library', 'CloudStorage', 'GoogleDrive-someone', 'My Drive')
+  mkdirSync(drive, { recursive: true })
+  mkdirSync(path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'), { recursive: true })
+  const linked = path.join(tmpDir(), 'linked')
+  symlinkSync(drive, linked)
+  for (const out of [
+    path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs', 'eval'),
+    path.join(linked, 'eval'),
+    path.join(home, 'OneDrive - Example', 'eval'),
+    path.join(home, 'Dropbox (Personal)', 'eval'),
+    path.join(home, 'Documents', 'eval'),
+  ]) {
+    const run = spawnSync(process.execPath, ['tools/importV1.ts', '--v1', v1, '--out', out], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home } })
+    assert.notEqual(run.status, 0, out)
+    assert.match(run.stderr, /syncs to a cloud drive/, out)
+    assert.equal(existsSync(out), false, out)
+  }
+  assert.deepEqual(readdirSync(drive), [])
 })
 
 test('the V1 import refuses an output folder that holds the V1 database, and replaces only its own database there', () => {
