@@ -15,7 +15,7 @@ import { immediateRetrying } from './tx.ts'
 import { ScrubUnavailableError, scrubAll, scrubBlocked } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
 import { leafRowid, readStructure, segmentCount, type FtsSegment, type FtsStructure } from './ftsStructure.ts'
-import { dbHostLookup, resolveHost } from '../capture/agents/store.ts'
+import { dbHostLookup, resolveHost, type HostLookup } from '../capture/agents/store.ts'
 import type { Agent } from '../capture/agents/types.ts'
 
 export interface DeletionResult {
@@ -436,6 +436,7 @@ export class Deleter {
           after = rows[rows.length - 1]!.id
         }
       }
+      removed += this.cutAgentHostCrossing(look, app, agent, session, from, to)
       n += removed
       const ownSpan = db.prepare(
         `SELECT 1 FROM agent_hosts h WHERE h.agent = ? AND h.session_id = ? AND lower(h.app_id) = ? AND h.from_wall_ms < ?
@@ -446,11 +447,49 @@ export class Deleter {
     for (const { agent, session } of affected) {
       immediateRetrying(db, () => {
         n += db.prepare(`DELETE FROM agent_sessions WHERE agent = ? AND session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id)`).run(agent, session).changes
+        const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
+        db.prepare(
+          `UPDATE agent_sessions SET
+             first_wall_ms = (SELECT min(start_wall_ms) FROM agent_turns t WHERE ${own}),
+             last_wall_ms = (SELECT max(max(last_activity_wall_ms, coalesce(end_wall_ms, 0))) FROM agent_turns t WHERE ${own})
+           WHERE agent = ? AND session_id = ?`,
+        ).run(agent, session)
         // Parser state of the session's logs can describe what was removed (an open turn, message fingerprints).
         db.prepare('UPDATE agent_sources SET state = NULL WHERE agent = ? AND session_id = ? AND state IS NOT NULL').run(agent, session)
       })
     }
     return n
+  }
+
+  /**
+   * A turn or wait that began before `from` and runs on into the range is cut where the session is first in the app
+   * within it: at `from`, or where the session or a session above it moved to the app.
+   */
+  private cutAgentHostCrossing(look: HostLookup, app: string, agent: Agent, session: string, from: number, to: number): number {
+    const db = this.db
+    if (from === Number.MIN_SAFE_INTEGER) return 0
+    const chain: string[] = []
+    for (let s: string | null = session; s !== null && !chain.includes(s); s = look.parent(agent, s)) chain.push(s)
+    const moves = db.prepare('SELECT from_wall_ms AS at FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms > ? AND from_wall_ms < ?').pluck()
+    const cutAt = (until: number): number | null => {
+      const times = [from, ...chain.flatMap((s) => moves.all(agent, s, from, until) as number[])].sort((a, b) => a - b)
+      return times.find((at) => resolveHost(look, agent, session, at)?.app_id?.toLowerCase() === app) ?? null
+    }
+    const turns = db
+      .prepare('SELECT id, max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = ? AND session_id = ? AND start_wall_ms < ? AND (last_activity_wall_ms > ? OR end_wall_ms > ?)')
+      .all(agent, session, from, from, from) as { id: number; last: number }[]
+    const waits = db.prepare('SELECT id, end_wall_ms AS last FROM agent_events WHERE agent = ? AND session_id = ? AND wall_ms < ? AND end_wall_ms > ?').all(agent, session, from, from) as { id: number; last: number }[]
+    const cuts = [...turns.map((x) => ({ table: 'agent_turns', ...x })), ...waits.map((x) => ({ table: 'agent_events', ...x }))].flatMap((x) => {
+      const at = cutAt(Math.min(x.last, to))
+      return at === null ? [] : [{ ...x, at }]
+    })
+    if (cuts.length === 0) return 0
+    immediateRetrying(db, () => {
+      const turn = db.prepare('UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @at), end_wall_ms = CASE WHEN end_wall_ms > @at THEN @at ELSE end_wall_ms END WHERE id = @id')
+      const wait = db.prepare('UPDATE agent_events SET end_wall_ms = @at WHERE id = @id AND end_wall_ms > @at')
+      for (const c of cuts) (c.table === 'agent_turns' ? turn : wait).run({ id: c.id, at: c.at })
+    })
+    return cuts.length
   }
 
   /**

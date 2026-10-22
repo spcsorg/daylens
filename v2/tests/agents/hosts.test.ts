@@ -297,3 +297,22 @@ test('deleting an app across all time deletes the past only: what the app and it
   assert.deepEqual(turns('s'), ['s2'], 'once excluded, its sessions are not')
   r.close()
 })
+
+test('deleting an app for a range cuts agent work that ran in it from before the range began', async () => {
+  const { r, agents } = setup()
+  const H = 60 * MIN
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0)
+  agents.apply('claude_code', [
+    { t: 'session', session: 's', origin: 'interactive', parent: null, client: 'cli', dir: '/w', branch: null, at: T0 + H - 5 * MIN },
+    { t: 'turn', key: 'k', session: 's', dir: '/w', branch: null, opener: 'user', start: T0 + H - 5 * MIN, replayed: false },
+    { t: 'wait', key: 'w', session: 's', turn: 'k', reason: 'question', start: T0 + H - 2 * MIN, end: T0 + H + 5 * MIN },
+    { t: 'activity', key: 'k', session: 's', at: T0 + H + 14 * MIN },
+    { t: 'end', key: 'k', state: 'completed', at: T0 + H + 15 * MIN },
+  ])
+  r.clock.t = T0 + 2 * H
+  await r.storage.deleteSource('com.mitchellh.ghostty', { from_wall_ms: T0 + H, to_wall_ms: T0 + H + 30 * MIN }).done
+  assert.deepEqual(r.q('SELECT start_wall_ms, last_activity_wall_ms, end_wall_ms FROM agent_turns'), [{ start_wall_ms: T0 + H - 5 * MIN, last_activity_wall_ms: T0 + H, end_wall_ms: T0 + H }])
+  assert.deepEqual(r.q('SELECT wall_ms, end_wall_ms FROM agent_events WHERE kind = ?', 'wait'), [{ wall_ms: T0 + H - 2 * MIN, end_wall_ms: T0 + H }])
+  assert.deepEqual(r.q('SELECT first_wall_ms, last_wall_ms FROM agent_sessions'), [{ first_wall_ms: T0 + H - 5 * MIN, last_wall_ms: T0 + H }])
+  r.close()
+})
