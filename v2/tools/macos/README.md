@@ -22,10 +22,10 @@ Window titles stay empty until the helper has Accessibility access; see step 4 b
 2. Write the plist for this checkout. It points at the `node` you run it with, this folder, and the helper you just built:
 
    ```bash
-   node tools/macos/launchd.ts --deletion-stall-ms <ms>
+   node tools/macos/launchd.ts
    ```
 
-   `--deletion-stall-ms` is required and has no default: how long the deletion worker may commit nothing while it has work before capture takes checkpointing back from it. It prints the path of the plist it wrote, `build/app.daylens.engine.plist`. Pass `--data-dir <dir>` to use another data folder, or `--node <path>` for another Node 24.
+   It prints the path of the plist it wrote, `build/app.daylens.engine.plist`. Pass `--data-dir <dir>` to use another data folder, or `--node <path>` for another Node 24.
 3. Copy it and load it:
 
    ```bash

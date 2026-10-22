@@ -1,5 +1,5 @@
 // Capture service process: supervisor + normalization + storage. Runs outside the interface process.
-// Usage: node capture/service.ts --helper <path> --deletion-stall-ms <ms> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
+// Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--deletion-stall-ms 60000] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
 //        [--agent-sessions]   reads Claude Code and Codex session logs (agent session metadata is recorded only with permission)
 
 import os from 'node:os'
@@ -12,6 +12,7 @@ import { AgentReader, homeRoots } from './agents/reader.ts'
 import { AgentStore, removeStaging } from './agents/store.ts'
 import { WslDiscovery } from './agents/wsl.ts'
 import { BrowserPages } from './browser.ts'
+import { DELETION_STALL_MS } from './defaults.ts'
 import { BrowserLocal, helperPeerCheck, localEnabled } from './browserLocal.ts'
 import { BrowserSocket, statusMsg } from './browserSocket.ts'
 import { Privacy } from './normalize.ts'
@@ -33,14 +34,14 @@ const { values } = parseArgs({
     'reconcile-s': { type: 'string', default: '60' },
     'hang-after-s': { type: 'string' },
     'tick-ms': { type: 'string' },
-    'deletion-stall-ms': { type: 'string' },
+    'deletion-stall-ms': { type: 'string', default: String(DELETION_STALL_MS) },
     'agent-sessions': { type: 'boolean', default: false },
   },
 })
 
 const deletionStallMs = Number(values['deletion-stall-ms'])
 if (!values.helper || !(deletionStallMs > 0)) {
-  process.stderr.write('usage: service.ts --helper <path> --deletion-stall-ms <ms> [--data-dir <dir>]\n')
+  process.stderr.write('usage: service.ts --helper <path> [--data-dir <dir>] [--deletion-stall-ms <ms>]\n')
   process.exit(64)
 }
 

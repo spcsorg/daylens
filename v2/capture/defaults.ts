@@ -1,3 +1,6 @@
+// How long the deletion worker may commit nothing while it has work before capture takes checkpointing back from it.
+export const DELETION_STALL_MS = 60_000
+
 export interface ExclusionRule {
   // `site` matches a page host and every subdomain of it.
   match: 'app_id' | 'exe' | 'site'

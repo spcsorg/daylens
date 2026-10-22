@@ -1,16 +1,16 @@
 // Writes a launchd agent that runs the engine (capture, storage and agent-session reading) from this checkout at
 // login and keeps it running. It installs and starts nothing; see README.md beside it.
-// Usage: node tools/macos/launchd.ts --deletion-stall-ms <ms> [--out <file>] [--node <path>] [--data-dir <dir>]
+// Usage: node tools/macos/launchd.ts [--out <file>] [--node <path>] [--data-dir <dir>]
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
+import { DELETION_STALL_MS } from '../../capture/defaults.ts'
 
 export const LABEL = 'app.daylens.engine'
 
 const v2 = path.resolve(import.meta.dirname, '..', '..')
-const { values } = parseArgs({ options: { out: { type: 'string' }, node: { type: 'string' }, 'data-dir': { type: 'string' }, 'deletion-stall-ms': { type: 'string' } } })
-if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
+const { values } = parseArgs({ options: { out: { type: 'string' }, node: { type: 'string' }, 'data-dir': { type: 'string' }, 'deletion-stall-ms': { type: 'string', default: String(DELETION_STALL_MS) } } })
 const node = path.resolve(values.node ?? process.execPath)
 const helper = path.join(v2, 'native', 'macos', '.build', 'release', 'daylens-capture-macos')
 const logs = path.join(os.homedir(), 'Library', 'Logs', 'Daylens V2 Dev')

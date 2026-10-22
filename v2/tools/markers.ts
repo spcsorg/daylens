@@ -1,14 +1,14 @@
 // Scripted app switches and title changes at logged times, compared with what capture recorded.
-// It takes over the screen for about a minute. Usage: node tools/markers.ts --helper <path> --deletion-stall-ms <ms> --out <dir>
+// It takes over the screen for about a minute. Usage: node tools/markers.ts --helper <path> --out <dir>
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { DELETION_STALL_MS } from '../capture/defaults.ts'
 
-const { values } = parseArgs({ options: { helper: { type: 'string' }, out: { type: 'string' }, 'deletion-stall-ms': { type: 'string' } } })
-if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
+const { values } = parseArgs({ options: { helper: { type: 'string' }, out: { type: 'string' }, 'deletion-stall-ms': { type: 'string', default: String(DELETION_STALL_MS) } } })
 const out = values.out!
 const service = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

@@ -1,6 +1,6 @@
 // Runs the capture service with a real helper, samples every process it owns, and reports CPU, memory,
 // wakeups and energy against the background budget (docs/system-design.md#budgets).
-// Usage: node tools/soak.ts --helper <path> --deletion-stall-ms <ms> --minutes 60 --out <dir> [--procstat <path>] [--warmup-s 60]
+// Usage: node tools/soak.ts --helper <path> --minutes 60 --out <dir> [--procstat <path>] [--warmup-s 60]
 //        [--runtime electron]   runs the compiled service (npm run build:js) under Electron's Node, as production does
 import { spawn } from 'node:child_process'
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -9,11 +9,12 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { DELETION_STALL_MS } from '../capture/defaults.ts'
 
 const { values } = parseArgs({
   options: {
     helper: { type: 'string' },
-    'deletion-stall-ms': { type: 'string' },
+    'deletion-stall-ms': { type: 'string', default: String(DELETION_STALL_MS) },
     minutes: { type: 'string', default: '60' },
     out: { type: 'string' },
     procstat: { type: 'string' },
@@ -25,7 +26,6 @@ const { values } = parseArgs({
     'to-ms': { type: 'string' },
   },
 })
-if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
 const out = values.out!
 const procstat = values.procstat ?? path.join(out, 'procstat')
 const service = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
