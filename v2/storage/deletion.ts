@@ -90,6 +90,29 @@ export function fenceEdges(db: Database.Database, t: Spec, allocateId: () => num
 }
 
 /**
+ * Inside the fence transaction, for a deleted range: a capture gap that crosses its start ends there, and one that runs
+ * past its end (or is still open) starts again at the end. A gap that crosses both is split, and the part after keeps the
+ * id, which whoever will close an open gap holds. Gaps wholly inside go with the removal.
+ */
+export function fenceGaps(db: Database.Database, from: number, to: number, allocateGapId: () => number): void {
+  const crossing = db.prepare('SELECT * FROM capture_gaps WHERE start_wall_ms < ? AND (end_wall_ms IS NULL OR end_wall_ms > ?)').all(from, from) as Record<string, unknown>[]
+  const insert = db.prepare(
+    `INSERT INTO capture_gaps (id, reason, scope, run, start_wall_ms, start_mono_us, start_boot, end_wall_ms, end_mono_us, end_boot, detail)
+     VALUES (@id, @reason, @scope, @run, @start_wall_ms, @start_mono_us, @start_boot, @end, NULL, NULL, @detail)`,
+  )
+  for (const g of crossing) {
+    const end = g.end_wall_ms as number | null
+    if (end !== null && end <= to) {
+      db.prepare('UPDATE capture_gaps SET end_wall_ms = ?, end_mono_us = NULL, end_boot = NULL WHERE id = ?').run(from, g.id)
+      continue
+    }
+    insert.run({ ...g, id: allocateGapId(), end: from })
+    db.prepare('UPDATE capture_gaps SET start_wall_ms = ?, start_mono_us = NULL, start_boot = NULL WHERE id = ?').run(to, g.id)
+  }
+  db.prepare('UPDATE capture_gaps SET start_wall_ms = ?, start_mono_us = NULL, start_boot = NULL WHERE start_wall_ms >= ? AND start_wall_ms < ? AND (end_wall_ms IS NULL OR end_wall_ms > ?)').run(to, from, to, to)
+}
+
+/**
  * Inside the fence transaction, with the tombstone: everything later steps must reach, before any of it changes.
  * Hours: those the deletion removes or clears. Threads and assistant reads: those linked to them, and reads over
  * the range or of the app or site. Search entries: only the hours cut by a range edge need rebuilding; entries
@@ -778,10 +801,8 @@ export class Deleter {
     if (t.kind === 'range' && hasAgentTables(db)) r.agentRecords += this.deleteAgentRange(from, to)
     if (t.kind === 'source' && t.app_id !== null && hasAgentTables(db) && hasAgentHosts(db)) r.agentRecords += this.deleteAgentHost(t.app_id, from, to)
     if (t.kind === 'range') {
-      immediateRetrying(db, () => {
-        db.prepare('UPDATE capture_gaps SET end_wall_ms = ? WHERE start_wall_ms < ? AND end_wall_ms > ?').run(from, from, from)
-        db.prepare(`DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ? AND reason != 'paused'`).run(from, to)
-      })
+      // The fence moved every gap that crosses an edge out of the range; a pause's gap goes like any other.
+      immediateRetrying(db, () => db.prepare('DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ?').run(from, to))
     }
     stop('search')
 

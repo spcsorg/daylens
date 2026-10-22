@@ -285,3 +285,31 @@ test('a crash right after a prune still leaves the obligation to purge, written 
   assert.deepEqual(diskContains(r2.dir, 'Saola'), [])
   r2.close()
 })
+
+test('deleting a range cuts the capture gaps at its edges, open ones included, and removes every gap inside, pauses too', async () => {
+  const r = rig()
+  const at = (wall_ms: number) => ({ wall_ms, mono_us: null, boot: null })
+  const ended = r.store.openGap({ reason: 'helper_crashed', scope: 'all', run: null, start: at(T0 + 30 * MIN), detail: null })
+  r.store.closeGap(ended, at(T0 + 70 * MIN))
+  const open = r.store.openGap({ reason: 'titles_unavailable', scope: 'titles', run: null, start: at(T0 + 30 * MIN), detail: null })
+  r.store.flush()
+  r.clock.t = T0 + HOUR + 20 * MIN
+  r.storage.pause(null)
+  r.clock.t = T0 + HOUR + 30 * MIN
+  r.storage.resume()
+  r.clock.t = T0 + HOUR + 40 * MIN
+  r.storage.pause(null)
+  r.clock.t = T0 + 3 * HOUR
+  await r.storage.deleteRange(T0 + HOUR, T0 + 2 * HOUR).done
+  r.store.closeGap(open, at(T0 + 3 * HOUR + 5 * MIN))
+  r.clock.t = T0 + 3 * HOUR + 10 * MIN
+  r.storage.resume()
+  const gaps = r.q<{ reason: string; s: number; e: number | null }>('SELECT reason, start_wall_ms - ? AS s, end_wall_ms - ? AS e FROM capture_gaps ORDER BY start_wall_ms, reason', T0, T0)
+  assert.deepEqual(gaps, [
+    { reason: 'helper_crashed', s: 30 * MIN, e: HOUR },
+    { reason: 'titles_unavailable', s: 30 * MIN, e: HOUR },
+    { reason: 'paused', s: 2 * HOUR, e: 3 * HOUR + 10 * MIN },
+    { reason: 'titles_unavailable', s: 2 * HOUR, e: 3 * HOUR + 5 * MIN },
+  ])
+  r.close()
+})

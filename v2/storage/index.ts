@@ -6,7 +6,7 @@ import { canonicalKeptTitleId, keptTitleIdentity, knownBrowser, Privacy, type Ga
 import type { AppIdentity } from '../capture/protocol.ts'
 import { Store, WAL_AUTOCHECKPOINT } from '../capture/store.ts'
 import { ChangeBus, type ChangeKind } from './changes.ts'
-import { DeletionWorker, fenceEdges, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
+import { DeletionWorker, fenceEdges, fenceGaps, planDeletion, pruneStep, type DeletionResult, type PruneResult } from './deletion.ts'
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
@@ -446,6 +446,7 @@ export class Storage {
               .run(t.kind, t.from_wall_ms, t.to_wall_ms, t.app_id, t.site, this.now()).lastInsertRowid,
           )
           fenceEdges(this.db, t, () => this.store.allocateObservationId())
+          if (t.kind === 'range' && t.from_wall_ms !== null && t.to_wall_ms !== null) fenceGaps(this.db, t.from_wall_ms, t.to_wall_ms, () => this.store.allocateGapId())
           planDeletion(this.db, id, t)
           return id
         },

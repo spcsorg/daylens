@@ -584,6 +584,11 @@ export class Store implements Sink {
     this.openRows.clear()
   }
 
+  /** An id for a gap written directly by storage (a gap split by a deletion); queued writes are flushed first. */
+  allocateGapId(): number {
+    return this.nextGapId++
+  }
+
   /** An id for a row written directly by storage (a row split by a deletion); queued writes are flushed first. */
   allocateObservationId(): number {
     const id = this.nextObsId++
