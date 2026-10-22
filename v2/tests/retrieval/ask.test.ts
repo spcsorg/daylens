@@ -75,8 +75,50 @@ test('an answer keeps only statements that cite what the AI was given, and each 
   assert.deepEqual(s.usage(), [{ kind: 'answer', provider: 'fake', model: 'fake-1', input_tokens: 1200, output_tokens: 80, ref: `read:${s.reads()[0]!.id}` }])
 
   assert.equal(seen[0]!.system, SYSTEM_PROMPT)
-  const record = JSON.parse(seen[0]!.prompt) as { hours: { title?: string }[] }
-  assert.equal(record.hours[0]!.title, 'Budget review')
+  s.close()
+})
+
+test('Daylens’s own hour text is not sent as evidence, the person’s corrections are, and a statement must cite something from the time, day, app, site and file it names', async () => {
+  const s = setup()
+  const hourId = s.r.storage.hourAt(T0)!.id
+  const seen: AskRequest[] = []
+  type Rec = { hours: { id: string; title?: string; summary?: string; corrected?: Record<string, string> }[]; sources: { id: string; address?: string; file?: string; title: string }[] }
+  const statements = (rec: Rec) => {
+    const hour = rec.hours[0]!.id
+    const page = rec.sources.find((x) => x.address)!.id
+    const file = rec.sources.find((x) => x.file === 'q4-budget.xlsx')!.id
+    const groceries = rec.sources.find((x) => x.title === 'Groceries')!.id
+    return [
+      { text: 'At 8:05 you had q4-budget.xlsx open in Editor.', sources: [file] },
+      { text: 'You emailed the bank in Mail.', sources: [hour] },
+      { text: 'At 15:00 you read the budget review.', sources: [page] },
+      { text: 'You read docs.example.com.', sources: [file] },
+      { text: 'You worked in Notes.', sources: [file] },
+      { text: 'You edited q4-budget.xlsx.', sources: [groceries] },
+      { text: 'On Monday you reviewed the budget.', sources: [hour] },
+      { text: 'Yesterday from 8:00 to 9:00 you were in Editor, Chrome and Notes.', sources: [hour] },
+      { text: 'You read the Budget review page on docs.example.com in Chrome.', sources: [page] },
+    ]
+  }
+  const model = fakeModel((req) => ({ answerable: true, statements: statements(JSON.parse(req.prompt) as Rec) }), seen)
+  const res = await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, LIMITS)
+  assert.equal(res.kind, 'answer')
+  if (res.kind !== 'answer') return
+  assert.deepEqual(res.statements.map((x) => x.text), [
+    'At 8:05 you had q4-budget.xlsx open in Editor.',
+    'You emailed the bank in Mail.',
+    'Yesterday from 8:00 to 9:00 you were in Editor, Chrome and Notes.',
+    'You read the Budget review page on docs.example.com in Chrome.',
+  ], 'what code cannot check (the bank) passes; a time, day, app, site or file the citations do not have does not')
+  assert.equal(res.dropped, 5)
+  const sent = JSON.parse(seen[0]!.prompt) as Rec
+  assert.deepEqual([sent.hours[0]!.title, sent.hours[0]!.summary, sent.hours[0]!.corrected], [undefined, undefined, undefined], 'the written hour is not evidence')
+  assert.match(seen[0]!.system, /must cite an hour or source from that time, that day, that app, that site or that file/)
+
+  s.r.storage.correct(hourId, 'summary', 'Cut the travel line.')
+  await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, LIMITS)
+  const corrected = JSON.parse(seen[1]!.prompt) as Rec
+  assert.deepEqual([corrected.hours[0]!.title, corrected.hours[0]!.corrected], [undefined, { summary: 'Cut the travel line.' }])
   s.close()
 })
 
