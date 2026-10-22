@@ -109,13 +109,24 @@ func screenLocked() -> Bool? {
   return (dict["CGSSessionScreenIsLocked"] as? Bool) ?? false
 }
 
+// Off when every online display is asleep; nil when the displays cannot be listed or there are none.
+func displayOn() -> Bool? {
+  var count: UInt32 = 0
+  guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  guard CGGetOnlineDisplayList(count, &ids, &count) == .success, count > 0 else { return nil }
+  return ids.prefix(Int(count)).contains { CGDisplayIsAsleep($0) == 0 }
+}
+
+// The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
 func snapshot() {
-  requestFocus(.snapshot, NSWorkspace.shared.frontmostApplication, force: true)
-  checkIdle(snapshot: true)
+  if let on = displayOn() { emit("power", "cg_display", Obs.power(on ? "display_on" : "display_off", snapshot: true)) }
   let locked = screenLocked()
   screenIsLocked = locked ?? false
   if screenIsLocked { suspendIdle(true) }
   emit("session", "cg_session", Obs.session(locked.map { $0 ? "locked" : "unlocked" } ?? "unknown", snapshot: true))
+  requestFocus(.snapshot, NSWorkspace.shared.frontmostApplication, force: true)
+  checkIdle(snapshot: true)
 }
 
 final class DistributedObserver: NSObject {
@@ -143,7 +154,7 @@ final class DistributedObserver: NSObject {
 
 titles.start()
 
-emit("hello", "helper", Obs.hello(helper: "daylens-capture-macos", bootIdentity: boot.source, version: helperVersion, pid: Int(getpid()), os: osDescription(),
+emit("hello", "helper", Obs.hello(awakeUs: Clock.awakeUs(), helper: "daylens-capture-macos", bootIdentity: boot.source, version: helperVersion, pid: Int(getpid()), os: osDescription(),
                                   permissions: permissions(), heartbeatS: heartbeatS, idleThresholdS: idleThresholdS, reconcileS: reconcileS))
 
 let ws = NSWorkspace.shared.notificationCenter

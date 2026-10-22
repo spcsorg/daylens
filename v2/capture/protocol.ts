@@ -25,6 +25,8 @@ export type ChannelState = 'ok' | 'degraded' | 'stalled' | 'no_permission'
 export type BootIdentitySource = 'kernel' | 'clock'
 
 export interface HelloObs {
+  // As in heartbeat: compared with the first heartbeat, it shows whether the machine slept in between.
+  awake_us: number
   helper: string
   boot_identity: BootIdentitySource
   version: string
@@ -101,6 +103,8 @@ export interface SessionObs {
 export type PowerState = 'sleep' | 'resume' | 'resume_user' | 'display_off' | 'display_on' | 'display_dim'
 export interface PowerObs {
   state: PowerState
+  // The display's current state, sent in a snapshot, not a change.
+  snapshot?: boolean
 }
 export interface ClockObs {
   change: 'time_changed' | 'timezone_changed'
@@ -291,6 +295,7 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
   hello: (o) => {
     const c = obj(o.config, 'config')
     return {
+      awake_us: int(o, 'awake_us'),
       helper: str(o, 'helper', 64),
       boot_identity: oneOf(o, 'boot_identity', ['kernel', 'clock'] as const),
       version: str(o, 'version', 64),
@@ -327,7 +332,7 @@ const OBS: { [K in Kind]: (o: Obj) => ObsByKind[K] } = {
     snapshot: boolOr(o, 'snapshot', false),
   }),
   session: (o) => ({ state: oneOf(o, 'state', SESSION_STATES), snapshot: boolOr(o, 'snapshot', false) }),
-  power: (o) => ({ state: oneOf(o, 'state', POWER_STATES) }),
+  power: (o) => ({ state: oneOf(o, 'state', POWER_STATES), ...(o.snapshot === undefined ? {} : { snapshot: bool(o, 'snapshot') }) }),
   clock: (o) => ({ change: oneOf(o, 'change', CLOCK_CHANGES) }),
   loss: (o) => {
     const from_wall_ms = int(o, 'from_wall_ms')

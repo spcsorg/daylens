@@ -88,7 +88,7 @@ test('presence comes from the capture tables: locks, sleep, idle, helper runs an
   const dir = tmp()
   const store = new Store(dir)
   const n = new Normalizer(store)
-  store.startRun(line('hello', { helper: 'test', boot_identity: 'kernel', version: '1', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, sec(0)) as never)
+  store.startRun(line('hello', { awake_us: 0, helper: 'test', boot_identity: 'kernel', version: '1', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, sec(0)) as never)
   store.endRun('run-test', sec(7200), 'test')
   n.handle(line('session', { state: 'unlocked', snapshot: true }, sec(0)))
   n.handle(line('session', { state: 'locked', snapshot: false }, sec(1000)))

@@ -12,7 +12,7 @@ public class GoldenFixtureTests
     // Obs for every win_* fixture, built the way Program.cs builds them where Core has the classifier.
     static readonly Dictionary<string, Action<Utf8JsonWriter>> Builders = new()
     {
-        ["win_hello"] = Obs.Hello("daylens-capture-windows", "2.0.0-dev", 7000, "Windows 10.0.26100", 15, 120, 60),
+        ["win_hello"] = Obs.Hello(612_345_000_000, "daylens-capture-windows", "2.0.0-dev", 7000, "Windows 10.0.26100", 15, 120, 60),
         ["win_heartbeat"] = Obs.Heartbeat(612_345_678_901, new Registrations(true, true, true), ChannelState.Ok, 0, 3),
         ["win_heartbeat_session_unregistered"] = Obs.Heartbeat(612_345_678_901, new Registrations(Focus: true, Session: false, Power: true), ChannelState.Ok, 0, 0),
         ["win_focus_store"] = Obs.Focus(FocusTrigger.AppChanged, Calculator, WindowInfo.Read("0x1A2B3C", "Calculator")),
@@ -20,6 +20,7 @@ public class GoldenFixtureTests
         ["win_focus_unicode"] = Obs.Focus(FocusTrigger.TitleChanged, Calculator, WindowInfo.Read("0x1A2B3C", UnicodeTitle)),
         ["win_power_resume"] = Obs.Power(Power.Classify(Power.PBT_APMRESUMEAUTOMATIC)!),
         ["win_power_resume_user"] = Obs.Power(Power.Classify(Power.PBT_APMRESUMESUSPEND)!),
+        ["win_power_display_snapshot"] = Obs.Power("display_on", snapshot: true),
         ["win_session_snapshot"] = Obs.Session(Sessions.FromSessionFlags(1), true),
         ["win_input_active"] = Obs.Input(false, 1_792_130_412_000, 120, true),
         ["win_focus_unresolved_host"] = Obs.Focus(FocusTrigger.AppChanged, AppInfo.Unknown(7712, IdentityState.Unresolved), WindowInfo.Read("0x3C4D", "Some hosted window")),
@@ -129,7 +130,7 @@ public class EncoderRobustnessTests
             Obs.Focus(FocusTrigger.AppChanged, app, WindowInfo.Read(evil, evil)));
         AssertSingleValidLine(line);
         foreach (var obs in new[] { Obs.Bye(evil), Obs.Session(evil, false), Obs.Power(evil), Obs.Clock(evil),
-                     Obs.Hello(evil, evil, 1, evil, 1, 1, 1) })
+                     Obs.Hello(1, evil, evil, 1, evil, 1, 1, 1) })
             AssertSingleValidLine(Envelope.Line("run-0001", 0, "boot-0001", Time, "windows", "helper", "bye", obs));
     }
 

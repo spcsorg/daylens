@@ -144,10 +144,11 @@ test('when the display comes back on, the helper is asked for a fresh read of th
   const snapfile = path.join(tempDir('daylens-v2-snap-'), 'snaps')
   const h = harness({ FAKE_MODE: 'display_cycle', FAKE_AFTER_MS: '200', FAKE_FOCUS_MS: '3600000', FAKE_SNAPFILE: snapfile })
   h.sup.start()
-  await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 2)
+  // The display the new helper reports clears the last stop, which asks for a snapshot of its own before the cycle.
+  await waitFor(() => existsSync(snapfile) && readFileSync(snapfile, 'utf8').trim().split('\n').length >= 3)
   h.store.flush()
   const rows = h.store.query<{ kind: string; state: string | null }>(`SELECT kind, state FROM observations WHERE kind IN ('focus', 'power') ORDER BY event_wall_ms, id`)
-  assert.deepEqual(rows.map((r) => (r.kind === 'focus' ? 'focus' : r.state)), ['focus', 'display_off', 'display_on', 'focus'])
+  assert.deepEqual(rows.map((r) => (r.kind === 'focus' ? 'focus' : r.state)), ['display_on', 'focus', 'display_off', 'display_on', 'focus'])
   await h.finish()
 })
 
@@ -306,4 +307,54 @@ test('when the title channel recovers, a forced snapshot replaces the possibly s
   assert.equal(rows.at(-1)!.possibly_stale_since_wall_ms, null, 'the re-read after recovery is a fresh row')
   assert.equal(rows.at(-1)!.title, rows[0]!.title, 'even though the title is the same')
   await h.finish()
+})
+
+// A supervisor fed protocol lines directly, with no helper process.
+function fed() {
+  const dir = tempDir('daylens-v2-sup-fed-')
+  const store = new Store(dir)
+  const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
+  const sup = new Supervisor(store, normalizer, {
+    helperPath: process.execPath, helperArgs: [], env: process.env, heartbeatMs: 15_000, hangAfterMs: 45_000, tickMs: 5000,
+    backoffInitialMs: 50, backoffMaxMs: 200, stableMs: 3000, crashLoopCount: 3, unavailableRetryMs: 60_000, log: () => {},
+  })
+  const T = 1_792_130_400_000
+  let seq = 0
+  const feed = (kind: string, obs: unknown, atMs: number, mono = atMs, awake = atMs) =>
+    (sup as unknown as { onRawLine(raw: string): void }).onRawLine(JSON.stringify({ v: 1, run: 'r', seq: seq++, boot: 'b', t: { wall_ms: T + atMs, mono_us: mono * 1000, tz: 'UTC', tz_offset_min: 0 }, platform: 'macos', source: 't', kind, obs }))
+  const heartbeat = (atMs: number, mono: number, awake: number, session = true) =>
+    feed('heartbeat', { awake_us: awake * 1000, permissions: { accessibility: 'granted' }, registrations: { focus: true, session, power: true }, titles: 'ok', stall_ms: 0, dropped: 0 }, atMs, mono)
+  const editor = { app_id: 'com.example.editor', name: 'Editor', path: null, pid: 7, registered_browser: false, engine: 'none', signer: null, version_info: null, identity_state: 'ok', store: null }
+  const open = () => {
+    feed('hello', { awake_us: 0, helper: 'fake', boot_identity: 'kernel', version: '0', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, 0)
+    feed('power', { state: 'display_on', snapshot: true }, 1)
+    feed('session', { state: 'unlocked', snapshot: true }, 2)
+    feed('focus', { trigger: 'snapshot', app: editor, window: { window: 'w', title: 'notes.md', title_state: 'ok' } }, 3)
+  }
+  const seen = () => {
+    store.flush()
+    return store.query<{ seen: number }>(`SELECT last_seen_wall_ms - ? AS seen FROM observations WHERE kind = 'focus'`, T).map((x) => x.seen)
+  }
+  return { open, heartbeat, seen, close: () => store.close() }
+}
+
+test('a heartbeat after a sleep the helper never reported does not carry the row through it', () => {
+  const s = fed()
+  s.open()
+  s.heartbeat(15_000, 15_000, 15_000)
+  assert.deepEqual(s.seen(), [15_000])
+  // An hour asleep: monotonic time ran on, awake time did not, and no sleep notice arrived.
+  s.heartbeat(3_630_000, 3_630_000, 30_000)
+  assert.deepEqual(s.seen(), [15_000])
+  s.close()
+})
+
+test('while the helper cannot receive lock events, a heartbeat does not extend the row', () => {
+  const s = fed()
+  s.open()
+  s.heartbeat(15_000, 15_000, 15_000)
+  s.heartbeat(30_000, 30_000, 30_000, false)
+  s.heartbeat(45_000, 45_000, 45_000, false)
+  assert.deepEqual(s.seen(), [15_000])
+  s.close()
 })

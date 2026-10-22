@@ -21,7 +21,7 @@ final class CaptureCoreTests: XCTestCase {
   func testEncoderMatchesGoldenFixtures() throws {
     let p = Permissions(accessibility: "granted")
     try assertMatches("mac_hello", seq: 0, source: "helper", kind: "hello",
-                      Obs.hello(helper: "daylens-capture-macos", version: "2.0.0-dev", pid: 4242, os: "macOS 27.0.1", permissions: p, heartbeatS: 15, idleThresholdS: 120, reconcileS: 60))
+                      Obs.hello(awakeUs: 612_345_000_000, helper: "daylens-capture-macos", version: "2.0.0-dev", pid: 4242, os: "macOS 27.0.1", permissions: p, heartbeatS: 15, idleThresholdS: 120, reconcileS: 60))
     try assertMatches("mac_heartbeat", seq: 1, source: "helper", kind: "heartbeat", Obs.heartbeat(awakeUs: 612_345_678_901, permissions: p, focusRegistered: true, sessionRegistered: true, powerRegistered: true, titles: .ok, stallMs: 0, dropped: 0))
     try assertMatches("mac_focus_app", seq: 2, source: "nsworkspace", kind: "focus",
                       Obs.focus(trigger: .app_changed, app: term, window: .read(window: "w-1", title: "daylens — zsh — 80×24")))
@@ -32,6 +32,7 @@ final class CaptureCoreTests: XCTestCase {
     try assertMatches("mac_input_idle", seq: 5, source: "idle_timer", kind: "input", Obs.input(idle: true, lastInputWallMs: 1_792_130_292_345, thresholdS: 120, snapshot: false))
     try assertMatches("mac_session_locked", seq: 6, source: "distributed_notification", kind: "session", Obs.session("locked", snapshot: false))
     try assertMatches("mac_power_sleep", seq: 7, source: "nsworkspace", kind: "power", Obs.power("sleep"))
+    try assertMatches("mac_power_display_snapshot", seq: 7, source: "cg_display", kind: "power", Obs.power("display_off", snapshot: true))
     try assertMatches("mac_clock", seq: 8, source: "notification", kind: "clock", Obs.clock("timezone_changed"))
     try assertMatches("mac_bye", seq: 9, source: "helper", kind: "bye", Obs.bye("shutdown"))
     try assertMatches("mac_loss", seq: 20, source: "helper", kind: "loss", Obs.loss(count: 3, fromWallMs: 1_792_130_410_000, toWallMs: 1_792_130_411_000))

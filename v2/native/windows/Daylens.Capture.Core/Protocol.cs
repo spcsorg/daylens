@@ -93,8 +93,9 @@ public static class Obs
         w.WriteEndObject();
     }
 
-    public static Action<Utf8JsonWriter> Hello(string helper, string version, int pid, string os, int heartbeatS, int idleThresholdS, int reconcileS, bool bootFromKernel = true) => w =>
+    public static Action<Utf8JsonWriter> Hello(long awakeUs, string helper, string version, int pid, string os, int heartbeatS, int idleThresholdS, int reconcileS, bool bootFromKernel = true) => w =>
     {
+        w.WriteNumber("awake_us", awakeUs);
         w.WriteString("helper", helper);
         w.WriteString("boot_identity", bootFromKernel ? "kernel" : "clock");
         w.WriteString("version", version);
@@ -147,7 +148,12 @@ public static class Obs
         w.WriteBoolean("snapshot", snapshot);
     };
 
-    public static Action<Utf8JsonWriter> Power(string state) => w => w.WriteString("state", state);
+    // A snapshot reports the display's current state rather than a change.
+    public static Action<Utf8JsonWriter> Power(string state, bool snapshot = false) => w =>
+    {
+        w.WriteString("state", state);
+        if (snapshot) w.WriteBoolean("snapshot", true);
+    };
     public static Action<Utf8JsonWriter> Clock(string change) => w => w.WriteString("change", change);
     public static Action<Utf8JsonWriter> Loss(int count, long fromWallMs, long toWallMs) => w =>
     {

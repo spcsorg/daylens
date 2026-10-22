@@ -88,10 +88,10 @@ public struct Permissions {
 }
 
 public enum Obs {
-  public static func hello(helper: String, bootIdentity: String = "kernel", version: String, pid: Int, os: String, permissions: Permissions,
+  public static func hello(awakeUs: Int64, helper: String, bootIdentity: String = "kernel", version: String, pid: Int, os: String, permissions: Permissions,
                            heartbeatS: Int, idleThresholdS: Int, reconcileS: Int) -> JSON {
     .object([
-      ("helper", .string(helper)), ("boot_identity", .string(bootIdentity)), ("version", .string(version)), ("pid", .int(pid)), ("os", .string(os)),
+      ("awake_us", .int(awakeUs)), ("helper", .string(helper)), ("boot_identity", .string(bootIdentity)), ("version", .string(version)), ("pid", .int(pid)), ("os", .string(os)),
       ("permissions", permissions.json),
       ("config", .object([("heartbeat_s", .int(heartbeatS)), ("idle_threshold_s", .int(idleThresholdS)), ("reconcile_s", .int(reconcileS))])),
     ])
@@ -110,7 +110,10 @@ public enum Obs {
   public static func session(_ state: String, snapshot: Bool) -> JSON {
     .object([("state", .string(state)), ("snapshot", .bool(snapshot))])
   }
-  public static func power(_ state: String) -> JSON { .object([("state", .string(state))]) }
+  // A snapshot reports the display's current state rather than a change.
+  public static func power(_ state: String, snapshot: Bool = false) -> JSON {
+    snapshot ? .object([("state", .string(state)), ("snapshot", .bool(true))]) : .object([("state", .string(state))])
+  }
   public static func clock(_ change: String) -> JSON { .object([("change", .string(change))]) }
   public static func loss(count: Int, fromWallMs: Int64, toWallMs: Int64) -> JSON {
     .object([("channel", .string("focus")), ("count", .int(count)), ("from_wall_ms", .int(fromWallMs)), ("to_wall_ms", .int(toWallMs))])

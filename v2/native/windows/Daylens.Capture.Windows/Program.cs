@@ -51,7 +51,7 @@ internal static unsafe class Program
         _resolver = new Resolver(_emitter);
         _idle = new IdleScheduler(_idleThresholdS);
 
-        Emit("hello", "helper", Obs.Hello("daylens-capture-windows", Version, Environment.ProcessId, $"Windows {Environment.OSVersion.Version}", _heartbeatS, _idleThresholdS, _reconcileS, BootIdentity.IsFromKernel(bootId)));
+        Emit("hello", "helper", Obs.Hello(Clock.AwakeUs(), "daylens-capture-windows", Version, Environment.ProcessId, $"Windows {Environment.OSVersion.Version}", _heartbeatS, _idleThresholdS, _reconcileS, BootIdentity.IsFromKernel(bootId)));
 
         _hwnd = CreateMessageWindow();
         if (_hwnd == 0) { Diag.Write("create_window_failed"); return 2; }
@@ -235,7 +235,8 @@ internal static unsafe class Program
     }
 
     static bool _locked;
-    static bool _displaySeen;
+    // The display's state since registration delivered it; null until then.
+    static string? _display;
 
     static void SuspendIdle(bool suspend)
     {
@@ -257,11 +258,13 @@ internal static unsafe class Program
         finally { Native.WTSFreeMemory(buf); }
     }
 
+    // The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
     static void Snapshot()
     {
+        if (_display is not null) Emit("power", "power", Obs.Power(_display, snapshot: true));
+        SessionSnapshot();
         Focus(FocusTrigger.Snapshot, Native.GetForegroundWindow(), Clock.Now(), force: true);
         CheckIdle(snapshot: true);
-        SessionSnapshot();
     }
 
     static void SessionSnapshot()
@@ -377,11 +380,16 @@ internal static unsafe class Program
         }
         var state = Power.Classify(pbt, setting, value);
         if (state is null) return;
-        // Registering for display status delivers the current value at once; that is not a change.
-        if (setting == Power.GUID_SESSION_DISPLAY_STATUS && !_displaySeen)
+        if (setting == Power.GUID_SESSION_DISPLAY_STATUS)
         {
-            _displaySeen = true;
-            return;
+            // Registering for display status delivers the current value at once: the display's state, not a change.
+            var first = _display is null;
+            _display = state;
+            if (first)
+            {
+                Emit("power", "power", Obs.Power(state, snapshot: true));
+                return;
+            }
         }
         Emit("power", "power", Obs.Power(state));
         if (state == "sleep") SuspendIdle(true);

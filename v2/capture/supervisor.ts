@@ -507,7 +507,7 @@ export class Supervisor {
       this.store.closeGap(this.titlesGap, point)
       this.titlesGap = null
     }
-    this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: null, boot: line.boot }
+    this.lastHeartbeat = { point, mono_us: line.t.mono_us, awake_us: line.obs.awake_us, boot: line.boot }
     this.heartbeatHr = this.o.hrtimeMs()
   }
 
@@ -520,12 +520,19 @@ export class Supervisor {
     if (prev && prev.awake_us !== null && prev.boot === line.boot) {
       const awakeGapMs = Math.round((line.obs.awake_us - prev.awake_us) / 1000)
       this.stats.heartbeatMaxGapMs = Math.max(this.stats.heartbeatMaxGapMs, awakeGapMs)
+      // Monotonic time runs on while the machine sleeps; awake time does not. More than a heartbeat apart, the machine
+      // slept in between, whether or not a sleep notice arrived.
+      const asleepMs = Math.round((line.t.mono_us - prev.mono_us) / 1000) - awakeGapMs
       if (awakeGapMs > this.o.heartbeatMs * 2.5) {
         this.o.log(`helper stalled between heartbeats awake_ms=${awakeGapMs}`)
         // No row is carried across the gap by the heartbeat that ends it.
         this.normalizer.interrupt(prev.point)
         const id = this.store.openGap({ reason: 'helper_stalled', scope: 'all', run: this.run, start: prev.point, detail: { awake_silence_ms: awakeGapMs } })
         this.store.closeGap(id, point)
+        this.send({ op: 'snapshot' })
+      } else if (asleepMs > this.o.heartbeatMs) {
+        this.o.log(`machine slept between heartbeats asleep_ms=${asleepMs}`)
+        this.normalizer.interrupt(prev.point)
         this.send({ op: 'snapshot' })
       }
     }
@@ -535,6 +542,7 @@ export class Supervisor {
     this.heartbeatHr = this.o.hrtimeMs()
     this.store.writeCheckpoint({ wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot, boot_identity: this.bootIdentity, clean: false })
     this.onRegistrations(line, point)
+    this.normalizer.onRegistrations(line.obs.registrations.session, line)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
     // The main loop is alive but the title worker is stuck in one call: only a restart frees it.
     if (line.obs.stall_ms >= this.o.hangAfterMs && this.child) {

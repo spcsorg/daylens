@@ -16,6 +16,7 @@
    "source": "helper",
    "kind": "hello",
    "obs": {
+    "awake_us": 612345000000,
     "helper": "daylens-capture-macos",
     "boot_identity": "kernel",
     "version": "2.0.0-dev",
@@ -246,6 +247,28 @@
   }
  },
  {
+  "name": "mac_power_display_snapshot",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 7,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "macos",
+   "source": "cg_display",
+   "kind": "power",
+   "obs": {
+    "state": "display_off",
+    "snapshot": true
+   }
+  }
+ },
+ {
   "name": "mac_clock",
   "line": {
    "v": 1,
@@ -304,6 +327,7 @@
    "source": "helper",
    "kind": "hello",
    "obs": {
+    "awake_us": 612345000000,
     "helper": "daylens-capture-windows",
     "boot_identity": "kernel",
     "version": "2.0.0-dev",
@@ -511,6 +535,28 @@
    "kind": "power",
    "obs": {
     "state": "resume_user"
+   }
+  }
+ },
+ {
+  "name": "win_power_display_snapshot",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 14,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Africa/Kigali",
+    "tz_offset_min": 120
+   },
+   "platform": "windows",
+   "source": "power",
+   "kind": "power",
+   "obs": {
+    "state": "display_on",
+    "snapshot": true
    }
   }
  },

@@ -326,7 +326,9 @@ function point(line: Line): GapPoint {
 const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
 const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
 // What ends the row in front: what ends intervals in derivation, and idle input, which presence counts as away.
-type Stop = 'locked' | 'asleep' | 'display_off' | 'idle'
+// The *_unknown stops hold while the helper cannot show the display is on, or the screen unlocked: a new helper until it
+// reports the display, an unreadable lock state, or a helper that cannot receive lock events.
+type Stop = 'locked' | 'asleep' | 'display_off' | 'idle' | 'display_unknown' | 'lock_unknown'
 
 export class Normalizer {
   private focus: OpenRow | null = null
@@ -366,9 +368,11 @@ export class Normalizer {
           this.endExcluded(line)
         }
         this.onState(line, 'session', line.obs.state, null)
+        if (line.obs.state === 'unknown') return line.obs.snapshot ? this.setStop('lock_unknown', true, line) : false
+        const known = this.setStop('lock_unknown', false, line)
         if (LOCK_START.has(line.obs.state)) return this.setStop('locked', true, line)
-        if (LOCK_END.has(line.obs.state)) return this.setStop('locked', false, line)
-        return false
+        if (LOCK_END.has(line.obs.state)) return this.setStop('locked', false, line) || known
+        return known
       }
       case 'power': {
         const s = line.obs.state
@@ -379,9 +383,14 @@ export class Normalizer {
           this.endExcluded(line)
         }
         this.onState(line, 'power', s, null)
-        if (s === 'sleep' || s === 'display_off') return this.setStop(s === 'sleep' ? 'asleep' : 'display_off', true, line)
+        if (s === 'sleep') return this.setStop('asleep', true, line)
         if (s === 'resume' || s === 'resume_user') return this.setStop('asleep', false, line)
-        return this.setStop('display_off', false, line)
+        if (s === 'display_off') {
+          this.setStop('display_unknown', false, line)
+          return this.setStop('display_off', true, line)
+        }
+        const known = this.setStop('display_unknown', false, line)
+        return this.setStop('display_off', false, line) || known
       }
       case 'clock': {
         // Clock changes are events, not states: every one is kept with its own time.
@@ -391,9 +400,11 @@ export class Normalizer {
         return false
       }
       case 'hello':
-        // A helper that is running is on an awake machine; no helper reports whether the display is on, so assume it is.
+        // A helper that is running is on an awake machine, but the display can be dark (a dark wake): nothing is
+        // recorded until the helper reports the display's state.
         this.stops.delete('asleep')
         this.stops.delete('display_off')
+        this.setStop('display_unknown', true, line)
         return false
       case 'heartbeat':
       case 'loss':
@@ -433,6 +444,11 @@ export class Normalizer {
     if (this.sink.extendObservation(f.id, wallMs) !== false) return false
     this.focus = null
     return true
+  }
+
+  /** A heartbeat's registrations: without lock events, whether the screen is locked cannot be known. */
+  onRegistrations(sessionRegistered: boolean, line: Line): void {
+    if (!sessionRegistered) this.setStop('lock_unknown', true, line)
   }
 
   /** A stop began or ended (for what follows the front, such as browser pages). */

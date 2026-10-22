@@ -120,16 +120,40 @@ test('with the display off, the window is not a row; after it comes back on, the
   ])
 })
 
-test('a new helper runs on an awake machine: a sleep or a dark display it never reported back does not stop recording', () => {
+const hello = (wallMs: number) => line('hello', { awake_us: 0, helper: 'fake', boot_identity: 'kernel', version: '0', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, wallMs)
+
+test('a new helper records nothing until it reports the display on, and a display it reports dark keeps recording stopped', () => {
   resetSeq()
   const sink = new MemorySink()
   const n = new Normalizer(sink, new Privacy())
+  const rows = () => sink.rows.filter((x) => x.kind === 'focus').map((x) => x.event_wall_ms - T0)
   n.handle(line('power', { state: 'display_off' }, T0))
   n.handle(line('power', { state: 'sleep' }, T0 + 1))
   n.interrupt({ wall_ms: T0 + MIN, mono_us: null, boot: null })
-  n.handle(line('hello', { helper: 'fake', boot_identity: 'kernel', version: '0', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, T0 + 2 * MIN))
+  n.handle(hello(T0 + 2 * MIN))
   n.handle(focus(editor, 'notes.md - Editor', T0 + 2 * MIN + 10, 'snapshot'))
-  assert.equal(sink.rows.filter((x) => x.kind === 'focus').length, 1)
+  assert.deepEqual(rows(), [], 'not before the display is known')
+  n.handle(line('power', { state: 'display_off', snapshot: true }, T0 + 2 * MIN + 20))
+  n.handle(focus(editor, 'notes.md - Editor', T0 + 2 * MIN + 30, 'snapshot'))
+  assert.deepEqual(rows(), [], 'a dark wake is not recorded')
+  assert.equal(n.handle(line('power', { state: 'display_on' }, T0 + 3 * MIN)), true)
+  n.handle(focus(editor, 'notes.md - Editor', T0 + 3 * MIN + 10, 'snapshot'))
+  assert.deepEqual(rows(), [3 * MIN + 10])
+})
+
+test('a lock state the helper cannot read stops recording until it can', () => {
+  resetSeq()
+  const sink = new MemorySink()
+  const n = new Normalizer(sink, new Privacy())
+  const rows = () => sink.rows.filter((x) => x.kind === 'focus').map((x) => x.event_wall_ms - T0)
+  n.handle(hello(T0))
+  n.handle(line('power', { state: 'display_on', snapshot: true }, T0 + 1))
+  n.handle(line('session', { state: 'unknown', snapshot: true }, T0 + 2))
+  n.handle(focus(editor, 'notes.md - Editor', T0 + 10, 'snapshot'))
+  assert.deepEqual(rows(), [])
+  assert.equal(n.handle(line('session', { state: 'unlocked', snapshot: true }, T0 + MIN)), true)
+  n.handle(focus(editor, 'notes.md - Editor', T0 + MIN + 10, 'snapshot'))
+  assert.deepEqual(rows(), [MIN + 10])
 })
 
 // Heartbeats every 15 s in (from, to], as the supervisor passes them on.
@@ -327,7 +351,8 @@ test('after the helper restarts, a heartbeat never reopens the row that ended be
   r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
   beats(r, T0, T0 + 5 * MIN)
   r.normalizer.interrupt({ wall_ms: T0 + 5 * MIN, mono_us: null, boot: null })
-  r.feed(line('hello', { helper: 'fake', boot_identity: 'kernel', version: '0', pid: 2, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, T0 + 6 * MIN))
+  r.feed(hello(T0 + 6 * MIN))
+  r.feed(line('power', { state: 'display_on', snapshot: true }, T0 + 6 * MIN + 1))
   beats(r, T0 + 5 * MIN, T0 + 7 * MIN)
   r.feed(focus(editor, 'notes.md - Editor', T0 + 7 * MIN + 10, 'snapshot'))
   beats(r, T0 + 7 * MIN, T0 + 8 * MIN)
