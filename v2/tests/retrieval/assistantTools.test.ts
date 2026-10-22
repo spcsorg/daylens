@@ -191,6 +191,30 @@ test('an app deleted for a range cuts the agent turn that crossed into it and le
   }
 })
 
+test('a turn a deletion cuts says only that it ended when its end was deleted, keeps its state when it ended after, and stays open if open', async () => {
+  for (const hold of [true, false]) {
+    const s = setup({ holdDeletions: hold })
+    const agents = new AgentStore(s.r.store.database)
+    agents.apply('claude_code', [
+      ...turn('t1', 's1', T0 + 5 * MIN, T0 + 25 * MIN),
+      ...turn('t2', 's1', T0 + 40 * MIN, T0 + 70 * MIN),
+      { t: 'turn', key: 't3', session: 's1', dir: '/code/alpha', branch: 'main', opener: 'user', start: T0 + 80 * MIN, replayed: false },
+      { t: 'activity', key: 't3', session: 's1', at: T0 + 100 * MIN },
+    ])
+    s.r.clock.t = T0 + 5 * HOUR
+    const handles = [s.r.storage.deleteRange(T0 + 20 * MIN, T0 + 30 * MIN), s.r.storage.deleteRange(T0 + 60 * MIN, T0 + 65 * MIN), s.r.storage.deleteRange(T0 + 90 * MIN, T0 + 95 * MIN)]
+    if (!hold) for (const h of handles) await h.done
+    const ctx = { ...s.ctx, log: { recordRead: () => 0 } }
+    const work = runReadTool('get_agent_work', { date: DATE }, ctx) as { sessions: { turns: { start: string; end: string; end_state: string | null }[] }[] }
+    assert.deepEqual(work.sessions[0]!.turns.map((t) => [t.start.slice(11, 16), t.end.slice(11, 16), t.end_state]), [
+      ['08:05', '08:20', 'missing'],
+      ['08:40', '09:00', 'completed'],
+      ['09:20', '09:30', null],
+    ], `hold=${hold}`)
+    s.close()
+  }
+})
+
 test('input is checked, the longest span is the one the person set, and limits have no defaults', () => {
   const s = setup()
   assert.throws(() => runReadTool('get_day', { date: '2026-02-30' }, s.ctx), ToolInputError)

@@ -272,7 +272,9 @@ export class Reader {
    * Agent sessions with a turn in [from, to), as a pending deletion will leave them. A deleted range removes the turns
    * and messages that begin in it and cuts turns that cross its start there. A deleted app removes the turns and
    * messages that begin in its span while the session ran in it, and cuts a turn that crosses into the span where the
-   * session is first in the app inside it; the session's app is then read without the app's spans begun inside it.
+   * session is first in the app inside it; the session's app is then read without the app's spans begun inside it. A
+   * cut turn whose end was inside the deleted time, or had no time, ends 'missing'; one that ended after it keeps its
+   * state, and an open turn stays open.
    * Null when the agent reader has never been enabled on this database.
    */
   agentWork(fromWallMs: number, toWallMs: number): AgentSessionWork[] | null {
@@ -288,12 +290,12 @@ export class Reader {
     const hosts = this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() ? dbHostLookup(this.db) : null
     const turns = this.db
       .prepare(
-        `SELECT t.agent, t.session_id, t.start_wall_ms, coalesce(t.end_wall_ms, t.last_activity_wall_ms) AS end_wall_ms, t.end_state,
+        `SELECT t.agent, t.session_id, t.start_wall_ms, coalesce(t.end_wall_ms, t.last_activity_wall_ms) AS end_wall_ms, t.end_wall_ms AS ended_wall_ms, t.end_state,
                 coalesce(s.origin, 'interactive') AS origin, coalesce(t.project_dir, s.project_dir) AS project_dir, coalesce(t.branch, s.branch) AS branch
          FROM agent_turns t LEFT JOIN agent_sessions s ON s.agent = t.agent AND s.session_id = t.session_id
          WHERE t.replayed = 0 AND t.start_wall_ms < ? AND coalesce(t.end_wall_ms, t.last_activity_wall_ms) >= ? ORDER BY t.start_wall_ms, t.id`,
       )
-      .all(to, from) as (AgentTurn & { agent: Agent; session_id: string; origin: string; project_dir: string | null; branch: string | null })[]
+      .all(to, from) as (AgentTurn & { agent: Agent; session_id: string; ended_wall_ms: number | null; origin: string; project_dir: string | null; branch: string | null })[]
     const inApp = (agent: Agent, session: string, at: number, app: string) => hosts !== null && resolveHost(hosts, agent, session, at)?.app_id?.toLowerCase() === app
     const moves = hosts ? this.db.prepare('SELECT from_wall_ms FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms > ? AND from_wall_ms < ?').pluck() : null
     // As the deletion cuts a turn crossing into an app's span: at its start, or where the session, or one above it,
@@ -308,7 +310,15 @@ export class Reader {
     const sessions = new Map<string, AgentSessionWork>()
     for (const t of turns) {
       if (ranges.some(([a, b]) => t.start_wall_ms >= a && t.start_wall_ms < b)) continue
-      let end = Math.min(t.end_wall_ms, ...ranges.filter(([a]) => a > t.start_wall_ms).map(([a]) => a))
+      let end = t.end_wall_ms
+      let state = t.end_state
+      // As the deletion cuts a turn: an end inside the deleted time, or one with no time, says only that it ended.
+      const cut = (at: number, b: number) => {
+        if (end <= at) return
+        end = at
+        if (state !== null && (t.ended_wall_ms === null || (t.ended_wall_ms > at && t.ended_wall_ms < b))) state = 'missing'
+      }
+      for (const [a, b] of ranges) if (a > t.start_wall_ms) cut(a, b)
       let gone = false
       for (const d of appDeletions) {
         const [a, b] = span(d)
@@ -316,7 +326,7 @@ export class Reader {
           if (inApp(t.agent, t.session_id, t.start_wall_ms, d.app_id!)) gone = true
         } else if (d.from_wall_ms !== null && t.start_wall_ms < a && end > a) {
           const at = cutAt(t.agent, t.session_id, d.app_id!, a, Math.min(end, b))
-          if (at !== null) end = Math.min(end, at)
+          if (at !== null) cut(at, b)
         }
       }
       if (gone || end < from) continue
@@ -326,8 +336,7 @@ export class Reader {
         const host = after ? resolveHost(after, t.agent, t.session_id, t.start_wall_ms) : null
         sessions.set(key, (s = { agent: t.agent, session_id: t.session_id, origin: t.origin, project_dir: t.project_dir, branch: t.branch, app_id: host?.app_id ?? null, turns: [], user_messages_wall_ms: [] }))
       }
-      // A cut turn keeps its end state, as the deletion leaves it.
-      s.turns.push({ start_wall_ms: t.start_wall_ms, end_wall_ms: end, end_state: t.end_state })
+      s.turns.push({ start_wall_ms: t.start_wall_ms, end_wall_ms: end, end_state: state })
     }
     const acts = this.db.prepare(`SELECT wall_ms FROM agent_events WHERE kind = 'user' AND detail IN ('prompt', 'queued', 'steer', 'answer') AND agent = ? AND session_id = ? AND wall_ms >= ? AND wall_ms < ? ORDER BY wall_ms`)
     for (const s of sessions.values()) {
