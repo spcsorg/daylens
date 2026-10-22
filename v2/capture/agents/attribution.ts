@@ -2,6 +2,7 @@
 // Derived on read, never stored, so it always reflects the latest observations and corrections.
 
 import type Database from 'better-sqlite3'
+import { PRESENCE_KINDS } from '../../storage/schema.ts'
 import type { EventRow, TurnRow } from './store.ts'
 
 export type Presence = 'present' | 'away' | 'asleep' | 'unknown'
@@ -199,14 +200,17 @@ function lastInput(detail: string | null): number | null {
 
 // Presence inputs from the capture tables: session, power and input observations, helper runs, and capture gaps.
 export function presenceFromCapture(db: Database.Database, from: number, to: number): PresenceInputs {
+  // The state in force at `from` is the latest row of each kind before it; each lookup is one step down the index.
+  const latest = (kind: string) =>
+    `SELECT * FROM (SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND kind = '${kind}' AND event_wall_ms < @from ORDER BY event_wall_ms DESC, id DESC LIMIT 1)`
   const rows = db
     .prepare(
-      `SELECT kind, state, event_wall_ms AS at, detail FROM observations
-       WHERE kind IN ('session', 'power', 'input', 'presence') AND event_wall_ms < ?
-         AND (event_wall_ms >= ? OR id IN (SELECT max(id) FROM observations WHERE kind IN ('session', 'power', 'input', 'presence') AND event_wall_ms < ? GROUP BY kind))
-       ORDER BY event_wall_ms, id`,
+      `SELECT kind, state, event_wall_ms AS at, detail FROM (
+         SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND event_wall_ms >= @from AND event_wall_ms < @to
+         UNION ALL ${['session', 'power', 'input', 'presence'].map(latest).join(' UNION ALL ')}
+       ) ORDER BY event_wall_ms, id`,
     )
-    .all(to, from, from) as { kind: string; state: string; at: number; detail: string | null }[]
+    .all({ from, to }) as { kind: string; state: string; at: number; detail: string | null }[]
   // woke: the machine woke by itself and nobody has given evidence of being back yet, which is away like idle.
   const open: Record<'locked' | 'asleep' | 'idle' | 'woke', number | null> = { locked: null, asleep: null, idle: null, woke: null }
   const inputs: PresenceInputs = { covered: [], locked: [], asleep: [], idle: [], unknown: [] }

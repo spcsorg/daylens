@@ -325,6 +325,14 @@ const deletionAnnounced: Migration = {
     `),
 }
 
+// The rows presence is read from (agent attribution: when the person was away), by kind and time; focus rows, nearly all
+// of the table, stay out of it. Queries name the same kinds so the planner can use it.
+export const PRESENCE_KINDS = `kind IN ('session', 'power', 'input', 'presence')`
+const observationsByPresenceKind: Migration = {
+  name: 'observations_by_presence_kind',
+  up: (db) => db.exec(`CREATE INDEX IF NOT EXISTS observations_presence ON observations(kind, event_wall_ms) WHERE ${PRESENCE_KINDS}`),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -348,4 +356,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   deletionFence,
   pausesByApp,
   deletionAnnounced,
+  observationsByPresenceKind,
 ]

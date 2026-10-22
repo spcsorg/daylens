@@ -6,6 +6,7 @@ import { Normalizer } from '../../capture/normalize.ts'
 import { Store } from '../../capture/store.ts'
 import { line } from '../support/lines.ts'
 import { sec, tmp } from './fixtures.ts'
+import { rig, T0 } from '../storage/support.ts'
 
 const MIN = 60_000
 
@@ -140,4 +141,20 @@ test('a machine that wakes by itself is not the person coming back: presence sta
   assert.deepEqual(inputs.idle, [{ start: sec(2000), end: sec(2600) }], 'away from the wake to the first input; a wake the person caused is presence at once')
   assert.deepEqual(presenceFromCapture(store.database, sec(2200), sec(2400)).idle, [{ start: sec(2000), end: sec(2400) }], 'a window that starts after the wake still knows nobody is back')
   store.close()
+})
+
+test('presence reads use the index of presence rows, so a read does not scan the whole history', () => {
+  const r = rig()
+  const db = r.store.database
+  const seen: string[] = []
+  const prepare = db.prepare.bind(db)
+  const spy = Object.create(db, { prepare: { value: (sql: string) => (seen.push(sql), prepare(sql)) } }) as typeof db
+  presenceFromCapture(spy, T0, T0 + 3_600_000)
+  const reads = seen.filter((sql) => sql.includes('FROM observations'))
+  assert.equal(reads.length, 1)
+  const plan = (db.prepare(`EXPLAIN QUERY PLAN ${reads[0]}`).all({ from: T0, to: T0 + 3_600_000 }) as { detail: string }[]).map((p) => p.detail)
+  const scans = plan.filter((d) => /\bobservations\b/.test(d))
+  assert.equal(scans.length, 5, plan.join('\n'))
+  assert.ok(scans.every((d) => d.includes('USING INDEX observations_presence')), plan.join('\n'))
+  r.close()
 })
