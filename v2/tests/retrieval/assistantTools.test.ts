@@ -215,6 +215,23 @@ test('a turn a deletion cuts says only that it ended when its end was deleted, k
   }
 })
 
+test('a message at the very start of a deleted range goes with it, pending or done, though the turn it was in is cut there', async () => {
+  for (const hold of [true, false]) {
+    const s = setup({ holdDeletions: hold })
+    const agents = new AgentStore(s.r.store.database)
+    agents.apply('claude_code', [
+      ...turn('t1', 's1', T0 + 5 * MIN, T0 + 25 * MIN),
+      { t: 'user', key: 't1-u2', session: 's1', turn: 't1', act: 'steer', basis: 'marked', at: T0 + 20 * MIN },
+    ])
+    s.r.clock.t = T0 + 5 * HOUR
+    const handle = s.r.storage.deleteRange(T0 + 20 * MIN, T0 + 30 * MIN)
+    if (!hold) await handle.done
+    const work = runReadTool('get_agent_work', { date: DATE }, { ...s.ctx, log: { recordRead: () => 0 } }) as { sessions: { turns: { end: string }[]; user_messages_at: string[] }[] }
+    assert.deepEqual(work.sessions.map((x) => [x.turns.map((t) => t.end.slice(11, 16)), x.user_messages_at.map((m) => m.slice(11, 16))]), [[['08:20'], ['08:05']]], `hold=${hold}`)
+    s.close()
+  }
+})
+
 test('input is checked, the longest span is the one the person set, and limits have no defaults', () => {
   const s = setup()
   assert.throws(() => runReadTool('get_day', { date: '2026-02-30' }, s.ctx), ToolInputError)

@@ -341,6 +341,8 @@ export class Reader {
     const acts = this.db.prepare(`SELECT wall_ms FROM agent_events WHERE kind = 'user' AND detail IN ('prompt', 'queued', 'steer', 'answer') AND agent = ? AND session_id = ? AND wall_ms >= ? AND wall_ms < ? ORDER BY wall_ms`)
     for (const s of sessions.values()) {
       for (const { wall_ms } of acts.all(s.agent, s.session_id, from, to) as { wall_ms: number }[]) {
+        // Half-open, as the deletion removes events: one at a range's start goes, though the cut turn ends there.
+        if (ranges.some(([a, b]) => wall_ms >= a && wall_ms < b)) continue
         if (appDeletions.some((d) => wall_ms >= span(d)[0] && wall_ms < span(d)[1] && inApp(s.agent as Agent, s.session_id, wall_ms, d.app_id!))) continue
         if (s.turns.some((t) => wall_ms >= t.start_wall_ms && wall_ms <= t.end_wall_ms)) s.user_messages_wall_ms.push(wall_ms)
       }
