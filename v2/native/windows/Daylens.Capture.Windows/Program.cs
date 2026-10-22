@@ -109,13 +109,38 @@ internal static unsafe class Program
             RegistrationRetry.Source.Session => Native.WTSRegisterSessionNotification(_hwnd, Native.NOTIFY_FOR_THIS_SESSION),
             // Required for suspend and resume notices on Modern Standby machines.
             RegistrationRetry.Source.Power => Native.RegisterSuspendResumeNotification(_hwnd, Native.DEVICE_NOTIFY_WINDOW_HANDLE) != 0,
-            RegistrationRetry.Source.Display => Native.RegisterPowerSettingNotification(_hwnd, Power.GUID_SESSION_DISPLAY_STATUS, Native.DEVICE_NOTIFY_WINDOW_HANDLE) != 0,
+            RegistrationRetry.Source.Display => RegisterDisplay(),
             _ => Native.SetWinEventHook(WinEvents.EVENT_SYSTEM_FOREGROUND, WinEvents.EVENT_SYSTEM_FOREGROUND, 0,
                 (nint)(delegate* unmanaged<nint, uint, nint, int, int, uint, uint, void>)&OnWinEvent, 0, 0,
                 Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS) != 0,
         };
         if (!ok) Diag.Write(DiagCode(source) + "_failed");
         return ok;
+    }
+
+    // Registering for display status delivers its current value at once, so registering again reads it.
+    static nint _displayNotify;
+    static bool _displayRead;
+
+    static bool RegisterDisplay()
+    {
+        var handle = Native.RegisterPowerSettingNotification(_hwnd, Power.GUID_SESSION_DISPLAY_STATUS, Native.DEVICE_NOTIFY_WINDOW_HANDLE);
+        if (handle == 0) return false;
+        if (_displayNotify != 0) Native.UnregisterPowerSettingNotification(_displayNotify);
+        _displayNotify = handle;
+        _displayRead = true;
+        return true;
+    }
+
+    // A lock or dark display whose notice was missed, or a state that could not be read before, is reported when it is read.
+    static void ReconcileStates()
+    {
+        if (_registrations.IsRegistered(RegistrationRetry.Source.Display) && !RegisterDisplay()) Diag.Write("display_status_read_failed");
+        var lockState = _watch.ReadLock(SessionState());
+        if (lockState is null) return;
+        _locked = lockState == "locked";
+        SuspendIdle(_locked);
+        Emit("session", "wts", Obs.Session(lockState, true));
     }
 
     static void RetryRegistrations()
@@ -235,8 +260,7 @@ internal static unsafe class Program
     }
 
     static bool _locked;
-    // The display's state since registration delivered it; null until then.
-    static string? _display;
+    static readonly StateWatch _watch = new();
 
     static void SuspendIdle(bool suspend)
     {
@@ -261,7 +285,7 @@ internal static unsafe class Program
     // The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
     static void Snapshot()
     {
-        if (_display is not null) Emit("power", "power", Obs.Power(_display, snapshot: true));
+        if (_watch.Display is string display) Emit("power", "power", Obs.Power(display, snapshot: true));
         SessionSnapshot();
         Focus(FocusTrigger.Snapshot, Native.GetForegroundWindow(), Clock.Now(), force: true);
         CheckIdle(snapshot: true);
@@ -270,6 +294,7 @@ internal static unsafe class Program
     static void SessionSnapshot()
     {
         var state = SessionState();
+        _watch.NoteLock(state);
         _locked = state == "locked";
         Emit("session", "wts", Obs.Session(state, true));
     }
@@ -365,6 +390,7 @@ internal static unsafe class Program
         {
             var fg = Native.GetForegroundWindow();
             Focus(fg != _fgHwnd ? FocusTrigger.AppChanged : FocusTrigger.Reconcile, fg, Clock.Now());
+            ReconcileStates();
         }
     }
 
@@ -382,14 +408,14 @@ internal static unsafe class Program
         if (state is null) return;
         if (setting == Power.GUID_SESSION_DISPLAY_STATUS)
         {
-            // Registering for display status delivers the current value at once: the display's state, not a change.
-            var first = _display is null;
-            _display = state;
-            if (first)
+            if (_displayRead)
             {
-                Emit("power", "power", Obs.Power(state, snapshot: true));
+                // The value a registration delivers is the display's state, not a change; reported only when it differs.
+                _displayRead = false;
+                if (_watch.ReadDisplay(state) is string read) Emit("power", "power", Obs.Power(read, snapshot: true));
                 return;
             }
+            _watch.NoteDisplay(state);
         }
         Emit("power", "power", Obs.Power(state));
         if (state == "sleep") SuspendIdle(true);
@@ -408,12 +434,17 @@ internal static unsafe class Program
         Emit("session", "wts", Obs.Session(state, false));
         if (state is "locked" or "console_disconnect" or "remote_disconnect")
         {
+            if (state == "locked") _watch.NoteLock("locked");
             _locked = state == "locked" || _locked;
             SuspendIdle(true);
         }
         else if (state is "unlocked" or "console_connect" or "remote_connect")
         {
-            if (state == "unlocked") _locked = false;
+            if (state == "unlocked")
+            {
+                _locked = false;
+                _watch.NoteLock("unlocked");
+            }
             SuspendIdle(false);
             Focus(FocusTrigger.Reconcile, Native.GetForegroundWindow(), Clock.Now());
         }

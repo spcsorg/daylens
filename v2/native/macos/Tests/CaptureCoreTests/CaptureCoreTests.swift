@@ -322,3 +322,33 @@ final class HostWalkTests: XCTestCase {
     XCTAssertNil(walk([500: (400, nil), 400: (500, nil)], from: 500))
   }
 }
+
+final class StateWatchTests: XCTestCase {
+  func testAReadReportsALockOrDarkDisplayWhoseNoticeWasMissed() {
+    let w = StateWatch()
+    XCTAssertEqual(w.readDisplay("display_on"), "display_on")
+    XCTAssertEqual(w.readLock("unlocked"), "unlocked")
+    XCTAssertNil(w.readDisplay("display_on"))
+    XCTAssertNil(w.readLock("unlocked"))
+    XCTAssertEqual(w.readDisplay("display_off"), "display_off")
+    XCTAssertEqual(w.readLock("locked"), "locked")
+  }
+
+  func testAStateThatCannotBeReadIsReadAgainUntilItCanAndAnUnknownLockIsReportedOnce() {
+    let w = StateWatch()
+    XCTAssertNil(w.readDisplay(nil))
+    XCTAssertEqual(w.readDisplay("display_on"), "display_on")
+    XCTAssertEqual(w.readLock("unknown"), "unknown")
+    XCTAssertNil(w.readLock("unknown"))
+    XCTAssertEqual(w.readLock("unlocked"), "unlocked")
+  }
+
+  func testANoticeIsWhatTheNextReadIsComparedWith() {
+    let w = StateWatch()
+    _ = w.readLock("unlocked")
+    w.noteLock("locked")
+    XCTAssertNil(w.readLock("locked"))
+    w.noteDisplay("display_off")
+    XCTAssertEqual(w.readDisplay("display_on"), "display_on")
+  }
+}

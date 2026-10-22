@@ -55,6 +55,8 @@ The capture service adds the **recorded time** (`recorded_wall_ms`) when it stor
 
 `trigger`: `app_changed`, `window_changed`, `title_changed`, `reconcile`, `snapshot`.
 
+Every `reconcile_s` the helper also reads the display and lock state again, since a notice can be missed while the machine stays awake, and reports what changed since it last reported as `power` or `session` with `snapshot: true`: the display going dark or coming on, the screen locking or unlocking, or a lock state it can no longer read (`unknown`). A state it could not read (the display on macOS, the lock on Windows) is read again on each of these ticks until it can be. Windows reads the display by registering for `GUID_SESSION_DISPLAY_STATUS` again, which delivers its current value.
+
 `app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
 
 `window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet. A `private` window never has its title stored. A browser window's title stays withheld even while the extension reports pages, because the window in front may be one the extension cannot see.

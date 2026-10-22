@@ -58,6 +58,7 @@ internal static unsafe partial class Native
     [LibraryImport("user32.dll")] public static partial void PostQuitMessage(int code);
     [LibraryImport("user32.dll")] public static partial nint RegisterSuspendResumeNotification(nint recipient, uint flags);
     [LibraryImport("user32.dll")] public static partial nint RegisterPowerSettingNotification(nint recipient, in Guid setting, uint flags);
+    [LibraryImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static partial bool UnregisterPowerSettingNotification(nint handle);
     [LibraryImport("wtsapi32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static partial bool WTSRegisterSessionNotification(nint hwnd, uint flags);
     [LibraryImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW")] [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool WTSQuerySessionInformation(nint server, int session, int infoClass, out nint buffer, out uint bytes);

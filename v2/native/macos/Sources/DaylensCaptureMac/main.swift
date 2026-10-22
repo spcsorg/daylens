@@ -118,24 +118,48 @@ func displayOn() -> Bool? {
   return ids.prefix(Int(count)).contains { CGDisplayIsAsleep($0) == 0 }
 }
 
-// The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
-func snapshot() {
-  if let on = displayOn() { emit("power", "cg_display", Obs.power(on ? "display_on" : "display_off", snapshot: true)) }
+let watch = StateWatch()
+
+func readDisplay() -> String? { displayOn().map { $0 ? "display_on" : "display_off" } }
+
+func readLock() -> String {
   let locked = screenLocked()
   screenIsLocked = locked ?? false
   if screenIsLocked { suspendIdle(true) }
-  emit("session", "cg_session", Obs.session(locked.map { $0 ? "locked" : "unlocked" } ?? "unknown", snapshot: true))
+  return locked.map { $0 ? "locked" : "unlocked" } ?? "unknown"
+}
+
+// The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
+func snapshot() {
+  if let display = readDisplay() {
+    watch.noteDisplay(display)
+    emit("power", "cg_display", Obs.power(display, snapshot: true))
+  }
+  let lock = readLock()
+  watch.noteLock(lock)
+  emit("session", "cg_session", Obs.session(lock, snapshot: true))
   requestFocus(.snapshot, NSWorkspace.shared.frontmostApplication, force: true)
   checkIdle(snapshot: true)
 }
 
+// A lock or dark display whose notice was missed, or a state that could not be read before, is reported when it is read.
+func reconcileStates() {
+  if let display = watch.readDisplay(readDisplay()) { emit("power", "cg_display", Obs.power(display, snapshot: true)) }
+  if let lock = watch.readLock(readLock()) {
+    emit("session", "cg_session", Obs.session(lock, snapshot: true))
+    if lock == "unlocked" { suspendIdle(false) }
+  }
+}
+
 final class DistributedObserver: NSObject {
   @objc func locked(_ n: Notification) {
+    watch.noteLock("locked")
     emit("session", "distributed_notification", Obs.session("locked", snapshot: false))
     screenIsLocked = true
     suspendIdle(true)
   }
   @objc func unlocked(_ n: Notification) {
+    watch.noteLock("unlocked")
     emit("session", "distributed_notification", Obs.session("unlocked", snapshot: false))
     screenIsLocked = false
     suspendIdle(false)
@@ -197,9 +221,11 @@ if rootPowerPort != 0, let ref = powerPortRef {
   diag("power_register_failed")
 }
 ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in
+  watch.noteDisplay("display_off")
   emit("power", "nsworkspace", Obs.power("display_off"))
 }
 ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in
+  watch.noteDisplay("display_on")
   emit("power", "nsworkspace", Obs.power("display_on"))
 }
 ws.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in
@@ -248,6 +274,7 @@ reconcile.setEventHandler { autoreleasepool {
   let changed = (app?.processIdentifier ?? 0) != frontPid
   frontPid = app?.processIdentifier ?? 0
   requestFocus(changed ? .app_changed : .reconcile, app)
+  reconcileStates()
 } }
 reconcile.resume()
 
