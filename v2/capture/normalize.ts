@@ -330,7 +330,8 @@ const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logo
 // What ends the row in front: what ends intervals in derivation, and idle input, which presence counts as away.
 // The *_unknown stops hold while the helper cannot show the display is on, or the screen unlocked: a new helper until it
 // reports the display, an unreadable lock state, or a helper that cannot receive lock events.
-type Stop = 'locked' | 'asleep' | 'display_off' | 'idle' | 'display_unknown' | 'lock_unknown'
+// woke: the machine resumed by itself and nobody has given evidence of being back (the first input after the wake).
+type Stop = 'locked' | 'asleep' | 'display_off' | 'idle' | 'display_unknown' | 'lock_unknown' | 'woke'
 
 export class Normalizer {
   private focus: OpenRow | null = null
@@ -360,14 +361,15 @@ export class Normalizer {
       case 'focus':
         this.onFocus(line)
         return false
-      case 'input':
-        this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
+      case 'input': {
+        const back = this.onPresenceEvidence(line, line.obs.state === 'active' && line.obs.last_input_wall_ms >= (this.resumedAtWall ?? Infinity))
         this.onState(line, 'input', line.obs.state, JSON.stringify({ last_input_wall_ms: line.obs.last_input_wall_ms, threshold_s: line.obs.threshold_s }))
         // Away from the last input, not from when idle was noticed: the window in front ends there.
         if (line.obs.state === 'idle' && this.focus !== null && !this.stops.has('idle')) this.sink.retractObservation(this.focus.id, line.obs.last_input_wall_ms)
-        return this.setStop('idle', line.obs.state === 'idle', line)
+        return this.setStop('idle', line.obs.state === 'idle', line) || back
+      }
       case 'session': {
-        this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
+        const back = this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
         if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') {
           this.endExcluded(line)
         }
@@ -375,20 +377,25 @@ export class Normalizer {
         if (line.obs.state === 'unknown') return line.obs.snapshot ? this.setStop('lock_unknown', true, line) : false
         const known = this.setStop('lock_unknown', false, line)
         if (LOCK_START.has(line.obs.state)) return this.setStop('locked', true, line)
-        if (LOCK_END.has(line.obs.state)) return this.setStop('locked', false, line) || known
-        return known
+        if (LOCK_END.has(line.obs.state)) return this.setStop('locked', false, line) || known || back
+        return known || back
       }
       case 'power': {
         const s = line.obs.state
-        if (s === 'resume') this.resumedAtWall ??= line.t.wall_ms
-        this.onPresenceEvidence(line, s === 'resume_user')
+        // Waking alone is not the person coming back: nothing is recorded until their first input after it.
+        if (s === 'resume' && this.resumedAtWall === null) {
+          this.resumedAtWall = line.t.wall_ms
+          this.setStop('woke', true, line)
+        }
+        const back = this.onPresenceEvidence(line, s === 'resume_user')
         if (s === 'sleep') {
           this.resumedAtWall = null
+          this.setStop('woke', false, line)
           this.endExcluded(line)
         }
         this.onState(line, 'power', s, null)
         if (s === 'sleep') return this.setStop('asleep', true, line)
-        if (s === 'resume' || s === 'resume_user') return this.setStop('asleep', false, line)
+        if (s === 'resume' || s === 'resume_user') return this.setStop('asleep', false, line) || back
         if (s === 'display_off') {
           this.setStop('display_unknown', false, line)
           return this.setStop('display_off', true, line)
@@ -579,12 +586,14 @@ export class Normalizer {
     else this.lastState.set(kind, { id, key: state, hasTitle: false, sinceWall: line.t.wall_ms, stale: false })
   }
 
-  private onPresenceEvidence(line: Line, isEvidence: boolean): void {
-    if (this.resumedAtWall === null || !isEvidence) return
+  // True when the evidence ended the last stop in effect, so the window in front needs a fresh read.
+  private onPresenceEvidence(line: Line, isEvidence: boolean): boolean {
+    if (this.resumedAtWall === null || !isEvidence) return false
     this.resumedAtWall = null
     const row = envelopeRow(line, 'presence')
     row.source = 'normalizer'
     row.state = 'returned'
     this.sink.insertObservation(row)
+    return this.setStop('woke', false, line)
   }
 }

@@ -38,6 +38,7 @@ test('after a wake, time in the same window is its own interval', () => {
   r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
   r.feed(line('power', { state: 'sleep' }, T0 + 10 * MIN))
   r.feed(line('power', { state: 'resume' }, T0 + 60 * MIN))
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + 60 * MIN + 5, threshold_s: 120, snapshot: false }, T0 + 60 * MIN + 5))
   r.feed(focus(editor, 'notes.md - Editor', T0 + 60 * MIN + 10, 'snapshot'))
   r.feed(focus(editor, 'notes.md - Editor', T0 + 80 * MIN, 'snapshot'))
   r.feed(focus(chat, null, T0 + 80 * MIN + 1000, 'app_changed'))
@@ -210,6 +211,7 @@ test('a heartbeat never carries a row through sleep', () => {
   r.feed(focus(editor, 'notes.md - Editor', T0 + 20 * MIN + 10, 'snapshot'))
   beats(r, T0 + 20 * MIN, T0 + 21 * MIN)
   r.feed(line('power', { state: 'display_on' }, T0 + 60 * MIN))
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + 60 * MIN + 5, threshold_s: 120, snapshot: false }, T0 + 60 * MIN + 5))
   r.feed(focus(editor, 'notes.md - Editor', T0 + 60 * MIN + 10, 'snapshot'))
   beats(r, T0 + 60 * MIN, T0 + 62 * MIN)
   assert.deepEqual(editorRows(r), [
@@ -377,5 +379,21 @@ test('idle counts from the last input: the window in front ends there, not when 
     [8 * MIN + 10, 8 * MIN + 10],
   ])
   assert.deepEqual(intervals(r).filter(([, , t]) => t !== null)[0], [0, 3 * MIN, 'notes.md - Editor'])
+  r.close()
+})
+
+test('a machine that wakes by itself records no window until the first input after the wake', () => {
+  resetSeq()
+  const r = rig()
+  r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
+  r.feed(line('power', { state: 'sleep' }, T0 + MIN))
+  r.feed(line('power', { state: 'resume' }, T0 + 60 * MIN))
+  r.feed(focus(editor, 'notes.md - Editor', T0 + 60 * MIN + 10, 'snapshot'))
+  beats(r, T0 + 60 * MIN, T0 + 70 * MIN)
+  assert.deepEqual(editorRows(r), [[0, 0]], 'nobody touched it')
+  assert.equal(r.normalizer.handle(line('input', { state: 'active', last_input_wall_ms: T0 + 70 * MIN + 5, threshold_s: 120, snapshot: false }, T0 + 70 * MIN + 5)), true, 'the first input asks for a fresh read')
+  r.feed(focus(editor, 'notes.md - Editor', T0 + 70 * MIN + 10, 'snapshot'))
+  beats(r, T0 + 70 * MIN, T0 + 72 * MIN)
+  assert.deepEqual(editorRows(r), [[0, 0], [70 * MIN + 10, 72 * MIN]])
   r.close()
 })
