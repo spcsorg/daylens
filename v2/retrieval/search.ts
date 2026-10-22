@@ -47,6 +47,8 @@ export interface SearchResults {
   files: FoundItem[]
   windows: FoundItem[]
   hours: FoundHour[]
+  // The groups that matched more items than they return.
+  more: Group[]
 }
 
 export interface SearchOptions {
@@ -65,7 +67,7 @@ export function ftsQuery(text: string, match: 'all' | 'any' = 'all'): string | n
   return words.map((w, i) => `"${w}"${i === words.length - 1 ? '*' : ''}`).join(match === 'all' ? ' ' : ' OR ')
 }
 
-type Group = 'pages' | 'files' | 'windows' | 'hours'
+export type Group = 'pages' | 'files' | 'windows' | 'hours'
 
 interface Doc {
   kind: 'activity' | 'hour'
@@ -97,7 +99,7 @@ const PASSES: readonly { group: Group; match: (q: string, any: string) => string
 
 const COLUMNS = 'd.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.files, d.hour_id, d.first_wall_ms, d.last_wall_ms'
 const GROUPS: readonly Group[] = ['pages', 'files', 'windows', 'hours']
-const EMPTY: SearchResults = { pages: [], files: [], windows: [], hours: [] }
+const EMPTY: SearchResults = { pages: [], files: [], windows: [], hours: [], more: [] }
 
 export function search(reader: Reader, text: string, opts: SearchOptions): SearchResults {
   if (!Number.isInteger(opts.perGroup) || opts.perGroup < 1) throw new RangeError('perGroup must be a positive whole number')
@@ -114,7 +116,8 @@ export function search(reader: Reader, text: string, opts: SearchOptions): Searc
     const read = db.prepare(`SELECT d.id, ${COLUMNS} FROM json_each(?) j CROSS JOIN search_docs d ON d.id = j.value WHERE ${where}`)
     const ranked = db.prepare('SELECT rowid FROM search WHERE search MATCH ? ORDER BY rank, rowid DESC').pluck()
     const chosen = new Map<Group, Map<string, Doc>>(GROUPS.map((g) => [g, new Map()]))
-    const full = (g: Group) => chosen.get(g)!.size >= opts.perGroup
+    // One item past the limit is chosen to learn whether the group has more; it is not read further.
+    const full = (g: Group) => chosen.get(g)!.size > opts.perGroup
     const any = ftsQuery(text, 'any')!
     for (const pass of PASSES) {
       if (full(pass.group)) continue
@@ -153,7 +156,8 @@ export function search(reader: Reader, text: string, opts: SearchOptions): Searc
       return same.length > 0 ? same : [first]
     }
 
-    const out: SearchResults = { pages: [], files: [], windows: [], hours: [] }
+    const out: SearchResults = { pages: [], files: [], windows: [], hours: [], more: GROUPS.filter(full) }
+    for (const g of out.more) chosen.get(g)!.delete([...chosen.get(g)!.keys()].at(-1)!)
     const hourIdAt = db.prepare('SELECT id FROM hours WHERE start_wall_ms = ?').pluck()
     for (const g of GROUPS) {
       for (const first of chosen.get(g)!.values()) {

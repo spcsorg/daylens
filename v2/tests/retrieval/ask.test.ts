@@ -159,7 +159,7 @@ test('what is deleted while the AI is answering is taken out of the answer, and 
 
     const all = await ask(q, { reader: s.reader, model: model(() => s.r.storage.deleteRange(T0, T0 + HOUR)), log: s.r.storage, now: () => NEXT_DAY }, LIMITS)
     assert.deepEqual([all.kind, all.kind === 'withdrawn' && all.withdrawn], ['withdrawn', 2], `hold=${hold}`)
-    assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [] })
+    assert.deepEqual(all.results, { pages: [], files: [], windows: [], hours: [], more: [] })
     s.close()
   }
 })
@@ -218,7 +218,43 @@ test('when the limits leave part of the record out, the AI is told how much, and
   assert.deepEqual(sent.map((r) => [r.hours.length, r.hours_not_sent]), [[3, 5], [3, 5], [8, 0]])
   assert.ok(sent[0]!.sources_not_sent > 0 && sent[1]!.sources_not_sent > 0)
   assert.equal(sent[2]!.sources_not_sent, 0)
-  assert.match(seen[0]!.system, /"hours_not_sent" or "sources_not_sent" is above 0.*never say something happened only, first, last/)
+  assert.match(seen[0]!.system, /"incomplete" is true.*never say something happened only, first, last/)
+  s.close()
+})
+
+test('what search left out past its limit counts as left out, and then a claim of only, first, last or never is dropped', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR))
+  for (let h = 1; h <= 10; h++) {
+    s.r.feed(focus(editor, `ledger-${h}.xlsx - Editor`, T0 + h * HOUR, 'app_changed'))
+    s.r.feed(focus(editor, `ledger-${h}.xlsx - Editor`, T0 + h * HOUR + 5 * MIN))
+  }
+  s.r.store.flush()
+  const seen: AskRequest[] = []
+  const model = fakeModel((req) => {
+    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file?.startsWith('ledger-'))!
+    return {
+      answerable: true,
+      statements: [
+        { text: `The only ledger you opened was ${file.file}.`, sources: [file.id] },
+        { text: `You opened ${file.file} last.`, sources: [file.id] },
+        { text: `You opened ${file.file}.`, sources: [file.id] },
+      ],
+    }
+  }, seen)
+  const res = await ask('which ledger xlsx', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, { maxHours: 5, maxSources: 10, perGroup: 1 })
+  const sent = JSON.parse(seen[0]!.prompt) as { incomplete: boolean; hours_not_sent: number; sources_not_sent: number; hours: unknown[] }
+  assert.deepEqual([sent.hours.length, sent.hours_not_sent, sent.sources_not_sent], [1, 0, 0], 'one file in one hour came back from search')
+  assert.equal(sent.incomplete, true, 'search had more files than its limit')
+  assert.equal(res.kind, 'answer')
+  if (res.kind !== 'answer') return
+  assert.deepEqual(res.statements.map((x) => x.text.replace(/ledger-\d+/, 'ledger-n')), ['You opened ledger-n.xlsx.'])
+  assert.equal(res.dropped, 2)
+
+  const all = await ask('which ledger xlsx', { reader: s.reader, model, log: s.r.storage, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.equal((JSON.parse(seen[1]!.prompt) as { incomplete: boolean }).incomplete, false)
+  assert.equal(all.kind === 'answer' && all.statements.length, 3, 'with the whole record sent, the claim stands')
   s.close()
 })
 
