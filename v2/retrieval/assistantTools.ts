@@ -335,8 +335,10 @@ export const READ_TOOLS: readonly ReadTool[] = [
 ]
 
 /**
- * Runs one read tool: input is checked, the read is logged, and only then is anything returned. A call refused for
- * its input is logged too, at the time it was made and showing nothing, so every call an assistant makes is listed.
+ * Runs one read tool: input is checked, the read is logged, and only then is anything returned. A call that fails, for
+ * its input, a deletion or anything else, is logged too, at the time it was made and showing nothing, so every call an
+ * assistant makes is listed. Only a refused search keeps its text, and only when the input was refused: what a
+ * deletion refused may name what it deleted.
  */
 export function runReadTool(name: string, args: Record<string, unknown>, ctx: ToolContext): unknown {
   checkLimits(ctx.limits)
@@ -345,10 +347,13 @@ export function runReadTool(name: string, args: Record<string, unknown>, ctx: To
     if (!tool) throw new ToolInputError(`there is no tool ${name}`)
     return tool.run(args ?? {}, ctx, ctx.reader.deletionMark())
   } catch (err) {
-    if (err instanceof ToolInputError) {
-      const now = (ctx.now ?? Date.now)()
-      const query = name === 'search' && typeof args?.query === 'string' ? args.query : null
+    const now = (ctx.now ?? Date.now)()
+    const query = err instanceof ToolInputError && name === 'search' && typeof args?.query === 'string' ? args.query : null
+    try {
       new Shown().logged(ctx, ctx.reader.deletionMark(), name, now, now, query)
+    } catch (logErr) {
+      // The assistant gets the call's own error; the log's is attached to it.
+      throw Object.assign(err as Error, { logError: logErr })
     }
     throw err
   }

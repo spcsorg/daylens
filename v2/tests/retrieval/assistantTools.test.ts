@@ -90,7 +90,9 @@ test('a read a deletion under way would cover is refused and returns nothing', (
   assert.deepEqual(found.pages, [])
   s.r.storage.deleteRange(T0, T0 + HOUR)
   assert.throws(() => runReadTool('get_day', { date: DATE }, s.ctx), PendingDeletionError)
-  assert.equal(s.reads().length, before + 1, 'the refused read left no entry')
+  const refused = s.reads().at(-1)!
+  assert.equal(s.reads().length, before + 2)
+  assert.deepEqual([refused.tool, refused.from_wall_ms, refused.to_wall_ms, s.items(refused.id)], ['get_day', T0 + 2 * HOUR, T0 + 2 * HOUR, []], 'the refused call is listed, showing nothing')
   s.close()
 })
 
@@ -112,7 +114,7 @@ test('a deletion that begins and finishes between a read and its log entry refus
   assert.equal(s.r.q<{ state: string }>('SELECT state FROM deletions').length, 0)
   assert.throws(() => runReadTool('search', { query: 'budget' }, { ...s.ctx, log }), PendingDeletionError)
   assert.deepEqual(s.r.q<{ state: string }>('SELECT state FROM deletions').map((d) => d.state), ['done'])
-  assert.equal(s.reads().length, 0, 'nothing of the deleted site is in the log')
+  assert.deepEqual(s.reads().map((x) => [x.tool, x.query, s.items(x.id)]), [['search', null, []]], 'the call is listed; nothing of the deleted site is, not even the words searched')
   const again = runReadTool('search', { query: 'budget' }, { ...s.ctx, log }) as { pages: unknown[] }
   assert.deepEqual(again.pages, [], 'read again, the site is gone')
   s.close()
