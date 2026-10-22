@@ -314,6 +314,17 @@ const pausesByApp: Migration = {
   up: (db) => db.exec('ALTER TABLE pauses ADD COLUMN app_id TEXT'),
 }
 
+const deletionAnnounced: Migration = {
+  name: 'deletion_announced',
+  // The last terminal state announced, written with its announcement: a restart announces what a crash left unsaid.
+  // Deletions from before this column are taken as announced.
+  up: (db) =>
+    db.exec(`
+      ALTER TABLE deletions ADD COLUMN announced TEXT CHECK (announced IN ('done', 'purged'));
+      UPDATE deletions SET announced = state WHERE state != 'pending';
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -336,4 +347,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   deletionWork,
   deletionFence,
   pausesByApp,
+  deletionAnnounced,
 ]

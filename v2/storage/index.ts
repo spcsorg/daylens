@@ -225,13 +225,18 @@ export class Storage {
     this.backfill = this.runBackfill()
     this.backfill.catch(() => {})
     if (this.db.prepare(`SELECT 1 FROM meta WHERE key = 'retention_purge_pending'`).get()) this.retentionPurge = this.checkpointWhenFree()
+    const announced = new Map((this.db.prepare('SELECT id, announced FROM deletions').all() as { id: number; announced: string | null }[]).map((d) => [d.id, d.announced]))
     for (const t of this.rules.tombstones) {
       if (t.state === 'pending') {
         this.track(this.finishDeletion(t.id))
           .then(() => this.purgeWhenFree(t.id))
           .catch((err: Error) => this.onError(`deletion_resume_${err.message}`))
+        continue
       }
+      // The worker's commit of done or purged and its announcement are separate; a crash between them leaves it unsaid.
+      if (announced.get(t.id) === null) this.announceDone(t.id)
       if (t.state === 'done') this.purgeWhenFree(t.id).catch((err: Error) => this.onError(`purge_${err.message}`))
+      if (t.state === 'purged' && announced.get(t.id) !== 'purged') this.purges.set(t.id, this.announcePurged(t.id))
     }
     this.expireDuePauses()
     // A pairing-key scrub an earlier run could not finish; the store retries it every minute until it completes.
@@ -465,11 +470,15 @@ export class Storage {
 
   private async finishDeletion(tombstone: number): Promise<DeletionResult> {
     const result = await this.deletions.run(tombstone, this.now())
+    this.announceDone(tombstone)
+    if (result.purged) this.purges.set(tombstone, this.announcePurged(tombstone))
+    return result
+  }
+
+  private announceDone(tombstone: number): void {
     const done = this.announceDeletion('done', tombstone)
     this.doneAnnouncements.set(tombstone, done)
     void done.then(() => this.doneAnnouncements.delete(tombstone))
-    if (result.purged) this.purges.set(tombstone, this.announcePurged(tombstone))
-    return result
   }
 
   private readonly doneAnnouncements = new Map<number, Promise<void>>()
@@ -491,7 +500,7 @@ export class Storage {
         const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }))
         this.db.pragma('busy_timeout = 0')
         try {
-          this.bus.commit('deletion', { state, tombstone }, () => {}, () => this.rules.loadTombstones())
+          this.bus.commit('deletion', { state, tombstone }, () => this.db.prepare('UPDATE deletions SET announced = ? WHERE id = ?').run(state, tombstone), () => this.rules.loadTombstones())
           resolve()
         } catch (err) {
           this.onError(`deletion_announce_${(err as { code?: string }).code ?? 'failed'}`)

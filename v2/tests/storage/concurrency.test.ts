@@ -734,3 +734,41 @@ test('while the deletion worker has work, capture leaves checkpointing to it, an
   assert.equal(setting(), 1000)
   r.close()
 })
+
+for (const crashedAfter of ['done', 'purged'] as const) {
+  test(`a deletion the worker finished as ${crashedAfter} just before a crash is announced done and purged, in order, after the restart`, async () => {
+    const dir = tmpDir()
+    const r = rig(dir, { holdDeletions: true })
+    r.store.insertObservation(row(T0, 'com.example.chat', 'crash canary'))
+    r.store.flush()
+    r.clock.t = T0 + HOUR
+    const { tombstone } = r.storage.deleteSource('com.example.chat')
+    r.close()
+    // The worker's own commits, then the process ends before the capture thread announces them.
+    const db = new Database(path.join(dir, DB_FILE))
+    db.pragma('secure_delete = ON')
+    const deleter = new Deleter(db)
+    deleter.run(tombstone, T0 + HOUR)
+    if (crashedAfter === 'purged') assert.equal(deleter.purge(tombstone), true)
+    db.close()
+
+    const again = rig(dir)
+    const states = () => again.q<{ payload: string }>(`SELECT payload FROM change_log WHERE kind = 'deletion' ORDER BY seq`).map((c) => JSON.parse(c.payload).state as string)
+    try {
+      again.storage.start()
+      await again.storage.deletionsSettled()
+      for (const start = Date.now(); !states().includes('purged') && Date.now() - start < 5000; ) await new Promise((res) => setTimeout(res, 20))
+      assert.deepEqual(states(), ['started', 'done', 'purged'])
+    } finally {
+      again.close()
+    }
+    const third = rig(dir)
+    try {
+      third.storage.start()
+      await new Promise((res) => setTimeout(res, 200))
+      assert.deepEqual(third.q<{ n: number }>(`SELECT count(*) AS n FROM change_log WHERE kind = 'deletion'`)[0]!.n, 3, 'a later start announces nothing again')
+    } finally {
+      third.close()
+    }
+  })
+}
