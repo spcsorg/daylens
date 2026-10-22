@@ -205,18 +205,19 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
         db.prepare(`SELECT agent, session_id, parent_session_id AS parent FROM main.agent_sessions WHERE parent_session_id IS NOT NULL
           UNION ALL SELECT agent, session_id, parent_session_id FROM staging.agent_sessions WHERE parent_session_id IS NOT NULL`).all() as Parameters<typeof memoryHostLookup>[1],
       )
-      // Whether a session whose app is not known is kept depends on the apps just merged.
+      // Whether a session whose app is not known is kept depends on the apps just merged, and on the rules of its time.
       const unknownOk = hosts.hostAllowed(null, Date.now())
+      const unknownAt = hosts.unknownAllowedAt?.() ?? (() => unknownOk)
       decide = (agent, session, at) => {
         const host = resolveHost(look, agent, session, at)
-        return host === null ? unknownOk : !host.excluded && hosts.hostAllowed(host, at)
+        return host === null ? unknownAt(at) : !host.excluded && hosts.hostAllowed(host, at)
       }
       // As the live reader keeps it: no log path or read position of a session in an excluded app, or of one whose
       // app is not known while it may be.
       db.function('agent_source_kept', { deterministic: false }, (agent: Agent, session: string | null) => {
         if (session === null) return 1
         const host = resolveHost(look, agent, session, Number.MAX_SAFE_INTEGER)
-        return host?.excluded || (host === null && !unknownOk) ? 0 : 1
+        return host?.excluded || (host !== null && hosts.hostExcluded(host)) || (host === null && !unknownOk) ? 0 : 1
       })
       db.exec(`
         INSERT INTO agent_sessions (agent, session_id, origin, parent_session_id, client, project_dir, branch, first_wall_ms, last_wall_ms, recorded_wall_ms)

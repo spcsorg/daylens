@@ -116,6 +116,7 @@ const agents = values['agent-sessions']
         const r = await backfill(store.database, dataDir, roots, log, undefined, undefined, () => storage.withheld(), {
           hostAllowed: (host, at) => storage.agentHostAllowed(host, at),
           hostExcluded: (host) => storage.excludesAgentHost(host),
+          unknownAllowedAt: () => storage.agentUnknownHostAllowedAt(),
         })
         if (r.child) log(`agent backfill files=${r.child.files_read} mb=${r.child.mb_read} wall_ms=${r.child.wall_ms} merge_ms=${r.merge_ms}`)
         return r.merged

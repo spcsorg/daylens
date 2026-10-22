@@ -333,6 +333,23 @@ const observationsByPresenceKind: Migration = {
   up: (db) => db.exec(`CREATE INDEX IF NOT EXISTS observations_presence ON observations(kind, event_wall_ms) WHERE ${PRESENCE_KINDS}`),
 }
 
+const exclusionPeriods: Migration = {
+  name: 'exclusion_periods',
+  // When each exclusion was in force: a log read later (an agent session's) is judged by the rules of its own time, so
+  // what an app did while it was excluded stays out after the exclusion is removed. An open period is a rule in force.
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE exclusion_periods (
+        id INTEGER PRIMARY KEY,
+        match TEXT NOT NULL,
+        value TEXT NOT NULL,
+        from_wall_ms INTEGER NOT NULL,
+        to_wall_ms INTEGER
+      );
+      CREATE INDEX exclusion_periods_rule ON exclusion_periods(match, value) WHERE to_wall_ms IS NULL;
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -357,4 +374,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   pausesByApp,
   deletionAnnounced,
   observationsByPresenceKind,
+  exclusionPeriods,
 ]

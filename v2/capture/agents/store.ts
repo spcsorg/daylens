@@ -223,6 +223,9 @@ export interface HostPolicy {
   hostAllowed: (host: SessionHost | null, atWallMs: number) => boolean
   // Whether the app is excluded; nothing that names it is kept.
   hostExcluded: (host: SessionHost) => boolean
+  // hostAllowed(null, at) prepared ahead, for use where the connection can run no other statement (the first read's
+  // merge). Without it, the rule in force now is used for every time.
+  unknownAllowedAt?: () => (atWallMs: number) => boolean
 }
 
 export const ALLOW_ALL_HOSTS: HostPolicy = { hostAllowed: () => true, hostExcluded: () => false }
@@ -568,9 +571,12 @@ export class AgentStore {
       flushActivity()
       if (source && source.session !== null) {
         const host = resolveHost(look, agent, source.session, Number.MAX_SAFE_INTEGER)
-        if (host?.excluded || (host === null && !this.hostAllowed(null, now))) return false
         // A log whose session has nothing kept (all of it deleted, withheld or not yet seen) is not named either.
-        if (this.stmt(SQL.sessionKept).get({ agent, session: source.session }) === undefined) return false
+        const excluded = host !== null && (host.excluded === true || this.hostExcluded(host))
+        if (excluded || (host === null && !this.hostAllowed(null, now)) || this.stmt(SQL.sessionKept).get({ agent, session: source.session }) === undefined) {
+          this.stmt('DELETE FROM agent_sources WHERE path = ?').run(source.path)
+          return false
+        }
       }
       if (source) {
         this.stmt(SQL.source).run({

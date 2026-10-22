@@ -128,8 +128,21 @@ export class Rules {
     }))
   }
 
+  // Rules no longer in force, with when they were.
+  pastExclusions: { rule: ExclusionRule; privacy: Privacy; from: number; to: number }[] = []
+
   loadExclusions(): void {
     this.privacy = new Privacy(this.db.prepare('SELECT match, value, label FROM exclusions ORDER BY id').all() as ExclusionRule[])
+    const past = this.db.prepare(`SELECT match, value, from_wall_ms AS f, to_wall_ms AS t FROM exclusion_periods WHERE to_wall_ms IS NOT NULL`).all() as { match: ExclusionRule['match']; value: string; f: number; t: number }[]
+    this.pastExclusions = past.map((p) => {
+      const rule: ExclusionRule = { match: p.match, value: p.value, label: p.value }
+      return { rule, privacy: new Privacy([rule]), from: p.f, to: p.t }
+    })
+  }
+
+  /** The rules no longer in force that were at a time. */
+  exclusionsAt(wallMs: number): { rule: ExclusionRule; privacy: Privacy }[] {
+    return this.pastExclusions.filter((p) => wallMs >= p.from && wallMs < p.to)
   }
 
   /** Paused, past retention, or deleted material is never written. */

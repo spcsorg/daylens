@@ -441,3 +441,28 @@ test('a deletion of an app cut short after removing records still keeps a subage
   assert.deepEqual(again.q('SELECT turn_key FROM agent_turns'), [], "a copy of the subagent's log brings nothing back")
   again.close()
 })
+
+test('excluding an app a tracked session runs in forgets its log, and what it wrote while excluded stays out once included again', () => {
+  const { r, agents, turn, turns } = setup()
+  const log = { path: '/logs/s.jsonl', agent: 'claude_code' as const, root: '/logs', session: 's', dev: '1', ino: '2', offset: 10, size: 10, state: '{"dir":"/w"}', turnless: false, counts: emptyCounts() }
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0)
+  agents.apply('claude_code', turn('s', 's1', T0 + MIN), log)
+  assert.equal(r.q('SELECT path FROM agent_sources').length, 1)
+  r.clock.t = T0 + 2 * MIN
+  r.storage.addExclusion({ match: 'app_id', value: 'com.mitchellh.ghostty', label: 'Ghostty' })
+  assert.deepEqual(r.q('SELECT path FROM agent_sources'), [], 'no log path or parser state of a session in the app is kept')
+  agents.apply('claude_code', turn('s', 's2', T0 + 3 * MIN), { ...log, offset: 20, size: 20 })
+  assert.deepEqual(r.q('SELECT path FROM agent_sources'), [])
+  r.clock.t = T0 + 5 * MIN
+  r.storage.removeExclusion('app_id', 'com.mitchellh.ghostty')
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + 6 * MIN)
+  agents.apply('claude_code', [...turn('s', 's2', T0 + 3 * MIN), ...turn('s', 's3', T0 + 7 * MIN)], { ...log, offset: 30, size: 30 })
+  assert.deepEqual(turns('s'), ['s1', 's3'], 'what the session did while its app was excluded is not recorded when its log is read again')
+  const staging = path.join(r.dir, 'staging-excluded-then.sqlite')
+  const db = new Database(staging)
+  new AgentStore(db).apply('claude_code', [...turn('s', 's2', T0 + 3 * MIN), ...turn('u', 'u1', T0 + 3 * MIN), ...turn('u', 'u2', T0 + 8 * MIN)])
+  db.close()
+  mergeStaging(r.store.database, staging, r.storage.withheld(), { hostAllowed: (h, at) => r.storage.agentHostAllowed(h, at), hostExcluded: (h) => r.storage.excludesAgentHost(h), unknownAllowedAt: () => r.storage.agentUnknownHostAllowedAt() })
+  assert.deepEqual([turns('s'), turns('u')], [['s1', 's3'], ['u2']], 'nor by the first read, for its app or one not known while Ghostty was excluded')
+  r.close()
+})

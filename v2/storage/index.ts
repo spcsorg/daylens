@@ -14,7 +14,7 @@ import type { Span } from '../capture/agents/withheld.ts'
 import { DAY_MS, fencedBy, pauseEnd, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
 import { scrubBlocked } from './scrub.ts'
-import { AgentStore, deleteAgentSession, type SessionHost } from '../capture/agents/store.ts'
+import { AgentStore, dbHostLookup, deleteAgentSession, resolveHost, type SessionHost } from '../capture/agents/store.ts'
 import { isKnownAgentHost } from '../capture/agents/host.ts'
 import type { Agent } from '../capture/agents/types.ts'
 import { immediate, isBusy } from './tx.ts'
@@ -400,8 +400,18 @@ export class Storage {
    * sessions is excluded, since the session may have run in it.
    */
   agentHostAllowed(host: SessionHost | null, atWallMs: number): boolean {
-    if (host?.app_id) return this.rules.accepts(atWallMs, host.app_id, null) && !this.rules.privacy.excludes(host.app_id, host.app_path)
-    return !this.agentHostExcluded()
+    const past = this.rules.exclusionsAt(atWallMs)
+    if (host?.app_id) {
+      return this.rules.accepts(atWallMs, host.app_id, null) && !this.rules.privacy.excludes(host.app_id, host.app_path) && !past.some((p) => p.privacy.excludes(host.app_id, host.app_path))
+    }
+    return !this.agentHostExcluded(this.rules.privacy, this.store.exclusions()) && !past.some((p) => this.agentHostExcluded(p.privacy, [p.rule]))
+  }
+
+  /** agentHostAllowed(null, at) for any time, with every query run now. */
+  agentUnknownHostAllowedAt(): (atWallMs: number) => boolean {
+    const now = !this.agentHostExcluded(this.rules.privacy, this.store.exclusions())
+    const past = this.rules.pastExclusions.map((p) => ({ from: p.from, to: p.to, excluded: this.agentHostExcluded(p.privacy, [p.rule]) })).filter((p) => p.excluded)
+    return (at) => now && !past.some((p) => at >= p.from && at < p.to)
   }
 
   /** Whether the app an agent session ran in is excluded. */
@@ -409,15 +419,33 @@ export class Storage {
     return host.app_id !== null && this.rules.privacy.excludes(host.app_id, host.app_path)
   }
 
-  private agentHostExcluded(): boolean {
-    const rules = this.store.exclusions().filter((r) => r.match !== 'site')
+  // Whether these rules exclude an app that may have run a session whose app is not known.
+  private agentHostExcluded(privacy: Privacy, all: readonly ExclusionRule[]): boolean {
+    const rules = all.filter((r) => r.match !== 'site')
     if (rules.length === 0) return false
     if (rules.some((r) => r.match === 'app_id' && isKnownAgentHost(r.value))) return true
     if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() === undefined) return false
     // A session seen in an excluded app is kept without the app's name, so any such session counts.
     if (this.db.prepare(`SELECT 1 FROM agent_hosts WHERE basis = 'excluded' LIMIT 1`).get() !== undefined) return true
     const seen = this.db.prepare('SELECT DISTINCT app_id, app_path FROM agent_hosts WHERE app_id IS NOT NULL').all() as SessionHost[]
-    return seen.some((h) => this.rules.privacy.excludes(h.app_id, h.app_path))
+    return seen.some((h) => privacy.excludes(h.app_id, h.app_path))
+  }
+
+  /**
+   * Inside the transaction that adds an exclusion: the logs of sessions it now holds back (in the app, or whose app is
+   * not known while it may be) keep no path, read position or parser state. The reader keeps their positions in memory.
+   */
+  private forgetExcludedLogs(rules: readonly ExclusionRule[]): void {
+    if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() === undefined) return
+    const privacy = new Privacy(rules)
+    const look = dbHostLookup(this.db)
+    let unknown: boolean | null = null
+    const del = this.db.prepare('DELETE FROM agent_sources WHERE agent = ? AND session_id = ?')
+    for (const s of this.db.prepare('SELECT DISTINCT agent, session_id FROM agent_sources WHERE session_id IS NOT NULL').all() as { agent: Agent; session_id: string }[]) {
+      const host = resolveHost(look, s.agent, s.session_id, Number.MAX_SAFE_INTEGER)
+      const held = host === null ? (unknown ??= this.agentHostExcluded(privacy, rules)) : host.excluded === true || (host.app_id !== null && privacy.excludes(host.app_id, host.app_path))
+      if (held) del.run(s.agent, s.session_id)
+    }
   }
 
   /** Deletes one agent session for good (one a deleted app's confirmation offered); resolves once it is purged. */
@@ -838,13 +866,21 @@ export class Storage {
 
   addExclusion(rule: ExclusionRule): void {
     this.privacyWrite(true, () => this.bus.commit('exclusion', { match: rule.match, added: true }, () => {
-      this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 0)').run(rule.match, rule.value, rule.label)
+      const added = this.db.prepare('INSERT OR IGNORE INTO exclusions (match, value, label, is_default) VALUES (?, ?, ?, 0)').run(rule.match, rule.value, rule.label).changes > 0
+      if (!added) return
+      this.db.prepare('INSERT INTO exclusion_periods (match, value, from_wall_ms) VALUES (?, ?, ?)').run(rule.match, rule.value, this.now())
+      this.forgetExcludedLogs(this.store.exclusions())
     }, () => this.installExclusions()))
   }
 
   removeExclusion(match: ExclusionRule['match'], value: string): void {
     this.privacyWrite(true, () => this.bus.commit('exclusion', { match, removed: true }, () => {
-      this.db.prepare('DELETE FROM exclusions WHERE match = ? AND value = ?').run(match, value)
+      if (this.db.prepare('DELETE FROM exclusions WHERE match = ? AND value = ?').run(match, value).changes === 0) return
+      const now = this.now()
+      // A rule in force since before its periods were kept is taken to have been in force all along.
+      if (this.db.prepare('UPDATE exclusion_periods SET to_wall_ms = ? WHERE match = ? AND value = ? AND to_wall_ms IS NULL').run(now, match, value).changes === 0) {
+        this.db.prepare('INSERT INTO exclusion_periods (match, value, from_wall_ms, to_wall_ms) VALUES (?, ?, ?, ?)').run(match, value, Number.MIN_SAFE_INTEGER, now)
+      }
     }, () => this.installExclusions()))
   }
 
