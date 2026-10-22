@@ -189,6 +189,13 @@ export function summarize(segments: readonly WorkSegment[], events: readonly Eve
 const LOCK_START = new Set(['locked', 'console_disconnect', 'remote_disconnect', 'logoff'])
 const LOCK_END = new Set(['unlocked', 'console_connect', 'remote_connect', 'logon'])
 
+// What is left of an interval once the given ones are taken out of it.
+function without(i: Interval, out: readonly Interval[]): Interval[] {
+  let parts = [i]
+  for (const o of out) parts = parts.flatMap((p) => [{ start: p.start, end: Math.min(p.end, o.start) }, { start: Math.max(p.start, o.end), end: p.end }].filter((x) => x.end > x.start))
+  return parts
+}
+
 function lastInput(detail: string | null): number | null {
   try {
     const v = (JSON.parse(detail ?? 'null') as { last_input_wall_ms?: unknown } | null)?.last_input_wall_ms
@@ -255,7 +262,9 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
   const runs = db
     .prepare('SELECT started_wall_ms AS s, coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) AS e FROM capture_runs WHERE started_wall_ms < ? AND coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) > ?')
     .all(to, from) as { s: number; e: number }[]
-  inputs.covered = runs.map((r) => ({ start: r.s, end: r.e }))
+  // A deleted range was not recorded, whatever ran then: covered time stops at it and starts again after it.
+  const deleted = ranges ? (db.prepare(`SELECT from_wall_ms AS start, to_wall_ms AS end FROM deletions WHERE kind = 'range' AND from_wall_ms < ? AND to_wall_ms > ?`).all(to, from) as Interval[]) : []
+  inputs.covered = runs.flatMap((r) => without({ start: r.s, end: r.e }, deleted))
   const gaps = db
     .prepare(
       `SELECT start_wall_ms AS s, coalesce(end_wall_ms, ?) AS e FROM capture_gaps

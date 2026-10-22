@@ -193,3 +193,21 @@ test('a lock, sleep or idle whose end was deleted ends where the deleted range b
   assert.deepEqual(presenceFromCapture(r.store.database, T0 + 2 * H, T0 + 2 * H + 600_000).locked, [], 'a window after the range does not inherit the lock')
   r.close()
 })
+
+test('a deleted range reads as not recorded, not as present, though capture ran then', async () => {
+  const r = rig()
+  const H = 3_600_000
+  r.store.startRun(line('hello', { awake_us: 0, helper: 'test', boot_identity: 'kernel', version: '1', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, T0) as never)
+  r.store.endRun('run-test', T0 + 3 * H, 'test')
+  r.store.flush()
+  r.clock.t = T0 + 4 * H
+  await r.storage.deleteRange(T0 + H, T0 + 2 * H).done
+  const inputs = presenceFromCapture(r.store.database, T0, T0 + 3 * H)
+  assert.deepEqual(inputs.covered, [{ start: T0, end: T0 + H }, { start: T0 + 2 * H, end: T0 + 3 * H }])
+  assert.deepEqual(presenceTimeline(T0, T0 + 3 * H, inputs).map((p) => [p.start - T0, p.end - T0, p.state]), [
+    [0, H, 'present'],
+    [H, 2 * H, 'unknown'],
+    [2 * H, 3 * H, 'present'],
+  ])
+  r.close()
+})
