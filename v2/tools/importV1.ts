@@ -3,7 +3,7 @@
 // Storage.importObservations, so V2's exclusions and deletions apply. Nothing it writes belongs in the repository.
 // Usage: node tools/importV1.ts [--v1 <daylens.sqlite>] [--out <dir>] [--keep-copy]
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
@@ -29,6 +29,8 @@ for (const synced of [path.join(HOME, 'Projects'), path.join(HOME, 'Library', 'C
 }
 if (!existsSync(v1File)) throw new Error(`no V1 database at ${v1File}`)
 mkdirSync(out, { recursive: true })
+// The output folder's database is replaced; V1's file must never be one of the files that removes.
+if (path.dirname(realpathSync(v1File)) === realpathSync(out)) throw new Error(`refusing ${out}: it holds the V1 database; choose another output folder`)
 
 // One SELECT-only transaction on V1 for the whole copy, so the copy is a consistent snapshot even while V1 writes.
 const copy = path.join(out, `.v1-copy-${process.pid}.sqlite`)
@@ -175,7 +177,7 @@ try {
   }
   events.sort((a, b) => a.t - b.t || a.order - b.order)
 
-  for (const f of readdirSync(out)) if (f.startsWith(DB_FILE)) rmSync(path.join(out, f))
+  for (const f of ['', '-wal', '-shm', '-journal']) rmSync(path.join(out, DB_FILE + f), { force: true })
   const store = new Store(out)
   // A one-shot import runs no deletions, so capture never needs checkpointing back from the deletion worker.
   const storage = new Storage(store, out, { deletionStallMs: Infinity })

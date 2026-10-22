@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -61,6 +61,24 @@ test('the V1 import reads a copy, never changes V1, and builds V2 rows through i
   assert.notEqual(refused.status, 0)
   assert.match(refused.stderr, /syncs to a cloud drive/)
   assert.equal(existsSync(path.join(os.homedir(), 'Projects', 'daylens-import-refusal-check')), false)
+})
+
+test('the V1 import refuses an output folder that holds the V1 database, and replaces only its own database there', () => {
+  const v1 = v1Fixture()
+  const before = digest(v1)
+  for (const name of [DB_FILE, 'daylens.sqlite']) {
+    const dir = tmpDir()
+    const inside = path.join(dir, name)
+    copyFileSync(v1, inside)
+    const refused = spawnSync(process.execPath, ['tools/importV1.ts', '--v1', inside, '--out', dir], { cwd: V2, encoding: 'utf8' })
+    assert.notEqual(refused.status, 0, name)
+    assert.match(refused.stderr, /holds the V1 database/)
+    assert.equal(digest(inside), before, `${name}: V1 is still there, unchanged`)
+  }
+  const out = tmpDir()
+  writeFileSync(path.join(out, `${DB_FILE}.backup`), 'mine')
+  execFileSync(process.execPath, ['tools/importV1.ts', '--v1', v1, '--out', out], { cwd: V2, stdio: ['ignore', 'pipe', 'pipe'] })
+  assert.equal(readFileSync(path.join(out, `${DB_FILE}.backup`), 'utf8'), 'mine', 'a file that only starts with the name is not removed')
 })
 
 test('the search evaluation fails loudly when its private queries or database are missing', () => {
