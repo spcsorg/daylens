@@ -140,6 +140,9 @@ export class Supervisor {
   // Open from the first dropped focus request until the next focus line, which the helper sends after the drop.
   private focusLossGap: { id: number; count: number } | null = null
   private registrationGaps = new Map<'focus' | 'session' | 'power', number>()
+  // A display or lock state the helper has not been able to read for longer than its reconcile interval, by scope.
+  private unknownGaps = new Map<'session' | 'power', number>()
+  private reconcileMs = 0
   private rejectGap: { id: number; count: number; startWall: number } | null = null
   private awakeSilenceMs = 0
   private lastTick: { wall: number; hr: number } | null = null
@@ -443,9 +446,11 @@ export class Supervisor {
         return this.onHeartbeat(line, point)
       case 'power':
         if (this.normalizer.handle(line) || line.obs.state === 'resume') this.send({ op: 'snapshot' })
+        this.checkUnknownState(point)
         return
       case 'session':
         if (this.normalizer.handle(line) || (line.obs.state === 'unlocked' && !line.obs.snapshot)) this.send({ op: 'snapshot' })
+        this.checkUnknownState(point)
         return
       case 'input':
         if (this.normalizer.handle(line)) this.send({ op: 'snapshot' })
@@ -496,6 +501,7 @@ export class Supervisor {
     const down = this.downGap
     this.downGap = null
     this.bootIdentity = line.obs.boot_identity
+    this.reconcileMs = line.obs.config.reconcile_s * 1000
     if (line.obs.boot_identity === 'clock') this.o.log('boot identity degraded source=clock')
     if (down) this.refineDowntime(down, line)
     if (this.allGap) {
@@ -543,6 +549,7 @@ export class Supervisor {
     this.store.writeCheckpoint({ wall_ms: line.t.wall_ms, mono_us: line.t.mono_us, boot: line.boot, boot_identity: this.bootIdentity, clean: false })
     this.onRegistrations(line, point)
     this.normalizer.onRegistrations(line.obs.registrations.session, line)
+    this.checkUnknownState(point)
     this.normalizer.onTitleChannel(line.obs.titles, line.t.wall_ms)
     // The main loop is alive but the title worker is stuck in one call: only a restart frees it.
     if (line.obs.stall_ms >= this.o.hangAfterMs && this.child) {
@@ -595,9 +602,29 @@ export class Supervisor {
     }
   }
 
+  /**
+   * Nothing is recorded while the helper cannot tell whether the display is on or the screen locked; it reads both
+   * again on every reconcile. Not knowing for longer than that interval is a gap, so the app can say why.
+   */
+  private checkUnknownState(point: GapPoint): void {
+    for (const [what, scope] of [['display', 'power'], ['lock', 'session']] as const) {
+      const since = this.normalizer.unknownSince(what)
+      const open = this.unknownGaps.get(scope)
+      if (since !== undefined && open === undefined && !this.registrationGaps.has(scope) && point.wall_ms - since > this.reconcileMs) {
+        this.o.log(`helper ${what} state unknown since_ms=${point.wall_ms - since}`)
+        this.unknownGaps.set(scope, this.store.openGap({ reason: 'events_unavailable', scope, run: this.run, start: { wall_ms: since, mono_us: null, boot: point.boot }, detail: { state: 'unknown' } }))
+      } else if (since === undefined && open !== undefined) {
+        this.store.closeGap(open, point)
+        this.unknownGaps.delete(scope)
+      }
+    }
+  }
+
   private closeRegistrationGaps(at: GapPoint): void {
     for (const id of this.registrationGaps.values()) this.store.closeGap(id, at)
     this.registrationGaps.clear()
+    for (const id of this.unknownGaps.values()) this.store.closeGap(id, at)
+    this.unknownGaps.clear()
   }
 
   // --- helpers ------------------------------------------------------------

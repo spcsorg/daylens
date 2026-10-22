@@ -450,6 +450,11 @@ export class Normalizer {
     return true
   }
 
+  /** Since when the display, or the lock, has not been known; undefined while it is. */
+  unknownSince(what: 'display' | 'lock'): number | undefined {
+    return this.stops.get(what === 'display' ? 'display_unknown' : 'lock_unknown')
+  }
+
   /** A heartbeat's registrations: without lock events, whether the screen is locked cannot be known. */
   onRegistrations(sessionRegistered: boolean, line: Line): void {
     if (!sessionRegistered) this.setStop('lock_unknown', true, line)

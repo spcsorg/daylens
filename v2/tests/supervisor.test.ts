@@ -335,7 +335,11 @@ function fed() {
     store.flush()
     return store.query<{ seen: number }>(`SELECT last_seen_wall_ms - ? AS seen FROM observations WHERE kind = 'focus'`, T).map((x) => x.seen)
   }
-  return { open, heartbeat, seen, close: () => store.close() }
+  const gaps = () => {
+    store.flush()
+    return store.query<{ reason: string; scope: string; s: number; e: number | null; detail: string | null }>('SELECT reason, scope, start_wall_ms - ? AS s, end_wall_ms - ? AS e, detail FROM capture_gaps ORDER BY id', T, T)
+  }
+  return { open, heartbeat, seen, feed, gaps, editor, close: () => store.close() }
 }
 
 test('a heartbeat after a sleep the helper never reported does not carry the row through it', () => {
@@ -356,5 +360,20 @@ test('while the helper cannot receive lock events, a heartbeat does not extend t
   s.heartbeat(30_000, 30_000, 30_000, false)
   s.heartbeat(45_000, 45_000, 45_000, false)
   assert.deepEqual(s.seen(), [15_000])
+  s.close()
+})
+
+test('a display state the helper cannot read for longer than its reconcile interval is a gap until it can', () => {
+  const s = fed()
+  s.feed('hello', { awake_us: 0, helper: 'fake', boot_identity: 'kernel', version: '0', pid: 1, os: 'test', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, 0)
+  s.feed('session', { state: 'unlocked', snapshot: true }, 2)
+  s.feed('focus', { trigger: 'snapshot', app: s.editor, window: { window: 'w', title: 'notes.md', title_state: 'ok' } }, 3)
+  for (let t = 15_000; t <= 60_000; t += 15_000) s.heartbeat(t, t, t)
+  assert.deepEqual(s.gaps(), [], 'not before one reconcile interval has passed')
+  s.heartbeat(75_000, 75_000, 75_000)
+  assert.deepEqual(s.gaps(), [{ reason: 'events_unavailable', scope: 'power', s: 0, e: null, detail: '{"state":"unknown"}' }])
+  assert.deepEqual(s.seen(), [], 'and nothing is recorded meanwhile')
+  s.feed('power', { state: 'display_on', snapshot: true }, 80_000)
+  assert.deepEqual(s.gaps().map((g) => g.e), [80_000])
   s.close()
 })
