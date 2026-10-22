@@ -218,10 +218,17 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
   const open: Record<'locked' | 'asleep' | 'idle' | 'woke', number | null> = { locked: null, asleep: null, idle: null, woke: null }
   const inputs: PresenceInputs = { covered: [], locked: [], asleep: [], idle: [], unknown: [] }
   const closeIf = (k: 'locked' | 'asleep' | 'idle' | 'woke', at: number) => {
-    if (open[k] !== null) inputs[k === 'woke' ? 'idle' : k].push({ start: open[k]!, end: at })
+    if (open[k] !== null && at > open[k]! && at > from) inputs[k === 'woke' ? 'idle' : k].push({ start: open[k]!, end: at })
     open[k] = null
   }
+  // A lock, sleep or idle that began before a deleted range has no end left inside it: it ends where the range begins.
+  const starts = ranges ? (db.prepare(`SELECT from_wall_ms AS f FROM deletions WHERE kind = 'range' AND from_wall_ms < ? ORDER BY from_wall_ms`).pluck().all(to) as number[]) : []
+  let next = 0
+  const crossRanges = (until: number) => {
+    for (; next < starts.length && starts[next]! <= until; next++) for (const k of ['locked', 'asleep', 'idle', 'woke'] as const) closeIf(k, starts[next]!)
+  }
   for (const r of rows) {
+    crossRanges(r.at)
     if (r.kind === 'session') {
       if (LOCK_START.has(r.state)) open.locked ??= r.at
       else if (LOCK_END.has(r.state)) closeIf('locked', r.at)
@@ -243,6 +250,7 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
       else if (r.state === 'active') closeIf('idle', r.at)
     }
   }
+  crossRanges(to)
   for (const k of ['locked', 'asleep', 'idle', 'woke'] as const) closeIf(k, to)
   const runs = db
     .prepare('SELECT started_wall_ms AS s, coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) AS e FROM capture_runs WHERE started_wall_ms < ? AND coalesce(ended_wall_ms, last_heartbeat_wall_ms, started_wall_ms) > ?')

@@ -174,3 +174,22 @@ test('presence shows nothing from a range a deletion is still removing', () => {
   assert.deepEqual([inputs.locked, inputs.idle], [[], []])
   r.close()
 })
+
+test('a lock, sleep or idle whose end was deleted ends where the deleted range begins', async () => {
+  const r = rig()
+  const H = 3_600_000
+  r.feed(line('session', { state: 'unlocked', snapshot: true }, T0))
+  r.feed(line('session', { state: 'locked', snapshot: false }, T0 + H - 600_000))
+  r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + H + 600_000))
+  r.feed(line('input', { state: 'idle', last_input_wall_ms: T0 + H - 900_000, threshold_s: 120, snapshot: false }, T0 + H - 780_000))
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + H + 300_000, threshold_s: 120, snapshot: false }, T0 + H + 300_000))
+  r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 3 * H))
+  r.store.flush()
+  r.clock.t = T0 + 4 * H
+  await r.storage.deleteRange(T0 + H, T0 + 2 * H).done
+  const inputs = presenceFromCapture(r.store.database, T0, T0 + 4 * H)
+  assert.deepEqual(inputs.locked, [{ start: T0 + H - 600_000, end: T0 + H }, { start: T0 + 3 * H, end: T0 + 4 * H }])
+  assert.deepEqual(inputs.idle, [{ start: T0 + H - 900_000, end: T0 + H }])
+  assert.deepEqual(presenceFromCapture(r.store.database, T0 + 2 * H, T0 + 2 * H + 600_000).locked, [], 'a window after the range does not inherit the lock')
+  r.close()
+})
