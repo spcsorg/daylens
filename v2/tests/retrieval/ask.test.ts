@@ -221,6 +221,21 @@ test('a question about two days sends nothing from the days between them', async
   s.close()
 })
 
+test('a source seen in several hours is sent with when it was last seen, in any of them', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const t = T0 + 3 * HOUR
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+  s.r.feed(focus(editor, 'Scratch - Editor', t, 'app_changed'))
+  s.r.feed(focus(editor, 'Scratch - Editor', t + 2 * MIN))
+  s.r.store.flush()
+  const seen: AskRequest[] = []
+  await ask('what did I do yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => NEXT_DAY }, LIMITS)
+  const scratch = (JSON.parse(seen[0]!.prompt) as { sources: { title: string; minutes: number; last_seen: string; hours: string[] }[] }).sources.find((x) => x.title === 'Scratch - Editor')!
+  assert.deepEqual([scratch.minutes, scratch.hours.length, scratch.last_seen], [12, 2, '2026-10-16 11:02'])
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)

@@ -349,6 +349,10 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
       prev.sightings.push(...s.sightings)
       prev.ms = (prev.ms ?? 0) + s.ms
+      if (s.last_wall_ms > prev.last_wall_ms) {
+        prev.last_wall_ms = s.last_wall_ms
+        prev.title = s.title
+      }
       continue
     }
     if (sent.size >= limits.maxSources) {
