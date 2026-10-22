@@ -164,8 +164,16 @@ export class Storage {
 
   private readonly holdDeletions: boolean
 
-  /** holdDeletions: commit each deletion's fence but leave its removal for the next start (crash tests). */
-  constructor(store: Store, dir: string, opts: { now?: () => number; orderingPoint?: () => OrderingPoint | null | Promise<OrderingPoint | null>; onError?: (code: string) => void; holdDeletions?: boolean } = {}) {
+  /**
+   * deletionStallMs: how long the deletion worker may commit nothing while it has work before capture takes
+   * checkpointing back (Infinity: never). holdDeletions: commit each deletion's fence but leave its removal for the
+   * next start (crash tests).
+   */
+  constructor(
+    store: Store,
+    dir: string,
+    opts: { deletionStallMs: number; now?: () => number; orderingPoint?: () => OrderingPoint | null | Promise<OrderingPoint | null>; onError?: (code: string) => void; holdDeletions?: boolean },
+  ) {
     this.holdDeletions = opts.holdDeletions ?? false
     this.store = store
     this.db = store.database
@@ -185,11 +193,14 @@ export class Storage {
       cut: (s, e, row) => this.rules.cut(s, e, row),
       admit: (row) => this.rules.accepts(row.event_wall_ms, row.app_id, row.url),
     })
-    this.deletions = new DeletionWorker(store.file)
+    this.deletions = new DeletionWorker(store.file, opts.deletionStallMs)
     // The worker's large writes would otherwise be checkpointed inside capture's next commit, on the capture thread;
     // while it has work its own connection checkpoints after each of its commits instead.
-    this.deletions.onBusy = (busy) => {
-      if (this.db.open) this.db.pragma(`wal_autocheckpoint = ${busy ? 0 : WAL_AUTOCHECKPOINT}`)
+    this.deletions.onCheckpoints = (worker) => {
+      if (this.db.open) this.db.pragma(`wal_autocheckpoint = ${worker ? 0 : WAL_AUTOCHECKPOINT}`)
+    }
+    this.deletions.onStall = (stalled) => {
+      if (stalled) this.onError('deletion_worker_stalled')
     }
     store.onWriteStart = () => this.deletions.captureWriting(true)
     store.onWriteEnd = () => this.deletions.captureWriting(false)

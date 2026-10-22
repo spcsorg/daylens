@@ -3,14 +3,21 @@ import Database from 'better-sqlite3'
 import { parentPort, workerData } from 'node:worker_threads'
 import { Deleter } from './deletion.ts'
 import { ScrubUnavailableError } from './scrub.ts'
-import { setBeforeWrite } from './tx.ts'
+import { setAfterWrite, setBeforeWrite } from './tx.ts'
 
-const { file, want } = workerData as { file: string; want: Int32Array }
+const { file, want, progress } = workerData as { file: string; want: Int32Array; progress: Float64Array }
 const db = new Database(file)
 // Capture sets this while it flushes; each write transaction here waits until it is clear, so capture gets the lock next.
 setBeforeWrite(() => {
   while (Atomics.load(want, 0) !== 0) Atomics.wait(want, 0, Atomics.load(want, 0), 50)
 })
+// When this worker last committed (or was given a job), and the longest it has gone without.
+const progressed = () => {
+  const at = Date.now()
+  progress[1] = Math.max(progress[1]!, at - progress[0]!)
+  progress[0] = at
+}
+setAfterWrite(progressed)
 // Capture's flushes are short; waiting for one is fine, failing because of one is not.
 db.pragma('busy_timeout = 5000')
 db.pragma('foreign_keys = ON')

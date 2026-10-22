@@ -12,7 +12,7 @@ const KEY = 'K'.repeat(43)
 // The store as the service runs it: storage's deletion worker does the purge a scrub asks for.
 function open(dir: string, errors: string[], busyTimeoutMs?: number): { store: Store; close: () => void } {
   const store = new Store(dir, { busyTimeoutMs, onError: (c) => errors.push(c) })
-  const storage = new Storage(store, dir, { onError: (c) => errors.push(c) })
+  const storage = new Storage(store, dir, { deletionStallMs: Infinity, onError: (c) => errors.push(c) })
   return { store, close: () => { storage.stop(); store.close() } }
 }
 

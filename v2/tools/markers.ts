@@ -1,5 +1,5 @@
 // Scripted app switches and title changes at logged times, compared with what capture recorded.
-// It takes over the screen for about a minute. Usage: node tools/markers.ts --helper <path> --out <dir>
+// It takes over the screen for about a minute. Usage: node tools/markers.ts --helper <path> --deletion-stall-ms <ms> --out <dir>
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -7,7 +7,8 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 
-const { values } = parseArgs({ options: { helper: { type: 'string' }, out: { type: 'string' } } })
+const { values } = parseArgs({ options: { helper: { type: 'string' }, out: { type: 'string' }, 'deletion-stall-ms': { type: 'string' } } })
+if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
 const out = values.out!
 const service = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -34,7 +35,7 @@ async function main(): Promise<void> {
   osa('tell application "Terminal" to if (count of windows) is 0 then do script ""')
   await sleep(1500)
 
-  const svc = spawn(process.execPath, [service, '--helper', values.helper!, '--data-dir', path.join(out, 'data')], { stdio: ['ignore', 'ignore', 'inherit'] })
+  const svc = spawn(process.execPath, [service, '--helper', values.helper!, '--deletion-stall-ms', values['deletion-stall-ms']!, '--data-dir', path.join(out, 'data')], { stdio: ['ignore', 'ignore', 'inherit'] })
   await sleep(2000)
 
   const markers: Marker[] = []

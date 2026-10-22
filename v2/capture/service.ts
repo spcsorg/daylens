@@ -1,5 +1,5 @@
 // Capture service process: supervisor + normalization + storage. Runs outside the interface process.
-// Usage: node capture/service.ts --helper <path> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
+// Usage: node capture/service.ts --helper <path> --deletion-stall-ms <ms> [--data-dir <dir>] [--heartbeat-s 15] [--idle-threshold-s 120] [--reconcile-s 60]
 //        [--agent-sessions]   reads Claude Code and Codex session logs (agent session metadata is recorded only with permission)
 
 import os from 'node:os'
@@ -33,12 +33,14 @@ const { values } = parseArgs({
     'reconcile-s': { type: 'string', default: '60' },
     'hang-after-s': { type: 'string' },
     'tick-ms': { type: 'string' },
+    'deletion-stall-ms': { type: 'string' },
     'agent-sessions': { type: 'boolean', default: false },
   },
 })
 
-if (!values.helper) {
-  process.stderr.write('usage: service.ts --helper <path> [--data-dir <dir>]\n')
+const deletionStallMs = Number(values['deletion-stall-ms'])
+if (!values.helper || !(deletionStallMs > 0)) {
+  process.stderr.write('usage: service.ts --helper <path> --deletion-stall-ms <ms> [--data-dir <dir>]\n')
   process.exit(64)
 }
 
@@ -50,6 +52,7 @@ const store = new Store(dataDir, { onError: (code) => log(`storage error code=${
 // still owe a scrub. Written whenever one of those changes, and once at the first write.
 store.onHealth = (h) => process.stdout.write(JSON.stringify({ op: 'capture_health', store: h }) + '\n')
 const storage = new Storage(store, dataDir, {
+  deletionStallMs,
   onError: (code) => log(`storage error code=${code}`),
   orderingPoint: () => readOrderingPoint(values.helper!, values['helper-arg'] ?? [], log),
 })

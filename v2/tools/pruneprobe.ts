@@ -4,7 +4,7 @@ import { Storage } from '../storage/index.ts'
 const [dir, keep] = process.argv.slice(2) as [string, string]
 const store = new Store(dir)
 const last = (store.database.prepare('SELECT max(event_wall_ms) AS t FROM observations').get() as { t: number }).t
-const storage = new Storage(store, dir, { now: () => last })
+const storage = new Storage(store, dir, { deletionStallMs: Infinity, now: () => last })
 storage.setRetentionDays(Number(keep))
 storage.stop()
 const times: number[] = []

@@ -81,7 +81,7 @@ const store = new Store(dir, { now })
 store.close()
 const store2 = new Store(dir, { now })
 const ins = store2.database.prepare('UPDATE observations SET url = ? WHERE id = ?')
-const storage = new Storage(store2, dir, { now })
+const storage = new Storage(store2, dir, { deletionStallMs: Infinity, now })
 const pendingUrls: [string, number][] = []
 const prevFlushed = store2.onFlushed
 store2.onFlushed = (ids) => {

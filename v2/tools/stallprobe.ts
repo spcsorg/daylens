@@ -5,7 +5,7 @@ const dir = process.argv[2]!
 const t0 = performance.now()
 const store = new Store(dir)
 let last = (store.database.prepare('SELECT max(last_seen_wall_ms) AS t FROM observations').get() as { t: number }).t
-const storage = new Storage(store, dir, { now: () => clock.t + 1000 })
+const storage = new Storage(store, dir, { deletionStallMs: Infinity, now: () => clock.t + 1000 })
 console.log('open ms', (performance.now() - t0).toFixed(1))
 if (process.argv.includes('search')) {
   // As the benchmark does first: hundreds of searches on this connection.

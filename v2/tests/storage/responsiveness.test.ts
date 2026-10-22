@@ -78,7 +78,7 @@ test('a deletion left pending by a crash is still in force, and finishes at the 
 
 test('a job sent right after the worker is closed runs on a new worker; the old one exiting does not fail it', async () => {
   const r = rig()
-  const w = new DeletionWorker(path.join(r.dir, DB_FILE))
+  const w = new DeletionWorker(path.join(r.dir, DB_FILE), Infinity)
   await w.purge(0)
   void w.close()
   assert.equal(typeof (await w.purge(0)), 'boolean')

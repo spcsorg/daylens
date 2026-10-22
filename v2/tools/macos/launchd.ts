@@ -1,6 +1,6 @@
 // Writes a launchd agent that runs the engine (capture, storage and agent-session reading) from this checkout at
 // login and keeps it running. It installs and starts nothing; see README.md beside it.
-// Usage: node tools/macos/launchd.ts [--out <file>] [--node <path>] [--data-dir <dir>]
+// Usage: node tools/macos/launchd.ts --deletion-stall-ms <ms> [--out <file>] [--node <path>] [--data-dir <dir>]
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,7 +9,8 @@ import { parseArgs } from 'node:util'
 export const LABEL = 'app.daylens.engine'
 
 const v2 = path.resolve(import.meta.dirname, '..', '..')
-const { values } = parseArgs({ options: { out: { type: 'string' }, node: { type: 'string' }, 'data-dir': { type: 'string' } } })
+const { values } = parseArgs({ options: { out: { type: 'string' }, node: { type: 'string' }, 'data-dir': { type: 'string' }, 'deletion-stall-ms': { type: 'string' } } })
+if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
 const node = path.resolve(values.node ?? process.execPath)
 const helper = path.join(v2, 'native', 'macos', '.build', 'release', 'daylens-capture-macos')
 const logs = path.join(os.homedir(), 'Library', 'Logs', 'Daylens V2 Dev')
@@ -19,7 +20,7 @@ for (const [what, file] of [['node', node], ['capture helper (swift build -c rel
 }
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const args = [node, path.join(v2, 'capture', 'service.ts'), '--helper', helper, '--agent-sessions', ...(values['data-dir'] ? ['--data-dir', path.resolve(values['data-dir'])] : [])]
+const args = [node, path.join(v2, 'capture', 'service.ts'), '--helper', helper, '--deletion-stall-ms', values['deletion-stall-ms']!, '--agent-sessions', ...(values['data-dir'] ? ['--data-dir', path.resolve(values['data-dir'])] : [])]
 const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

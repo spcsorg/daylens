@@ -24,6 +24,8 @@ interface Run {
   observations: number
   canaryLeft: string[]
   state: string
+  // The longest the deletion worker went without committing while it had work: what a stall time must stay above.
+  workerQuietMs: number
 }
 
 async function deleteWhileCapturing(): Promise<Run> {
@@ -32,7 +34,7 @@ async function deleteWhileCapturing(): Promise<Run> {
   const clock = { t: LARGE_END + 3_600_000 }
   const now = () => clock.t
   const store = new Store(dir, { now })
-  const storage = new Storage(store, dir, { now, orderingPoint: () => ({ boot: 'b', mono_us: clock.t * 1000, boot_identity: 'kernel' }) })
+  const storage = new Storage(store, dir, { deletionStallMs: Infinity, now, orderingPoint: () => ({ boot: 'b', mono_us: clock.t * 1000, boot_identity: 'kernel' }) })
   storage.start()
   await storage.derivationSettled()
   let tombstone: number | null = null
@@ -75,7 +77,8 @@ async function deleteWhileCapturing(): Promise<Run> {
     const purgedMs = performance.now() - t0
     clearInterval(capture)
     store.flush()
-    return { sizeMb, flushes, doneMs, purgedMs, observations: result.observations, canaryLeft: diskContains(dir, CANARY), state: state.get(handle.tombstone) as string }
+    const workerQuietMs = (storage as unknown as { deletions: { longestQuietMs: number } }).deletions.longestQuietMs
+    return { sizeMb, flushes, doneMs, purgedMs, observations: result.observations, canaryLeft: diskContains(dir, CANARY), state: state.get(handle.tombstone) as string, workerQuietMs }
   } finally {
     clearInterval(capture)
     storage.stop()
@@ -97,7 +100,7 @@ function summary(ms: number[]) {
 test('capture writes land within the flush budget while a large file is purged, and nothing deleted is left', { timeout: 30 * 60_000 }, async (t) => {
   const r = await once()
   const purge = r.flushes.filter((f) => f.phase === 'done').map((f) => f.ms)
-  t.diagnostic(JSON.stringify({ size_mb: Math.round(r.sizeMb), observations_deleted: r.observations, done_s: Math.round(r.doneMs / 100) / 10, purged_s: Math.round(r.purgedMs / 100) / 10, purge: summary(purge) }))
+  t.diagnostic(JSON.stringify({ size_mb: Math.round(r.sizeMb), observations_deleted: r.observations, done_s: Math.round(r.doneMs / 100) / 10, purged_s: Math.round(r.purgedMs / 100) / 10, worker_quiet_max_ms: Math.round(r.workerQuietMs), purge: summary(purge) }))
   assert.ok(r.sizeMb >= LARGE_MIN_MB)
   assert.ok(r.observations > 0)
   assert.ok(purge.length > 0, 'capture wrote while the purge ran')

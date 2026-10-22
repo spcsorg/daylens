@@ -30,7 +30,7 @@ async function waitFor(cond: () => boolean, timeoutMs = 8000): Promise<void> {
 
 function startService(dataDir: string, work: string, env: Record<string, string> = {}): { proc: ChildProcess; log: () => string } {
   let log = ''
-  const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '1.5', '--tick-ms', '100'], {
+  const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--hang-after-s', '1.5', '--tick-ms', '100'], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof'), ...env },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
@@ -66,7 +66,7 @@ function setup() {
 
 test('the service tells the app its capture health on stdout', async () => {
   const { work, dataDir } = setup()
-  const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--heartbeat-s', '1', '--tick-ms', '100'], {
+  const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--tick-ms', '100'], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof') },
     stdio: ['ignore', 'pipe', 'ignore'],
   })

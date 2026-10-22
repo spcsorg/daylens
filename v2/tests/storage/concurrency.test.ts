@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
 import type { ObservationRow } from '../../capture/normalize.ts'
-import { DB_FILE, Store } from '../../capture/store.ts'
+import { DB_FILE, Store, WAL_AUTOCHECKPOINT } from '../../capture/store.ts'
 import { diskContains, HOUR, rig, T0, tmpDir } from './support.ts'
 import Database from 'better-sqlite3'
 import { immediate, immediateRetrying, isBusy } from '../../storage/tx.ts'
@@ -772,3 +772,28 @@ for (const crashedAfter of ['done', 'purged'] as const) {
     }
   })
 }
+
+test('a deletion worker that has work but commits nothing for the stall time gives checkpointing back to capture, and says so', async () => {
+  const errors: string[] = []
+  const r = rig(tmpDir(), { deletionStallMs: 300, onError: (code) => errors.push(code) })
+  r.store.insertObservation(row(T0, 'com.example.chat', 'stall canary'))
+  r.store.flush()
+  r.clock.t = T0 + HOUR
+  const deletions = (r.storage as unknown as { deletions: { captureWriting(on: boolean): void } }).deletions
+  const autocheckpoint = () => r.store.database.pragma('wal_autocheckpoint', { simple: true })
+  // The worker waits before its first write for as long as capture says it is writing: alive, and stuck.
+  deletions.captureWriting(true)
+  const handle = r.storage.deleteSource('com.example.chat')
+  try {
+    await new Promise((res) => setTimeout(res, 100))
+    assert.equal(autocheckpoint(), 0, 'the worker checkpoints while it has work')
+    await new Promise((res) => setTimeout(res, 400))
+    assert.equal(autocheckpoint(), WAL_AUTOCHECKPOINT, 'capture checkpoints again once the worker has committed nothing for the stall time')
+    assert.deepEqual(errors, ['deletion_worker_stalled'])
+  } finally {
+    deletions.captureWriting(false)
+    await handle.done
+    await r.storage.deletionsSettled()
+    r.close()
+  }
+})

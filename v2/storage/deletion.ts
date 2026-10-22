@@ -852,7 +852,11 @@ export class Deleter {
   }
 }
 
-/** The deletion worker thread, started on first use; jobs run one at a time, in order. */
+/**
+ * The deletion worker thread, started on first use; jobs run one at a time, in order. While it has work it takes
+ * over checkpointing from capture, unless it has committed nothing for `stallMs`: a worker that hangs without
+ * exiting would otherwise leave the write-ahead log growing without bound.
+ */
 export class DeletionWorker {
   private worker: Worker | null = null
   private next = 1
@@ -862,9 +866,16 @@ export class DeletionWorker {
   private idle: ReturnType<typeof setTimeout> | null = null
   // Shared with the worker: non-zero while capture is writing.
   private readonly want = new Int32Array(new SharedArrayBuffer(4))
+  // Shared with the worker: when it last committed or was given a job (wall ms), and the longest it went without.
+  private readonly progress = new Float64Array(new SharedArrayBuffer(16))
+  private readonly stallMs: number
+  private stalled = false
+  private watch: ReturnType<typeof setTimeout> | null = null
 
-  constructor(file: string) {
+  constructor(file: string, stallMs: number) {
+    if (!(stallMs > 0)) throw new Error('the deletion worker needs a stall time')
     this.file = file
+    this.stallMs = stallMs
   }
 
   /** Whether any job is queued or running. */
@@ -872,14 +883,46 @@ export class DeletionWorker {
     return this.pending.size > 0
   }
 
-  /** Called when the worker goes from idle to having work, and back. */
-  onBusy: (busy: boolean) => void = () => {}
-  private wasBusy = false
+  /** The longest the worker has gone without committing while it had work, since it started (measurements). */
+  get longestQuietMs(): number {
+    return this.progress[1]!
+  }
+
+  /** Called with true when the worker takes over checkpointing, false when capture must checkpoint again. */
+  onCheckpoints: (worker: boolean) => void = () => {}
+  /** Called when the worker has had work but committed nothing for the stall time, and when it commits again. */
+  onStall: (stalled: boolean) => void = () => {}
+  private checkpointing = false
 
   private notifyBusy(): void {
-    if (this.busy === this.wasBusy) return
-    this.wasBusy = this.busy
-    this.onBusy(this.wasBusy)
+    if (!this.busy) {
+      if (this.watch) clearTimeout(this.watch)
+      this.watch = null
+      if (this.stalled) {
+        this.stalled = false
+        this.onStall(false)
+      }
+    } else if (this.watch === null) this.watchProgress()
+    const worker = this.busy && !this.stalled
+    if (worker === this.checkpointing) return
+    this.checkpointing = worker
+    this.onCheckpoints(worker)
+  }
+
+  private watchProgress(): void {
+    if (!Number.isFinite(this.stallMs)) return
+    const quiet = Date.now() - this.progress[0]!
+    const stalled = quiet >= this.stallMs
+    if (stalled !== this.stalled) {
+      this.stalled = stalled
+      this.onStall(stalled)
+      this.notifyBusy()
+    }
+    this.watch = setTimeout(() => {
+      this.watch = null
+      if (this.busy) this.watchProgress()
+    }, stalled ? Math.min(this.stallMs, 1000) : this.stallMs - quiet)
+    this.watch.unref()
   }
 
   /** Capture is about to write (true) or done (false); the worker starts no write transaction in between. */
@@ -919,6 +962,7 @@ export class DeletionWorker {
     this.idle = null
     const w = this.ensure()
     const id = this.next++
+    if (!this.busy) this.progress[0] = Date.now()
     w.ref()
     return new Promise((resolve, reject) => {
       this.pending.set(id, { worker: w, resolve, reject })
@@ -931,7 +975,7 @@ export class DeletionWorker {
     if (this.worker) return this.worker
     // The worker is a sibling module: .ts when run from source, .js when built.
     const ext = path.extname(fileURLToPath(import.meta.url))
-    const w = new Worker(new URL(`./deletionWorker${ext}`, import.meta.url), { workerData: { file: this.file, want: this.want } })
+    const w = new Worker(new URL(`./deletionWorker${ext}`, import.meta.url), { workerData: { file: this.file, want: this.want, progress: this.progress } })
     w.on('message', (m: { id: number; result?: unknown; error?: string }) => {
       const p = this.pending.get(m.id)
       this.pending.delete(m.id)
@@ -965,7 +1009,8 @@ export class DeletionWorker {
 
   async close(): Promise<void> {
     if (this.idle) clearTimeout(this.idle)
-    this.idle = null
+    if (this.watch) clearTimeout(this.watch)
+    this.idle = this.watch = null
     const w = this.worker
     this.worker = null
     if (w) await w.terminate()

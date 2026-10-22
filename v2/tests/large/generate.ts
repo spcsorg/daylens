@@ -62,7 +62,7 @@ async function build(dir: string): Promise<void> {
   const clock = { t: LARGE_END - DAYS * DAY_MS }
   const now = () => clock.t
   const store = new Store(dir, { now })
-  const storage = new Storage(store, dir, { now })
+  const storage = new Storage(store, dir, { deletionStallMs: Infinity, now })
   for (let d = 0; d < DAYS; d++) {
     const dayStart = LARGE_END - (DAYS - d) * DAY_MS
     let t = dayStart + 9 * HOUR_MS

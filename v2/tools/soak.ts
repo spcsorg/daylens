@@ -1,6 +1,6 @@
 // Runs the capture service with a real helper, samples every process it owns, and reports CPU, memory,
 // wakeups and energy against the background budget (docs/system-design.md#budgets).
-// Usage: node tools/soak.ts --helper <path> --minutes 60 --out <dir> [--procstat <path>] [--warmup-s 60]
+// Usage: node tools/soak.ts --helper <path> --deletion-stall-ms <ms> --minutes 60 --out <dir> [--procstat <path>] [--warmup-s 60]
 //        [--runtime electron]   runs the compiled service (npm run build:js) under Electron's Node, as production does
 import { spawn } from 'node:child_process'
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -13,6 +13,7 @@ import Database from 'better-sqlite3'
 const { values } = parseArgs({
   options: {
     helper: { type: 'string' },
+    'deletion-stall-ms': { type: 'string' },
     minutes: { type: 'string', default: '60' },
     out: { type: 'string' },
     procstat: { type: 'string' },
@@ -24,6 +25,7 @@ const { values } = parseArgs({
     'to-ms': { type: 'string' },
   },
 })
+if (!(Number(values['deletion-stall-ms']) > 0)) throw new Error('--deletion-stall-ms is required')
 const out = values.out!
 const procstat = values.procstat ?? path.join(out, 'procstat')
 const service = fileURLToPath(new URL('../capture/service.ts', import.meta.url))
@@ -133,7 +135,7 @@ async function run(): Promise<void> {
   const root = fileURLToPath(new URL('..', import.meta.url))
   const bin = electron ? path.join(root, 'node_modules', '.bin', 'electron') : process.execPath
   const script = electron ? path.join(root, 'build', 'js', 'capture', 'service.js') : service
-  const svc = spawn(bin, [script, '--helper', values.helper!, '--data-dir', path.join(out, 'data')], {
+  const svc = spawn(bin, [script, '--helper', values.helper!, '--deletion-stall-ms', values['deletion-stall-ms']!, '--data-dir', path.join(out, 'data')], {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: electron ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
   })

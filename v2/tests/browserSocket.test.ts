@@ -55,7 +55,7 @@ function client(p: string): Promise<{ sock: net.Socket; got: Record<string, unkn
 test('host lines over the socket become page rows; storage pauses reach the host and refuse its lines', async () => {
   const dir = tempDir('dl-bs-')
   const store = new Store(path.join(dir, 'data'))
-  const storage = new Storage(store, path.join(dir, 'data'))
+  const storage = new Storage(store, path.join(dir, 'data'), { deletionStallMs: Infinity })
   const privacy = new Privacy(store.exclusions())
   const pages = new BrowserPages(store, privacy)
   const norm = new ServiceNormalizer(store, privacy, pages)
@@ -163,7 +163,7 @@ test('a database from the extension builds at version 3 opens, gains the run boo
   assert.equal(store.meta('pause'), null, "the extension build's pause marker is gone")
   assert.deepEqual(store.query(`SELECT id, end_wall_ms FROM capture_gaps ORDER BY id`), [{ id: 1, end_wall_ms: T + 3_600_000 }, { id: 2, end_wall_ms: T + 3_600_000 }])
   assert.equal(store.query<{ n: number }>(`SELECT count(*) AS n FROM pragma_table_info('capture_runs') WHERE name = 'boot_identity'`)[0]!.n, 1)
-  const storage = new Storage(store, dir, { now: () => T + 3_600_000 })
+  const storage = new Storage(store, dir, { deletionStallMs: Infinity, now: () => T + 3_600_000 })
   assert.equal(storage.paused(), null, 'nothing is paused')
   storage.stop()
   store.close()

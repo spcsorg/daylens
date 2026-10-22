@@ -209,14 +209,14 @@ test('storage says at start when the scrub is unavailable', () => {
   const dir = tmpDir()
   const errors: string[] = []
   const store = new Store(dir)
-  const storage = new Storage(store, dir, { onError: (code) => errors.push(code) })
+  const storage = new Storage(store, dir, { deletionStallMs: Infinity, onError: (code) => errors.push(code) })
   storage.start()
   assert.deepEqual(errors, [])
   storage.stop()
   const db = store.database
   Object.defineProperty(store, 'database', { get: () => withoutPages(db) })
   const reported: string[] = []
-  const without = new Storage(store, dir, { onError: (code) => reported.push(code) })
+  const without = new Storage(store, dir, { deletionStallMs: Infinity, onError: (code) => reported.push(code) })
   without.start()
   assert.deepEqual(reported, ['scrub_unavailable'])
   without.stop()

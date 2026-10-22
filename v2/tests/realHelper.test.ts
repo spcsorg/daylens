@@ -33,7 +33,7 @@ function helperPid(servicePid: number): number | null {
 
 function startService(dataDir: string, env: Record<string, string> = {}, args: string[] = []): { proc: ChildProcess; log: () => string } {
   let log = ''
-  const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200', ...args], {
+  const proc = spawn(process.execPath, [SERVICE, '--helper', HELPER, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--hang-after-s', '3', '--tick-ms', '200', ...args], {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ...env },
   })
