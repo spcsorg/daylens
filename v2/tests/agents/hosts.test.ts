@@ -349,7 +349,7 @@ test('deleting an app for a range leaves no app, log path or read time from it, 
   mergeStaging(r.store.database, staging, r.storage.withheld(), agents)
   assert.deepEqual([turns('s'), turns('u')], [['a'], []], 'nor does the first read of a copy of them')
   assert.deepEqual(r.q('SELECT count(*) AS n FROM agent_hosts WHERE from_wall_ms >= ? AND from_wall_ms < ?', T0 + H, T0 + H + 30 * MIN), [{ n: 0 }])
-  assert.deepEqual(r.q('SELECT state FROM agent_sources WHERE session_id = ?', 'u'), [{ state: null }])
+  assert.deepEqual(r.q('SELECT * FROM agent_sources WHERE session_id = ?', 'u'), [], 'nor names its log')
   r.close()
 })
 

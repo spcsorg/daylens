@@ -173,7 +173,7 @@ test('deleting everything leaves no app, log path or read position of the agent 
   agents.apply('claude_code', turn('k', 's1', T0 + 10 * MIN, T0 + 20 * MIN), logOf('s1', '{"dir":"/code/alpha"}'))
   agents.recordHost('claude_code', 's1', ghostty, 'responsible', T0)
   assert.deepEqual(rows(r, 'agent_turns'), [])
-  assert.deepEqual(r.q('SELECT state, updated_wall_ms FROM agent_sources'), [{ state: null, updated_wall_ms: T0 + HOUR + MIN }])
+  assert.deepEqual(r.q('SELECT * FROM agent_sources'), [], 'reading a deleted session\'s log again writes no path or read position back')
   assert.deepEqual(r.q('SELECT from_wall_ms FROM agent_hosts'), [{ from_wall_ms: T0 + HOUR }], 'the app it runs in now holds from the deletion on')
   r.close()
 })

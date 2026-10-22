@@ -415,6 +415,8 @@ const SQL = {
   deletedSession: 'SELECT 1 FROM agent_deleted_sessions WHERE agent = ? AND session_id = ?',
   turnSpan: 'SELECT session_id AS session, max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
   deletedSpans: 'SELECT from_wall_ms, to_wall_ms FROM agent_deleted_spans WHERE agent = ? AND session_id = ?',
+  sessionKept: `SELECT 1 WHERE EXISTS (SELECT 1 FROM agent_sessions WHERE agent = @agent AND session_id = @session)
+    OR EXISTS (SELECT 1 FROM agent_turns WHERE agent = @agent AND session_id = @session) OR EXISTS (SELECT 1 FROM agent_events WHERE agent = @agent AND session_id = @session)`,
   // The first real end wins; 'missing' only ever gives way to a real one.
   // The end is kept apart from the last activity: a turn that fails after a stalled request ended late but did nothing since.
   end: `UPDATE agent_turns SET end_state = @state, end_wall_ms = CASE WHEN @at IS NULL THEN NULL ELSE max(@at, start_wall_ms) END
@@ -460,8 +462,8 @@ export class AgentStore {
 
   /**
    * One transaction per batch: the records and the read position that produced them land together or not at all.
-   * Returns false when the read position was not kept: the log belongs to a session in an excluded app, or one whose
-   * app is not known while it may be (hostAllowed), and nothing that names it is stored.
+   * Returns false when the read position was not kept: the log belongs to a session in an excluded app, one whose app
+   * is not known while it may be (hostAllowed), or one with nothing kept, and nothing that names it is stored.
    */
   apply(agent: Agent, records: readonly AgentRecord[], source?: SourceUpdate): boolean {
     const now = this.now()
@@ -567,6 +569,8 @@ export class AgentStore {
       if (source && source.session !== null) {
         const host = resolveHost(look, agent, source.session, Number.MAX_SAFE_INTEGER)
         if (host?.excluded || (host === null && !this.hostAllowed(null, now))) return false
+        // A log whose session has nothing kept (all of it deleted, withheld or not yet seen) is not named either.
+        if (this.stmt(SQL.sessionKept).get({ agent, session: source.session }) === undefined) return false
       }
       if (source) {
         this.stmt(SQL.source).run({

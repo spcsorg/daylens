@@ -231,6 +231,9 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
           ON CONFLICT (agent, event_key) DO NOTHING;
         INSERT INTO agent_sources (path, agent, root, session_id, dev, ino, offset, size, state, turnless, lines, bad_lines, unknown_records, updated_wall_ms)
           SELECT path, agent, root, session_id, dev, ino, offset, size, CASE WHEN NOT agent_deleted_span(agent, session_id) THEN state END, turnless, lines, bad_lines, unknown_records, updated_wall_ms FROM staging.agent_sources s WHERE ${live('s')} AND agent_source_kept(agent, session_id)
+            AND (s.session_id IS NULL OR EXISTS (SELECT 1 FROM main.agent_sessions x WHERE x.agent = s.agent AND x.session_id = s.session_id)
+              OR EXISTS (SELECT 1 FROM main.agent_turns x WHERE x.agent = s.agent AND x.session_id = s.session_id)
+              OR EXISTS (SELECT 1 FROM main.agent_events x WHERE x.agent = s.agent AND x.session_id = s.session_id))
           ON CONFLICT (path) DO NOTHING;
       `)
     })()
