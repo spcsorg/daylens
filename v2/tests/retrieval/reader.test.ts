@@ -149,12 +149,14 @@ test('a pending range deletion already takes its part out of an hour’s gaps an
     gap('helper_crashed', 22, 28)
     gap('helper_crashed', 40, 45)
     gap('paused', 46, 48)
+    gap('helper_hung', 49, 53)
     r.clock.t = T0 + 2 * HOUR
     const handle = r.storage.deleteRange(T0 + 25 * MIN, T0 + 50 * MIN)
     if (!hold) await handle.done
     const reader = Reader.open(file(r))
-    // The lock at 31 minutes is inside the range; the gap crossing its start ends there; a pause stays, as deletion keeps it.
-    assert.deepEqual(reader.hourAt(T0)!.gaps, [{ reason: 'helper_crashed', ms: 3 * MIN }, { reason: 'paused', ms: 2 * MIN }], `hold=${hold}`)
+    // The lock at 31 minutes is inside the range; a gap crossing its start ends there, one crossing its end starts
+    // there, and those inside it go, the pause too.
+    assert.deepEqual(reader.hourAt(T0)!.gaps, [{ reason: 'helper_crashed', ms: 3 * MIN }, { reason: 'helper_hung', ms: 3 * MIN }], `hold=${hold}`)
     reader.close()
     r.close()
   }

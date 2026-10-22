@@ -410,8 +410,8 @@ export class Reader {
   /**
    * Gaps in [from, to), read once and then cut to each hour: the presence read looks back for the last state before
    * `from`, which costs about as much as the read itself on a large file, so it must not run once per hour. A pending
-   * range deletion already applies, as the deletion will leave them: a gap crossing its start ends there, one that
-   * begins inside it goes unless it is a pause, and lock, sleep and idle changes inside it are not read.
+   * range deletion already applies, as the deletion will leave them: a gap that begins inside it goes, pauses included,
+   * and lock, sleep and idle changes inside it are not read.
    */
   private gapsOver(from: number, to: number, pending: readonly Tombstone[]): (hourFrom: number, hourTo: number) => HourGap[] {
     const ranges = pending.filter((t) => t.kind === 'range').map((t) => [t.from_wall_ms ?? Number.MIN_SAFE_INTEGER, t.to_wall_ms ?? Number.MAX_SAFE_INTEGER] as const)
@@ -419,12 +419,8 @@ export class Reader {
       .prepare(`SELECT reason, start_wall_ms AS s, end_wall_ms AS end FROM capture_gaps WHERE scope = 'all' AND start_wall_ms < ? AND coalesce(end_wall_ms, ?) > ?`)
       .all(to, to, from) as { reason: string; s: number; end: number | null }[]
     const spans: { reason: string; s: number; e: number }[] = []
-    for (const g of rows) {
-      let end = g.end
-      if (ranges.some(([a, b]) => g.s >= a && g.s < b && g.reason !== 'paused')) continue
-      for (const [a] of ranges) if (end !== null && g.s < a && end > a) end = a
-      spans.push({ reason: g.reason, s: g.s, e: end ?? to })
-    }
+    // The deletion's fence has already cut and split the gaps crossing the range's edges; those inside it go.
+    for (const g of rows) if (!ranges.some(([a, b]) => g.s >= a && g.s < b)) spans.push({ reason: g.reason, s: g.s, e: g.end ?? to })
     for (const p of presenceSpans(this.db, from, to, ranges)) spans.push(p)
     return (hourFrom, hourTo) => {
       const out = new Map<string, number>()
