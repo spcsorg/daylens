@@ -91,3 +91,36 @@ test('nothing a pending deletion covers is found, and an hour is found by the us
   reader.close()
   r.close()
 })
+
+test('a search within dates reads only entries in them, and an item’s sightings read only its own entries', () => {
+  const r = rig()
+  r.feed(line('session', { state: 'unlocked', snapshot: false }, T0))
+  for (let h = 0; h < 20; h++) {
+    r.feed(focus(notes, `Budget notes ${h}`, T0 + h * HOUR, 'app_changed'))
+    r.feed(focus(notes, 'Budget', T0 + h * HOUR + 10 * MIN, 'app_changed'))
+  }
+  r.store.flush()
+  const reader = open(r)
+  const prepare = reader.db.prepare.bind(reader.db)
+  let rows = 0
+  reader.db.prepare = ((sql: string) => {
+    const st = prepare(sql)
+    if (!/search MATCH|json_each/.test(sql)) return st
+    const all = st.all.bind(st)
+    st.all = ((...a: unknown[]) => {
+      const out = all(...a) as unknown[]
+      rows += out.length
+      return out
+    }) as typeof st.all
+    return st
+  }) as typeof reader.db.prepare
+  const day = search(reader, 'budget', { perGroup: 5, fromWallMs: T0 + 5 * HOUR, toWallMs: T0 + 6 * HOUR })
+  assert.deepEqual(day.windows.map((w) => w.title), ['Budget', 'Budget notes 5'])
+  assert.ok(rows <= 6, `${rows} rows read for the two entries in that hour`)
+  rows = 0
+  const all = search(reader, 'budget', { perGroup: 1 })
+  assert.deepEqual(all.windows.map((w) => [w.title, w.seen_in.length]), [['Budget', 20]])
+  assert.ok(rows <= 64 + 64 + 20, `${rows} rows read`)
+  reader.close()
+  r.close()
+})

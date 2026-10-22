@@ -111,21 +111,32 @@ export function search(reader: Reader, text: string, opts: SearchOptions): Searc
   return db.transaction(() => {
     const fence = searchFence(pendingTombstones(db))
     const where = `d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ? AND ${fence.sql}`
-    // Each group's matches best first (ties: newest entry first), read in growing batches until the group has its
-    // items. Ranking reads only the index.
+    // Each group's matches best first (ties: newest entry first), ranked once and read in growing batches until the
+    // group has its items. Ordering by rank scores every match, so it is done once per group, not per batch. Across
+    // all time, ranking reads only the index and each batch's entries are read after; within dates, entries outside
+    // them are left out before ranking, so a narrow range ranks only its own.
     const read = db.prepare(`SELECT d.id, ${COLUMNS} FROM json_each(?) j CROSS JOIN search_docs d ON d.id = j.value WHERE ${where}`)
     const ranked = db.prepare('SELECT rowid FROM search WHERE search MATCH ? ORDER BY rank, rowid DESC').pluck()
+    const rankedIn = db.prepare(`SELECT d.id, ${COLUMNS} FROM search CROSS JOIN search_docs d ON d.id = search.rowid WHERE search MATCH ? AND ${where} ORDER BY search.rank, search.rowid DESC`)
+    const dated = opts.fromWallMs !== undefined || opts.toWallMs !== undefined
+    const docsOf = (rows: (Doc & { id: number })[]) => new Map(rows.map((d) => [d.id, d]))
+    function* batches(match: string): Generator<{ ids: number[]; docs: Map<number, Doc & { id: number }> }> {
+      const rows = dated ? (rankedIn.all(match, from, to, ...fence.params) as (Doc & { id: number })[]) : null
+      const ids = rows ? rows.map((d) => d.id) : (ranked.all(match) as number[])
+      const all = rows ? docsOf(rows) : null
+      for (let i = 0, n = 64; i < ids.length; i += n, n *= 2) {
+        const slice = ids.slice(i, i + n)
+        yield { ids: slice, docs: all ?? docsOf(read.all(JSON.stringify(slice), from, to, ...fence.params) as (Doc & { id: number })[]) }
+      }
+    }
     const chosen = new Map<Group, Map<string, Doc>>(GROUPS.map((g) => [g, new Map()]))
     // One item past the limit is chosen to learn whether the group has more; it is not read further.
     const full = (g: Group) => chosen.get(g)!.size > opts.perGroup
     const any = ftsQuery(text, 'any')!
     for (const pass of PASSES) {
       if (full(pass.group)) continue
-      const ids = ranked.all(pass.match(q, any)) as number[]
-      for (let i = 0, batch = 64; i < ids.length && !full(pass.group); i += batch, batch *= 2) {
-        const slice = ids.slice(i, i + batch)
-        const docs = new Map((read.all(JSON.stringify(slice), from, to, ...fence.params) as (Doc & { id: number })[]).map((d) => [d.id, d]))
-        for (const id of slice) {
+      for (const { ids, docs } of batches(pass.match(q, any))) {
+        for (const id of ids) {
           const d = docs.get(id)
           if (!d) continue
           // Pages and windows pass over the same entries: each lands in its own group, if there is room.
@@ -136,24 +147,28 @@ export function search(reader: Reader, text: string, opts: SearchOptions): Searc
           if (!items.has(k)) items.set(k, d)
           if (full(pass.group)) break
         }
+        if (full(pass.group)) break
       }
     }
 
     // Every entry of a chosen item, whether or not it matched the words: the item's title may have changed between
-    // sightings. Found through the index by its own text, then compared exactly. CROSS JOIN keeps the index lookup
-    // outermost; given the date range, the planner would otherwise walk every entry in range testing each.
+    // sightings. Found through the index by its own text; the query keeps those with the same address or title, and
+    // code compares the rest exactly (SQLite's lower() folds only ASCII). CROSS JOIN keeps the index lookup outermost;
+    // given the date range, the planner would otherwise walk every entry in range testing each.
     const field = { pages: 'address', files: 'files', windows: 'title' } as const
-    const entriesOf = db.prepare(`SELECT ${COLUMNS} FROM search CROSS JOIN search_docs d ON d.id = search.rowid WHERE search MATCH ? AND d.kind = 'activity' AND ${where}`)
+    const entriesOf = db.prepare(
+      `SELECT ${COLUMNS} FROM search CROSS JOIN search_docs d ON d.id = search.rowid
+       WHERE search MATCH ? AND d.kind = 'activity' AND (CASE ? WHEN 'pages' THEN d.url = ? WHEN 'files' THEN d.url = '' ELSE d.url = '' AND d.title = ? END) AND ${where}`,
+    )
     const entries = (g: Exclude<Group, 'hours'>, first: Doc): Doc[] => {
       const text = g === 'pages' ? first.url : g === 'files' ? first.files : first.title
       // Every address has its scheme and most have www: their index entries are the largest and narrow nothing.
       const words = (text.normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []).filter((w) => g !== 'pages' || !/^(https?|www)$/i.test(w))
       if (words.length === 0) return [first]
       const phrase = `${field[g]} : (${words.map((w) => `"${w}"`).join(' ')})`
-      const all = entriesOf.all(phrase, from, to, ...fence.params) as Doc[]
       const key = keyOf(g, first)
-      const same = all.filter((d) => (g === 'pages') === (d.url !== '') && keyOf(g, d) === key)
-      return same.length > 0 ? same : [first]
+      const own = (entriesOf.all(phrase, g, first.url, first.title, from, to, ...fence.params) as Doc[]).filter((d) => keyOf(g, d) === key)
+      return own.length > 0 ? own : [first]
     }
 
     const out: SearchResults = { pages: [], files: [], windows: [], hours: [], more: GROUPS.filter(full) }
