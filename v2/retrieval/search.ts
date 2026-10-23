@@ -110,15 +110,16 @@ function keyOf(g: Group, d: Pick<Doc, 'hour_id' | 'url' | 'files' | 'app_id' | '
 // every entry the words match. A file is an entry whose file name has the words; a page, any other entry with an
 // address; a window, any other entry. A window has no address, so entries whose address has any of the words (a site
 // name typed as the query) are not read for windows. The first pass is read until pages are full, filling windows on
-// the way; the windows pass runs only if windows are still short and the first pass stopped early, since every window it
-// could find the first pass has seen. `only` keeps a pass to its groups' entries in the query. Entries are still checked
+// the way; a page whose title names a file with the words has a pass of its own, read until pages are full. The windows
+// pass runs only if windows are still short and the first pass stopped early, since every window it could find the
+// first pass has seen (`covers`). `only` keeps a pass to its groups' entries in the query. Entries are still checked
 // exactly when read.
-const PASSES: readonly { group: Group; fills: readonly Group[]; until: readonly Group[]; match: (q: string, any: string) => string; only: string }[] = [
-  { group: 'pages', fills: ['pages', 'windows'], until: ['pages'], match: (q) => `{title address files} : (${q}) NOT files : (${q})`, only: `d.kind = 'activity'` },
-  // A page whose title names a file is still a page: found here, it lands with the pages.
-  { group: 'files', fills: ['files', 'pages'], until: ['files'], match: (q) => `files : (${q})`, only: `d.kind = 'activity'` },
-  { group: 'windows', fills: ['windows'], until: ['windows'], match: (q, any) => `{title files} : (${q}) NOT files : (${q}) NOT address : (${any})`, only: `d.kind = 'activity' AND d.url = ''` },
-  { group: 'hours', fills: ['hours'], until: ['hours'], match: (q) => `hour_text : (${q})`, only: `d.kind = 'hour'` },
+const PASSES: readonly { group: Group; fills: readonly Group[]; covers?: Group; match: (q: string, any: string) => string; only: string }[] = [
+  { group: 'pages', fills: ['pages', 'windows'], covers: 'windows', match: (q) => `{title address files} : (${q}) NOT files : (${q})`, only: `d.kind = 'activity'` },
+  { group: 'files', fills: ['files'], match: (q) => `files : (${q})`, only: `d.kind = 'activity' AND d.url = ''` },
+  { group: 'pages', fills: ['pages'], match: (q) => `files : (${q})`, only: `d.kind = 'activity' AND d.url != ''` },
+  { group: 'windows', fills: ['windows'], match: (q, any) => `{title files} : (${q}) NOT files : (${q}) NOT address : (${any})`, only: `d.kind = 'activity' AND d.url = ''` },
+  { group: 'hours', fills: ['hours'], match: (q) => `hour_text : (${q})`, only: `d.kind = 'hour'` },
 ]
 
 const COLUMNS = 'd.kind, d.hour_start_wall_ms, d.app_id, d.app_name, d.title, d.url, d.files, d.hour_id, d.first_wall_ms, d.last_wall_ms'
@@ -162,9 +163,9 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
     // One item past the limit is chosen to learn whether the group has more; it is not read further.
     const full = (g: Group) => chosen.get(g)!.size > opts.perGroup
     const any = ftsQuery(text, 'any')!
-    const readToEnd = new Set<Group>()
+    const seenAll = new Set<Group>()
     for (const pass of PASSES) {
-      if (full(pass.group) || readToEnd.has(pass.group)) continue
+      if (full(pass.group) || seenAll.has(pass.group)) continue
       let ended = true
       // Nothing else may run on the connection while rows are read, and nothing does: choosing is done in code.
       for (const d of rows(pass.match(q, any), pass.only)) {
@@ -177,12 +178,12 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
           const k = keyOf(g, one)
           if (!items.has(k) && !full(g)) items.set(k, one)
         }
-        if (pass.until.every(full)) {
+        if (full(pass.group)) {
           ended = false
           break
         }
       }
-      if (ended) for (const g of pass.fills) readToEnd.add(g)
+      if (ended && pass.covers) seenAll.add(pass.covers)
     }
 
     // Every entry of a chosen item, whether or not it matched the words: the item's title may have changed between

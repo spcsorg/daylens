@@ -204,3 +204,18 @@ test('search reads ranked matches only until each group is full', () => {
   reader.close()
   r.close()
 })
+
+test('a page whose title names a file is found even when local files fill their group first', () => {
+  const r = rig()
+  r.feed(focus(chrome, null, T0, 'app_changed'))
+  r.store.insertObservation({ ...page(T0, 'https://sheets.example.com/s/1', 'budget-old.xlsx'), seq: 1 })
+  r.feed(focus(chrome, null, T0 + MIN))
+  for (let i = 0; i < 5; i++) r.feed(focus(editor, `budget-${i}.xlsx - Editor`, T0 + (10 + i) * MIN, 'app_changed'))
+  r.store.flush()
+  const reader = open(r)
+  const res = search(reader, 'budget xlsx', { perGroup: 2 })
+  assert.deepEqual([res.files.length, res.more], [2, ['files']])
+  assert.deepEqual(res.pages.map((p) => p.url), ['https://sheets.example.com/s/1'])
+  reader.close()
+  r.close()
+})
