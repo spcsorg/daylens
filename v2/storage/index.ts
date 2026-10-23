@@ -305,6 +305,11 @@ export class Storage {
     return this.rules.accepts(eventWallMs, appId, url)
   }
 
+  /** Material that belongs to no app, such as a commit or a calendar event: refused if a pause or deletion covers any of [from, to]. */
+  acceptsSpan(fromWallMs: number, toWallMs: number): boolean {
+    return this.rules.mayCover(null, null, fromWallMs, toWallMs)
+  }
+
   /**
    * The one gate for every row, from capture or import. An excluded app's row becomes an excluded gap; paused,
    * expired or deleted material is dropped.

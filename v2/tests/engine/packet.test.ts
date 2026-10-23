@@ -133,6 +133,26 @@ test('a commit made while the screen was locked is marked as such, with the agen
   r.close()
 })
 
+test('commits and calendar events from paused or deleted time are left out; app exclusions do not match them', async () => {
+  resetSeq()
+  const r = rig()
+  covered(r, T0, T0 + HOUR)
+  r.clock.t = T0 + 30 * MIN
+  r.storage.pause(T0 + 40 * MIN)
+  const excluded = r.store.openGap({ reason: 'excluded', scope: 'all', run: 'run-test', start: { wall_ms: T0 + 45 * MIN, mono_us: null, boot: null }, detail: null })
+  r.store.closeGap(excluded, { wall_ms: T0 + 50 * MIN, mono_us: null, boot: null })
+  r.clock.t = T0 + 2 * HOUR
+  await r.storage.deleteRange(T0 + 10 * MIN, T0 + 20 * MIN).done
+  const commit = (hash: string, min: number) => ({ hash, at_wall_ms: T0 + min * MIN, repos: ['beta'], subject: `Change ${hash}`, stat: null })
+  const commits: CommitSource = { commits: () => [commit('kept', 5), commit('deleted', 15), commit('paused', 35), commit('excluded', 47)] }
+  const event = (id: string, from: number, to: number) => ({ id, title: id, start_wall_ms: T0 + from * MIN, end_wall_ms: T0 + to * MIN, attendees: null })
+  const calendar: CalendarSource = { events: () => [event('Kept', 21, 29), event('Deleted', 12, 18), event('Paused', 38, 44), event('Excluded', 46, 48)] }
+  const { packet } = buildPacket(r.storage, HOUR_AT(T0), OPTS, { commits, calendar })
+  assert.deepEqual(packet.commits.map((c) => c.subject), ['Change kept', 'Change excluded'], 'an excluded app in front does not make a commit its own')
+  assert.deepEqual(packet.scheduled_events.map((e) => e.title), ['Kept', 'Excluded'])
+  r.close()
+})
+
 test('the previous hour, open threads and corrections from nearby hours are passed along, corrections as the user wrote them', () => {
   resetSeq()
   const r = rig()

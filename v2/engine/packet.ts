@@ -251,10 +251,14 @@ export function buildPacket(storage: Storage, hour: PacketHour, opts: PacketOpti
     agentIds.set(`${s.agent}\u0000${s.session}`, id)
   }
 
+  // Commits and calendar events come from outside storage, so they pass its rules here. They belong to no app or site,
+  // so a pause or deletion of everything in a span withholds them, and exclusions and per-app rules never match them.
+  const admitted = (from: number, to: number) => storage.acceptsSpan(from, to)
+
   n = 0
   const seenCommits = new Set<string>()
   for (const c of (sources.commits?.commits(start, end) ?? []).sort((a, b) => a.at_wall_ms - b.at_wall_ms)) {
-    if (c.at_wall_ms < start || c.at_wall_ms >= end || seenCommits.has(c.hash)) continue
+    if (c.at_wall_ms < start || c.at_wall_ms >= end || seenCommits.has(c.hash) || !admitted(c.at_wall_ms, c.at_wall_ms)) continue
     seenCommits.add(c.hash)
     const id = `c${++n}`
     const entry: Packet['commits'][number] = { id, at: clock(c.at_wall_ms), repos: c.repos, subject: c.subject }
@@ -270,7 +274,7 @@ export function buildPacket(storage: Storage, hour: PacketHour, opts: PacketOpti
 
   n = 0
   for (const ev of (sources.calendar?.events(start, end) ?? []).sort((a, b) => a.start_wall_ms - b.start_wall_ms)) {
-    if (ev.end_wall_ms <= start || ev.start_wall_ms >= end) continue
+    if (ev.end_wall_ms <= start || ev.start_wall_ms >= end || !admitted(ev.start_wall_ms, Math.max(ev.start_wall_ms, ev.end_wall_ms - 1))) continue
     const id = `k${++n}`
     const entry: Packet['scheduled_events'][number] = { id, title: ev.title, from: clock(ev.start_wall_ms), to: clock(ev.end_wall_ms) }
     if (ev.attendees !== null) entry.attendees = ev.attendees
