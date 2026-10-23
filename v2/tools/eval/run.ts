@@ -256,18 +256,31 @@ export function shownHour(rec: { final: CallResult; validation: Validation | nul
   return { hour: factsHour(packet), fallback: true }
 }
 
-interface GradeRecord {
-  written?: string
+export interface GradeBasis {
+  // The write graded (writeId), and everything else that decides a verdict.
+  written: string
+  grader_prompt_sha256: string
+  checklists_sha256: string
+  key_sha256: string
+  model: string
+  effort: string | null
+  cli: string
+}
+
+interface GradeRecord extends Partial<GradeBasis> {
   verdict: Verdict | null
 }
+
+const BASIS_KEYS = ['written', 'grader_prompt_sha256', 'checklists_sha256', 'key_sha256', 'model', 'effort', 'cli'] as const
 
 /** Which write a grade is of: a rewritten hour needs a new grade. */
 export function writeId(rec: { started: string; final: CallResult }): string {
   return sha(`${rec.started}\u0000${rec.final.text ?? rec.final.error ?? ''}`)
 }
 
-export function gradeIsCurrent(g: GradeRecord | null, written: string): boolean {
-  return g !== null && g.verdict !== null && g.written === written
+/** A stored grade is reused only when it graded this write with the same grader, prompt, checklist and answer key. */
+export function gradeIsCurrent(g: GradeRecord | null, want: GradeBasis): boolean {
+  return g !== null && g.verdict !== null && BASIS_KEYS.every((k) => g[k] === want[k])
 }
 
 async function grade(gold: Gold, graderName: string, name: string): Promise<void> {
@@ -276,12 +289,14 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
   const scratch = cliScratch(CODEX_BASE)
   try {
     const backend = backendFor(g, scratch)
-    const meta = { grader: graderName, ...g, codex_file_reads: g.kind === 'codex', candidate: name, grader_prompt_sha256: sha(GRADER_PROMPT), checklists_sha256: sha(JSON.stringify(gold.checklists)), versions: versions() }
+    const v = versions()
+    const meta = { grader: graderName, ...g, codex_file_reads: g.kind === 'codex', candidate: name, grader_prompt_sha256: sha(GRADER_PROMPT), checklists_sha256: sha(JSON.stringify(gold.checklists)), cli: g.kind === 'codex' ? v.codex! : v.claude!, versions: v }
     for (const h of gold.hours) {
       const out = path.join(gold.dir, 'results/grades', graderName, name, `hour_${hh(h)}.json`)
       const rec = readJson<WriteRecord & { started: string }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
       const written = writeId(rec)
-      if (existsSync(out) && gradeIsCurrent(readJson<GradeRecord>(out), written)) continue
+      const basis: GradeBasis = { written, grader_prompt_sha256: meta.grader_prompt_sha256, checklists_sha256: meta.checklists_sha256, key_sha256: sha(gold.key[hh(h)] ?? ''), model: g.model, effort: g.effort, cli: meta.cli }
+      if (existsSync(out) && gradeIsCurrent(readJson<GradeRecord>(out), basis)) continue
       const checklist = gold.checklists.hours[hh(h)]
       if (!checklist) throw new Error(`no checklist for hour ${hh(h)}`)
       const onlyUser = checklist.only_user === true
@@ -289,7 +304,7 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
       const shown = shownHour(rec, packet)
       if (!shown) {
         const verdict: Verdict = { grade: 'wrong', reason: `no hour was written: ${(rec.final.error ?? 'no output').slice(0, 120)}`, must_missed: checklist.must, should_missed: checklist.should, must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
-        writeJson(out, { ...meta, hour: hh(h), written, automatic: true, verdict, inconsistencies: [] })
+        writeJson(out, { ...meta, ...basis, hour: hh(h), automatic: true, verdict, inconsistencies: [] })
         continue
       }
       const message = graderMessage(gold.checklists.rules, checklist, gold.key[hh(h)] ?? '', packet, shown.hour)
@@ -302,7 +317,7 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
           return p.error
         },
       )
-      writeJson(out, { ...meta, hour: hh(h), written, facts_fallback: shown.fallback, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
+      writeJson(out, { ...meta, ...basis, hour: hh(h), facts_fallback: shown.fallback, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
       console.log(graderName, name, hh(h), verdict ? (verdict as Verdict).grade : `ERROR ${final.error ?? attempts.at(-1)?.problem}`)
       if (final.quota) {
         console.log(graderName, 'stopped: usage limit reached')
@@ -314,22 +329,28 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
   }
 }
 
-interface HandCheck {
+export interface HandCheck {
   grader: string
   candidate: string
   hour: string
+  // The write it was made on (writeId); it says nothing about any other.
+  written: string
   grader_grade: Grade
   my_grade: Grade
   note: string
 }
 
+export function handCheckFor(hand: readonly HandCheck[], grader: string, candidate: string, hour: string, written: string): HandCheck | undefined {
+  return hand.find((x) => x.grader === grader && x.candidate === candidate && x.hour === hour && x.written === written)
+}
+
 function loadResults(gold: Gold, grader: string, name: string): HourResult[] {
   const hand = existsSync(path.join(gold.dir, 'results/hand-checks.json')) ? readJson<HandCheck[]>(path.join(gold.dir, 'results/hand-checks.json')) : []
   return gold.hours.map((h) => {
-    const w = readJson<{ final: CallResult; attempts: unknown[]; validation: Validation | null }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
+    const w = readJson<WriteRecord & { started: string; attempts: unknown[] }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
     const gf = path.join(gold.dir, 'results/grades', grader, name, `hour_${hh(h)}.json`)
     const verdict = existsSync(gf) ? readJson<{ verdict: Verdict | null }>(gf).verdict : null
-    const hc = hand.find((x) => x.grader === grader && x.candidate === name && x.hour === hh(h))
+    const hc = handCheckFor(hand, grader, name, hh(h), writeId(w))
     return {
       hour: hh(h),
       call: w.final,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { factsHour, type CallResult } from '../../engine/backends.ts'
 import { buildPacket, type Packet } from '../../engine/packet.ts'
 import type { Validation } from '../../engine/validate.ts'
-import { gradeIsCurrent, isCurrent, previousHour, shownHour, staleResults, writeId, writerPacket, type RunInfo, type WriteRecord } from '../../tools/eval/run.ts'
+import { gradeIsCurrent, handCheckFor, isCurrent, previousHour, shownHour, staleResults, writeId, writerPacket, type GradeBasis, type HandCheck, type RunInfo, type WriteRecord } from '../../tools/eval/run.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 
@@ -37,16 +37,26 @@ test('a stored result is kept only when its packet, prompt and previous hour are
   assert.equal(isCurrent(null, want), false)
 })
 
-test('a grade is kept only for the write it graded', () => {
+test('a grade is reused only for the same write, grader prompt, checklist, answer key, grader model, effort and CLI', () => {
   const first = writeId({ started: '2026-10-21T10:00:00Z', final: call() })
   const again = writeId({ started: '2026-10-21T11:00:00Z', final: call() })
   assert.notEqual(first, again)
   const verdict = { grade: 'right' as const, reason: 'ok', must_missed: [], should_missed: [], must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
-  assert.equal(gradeIsCurrent({ written: first, verdict }, first), true)
-  assert.equal(gradeIsCurrent({ written: first, verdict }, again), false, 'the hour was written again')
-  assert.equal(gradeIsCurrent({ verdict }, first), false, 'a grade that does not say which write it graded')
-  assert.equal(gradeIsCurrent({ written: first, verdict: null }, first), false)
-  assert.equal(gradeIsCurrent(null, first), false)
+  const basis: GradeBasis = { written: first, grader_prompt_sha256: 'gp', checklists_sha256: 'cl', key_sha256: 'k', model: 'claude-opus-5-5', effort: null, cli: '2.1.306 (Claude Code)' }
+  assert.equal(gradeIsCurrent({ ...basis, verdict }, basis), true)
+  assert.equal(gradeIsCurrent({ ...basis, verdict }, { ...basis, written: again }), false, 'the hour was written again')
+  for (const [k, v] of [['grader_prompt_sha256', 'gp2'], ['checklists_sha256', 'cl2'], ['key_sha256', 'k2'], ['model', 'claude-sonnet-5-5'], ['effort', 'low'], ['cli', '2.1.308 (Claude Code)']] as const) {
+    assert.equal(gradeIsCurrent({ ...basis, verdict }, { ...basis, [k]: v }), false, k)
+  }
+  assert.equal(gradeIsCurrent({ written: first, verdict }, basis), false, 'a grade that does not say what it was made with')
+  assert.equal(gradeIsCurrent({ ...basis, verdict: null }, basis), false)
+  assert.equal(gradeIsCurrent(null, basis), false)
+})
+
+test('a hand check applies only to the write it was made on', () => {
+  const hand: HandCheck[] = [{ grader: 'g', candidate: 'm', hour: '09', written: 'w1', grader_grade: 'right', my_grade: 'partly', note: '' }]
+  assert.equal(handCheckFor(hand, 'g', 'm', '09', 'w1'), hand[0])
+  assert.equal(handCheckFor(hand, 'g', 'm', '09', 'w2'), undefined, 'the hour was written again')
 })
 
 test('the evaluation passes the previous hour exactly as the engine does once that hour is stored', () => {
