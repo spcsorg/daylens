@@ -173,11 +173,9 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
   })
   db.function('agent_end', { deterministic: false }, (agent: string, session: string, start: number, at: number | null) => (at === null || admitsSpan(spansOf(agent, session), start, at) ? at : null))
   db.function('agent_deleted_span', { deterministic: false }, (agent: string, session: string) => (deleted.has(`${agent}\n${session}`) ? 1 : 0))
-  // Withheld time, and time deleted for this app (or any app, or one not named), keeps no record of where a session
-  // ran; the app holds from where that time ends.
-  db.function('agent_host_from', { deterministic: false }, (agent: string, session: string, at: number, appId: string | null) => {
-    const name = appId?.toLowerCase() ?? null
-    const own = [...spans, ...(deleted.get(`${agent}\n${session}`) ?? []).filter((d) => d.app === '' || name === null || d.app === name).map((d) => [d.from, d.to] as const)]
+  // Withheld or deleted time keeps no record of where a session ran; the app holds from where that time ends.
+  db.function('agent_host_from', { deterministic: false }, (agent: string, session: string, at: number) => {
+    const own = spansOf(agent, session)
     for (let moved = true; moved; ) {
       moved = false
       for (const [from, to] of own) {
@@ -215,7 +213,7 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
         // An excluded app is kept only as excluded, as the live reader keeps it.
         db.exec(`INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms)
           SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, at
-          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x, agent_host_from(agent, session_id, from_wall_ms, app_id) AS at FROM staging.agent_hosts ORDER BY from_wall_ms, id) s WHERE ${live('s')} AND at IS NOT NULL
+          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x, agent_host_from(agent, session_id, from_wall_ms) AS at FROM staging.agent_hosts ORDER BY from_wall_ms, id) s WHERE ${live('s')} AND at IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.at)`)
       }
       look = memoryHostLookup(db.prepare('SELECT agent, session_id, app_id, app_path, basis, from_wall_ms FROM main.agent_hosts ORDER BY from_wall_ms, id').all() as Parameters<typeof memoryHostLookup>[0], parents)

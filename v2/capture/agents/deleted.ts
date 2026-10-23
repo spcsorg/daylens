@@ -4,7 +4,7 @@
 import type { Agent } from './types.ts'
 import type { HostLookup } from './store.ts'
 
-/** Part of a deleted range a session spent in the deleted app, and that app; '' for a span that names none. */
+/** An app deletion's tombstone for a session: the app and the range it deleted ('' for spans that name no app). */
 export interface DeletedSpan {
   from: number
   to: number
@@ -29,31 +29,11 @@ export function deletedSession(t: Tombstones, look: HostLookup, agent: Agent, se
 }
 
 /**
- * A record of `session` at `at` is deleted when one of the session's deleted spans covers that time: a span is the
- * part of a deleted range the session spent in the deleted app, so outside it the session's records from other apps
- * stay. Inside a span of a session above it, the record goes unless the session (or one between) has an app of its own
- * then that is another app: the deletion removed the spans it would otherwise inherit, so it cannot be judged by them.
+ * A record of `session` at `at` is deleted when a deleted span of the session, or of any session above it, covers
+ * that time, whatever app the record resolves to: the tombstone keeps only the app and the range, not when the session
+ * was in the app.
  */
 export function deletedAt(t: Tombstones, look: HostLookup, agent: Agent, session: string, at: number | null): boolean {
   if (at === null) return false
-  if (t.spans(agent, session).some((d) => at >= d.from && at < d.to)) return true
-  const below = [session]
-  for (const a of above(look, agent, session)) {
-    for (const d of t.spans(agent, a)) {
-      if (at < d.from || at >= d.to) continue
-      const own = ownApp(look, agent, below, at)
-      if (d.app === '' || own === null || own === d.app) return true
-    }
-    below.push(a)
-  }
-  return false
-}
-
-// The app named by the nearest span of these sessions' own at a time; null when none names one.
-function ownApp(look: HostLookup, agent: Agent, sessions: readonly string[], at: number): string | null {
-  for (const s of sessions) {
-    const span = look.span(agent, s, at)
-    if (span) return span.basis === 'excluded' ? null : (span.app_id?.toLowerCase() ?? null)
-  }
-  return null
+  return [session, ...above(look, agent, session)].some((s) => t.spans(agent, s).some((d) => at >= d.from && at < d.to))
 }

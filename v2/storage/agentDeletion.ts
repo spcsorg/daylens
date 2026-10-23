@@ -38,7 +38,8 @@ function ancestors(look: HostLookup, agent: Agent, session: string): string[] {
  * Inside the fence transaction. A range: every session with records in it, a turn or wait crossing into it, an app
  * seen from inside it or a log read since it began; their spans are the range. An app: the sessions known to have run
  * in it and their subagents at any depth, each with the parts of the range in which it, or the session above it, was
- * in the app, judged now from the app spans as they are. Those sessions get their tombstones here too.
+ * in the app, judged now from the app spans as they are. Those sessions get their tombstones (the app and the range)
+ * here too.
  */
 export function planAgentDeletion(db: Database.Database, tombstoneId: number, app: string | null, from: number, to: number): void {
   if (!hasTable(db, 'agent_turns')) return
@@ -90,9 +91,9 @@ export function planAgentDeletion(db: Database.Database, tombstoneId: number, ap
     }
     if (spans.length === 0) continue
     add(agent, session, spans, true)
-    // The parts of the range the session spent in the app, not the whole range: the deletion removes the app spans
-    // that showed it, so a record read later from outside them, from another app, could not be told apart otherwise.
-    for (const [a, b] of spans) tombstone.run(agent, session, app, a, b)
+    // Only what the deletion request holds, the app and the range: when the session was in the app inside it is part
+    // of what was deleted. So the session's records anywhere in the range are refused, whatever app they resolve to.
+    tombstone.run(agent, session, app, from, to)
   }
 }
 

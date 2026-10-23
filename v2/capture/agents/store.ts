@@ -186,8 +186,7 @@ export const agentDeletedSpansMigration: Migration = {
     `),
 }
 
-// An app deletion's span names the app it deleted ('' for spans written before it did): a late record of the session
-// from another app stays.
+// An app deletion's span names the app it deleted ('' for spans written before it did).
 export const agentDeletedSpansAppMigration: Migration = {
   name: 'agent_deleted_spans_app_v1',
   up: (db) =>
@@ -204,6 +203,28 @@ export const agentDeletedSpansAppMigration: Migration = {
       DROP TABLE agent_deleted_spans;
       ALTER TABLE agent_deleted_spans_app RENAME TO agent_deleted_spans;
     `),
+}
+
+// An app deletion's span holds the app and the range it deleted, never the parts of the range the session spent in the
+// app: spans that held those become the range of the deletion they came from.
+export const agentDeletedSpansWholeRangeMigration: Migration = {
+  name: 'agent_deleted_spans_whole_range_v1',
+  up: (db) => {
+    if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'deletions'`).get() === undefined) {
+      db.exec(`DELETE FROM agent_deleted_spans WHERE app_id != ''`)
+      return
+    }
+    db.exec(`
+      CREATE TEMP TABLE agent_deleted_spans_whole AS
+        SELECT DISTINCT s.agent, s.session_id, s.app_id, coalesce(d.from_wall_ms, ${Number.MIN_SAFE_INTEGER}) AS from_wall_ms, d.to_wall_ms
+        FROM agent_deleted_spans s JOIN deletions d ON d.kind = 'source' AND lower(d.app_id) = s.app_id
+          AND coalesce(d.from_wall_ms, ${Number.MIN_SAFE_INTEGER}) <= s.from_wall_ms AND d.to_wall_ms >= s.to_wall_ms
+        WHERE s.app_id != '';
+      DELETE FROM agent_deleted_spans WHERE app_id != '';
+      INSERT OR IGNORE INTO agent_deleted_spans (agent, session_id, app_id, from_wall_ms, to_wall_ms) SELECT * FROM agent_deleted_spans_whole;
+      DROP TABLE agent_deleted_spans_whole;
+    `)
+  },
 }
 
 // Which app each session ran in, from when: a session resumed in another app has a span for each. A span with no
@@ -478,7 +499,7 @@ export class AgentStore {
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
-    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration, agentDeletedSpansAppMigration], now)
+    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration, agentDeletedSpansAppMigration, agentDeletedSpansWholeRangeMigration], now)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -657,10 +678,8 @@ export class AgentStore {
     if (this.isDeletedSession(agent, session)) return
     this.lookup ??= dbHostLookup(this.db)
     if (deletedSession({ spans: () => [], session: (a, x) => this.isDeletedSession(a, x) }, this.lookup, agent, session)) return
-    // Withheld time, and time deleted for this app (or any app, or one not named), keeps no record of where the session
-    // ran; the app holds from where that time ends.
-    const name = app?.app_id?.toLowerCase() ?? null
-    const spans = [...this.withheld(), ...this.deletedSpans(agent, session).filter((d) => d.app === '' || name === null || d.app === name).map((d) => [d.from, d.to] as const)]
+    // Withheld or deleted time keeps no record of where the session ran; the app holds from where that time ends.
+    const spans = [...this.withheld(), ...this.deletedSpans(agent, session).map((d) => [d.from, d.to] as const)]
     for (let moved = true; moved; ) {
       moved = false
       for (const [from, to] of spans) {

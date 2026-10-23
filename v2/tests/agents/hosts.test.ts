@@ -6,7 +6,7 @@ import Database from 'better-sqlite3'
 import { backfill, mergeStaging } from '../../capture/agents/backfill.ts'
 import { ClaudeParser } from '../../capture/agents/claude.ts'
 import { AgentReader, homeRoots } from '../../capture/agents/reader.ts'
-import { AgentStore } from '../../capture/agents/store.ts'
+import { AgentStore, agentDeletedSessionsMigration, agentDeletedSpansAppMigration, agentDeletedSpansMigration, agentHostsMigration, agentSessionsMigration, agentSourcesTurnlessMigration, applyMigrations } from '../../capture/agents/store.ts'
 import { emptyCounts, type AgentRecord } from '../../capture/agents/types.ts'
 import { rig, MIN, T0 } from '../storage/support.ts'
 import { claude, claudeCtx, of, run, tmp } from './fixtures.ts'
@@ -414,7 +414,7 @@ test('excluding an app a tracked session runs in forgets its log, and what it wr
   r.close()
 })
 
-test("deleting an app keeps a session's late records from another app, and refuses those from the app it deleted", async () => {
+test("deleting an app refuses a session's records anywhere in the deleted range, whatever app they resolve to, and keeps no time it moved", async () => {
   const { r, agents, turn, turns } = setup()
   const H = 60 * MIN
   agents.apply('claude_code', [{ t: 'client', session: 's', client: 'claude-desktop', at: T0 }, ...turn('s', 'd1', T0 + 10 * MIN)])
@@ -422,18 +422,31 @@ test("deleting an app keeps a session's late records from another app, and refus
   agents.apply('claude_code', turn('s', 'g1', T0 + H + 10 * MIN))
   r.clock.t = T0 + 2 * H
   await r.storage.deleteSource('com.mitchellh.ghostty').done
-  assert.deepEqual(r.q('SELECT app_id, from_wall_ms, to_wall_ms FROM agent_deleted_spans'), [{ app_id: 'com.mitchellh.ghostty', from_wall_ms: T0 + H, to_wall_ms: T0 + 2 * H }], 'the tombstone names the app and the time the session spent in it')
+  assert.deepEqual(r.q('SELECT app_id, from_wall_ms, to_wall_ms FROM agent_deleted_spans'), [{ app_id: 'com.mitchellh.ghostty', from_wall_ms: Number.MIN_SAFE_INTEGER, to_wall_ms: T0 + 2 * H }], 'the tombstone holds the app and the range the deletion was asked for, not when the session moved')
   agents.apply('claude_code', [...turn('s', 'd2', T0 + 30 * MIN), ...turn('s', 'g1', T0 + H + 10 * MIN), ...turn('s', 'g2', T0 + H + 40 * MIN)])
-  assert.deepEqual(turns('s'), ['d1', 'd2'], 'a late turn from the Claude app stays; Ghostty time does not come back')
+  assert.deepEqual(turns('s'), ['d1'], 'a late turn from the Claude app inside the range is refused too; what was already kept stays')
   const staging = path.join(r.dir, 'staging-late.sqlite')
   const db = new Database(staging)
   new AgentStore(db).apply('claude_code', [...turn('s', 'd3', T0 + 40 * MIN), ...turn('s', 'g3', T0 + H + 20 * MIN)])
   db.close()
   mergeStaging(r.store.database, staging, r.storage.withheld(), agents)
-  assert.deepEqual(turns('s'), ['d1', 'd2', 'd3'], 'nor in the first read')
+  assert.deepEqual(turns('s'), ['d1'], 'and by the first read')
   r.close()
 })
 
+test('an app tombstone that held the times a session spent in the app becomes the range of its deletion', () => {
+  const r = rig()
+  const db = r.store.database
+  applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration, agentDeletedSpansAppMigration])
+  db.prepare(`INSERT INTO deletions (kind, from_wall_ms, to_wall_ms, app_id, site, created_wall_ms, state) VALUES ('source', ?, ?, 'com.mitchellh.ghostty', NULL, ?, 'purged')`).run(T0, T0 + 120 * MIN, T0)
+  db.prepare(`INSERT INTO agent_deleted_spans (agent, session_id, app_id, from_wall_ms, to_wall_ms) VALUES ('claude_code', 's', 'com.mitchellh.ghostty', ?, ?), ('claude_code', 's', 'com.mitchellh.ghostty', ?, ?), ('claude_code', 'old', '', 1, 2)`).run(T0 + 30 * MIN, T0 + 40 * MIN, T0 + 70 * MIN, T0 + 80 * MIN)
+  new AgentStore(db)
+  assert.deepEqual(r.q('SELECT session_id, app_id, from_wall_ms, to_wall_ms FROM agent_deleted_spans ORDER BY session_id'), [
+    { session_id: 'old', app_id: '', from_wall_ms: 1, to_wall_ms: 2 },
+    { session_id: 's', app_id: 'com.mitchellh.ghostty', from_wall_ms: T0, to_wall_ms: T0 + 120 * MIN },
+  ])
+  r.close()
+})
 test("a subagent read for the first time after its parent's app was deleted, or its parent deleted, is refused", async () => {
   const { r, agents, turn, turns } = setup()
   const sub = (session: string, parent: string, key: string, at: number): AgentRecord[] => [
@@ -449,7 +462,7 @@ test("a subagent read for the first time after its parent's app was deleted, or 
   assert.equal(await r.storage.deleteAgentSession('claude_code', 'q'), true)
   agents.recordHost('claude_code', 'o', vscode, 'responsible', T0 + 2 * MIN)
   agents.apply('claude_code', [...sub('c', 'p', 'c1', T0 + 2 * MIN), ...sub('g', 'c', 'g1', T0 + 3 * MIN), ...sub('o', 'p', 'o1', T0 + 2 * MIN), ...sub('d', 'q', 'd1', T0 + 2 * MIN)])
-  assert.deepEqual([turns('c'), turns('g'), turns('o'), turns('d')], [[], [], ['o1'], []], 'the subagent and its own subagent go; one in another app of its own stays; one of a deleted session goes')
+  assert.deepEqual([turns('c'), turns('g'), turns('o'), turns('d')], [[], [], [], []], 'the subagent and its own subagent go, as does one with an app of its own, and one of a deleted session')
   const staging = path.join(r.dir, 'staging-sub.sqlite')
   const db = new Database(staging)
   new AgentStore(db).apply('claude_code', [...sub('c2', 'p', 'c21', T0 + 4 * MIN), ...sub('d2', 'q', 'd21', T0 + 4 * MIN)])
