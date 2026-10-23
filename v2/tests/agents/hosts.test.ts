@@ -413,3 +413,23 @@ test('excluding an app a tracked session runs in forgets its log, and what it wr
   assert.deepEqual([turns('s'), turns('u')], [['s1', 's3'], ['u2']], 'nor by the first read, for its app or one not known while Ghostty was excluded')
   r.close()
 })
+
+test("deleting an app keeps a session's late records from another app, and refuses those from the app it deleted", async () => {
+  const { r, agents, turn, turns } = setup()
+  const H = 60 * MIN
+  agents.apply('claude_code', [{ t: 'client', session: 's', client: 'claude-desktop', at: T0 }, ...turn('s', 'd1', T0 + 10 * MIN)])
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + H)
+  agents.apply('claude_code', turn('s', 'g1', T0 + H + 10 * MIN))
+  r.clock.t = T0 + 2 * H
+  await r.storage.deleteSource('com.mitchellh.ghostty').done
+  assert.deepEqual(r.q('SELECT app_id, from_wall_ms, to_wall_ms FROM agent_deleted_spans'), [{ app_id: 'com.mitchellh.ghostty', from_wall_ms: T0 + H, to_wall_ms: T0 + 2 * H }], 'the tombstone names the app and the time the session spent in it')
+  agents.apply('claude_code', [...turn('s', 'd2', T0 + 30 * MIN), ...turn('s', 'g1', T0 + H + 10 * MIN), ...turn('s', 'g2', T0 + H + 40 * MIN)])
+  assert.deepEqual(turns('s'), ['d1', 'd2'], 'a late turn from the Claude app stays; Ghostty time does not come back')
+  const staging = path.join(r.dir, 'staging-late.sqlite')
+  const db = new Database(staging)
+  new AgentStore(db).apply('claude_code', [...turn('s', 'd3', T0 + 40 * MIN), ...turn('s', 'g3', T0 + H + 20 * MIN)])
+  db.close()
+  mergeStaging(r.store.database, staging, r.storage.withheld(), agents)
+  assert.deepEqual(turns('s'), ['d1', 'd2', 'd3'], 'nor in the first read')
+  r.close()
+})

@@ -8,6 +8,7 @@ import type Database from 'better-sqlite3'
 import { clientApp, type HostApp } from './host.ts'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 import { admitsAt, admitsSpan, type Span } from './withheld.ts'
+import { deletedAt, type DeletedSpan, type Tombstones } from './deleted.ts'
 import { SCRUB_PENDING } from '../store.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
@@ -182,6 +183,26 @@ export const agentDeletedSpansMigration: Migration = {
         to_wall_ms INTEGER NOT NULL,
         PRIMARY KEY (agent, session_id, from_wall_ms, to_wall_ms)
       ) WITHOUT ROWID;
+    `),
+}
+
+// An app deletion's span names the app it deleted ('' for spans written before it did): a late record of the session
+// from another app stays.
+export const agentDeletedSpansAppMigration: Migration = {
+  name: 'agent_deleted_spans_app_v1',
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE agent_deleted_spans_app (
+        agent TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        app_id TEXT NOT NULL,
+        from_wall_ms INTEGER NOT NULL,
+        to_wall_ms INTEGER NOT NULL,
+        PRIMARY KEY (agent, session_id, app_id, from_wall_ms, to_wall_ms)
+      ) WITHOUT ROWID;
+      INSERT INTO agent_deleted_spans_app SELECT agent, session_id, '', from_wall_ms, to_wall_ms FROM agent_deleted_spans;
+      DROP TABLE agent_deleted_spans;
+      ALTER TABLE agent_deleted_spans_app RENAME TO agent_deleted_spans;
     `),
 }
 
@@ -417,7 +438,7 @@ const SQL = {
   activity: 'UPDATE agent_turns SET last_activity_wall_ms = max(last_activity_wall_ms, @at) WHERE agent = @agent AND turn_key = @key',
   deletedSession: 'SELECT 1 FROM agent_deleted_sessions WHERE agent = ? AND session_id = ?',
   turnSpan: 'SELECT session_id AS session, max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = @agent AND turn_key = @key',
-  deletedSpans: 'SELECT from_wall_ms, to_wall_ms FROM agent_deleted_spans WHERE agent = ? AND session_id = ?',
+  deletedSpans: 'SELECT from_wall_ms AS "from", to_wall_ms AS "to", app_id AS app FROM agent_deleted_spans WHERE agent = ? AND session_id = ?',
   sessionKept: `SELECT 1 WHERE EXISTS (SELECT 1 FROM agent_sessions WHERE agent = @agent AND session_id = @session)
     OR EXISTS (SELECT 1 FROM agent_turns WHERE agent = @agent AND session_id = @session) OR EXISTS (SELECT 1 FROM agent_events WHERE agent = @agent AND session_id = @session)`,
   // The first real end wins; 'missing' only ever gives way to a real one.
@@ -451,7 +472,7 @@ export class AgentStore {
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
-    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration], now)
+    applyMigrations(db, [agentSessionsMigration, agentSourcesTurnlessMigration, agentDeletedSessionsMigration, agentHostsMigration, agentDeletedSpansMigration, agentDeletedSpansAppMigration], now)
   }
 
   private stmt(sql: string): Database.Statement {
@@ -477,7 +498,7 @@ export class AgentStore {
       // Withheld time, and the session's own time an app deletion reached.
       const spansOf = (session: string): readonly Span[] => {
         let v = sessionSpans.get(session)
-        if (v === undefined) sessionSpans.set(session, (v = [...spans, ...this.deletedSpans(agent, session)]))
+        if (v === undefined) sessionSpans.set(session, (v = [...spans, ...this.deletedSpans(agent, session).map((d) => [d.from, d.to] as const)]))
         return v
       }
       // A turn never stretches across withheld time: its last activity or end stays before the gap.
@@ -514,6 +535,8 @@ export class AgentStore {
         return v
       }
       const ok = (at: number | null) => admitsAt(spans, at)
+      const tombstones: Tombstones = { spans: (a, session) => this.deletedSpans(a, session) }
+      const gone = (session: string) => (at: number | null) => !deletedAt(tombstones, look, agent, session, at)
       const deleted = new Map<string, boolean>()
       const isDeleted = (session: string | null) => {
         if (session === null) return false
@@ -529,7 +552,7 @@ export class AgentStore {
         const at = recordAt(r)
         // A record that names only its turn is judged by the turn's session.
         const owner = 'session' in r ? r.session : r.t === 'turn_dir' || r.t === 'turn_opener' ? ((this.stmt(SQL.turnSpan).get({ agent, key: r.key }) as { session: string } | undefined)?.session ?? null) : null
-        if (!admitted(r, ok) || (owner !== null && !admitted(r, (x) => admitsAt(spansOf(owner), x))) || ('session' in r && (isDeleted(r.session) || (at !== null && !hostOk(r.session, at))))) {
+        if (!admitted(r, ok) || (owner !== null && !admitted(r, gone(owner))) || ('session' in r && (isDeleted(r.session) || (at !== null && !hostOk(r.session, at))))) {
           dropped = true
           continue
         }
@@ -556,7 +579,7 @@ export class AgentStore {
             flushActivity()
             // An end across withheld time keeps the turn ended without saying when; one inside it, also without saying how.
             const turn = this.stmt(SQL.turnSpan).get({ agent, key: r.key }) as { session: string } | undefined
-            const inside = r.at !== null && turn !== undefined && !admitsAt(spansOf(turn.session), r.at)
+            const inside = r.at !== null && turn !== undefined && (!admitsAt(spans, r.at) || !gone(turn.session)(r.at))
             this.stmt(SQL.end).run({ agent, key: r.key, state: inside ? 'missing' : r.state, at: r.at !== null && reaches(r.key, r.at) ? r.at : null })
             break
           }
@@ -625,8 +648,10 @@ export class AgentStore {
    */
   recordHost(agent: Agent, session: string, app: HostApp | null, basis: HostRecordBasis, at: number): void {
     if (this.isDeletedSession(agent, session)) return
-    // Withheld or deleted time keeps no record of where the session ran; the app holds from where that time ends.
-    const spans = [...this.withheld(), ...this.deletedSpans(agent, session)]
+    // Withheld time, and time deleted for this app (or any app, or one not named), keeps no record of where the session
+    // ran; the app holds from where that time ends.
+    const name = app?.app_id?.toLowerCase() ?? null
+    const spans = [...this.withheld(), ...this.deletedSpans(agent, session).filter((d) => d.app === '' || name === null || d.app === name).map((d) => [d.from, d.to] as const)]
     for (let moved = true; moved; ) {
       moved = false
       for (const [from, to] of spans) {
@@ -659,8 +684,8 @@ export class AgentStore {
     return resolveHost(this.lookup, agent, session, at)
   }
 
-  deletedSpans(agent: Agent, session: string): Span[] {
-    return (this.stmt(SQL.deletedSpans).all(agent, session) as { from_wall_ms: number; to_wall_ms: number }[]).map((d) => [d.from_wall_ms, d.to_wall_ms] as const)
+  deletedSpans(agent: Agent, session: string): DeletedSpan[] {
+    return this.stmt(SQL.deletedSpans).all(agent, session) as DeletedSpan[]
   }
 
   isDeletedSession(agent: Agent, session: string | null): boolean {

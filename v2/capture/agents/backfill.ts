@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 import type Database from 'better-sqlite3'
 import { classifyFile, healthFromCounts, type AgentRoot, type RootCounts } from './reader.ts'
 import { admitsAt, admitsSpan, nextWithheld, type Span } from './withheld.ts'
-import { ALLOW_ALL_HOSTS, AgentStore, loadFingerprintKey, memoryHostLookup, removeStaging, resolveHost, STAGING_FILE, type HostPolicy } from './store.ts'
+import { deletedAt, type DeletedSpan, type Tombstones } from './deleted.ts'
+import { ALLOW_ALL_HOSTS, AgentStore, loadFingerprintKey, memoryHostLookup, removeStaging, resolveHost, STAGING_FILE, type HostLookup, type HostPolicy } from './store.ts'
 import { addCounts, type Agent } from './types.ts'
 
 export interface BackfillStats {
@@ -143,18 +144,22 @@ export async function listLogs(roots: PlainRoot[]): Promise<string[]> {
 // Merges the staging tables into the live ones. Rows already present win: they were read by this process.
 export function mergeStaging(db: Database.Database, staging: string, spans: readonly Span[] = [], hosts: HostPolicy = ALLOW_ALL_HOSTS): void {
   // The time an app deletion reached in a session, read before the merge: the functions below run inside its statements.
-  const deleted = new Map<string, Span[]>()
+  const deleted = new Map<string, DeletedSpan[]>()
   if (db.prepare(`SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'agent_deleted_spans'`).get() !== undefined) {
-    for (const d of db.prepare('SELECT agent, session_id, from_wall_ms, to_wall_ms FROM main.agent_deleted_spans').all() as { agent: string; session_id: string; from_wall_ms: number; to_wall_ms: number }[]) {
+    for (const d of db.prepare('SELECT agent, session_id, app_id, from_wall_ms, to_wall_ms FROM main.agent_deleted_spans').all() as { agent: string; session_id: string; app_id: string; from_wall_ms: number; to_wall_ms: number }[]) {
       const k = `${d.agent}\n${d.session_id}`
-      deleted.set(k, [...(deleted.get(k) ?? []), [d.from_wall_ms, d.to_wall_ms]])
+      deleted.set(k, [...(deleted.get(k) ?? []), { from: d.from_wall_ms, to: d.to_wall_ms, app: d.app_id }])
     }
   }
+  const tombstones: Tombstones = { spans: (agent, session) => deleted.get(`${agent}\n${session}`) ?? [] }
+  // Set once the apps are merged, before any statement that judges a record.
+  let look: HostLookup = { span: () => undefined, parent: () => null }
+  // A turn never stretches across withheld or deleted time.
   const spansOf = (agent: string, session: string): readonly Span[] => {
     const own = deleted.get(`${agent}\n${session}`)
-    return own ? [...spans, ...own] : spans
+    return own ? [...spans, ...own.map((d) => [d.from, d.to] as const)] : spans
   }
-  db.function('agent_admits', { deterministic: false }, (agent: string, session: string, at: number | null) => (admitsAt(spansOf(agent, session), at) ? 1 : 0))
+  db.function('agent_admits', { deterministic: false }, (agent: Agent, session: string, at: number | null) => (admitsAt(spans, at) && !deletedAt(tombstones, look, agent, session, at) ? 1 : 0))
   // A turn's activity and end stop where withheld time begins after its start.
   db.function('agent_clip', { deterministic: false }, (agent: string, session: string, start: number, at: number | null) => {
     const own = spansOf(agent, session)
@@ -163,9 +168,11 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
   })
   db.function('agent_end', { deterministic: false }, (agent: string, session: string, start: number, at: number | null) => (at === null || admitsSpan(spansOf(agent, session), start, at) ? at : null))
   db.function('agent_deleted_span', { deterministic: false }, (agent: string, session: string) => (deleted.has(`${agent}\n${session}`) ? 1 : 0))
-  // Withheld or deleted time keeps no record of where a session ran; the app holds from where that time ends.
-  db.function('agent_host_from', { deterministic: false }, (agent: string, session: string, at: number) => {
-    const own = spansOf(agent, session)
+  // Withheld time, and time deleted for this app (or any app, or one not named), keeps no record of where a session
+  // ran; the app holds from where that time ends.
+  db.function('agent_host_from', { deterministic: false }, (agent: string, session: string, at: number, appId: string | null) => {
+    const name = appId?.toLowerCase() ?? null
+    const own = [...spans, ...(deleted.get(`${agent}\n${session}`) ?? []).filter((d) => d.app === '' || name === null || d.app === name).map((d) => [d.from, d.to] as const)]
     for (let moved = true; moved; ) {
       moved = false
       for (const [from, to] of own) {
@@ -197,10 +204,10 @@ export function mergeStaging(db: Database.Database, staging: string, spans: read
         // An excluded app is kept only as excluded, as the live reader keeps it.
         db.exec(`INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms)
           SELECT agent, session_id, CASE WHEN NOT x THEN app_id END, CASE WHEN NOT x THEN app_name END, CASE WHEN NOT x THEN app_path END, CASE WHEN x THEN 'excluded' ELSE basis END, at
-          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x, agent_host_from(agent, session_id, from_wall_ms) AS at FROM staging.agent_hosts ORDER BY from_wall_ms, id) s WHERE ${live('s')} AND at IS NOT NULL
+          FROM (SELECT *, agent_host_excluded(app_id, app_path) AS x, agent_host_from(agent, session_id, from_wall_ms, app_id) AS at FROM staging.agent_hosts ORDER BY from_wall_ms, id) s WHERE ${live('s')} AND at IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM agent_hosts h WHERE h.agent = s.agent AND h.session_id = s.session_id AND h.from_wall_ms = s.at)`)
       }
-      const look = memoryHostLookup(
+      look = memoryHostLookup(
         db.prepare('SELECT agent, session_id, app_id, app_path, basis, from_wall_ms FROM main.agent_hosts ORDER BY from_wall_ms, id').all() as Parameters<typeof memoryHostLookup>[0],
         db.prepare(`SELECT agent, session_id, parent_session_id AS parent FROM main.agent_sessions WHERE parent_session_id IS NOT NULL
           UNION ALL SELECT agent, session_id, parent_session_id FROM staging.agent_sessions WHERE parent_session_id IS NOT NULL`).all() as Parameters<typeof memoryHostLookup>[1],

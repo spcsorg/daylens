@@ -76,7 +76,7 @@ export function planAgentDeletion(db: Database.Database, tombstoneId: number, ap
     for (const c of children.all(next.agent, next.session) as { session_id: string }[]) queue.push({ agent: next.agent, session: c.session_id })
   }
   const moves = db.prepare('SELECT from_wall_ms FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms > ? AND from_wall_ms < ?').pluck()
-  const tombstone = db.prepare('INSERT OR IGNORE INTO agent_deleted_spans (agent, session_id, from_wall_ms, to_wall_ms) VALUES (?, ?, ?, ?)')
+  const tombstone = db.prepare('INSERT OR IGNORE INTO agent_deleted_spans (agent, session_id, app_id, from_wall_ms, to_wall_ms) VALUES (?, ?, ?, ?, ?)')
   for (const { agent, session } of reached.values()) {
     // The app a session resolves to changes only where it or a session above it has a span of its own.
     const points = [...new Set([from, ...[session, ...ancestors(look, agent, session)].flatMap((s) => moves.all(agent, s, from, to) as number[])])].sort((a, b) => a - b)
@@ -90,7 +90,9 @@ export function planAgentDeletion(db: Database.Database, tombstoneId: number, ap
     }
     if (spans.length === 0) continue
     add(agent, session, spans, true)
-    tombstone.run(agent, session, from, to)
+    // The parts of the range the session spent in the app, not the whole range: the deletion removes the app spans
+    // that showed it, so a record read later from outside them, from another app, could not be told apart otherwise.
+    for (const [a, b] of spans) tombstone.run(agent, session, app, a, b)
   }
 }
 
