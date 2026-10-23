@@ -399,17 +399,18 @@ test('a machine that wakes by itself records no window until the first input aft
 })
 
 test('after a wake, an unlock a snapshot finds, or a connection to the session, is someone there', () => {
-  for (const back of [line('session', { state: 'unlocked', snapshot: true }, T0 + 61 * MIN), line('session', { state: 'remote_connect', snapshot: false }, T0 + 61 * MIN), line('session', { state: 'console_connect', snapshot: false }, T0 + 61 * MIN)]) {
+  for (const [state, snapshot] of [['unlocked', true], ['remote_connect', false], ['console_connect', false]] as const) {
+    const back = line('session', { state, snapshot }, T0 + 61 * MIN)
     resetSeq()
     const r = rig()
     r.feed(focus(editor, 'notes.md - Editor', T0, 'app_changed'))
     r.feed(line('session', { state: 'locked', snapshot: false }, T0 + MIN))
     r.feed(line('power', { state: 'sleep' }, T0 + 2 * MIN))
     r.feed(line('power', { state: 'resume' }, T0 + 60 * MIN))
-    assert.equal(r.normalizer.handle(back), true, `${back.obs.state} asks for a fresh read`)
+    assert.equal(r.normalizer.handle(back), true, `${state} asks for a fresh read`)
     r.feed(focus(editor, 'notes.md - Editor', T0 + 61 * MIN + 10, 'snapshot'))
     beats(r, T0 + 61 * MIN, T0 + 63 * MIN)
-    assert.deepEqual(editorRows(r), [[0, 0], [61 * MIN + 10, 63 * MIN]], `recorded after ${back.obs.state}`)
+    assert.deepEqual(editorRows(r), [[0, 0], [61 * MIN + 10, 63 * MIN]], `recorded after ${state}`)
     r.close()
   }
 })
