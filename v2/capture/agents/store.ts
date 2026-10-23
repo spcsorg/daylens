@@ -8,7 +8,7 @@ import type Database from 'better-sqlite3'
 import { clientApp, type HostApp } from './host.ts'
 import { processKey, type Agent, type AgentRecord, type ParseCounts } from './types.ts'
 import { admitsAt, admitsSpan, type Span } from './withheld.ts'
-import { deletedAt, type DeletedSpan, type Tombstones } from './deleted.ts'
+import { deletedAt, deletedSession, type DeletedSpan, type Tombstones } from './deleted.ts'
 import { SCRUB_PENDING } from '../store.ts'
 
 export const STAGING_FILE = 'agent-backfill.sqlite'
@@ -320,11 +320,17 @@ export function memoryHostLookup(spans: readonly (HostSpan & { agent: string; se
  */
 export function deleteAgentSession(db: Database.Database, agent: Agent, session: string, nowWallMs: number): void {
   db.transaction(() => {
-    db.prepare('INSERT OR IGNORE INTO agent_deleted_sessions (agent, session_id, deleted_wall_ms) VALUES (?, ?, ?)').run(agent, session, nowWallMs)
-    // Its apps, its logs' paths and read positions go too: the reader skips a log whose name is a deleted session.
+    // Its subagents at any depth go with it; one not read yet is refused through the parent its log names.
+    const sessions = [session]
+    const children = db.prepare('SELECT session_id FROM agent_sessions WHERE agent = ? AND parent_session_id = ?').pluck()
+    for (let i = 0; i < sessions.length; i++) for (const c of children.all(agent, sessions[i]) as string[]) if (!sessions.includes(c)) sessions.push(c)
+    // Their apps, their logs' paths and read positions go too: the reader skips a log whose name is a deleted session.
     const tables = ['agent_events', 'agent_turns', 'agent_sessions', 'agent_sources']
     for (const t of ['agent_hosts', 'agent_deleted_spans']) if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t)) tables.push(t)
-    for (const table of tables) db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, session)
+    for (const s of sessions) {
+      db.prepare('INSERT OR IGNORE INTO agent_deleted_sessions (agent, session_id, deleted_wall_ms) VALUES (?, ?, ?)').run(agent, s, nowWallMs)
+      for (const table of tables) db.prepare(`DELETE FROM ${table} WHERE agent = ? AND session_id = ?`).run(agent, s)
+    }
     db.prepare(SCRUB_PENDING).run()
   })()
   const dir = db.name && db.name !== ':memory:' ? path.dirname(db.name) : null
@@ -535,13 +541,14 @@ export class AgentStore {
         return v
       }
       const ok = (at: number | null) => admitsAt(spans, at)
-      const tombstones: Tombstones = { spans: (a, session) => this.deletedSpans(a, session) }
+      const tombstones: Tombstones = { spans: (a, session) => this.deletedSpans(a, session), session: (a, session) => this.stmt(SQL.deletedSession).get(a, session) !== undefined }
       const gone = (session: string) => (at: number | null) => !deletedAt(tombstones, look, agent, session, at)
       const deleted = new Map<string, boolean>()
+      // Deleted for good, it or a session above it.
       const isDeleted = (session: string | null) => {
         if (session === null) return false
         let d = deleted.get(session)
-        if (d === undefined) deleted.set(session, (d = this.stmt(SQL.deletedSession).get(agent, session) !== undefined))
+        if (d === undefined) deleted.set(session, (d = deletedSession(tombstones, look, agent, session)))
         return d
       }
       for (const r of records) {
@@ -648,6 +655,8 @@ export class AgentStore {
    */
   recordHost(agent: Agent, session: string, app: HostApp | null, basis: HostRecordBasis, at: number): void {
     if (this.isDeletedSession(agent, session)) return
+    this.lookup ??= dbHostLookup(this.db)
+    if (deletedSession({ spans: () => [], session: (a, x) => this.isDeletedSession(a, x) }, this.lookup, agent, session)) return
     // Withheld time, and time deleted for this app (or any app, or one not named), keeps no record of where the session
     // ran; the app holds from where that time ends.
     const name = app?.app_id?.toLowerCase() ?? null

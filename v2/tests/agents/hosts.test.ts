@@ -433,3 +433,28 @@ test("deleting an app keeps a session's late records from another app, and refus
   assert.deepEqual(turns('s'), ['d1', 'd2', 'd3'], 'nor in the first read')
   r.close()
 })
+
+test("a subagent read for the first time after its parent's app was deleted, or its parent deleted, is refused", async () => {
+  const { r, agents, turn, turns } = setup()
+  const sub = (session: string, parent: string, key: string, at: number): AgentRecord[] => [
+    { t: 'session', session, origin: 'subagent', parent, client: null, dir: '/w', branch: null, at },
+    { t: 'turn', key, session, dir: '/w', branch: null, opener: 'agent', start: at, replayed: false },
+  ]
+  agents.recordHost('claude_code', 'p', ghostty, 'responsible', T0)
+  agents.apply('claude_code', turn('p', 'p1', T0 + MIN))
+  agents.recordHost('claude_code', 'q', vscode, 'responsible', T0)
+  agents.apply('claude_code', turn('q', 'q1', T0 + MIN))
+  r.clock.t = T0 + 10 * MIN
+  await r.storage.deleteSource('com.mitchellh.ghostty').done
+  assert.equal(await r.storage.deleteAgentSession('claude_code', 'q'), true)
+  agents.recordHost('claude_code', 'o', vscode, 'responsible', T0 + 2 * MIN)
+  agents.apply('claude_code', [...sub('c', 'p', 'c1', T0 + 2 * MIN), ...sub('g', 'c', 'g1', T0 + 3 * MIN), ...sub('o', 'p', 'o1', T0 + 2 * MIN), ...sub('d', 'q', 'd1', T0 + 2 * MIN)])
+  assert.deepEqual([turns('c'), turns('g'), turns('o'), turns('d')], [[], [], ['o1'], []], 'the subagent and its own subagent go; one in another app of its own stays; one of a deleted session goes')
+  const staging = path.join(r.dir, 'staging-sub.sqlite')
+  const db = new Database(staging)
+  new AgentStore(db).apply('claude_code', [...sub('c2', 'p', 'c21', T0 + 4 * MIN), ...sub('d2', 'q', 'd21', T0 + 4 * MIN)])
+  db.close()
+  mergeStaging(r.store.database, staging, r.storage.withheld(), agents)
+  assert.deepEqual([turns('c2'), turns('d2')], [[], []], 'nor by the first read')
+  r.close()
+})
