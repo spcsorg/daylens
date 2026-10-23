@@ -136,15 +136,18 @@ export function parseClaude(r: RunResult): CallResult {
   return out
 }
 
-// What codex exec 0.162 can switch off. It still offers some tools (see the evaluation report), so it is only used
-// on frozen packets in a read-only sandbox in an empty folder.
+// What codex exec can switch off. It still offers tools that can read files anywhere the user can (its sandbox only
+// stops writes, and the empty folder is not a jail), so it never writes real hours, and an evaluation must ask for it.
 const CODEX_DISABLE = [
   'shell_tool', 'unified_exec', 'image_generation', 'multi_agent', 'plugins', 'apps', 'view_image', 'sleep_tool', 'tool_suggest',
   'skill_search', 'browser_use', 'browser_use_external', 'computer_use', 'goals', 'in_app_browser', 'remote_plugin', 'shell_snapshot',
   'skill_mcp_dependency_install',
 ]
 
-export function codexCli(model: string, effort: string | null, opts: CliOptions & { instructionsFile: string }): TextBackend {
+export const CODEX_READS_FLAG = '--allow-codex-file-reads'
+
+export function codexCli(model: string, effort: string | null, opts: CliOptions & { instructionsFile: string; allowFileReads?: boolean }): TextBackend {
+  if (opts.allowFileReads !== true) throw new Error(`codex exec can read files outside its folder; it runs only for an evaluation started with ${CODEX_READS_FLAG}`)
   const run = opts.run ?? runProcess
   const args = [
     'exec', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-s', 'read-only', '--json', '-C', opts.cwd,

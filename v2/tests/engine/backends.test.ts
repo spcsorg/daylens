@@ -79,7 +79,7 @@ test('the CLIs run in the given empty folder with tools off, and never see API k
   const env = cleanEnv({ PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'k', OPENAI_API_KEY: 'k', CLAUDE_EFFORT: 'high', ANTHROPIC_BASE_URL: 'x', CLAUDECODE: '1' })
   assert.deepEqual(env, { PATH: '/bin', HOME: '/h' })
   await cliWriter(claudeCli('claude-haiku-5-5', { cwd: '/empty', run, env })).write(packet)
-  await codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run, env }).call('hi')
+  await codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run, env, allowFileReads: true }).call('hi')
   const [c, x] = calls
   assert.equal(c!.cwd, '/empty')
   assert.deepEqual(c!.args.slice(c!.args.indexOf('--tools'), c!.args.indexOf('--tools') + 2), ['--tools', ''])
@@ -107,4 +107,13 @@ test('with no AI the hour is its facts: it passes validation and never says the 
   const empty = factsHour({ ...packet, windows: [], pages: [], agents: [], commits: [], away: [], unknown: [] })
   assert.equal(empty.title, 'Nothing recorded')
   assert.deepEqual(validateHour(JSON.stringify(empty), { ...packet, windows: [], pages: [], agents: [], commits: [] }, refs).errors, [])
+})
+
+test('codex exec refuses to run unless the evaluation explicitly allows its file reads', () => {
+  const run: Runner = async () => {
+    throw new Error('must not run')
+  }
+  assert.throws(() => codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run }), /--allow-codex-file-reads/)
+  assert.throws(() => codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run, allowFileReads: false }), /--allow-codex-file-reads/)
+  assert.doesNotThrow(() => codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run, allowFileReads: true }))
 })

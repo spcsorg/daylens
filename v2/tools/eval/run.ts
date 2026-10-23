@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
+import { CODEX_READS_FLAG, claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
 import type { Packet, Ref } from '../../engine/packet.ts'
 import { WRITER_PROMPT } from '../../engine/prompt.ts'
 import { validateHour, type Validation, type WrittenHour } from '../../engine/validate.ts'
@@ -91,9 +91,12 @@ export function openGold(dir: string): Gold {
   }
 }
 
+// Set from the command line: codex exec runs only when the evaluation was started with CODEX_READS_FLAG.
+let codexFileReads = false
+
 function backendFor(c: Candidate, scratch: { cwd: string; instructionsFile: string }): TextBackend {
   if (c.kind === 'claude') return claudeCli(c.model, { cwd: scratch.cwd })
-  if (c.kind === 'codex') return codexCli(c.model, c.effort, { cwd: scratch.cwd, instructionsFile: scratch.instructionsFile })
+  if (c.kind === 'codex') return codexCli(c.model, c.effort, { cwd: scratch.cwd, instructionsFile: scratch.instructionsFile, allowFileReads: codexFileReads })
   throw new Error('no backend for no-ai')
 }
 
@@ -167,7 +170,7 @@ async function write(gold: Gold, name: string): Promise<void> {
   const scratch = cliScratch(CODEX_BASE)
   try {
     const writer: HourWriter = c.kind === 'none' ? noAi : cliWriter(backendFor(c, scratch))
-    const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), versions: versions() }
+    const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), codex_file_reads: c.kind === 'codex', versions: versions() }
     const outOf = (h: number) => path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`)
     const recordOf = (h: number) => (existsSync(outOf(h)) ? readJson<WriteRecord>(outOf(h)) : null)
     for (const h of [...gold.hours].sort((a, b) => a - b)) {
@@ -221,7 +224,7 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
   const scratch = cliScratch(CODEX_BASE)
   try {
     const backend = backendFor(g, scratch)
-    const meta = { grader: graderName, ...g, candidate: name, grader_prompt_sha256: sha(GRADER_PROMPT), checklists_sha256: sha(JSON.stringify(gold.checklists)), versions: versions() }
+    const meta = { grader: graderName, ...g, codex_file_reads: g.kind === 'codex', candidate: name, grader_prompt_sha256: sha(GRADER_PROMPT), checklists_sha256: sha(JSON.stringify(gold.checklists)), versions: versions() }
     for (const h of gold.hours) {
       const out = path.join(gold.dir, 'results/grades', graderName, name, `hour_${hh(h)}.json`)
       const rec = readJson<WriteRecord & { started: string }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
@@ -325,8 +328,9 @@ function summary(gold: Gold): void {
 }
 
 if (import.meta.main) {
-  const { values, positionals } = parseArgs({ options: { gold: { type: 'string' } }, allowPositionals: true })
+  const { values, positionals } = parseArgs({ options: { gold: { type: 'string' }, [CODEX_READS_FLAG.slice(2)]: { type: 'boolean' } }, allowPositionals: true })
   if (!values.gold) throw new Error('--gold <dir> is required')
+  codexFileReads = values[CODEX_READS_FLAG.slice(2)] === true
   const gold = openGold(values.gold)
   const [cmd, a, b] = positionals
   if (cmd === 'write' && a) await write(gold, a)
