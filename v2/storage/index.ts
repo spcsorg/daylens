@@ -401,18 +401,20 @@ export class Storage {
    * sessions is excluded, since the session may have run in it.
    */
   agentHostAllowed(host: SessionHost | null, atWallMs: number): boolean {
-    const past = this.rules.exclusionsAt(atWallMs)
-    if (host?.app_id) {
-      return this.rules.accepts(atWallMs, host.app_id, null) && !this.rules.privacy.excludes(host.app_id, host.app_path) && !past.some((p) => p.privacy.excludes(host.app_id, host.app_path))
-    }
-    return !this.agentHostExcluded(this.rules.privacy, this.store.exclusions()) && !past.some((p) => this.agentHostExcluded(p.privacy, [p.rule]))
+    if (host?.app_id) return this.rules.accepts(atWallMs, host.app_id, null) && !this.rules.excludedAt(host.app_id, host.app_path, atWallMs)
+    const rules = this.rules.exclusionsAt(atWallMs)
+    return !this.agentHostExcluded(new Privacy(rules), rules)
   }
 
   /** agentHostAllowed(null, at) for any time, with every query run now. */
   agentUnknownHostAllowedAt(): (atWallMs: number) => boolean {
-    const now = !this.agentHostExcluded(this.rules.privacy, this.store.exclusions())
-    const past = this.rules.pastExclusions.map((p) => ({ from: p.from, to: p.to, excluded: this.agentHostExcluded(p.privacy, [p.rule]) })).filter((p) => p.excluded)
-    return (at) => now && !past.some((p) => at >= p.from && at < p.to)
+    // The rules in force change only where a period begins or ends; between those points the answer is the same.
+    const points = [...new Set(this.rules.exclusionPeriods.flatMap((p) => [p.from, p.to]).filter((x) => Number.isFinite(x)))].sort((a, b) => a - b)
+    const allowedFrom = [Number.NEGATIVE_INFINITY, ...points].map((at) => {
+      const rules = this.rules.exclusionsAt(at)
+      return { at, allowed: !this.agentHostExcluded(new Privacy(rules), rules) }
+    })
+    return (at) => allowedFrom.findLast((x) => x.at <= at)!.allowed
   }
 
   /** Whether the app an agent session ran in is excluded. */

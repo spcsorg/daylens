@@ -458,3 +458,20 @@ test("a subagent read for the first time after its parent's app was deleted, or 
   assert.deepEqual([turns('c2'), turns('d2')], [[], []], 'nor by the first read')
   r.close()
 })
+
+test('a record from before an exclusion began, read while it is in force, is kept, and the reader does not skip it later', () => {
+  const { r, agents, turn, turns } = setup()
+  const log = { path: '/logs/s.jsonl', agent: 'claude_code' as const, root: '/logs', session: 's', dev: '1', ino: '2', offset: 10, size: 10, state: null, turnless: false, counts: emptyCounts() }
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0)
+  agents.apply('claude_code', turn('s', 's1', T0 + MIN), log)
+  r.clock.t = T0 + 10 * MIN
+  r.storage.addExclusion({ match: 'app_id', value: 'com.mitchellh.ghostty', label: 'Ghostty' })
+  agents.apply('claude_code', [...turn('s', 's2', T0 + 5 * MIN), ...turn('s', 's3', T0 + 12 * MIN)], { ...log, offset: 20, size: 20 })
+  assert.deepEqual(turns('s'), ['s1', 's2'], 'the turn from before the exclusion is kept; the one during it is not')
+  r.clock.t = T0 + 20 * MIN
+  r.storage.removeExclusion('app_id', 'com.mitchellh.ghostty')
+  agents.recordHost('claude_code', 's', ghostty, 'responsible', T0 + 21 * MIN)
+  agents.apply('claude_code', [...turn('s', 's2', T0 + 5 * MIN), ...turn('s', 's3', T0 + 12 * MIN), ...turn('s', 's4', T0 + 22 * MIN)], { ...log, offset: 30, size: 30 })
+  assert.deepEqual(turns('s'), ['s1', 's2', 's4'], 'and a read from any earlier cursor gives the same answer: only time inside the exclusion is left out')
+  r.close()
+})

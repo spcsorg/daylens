@@ -128,21 +128,32 @@ export class Rules {
     }))
   }
 
-  // Rules no longer in force, with when they were.
-  pastExclusions: { rule: ExclusionRule; privacy: Privacy; from: number; to: number }[] = []
+  // Every rule with the time it was in force: rules in force now from when they were added (all along when that was
+  // not recorded), and rules no longer in force for the time they were.
+  exclusionPeriods: { rule: ExclusionRule; privacy: Privacy; from: number; to: number }[] = []
 
   loadExclusions(): void {
-    this.privacy = new Privacy(this.db.prepare('SELECT match, value, label FROM exclusions ORDER BY id').all() as ExclusionRule[])
-    const past = this.db.prepare(`SELECT match, value, from_wall_ms AS f, to_wall_ms AS t FROM exclusion_periods WHERE to_wall_ms IS NOT NULL`).all() as { match: ExclusionRule['match']; value: string; f: number; t: number }[]
-    this.pastExclusions = past.map((p) => {
-      const rule: ExclusionRule = { match: p.match, value: p.value, label: p.value }
-      return { rule, privacy: new Privacy([rule]), from: p.f, to: p.t }
-    })
+    const rules = this.db.prepare('SELECT match, value, label FROM exclusions ORDER BY id').all() as ExclusionRule[]
+    this.privacy = new Privacy(rules)
+    const periods = this.db.prepare(`SELECT match, value, from_wall_ms AS f, to_wall_ms AS t FROM exclusion_periods`).all() as { match: ExclusionRule['match']; value: string; f: number; t: number | null }[]
+    const since = new Map(periods.filter((p) => p.t === null).map((p) => [`${p.match}\n${p.value}`, p.f]))
+    this.exclusionPeriods = [
+      ...rules.map((rule) => ({ rule, privacy: new Privacy([rule]), from: since.get(`${rule.match}\n${rule.value}`) ?? Number.NEGATIVE_INFINITY, to: Number.POSITIVE_INFINITY })),
+      ...periods.filter((p) => p.t !== null).map((p) => {
+        const rule: ExclusionRule = { match: p.match, value: p.value, label: p.value }
+        return { rule, privacy: new Privacy([rule]), from: p.f, to: p.t! }
+      }),
+    ]
   }
 
-  /** The rules no longer in force that were at a time. */
-  exclusionsAt(wallMs: number): { rule: ExclusionRule; privacy: Privacy }[] {
-    return this.pastExclusions.filter((p) => wallMs >= p.from && wallMs < p.to)
+  /** The rules in force at a time. */
+  exclusionsAt(wallMs: number): ExclusionRule[] {
+    return this.exclusionPeriods.filter((p) => wallMs >= p.from && wallMs < p.to).map((p) => p.rule)
+  }
+
+  /** Whether an app was excluded at a time. */
+  excludedAt(appId: string | null, path: string | null, wallMs: number): boolean {
+    return this.exclusionPeriods.some((p) => wallMs >= p.from && wallMs < p.to && p.privacy.excludes(appId, path))
   }
 
   /** Paused, past retention, or deleted material is never written. */
