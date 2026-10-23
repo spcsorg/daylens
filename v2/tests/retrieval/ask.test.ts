@@ -236,6 +236,24 @@ test('a source seen in several hours is sent with when it was last seen, in any 
   s.close()
 })
 
+test('a time written with a.m. and a thing called first or last pass; a claim about the first time still does not, unless the whole day was sent', async () => {
+  const s = setup()
+  const model = fakeModel((req) => {
+    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file === 'q4-budget.xlsx')!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'At 8:05 a.m. you had q4-budget.xlsx open.', sources: [file] },
+        { text: 'You worked on the first draft of q4-budget.xlsx.', sources: [file] },
+        { text: 'You first opened q4-budget.xlsx at 8:00.', sources: [file] },
+      ],
+    }
+  })
+  const res = await ask('budget xlsx', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['At 8:05 a.m. you had q4-budget.xlsx open.', 'You worked on the first draft of q4-budget.xlsx.'])
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)

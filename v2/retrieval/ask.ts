@@ -251,14 +251,29 @@ export function supported(text: string, cites: readonly Evidence[], appNames: re
   const appOk = (n: string) => cites.some((c) => c.apps.some((x) => lower(x) === n.toLowerCase())) || inText(n.toLowerCase())
   const dottedOk = (n: string) =>
     cites.some((c) => c.files.some((f) => lower(f) === n) || c.apps.some((a) => lower(a) === n) || c.sites.some((s) => s !== null && (s === n || s.endsWith(`.${n}`) || n.endsWith(`.${s}`)))) || inText(n)
-  return names(text, appNames, true).every(appOk) && [...text.matchAll(DOTTED)].every((m) => dottedOk(m[0].toLowerCase().replace(/\.$/, '')))
+  // a.m., p.m., e.g. and i.e. are not names.
+  const plain = text.replace(/\b(?:[ap]\.m|e\.g|i\.e)\.?/gi, ' ')
+  return names(text, appNames, true).every(appOk) && [...plain.matchAll(DOTTED)].every((m) => dottedOk(m[0].toLowerCase().replace(/\.$/, '')))
 }
 
 /** A claim about every occurrence: true only of the whole record, never of part of it. */
 export function claimsAll(text: string): boolean {
   const t = text.toLowerCase().replace(/\blast (week|month|year|night|morning|afternoon|evening|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g, '')
-  return /\b(only|first|firstly|last|lastly|never|always|every time|each time|earliest|latest|most recent|most recently|no other|nothing else|none of)\b/.test(t)
+  if (/\b(only|never|always|every time|each time|most recent|most recently|no other|nothing else|none of)\b/.test(t)) return true
+  // First, last, earliest and latest claim an occurrence when they say when something happened ("first opened", "the
+  // last time", "you saw it last", "at first"), not when they name a thing ("the first draft").
+  for (const m of t.matchAll(/\b(at )?(first|last|earliest|latest)\b(\s+([\p{L}]+))?/gu)) {
+    const next = m[4]
+    if (m[1] || !next || OCCURRENCE.has(next) || /ed$/.test(next)) return true
+  }
+  return false
 }
+
+const OCCURRENCE = new Set(
+  ('time times thing things one ones visit visits session sessions activity app apps page pages file files window windows hour hours day days ' +
+    'open opened use used seen saw see visited worked work edited read did was were touched looked viewed of you i we it they')
+    .split(' '),
+)
 
 /** Results of the days searched one by one, as one: taken from each day in turn, an item seen on several days once. */
 function mergeDays(perDay: readonly SearchResults[], perGroup: number): SearchResults {
