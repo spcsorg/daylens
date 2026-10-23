@@ -100,8 +100,17 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     }
   }
 
-  // Times the packet itself states (a calendar entry that started earlier, say) are evidence, not invention.
-  const packetTimes = new Set([...JSON.stringify(packet).matchAll(CLOCK)].map((m) => toMinute(m)))
+  // Times this hour's own facts state (a calendar entry that started earlier, the time a title last changed) are
+  // evidence, not invention. Captured text (titles, addresses) and earlier hours' text (previous_hour, corrections) are not.
+  const stated = [
+    ...packet.away.flatMap((a) => [a.from, a.to]),
+    ...packet.unknown.flatMap((g) => [g.from, g.to]),
+    ...[...packet.windows, ...packet.pages].flatMap((i) => [i.from, i.to, i.stale ?? '']),
+    ...packet.agents.flatMap((a) => a.messages.map((m) => m.slice(0, 5))),
+    ...packet.commits.map((c) => c.at),
+    ...packet.scheduled_events.flatMap((e) => [e.from, e.to]),
+  ]
+  const packetTimes = new Set(stated.flatMap((x) => [...x.matchAll(CLOCK)].map((m) => toMinute(m))))
   const [from, to] = packet.hour.slice(11).split('-').map((t) => toMinute(/(\d+):(\d+)/.exec(t)!))
   const end = to! === 0 ? 24 * 60 : to!
   for (const f of TEXT_FIELDS) {

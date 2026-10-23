@@ -89,9 +89,15 @@ test('nothing is finished without a cited commit, in the outcome, the title or t
   assert.deepEqual(codes({ title: 'Finished the config change' }), [], 'the cited commit proves it')
 })
 
-test('times are within the hour, unless the packet itself states them', () => {
+test("times are within the hour, unless this hour's own facts state them", () => {
   assert.deepEqual(codes({ detail: 'You came back to it at 11:30.' }), ['time_outside_hour'])
   assert.deepEqual(codes({ detail: 'Standup was scheduled 09:30 to 10:30.' }), [])
+  const withText = (extra: Partial<Packet>) => validateHour(JSON.stringify({ ...good, detail: 'You picked it up again at 11:45.' }), { ...packet, ...extra }, refs).errors.map((e) => e.code)
+  assert.deepEqual(withText({ previous_hour: { title: 'Planning', summary: 'You planned until 11:45.' } }), ['time_outside_hour'], 'not from the previous hour')
+  assert.deepEqual(withText({ corrections: [{ hour: '11:00', field: 'summary', text: 'Back at 11:45' }] }), ['time_outside_hour'], 'not from a correction')
+  assert.deepEqual(withText({ windows: [...packet.windows, { id: 'i3', app: 'Calendar', title: 'Call at 11:45', min: 1, from: '10:56', to: '10:57', times: 1 }] }), ['time_outside_hour'], 'not from a title')
+  assert.deepEqual(withText({ pages: [...packet.pages, { id: 'p2', app: 'Dia', url: 'https://example.com/at/11:45', min: 1, from: '10:57', to: '10:58', times: 1 }] }), ['time_outside_hour'], 'not from an address')
+  assert.deepEqual(withText({ scheduled_events: [{ id: 'k2', title: 'Review', from: '10:45', to: '11:45' }] }), [], 'a calendar entry states it')
 })
 
 test('work the packet marks as done while away is never credited to the person, whatever the words', () => {
