@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { AgentStore } from '../../capture/agents/store.ts'
@@ -145,36 +146,26 @@ test('a search’s log entry stays the same size however many hours its results 
   s.close()
 })
 
-test('a long read-log entry is written in short transactions, and a deletion begun between them leaves none of it', () => {
-  const s = setup({ holdDeletions: true })
-  const db = s.log.db
-  const count = () => (db.prepare('SELECT count(*) FROM assistant_read_items').pluck().get() as number)
-  const transaction = db.transaction.bind(db)
-  const sizes: number[] = []
-  db.transaction = ((fn: (...a: unknown[]) => unknown) =>
-    transaction((...a: unknown[]) => {
-      const n = count()
-      const out = fn(...a)
-      sizes.push(count() - n)
-      return out
-    })) as typeof db.transaction
-  const read = { assistant: 'Claude Code', tool: 'get_day', from_wall_ms: T0, to_wall_ms: T0 + HOUR, sources: Array.from({ length: 1200 }, (_, i) => ({ site: `site${i}.example.com` })) }
-  s.log.recordRead(read, s.reader.deletionMark())
-  assert.deepEqual([sizes, count()], [[500, 500, 200], 1200])
-
-  sizes.length = 0
-  const mark = s.reader.deletionMark()
-  const tx = db.transaction
-  let calls = 0
-  db.transaction = ((fn: (...a: unknown[]) => unknown) => {
-    if (++calls === 2) {
-      s.r.clock.t = T0 + 2 * HOUR
-      s.r.storage.deleteRange(T0 - HOUR, T0 - 30 * MIN)
+test('a read-log entry is seen whole or not at all, even by a process killed as it writes', () => {
+  const s = setup()
+  const file = path.join(s.r.dir, DB_FILE)
+  const v2 = path.resolve(import.meta.dirname, '../..')
+  // Killed the moment its first write transaction commits, before anything after it runs.
+  const child = `
+    import { AssistantStore } from ${JSON.stringify(path.join(v2, 'retrieval/assistantStore.ts'))}
+    const store = AssistantStore.open(${JSON.stringify(file)})
+    const transaction = store.db.transaction.bind(store.db)
+    store.db.transaction = (fn) => {
+      const tx = transaction(fn)
+      const kill = (run) => (...a) => { const out = run(...a); process.kill(process.pid, 'SIGKILL'); return out }
+      return Object.assign(kill(tx), { immediate: kill(tx.immediate), deferred: kill(tx.deferred), exclusive: kill(tx.exclusive) })
     }
-    return tx(fn)
-  }) as typeof db.transaction
-  assert.throws(() => s.log.recordRead(read, mark), PendingDeletionError)
-  assert.deepEqual([s.reads().length, count()], [1, 1200], 'the part written is gone')
+    store.recordRead({ assistant: 'Claude Code', tool: 'get_day', from_wall_ms: 0, to_wall_ms: 1, sources: Array.from({ length: 1200 }, (_, i) => ({ site: 'site' + i + '.example.com' })) }, 0)
+  `
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' })
+  assert.equal(run.signal, 'SIGKILL', run.stderr)
+  const counts = s.r.q<{ n: number }>('SELECT count(i.read_id) AS n FROM assistant_reads a LEFT JOIN assistant_read_items i ON i.read_id = a.id GROUP BY a.id').map((x) => x.n)
+  assert.deepEqual(counts, [1200], 'the entry, with every item')
   s.close()
 })
 
