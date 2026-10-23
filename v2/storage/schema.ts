@@ -350,6 +350,24 @@ const exclusionPeriods: Migration = {
     `),
 }
 
+const deletionAgent: Migration = {
+  name: 'deletion_agent',
+  // A deletion's agent plan, written with its tombstone: each session it touches, the spans of time whose records go,
+  // whether it loses records, and how deep it sits under the session that started it. Crossed off as each finishes.
+  up: (db) =>
+    db.exec(`
+      CREATE TABLE deletion_agent (
+        tombstone_id INTEGER NOT NULL REFERENCES deletions(id) ON DELETE CASCADE,
+        agent TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        spans TEXT NOT NULL,
+        removes INTEGER NOT NULL,
+        depth INTEGER NOT NULL,
+        PRIMARY KEY (tombstone_id, agent, session_id)
+      ) WITHOUT ROWID;
+    `),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -375,4 +393,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   deletionAnnounced,
   observationsByPresenceKind,
   exclusionPeriods,
+  deletionAgent,
 ]

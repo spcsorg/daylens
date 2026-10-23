@@ -8,9 +8,7 @@ import { ClaudeParser } from '../../capture/agents/claude.ts'
 import { AgentReader, homeRoots } from '../../capture/agents/reader.ts'
 import { AgentStore } from '../../capture/agents/store.ts'
 import { emptyCounts, type AgentRecord } from '../../capture/agents/types.ts'
-import { rig, MIN, T0, tmpDir } from '../storage/support.ts'
-import { Deleter } from '../../storage/deletion.ts'
-import { DB_FILE } from '../../capture/store.ts'
+import { rig, MIN, T0 } from '../storage/support.ts'
 import { claude, claudeCtx, of, run, tmp } from './fixtures.ts'
 
 const ghostty = { app_id: 'com.mitchellh.ghostty', name: 'Ghostty', path: '/Applications/Ghostty.app' }
@@ -389,57 +387,6 @@ test('a session in an excluded app leaves no log path or read position, read liv
   assert.deepEqual(r.q('SELECT path FROM agent_sources'), [])
   assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM agent_turns')[0]!.n, 0)
   r.close()
-})
-
-test('a deletion of an app cut short after removing records still keeps a subagent that ran there from being read again', async () => {
-  const dir = tmpDir()
-  const wire = (r: ReturnType<typeof rig>) => {
-    const agents = new AgentStore(r.store.database, () => r.clock.t)
-    agents.withheld = () => r.storage.withheld()
-    agents.hostAllowed = (host, at) => r.storage.agentHostAllowed(host, at)
-    agents.hostExcluded = (host) => r.storage.excludesAgentHost(host)
-    return agents
-  }
-  const subagent: AgentRecord[] = [
-    { t: 'session', session: 'c', origin: 'subagent', parent: 'p', client: null, dir: '/w', branch: null, at: T0 + MIN },
-    { t: 'turn', key: 'c1', session: 'c', dir: '/w', branch: null, opener: 'agent', start: T0 + MIN, replayed: false },
-  ]
-  const r = rig(dir, { holdDeletions: true })
-  const agents = wire(r)
-  agents.recordHost('claude_code', 'p', ghostty, 'responsible', T0)
-  agents.apply('claude_code', [
-    { t: 'session', session: 'p', origin: 'interactive', parent: null, client: 'cli', dir: '/w', branch: null, at: T0 + MIN },
-    { t: 'turn', key: 'p1', session: 'p', dir: '/w', branch: null, opener: 'user', start: T0 + MIN, replayed: false },
-    ...subagent,
-  ])
-  r.clock.t = T0 + 10 * MIN
-  const { tombstone } = r.storage.deleteSource('com.mitchellh.ghostty')
-  r.close()
-
-  // The worker's run ends, as a crash would, once the records are gone and before the session rows are tidied.
-  const db = new Database(path.join(dir, DB_FILE))
-  db.pragma('secure_delete = ON')
-  const crashing = new Proxy(db, {
-    get(target, key) {
-      if (key === 'prepare') {
-        return (sql: string) => {
-          if (sql.startsWith('DELETE FROM agent_sessions WHERE agent = ? AND session_id = ?')) throw new Error('crash')
-          return target.prepare(sql)
-        }
-      }
-      const v = Reflect.get(target, key) as unknown
-      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v
-    },
-  })
-  assert.throws(() => new Deleter(crashing).run(tombstone, T0 + 10 * MIN), /crash/)
-  assert.equal(db.prepare(`SELECT count(*) AS n FROM agent_turns`).pluck().get(), 0, 'the records were removed before the crash')
-  new Deleter(db).run(tombstone, T0 + 10 * MIN)
-  db.close()
-
-  const again = rig(dir)
-  wire(again).apply('claude_code', subagent)
-  assert.deepEqual(again.q('SELECT turn_key FROM agent_turns'), [], "a copy of the subagent's log brings nothing back")
-  again.close()
 })
 
 test('excluding an app a tracked session runs in forgets its log, and what it wrote while excluded stays out once included again', () => {

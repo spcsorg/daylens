@@ -15,8 +15,7 @@ import { immediateRetrying } from './tx.ts'
 import { ScrubUnavailableError, scrubAll, scrubBlocked } from './scrub.ts'
 import { pruneChangeLog } from './changes.ts'
 import { leafRowid, readStructure, segmentCount, type FtsSegment, type FtsStructure } from './ftsStructure.ts'
-import { dbHostLookup, resolveHost, type HostLookup } from '../capture/agents/store.ts'
-import type { Agent } from '../capture/agents/types.ts'
+import { runAgentDeletion } from './agentDeletion.ts'
 
 export interface DeletionResult {
   tombstone: number
@@ -38,10 +37,6 @@ type Spec = Pick<Tombstone, 'kind' | 'from_wall_ms' | 'to_wall_ms' | 'app_id' | 
 // Agent session tables exist once the agent reader has been enabled.
 function hasAgentTables(db: Database.Database): boolean {
   return db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_events'`).get() !== undefined
-}
-
-function hasAgentHosts(db: Database.Database): boolean {
-  return db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_hosts'`).get() !== undefined
 }
 
 function hasUrl(db: Database.Database): boolean {
@@ -144,16 +139,6 @@ export function planDeletion(db: Database.Database, tombstoneId: number, t: Spec
     ).run({ id: tombstoneId, app, site, from, to })
   }
   db.prepare(`INSERT OR IGNORE INTO deletion_fence SELECT tombstone_id, kind, ref FROM deletion_work WHERE tombstone_id = ? AND kind IN ('hour', 'thread', 'read')`).run(tombstoneId)
-}
-
-// A turn cut where deleted time begins: an end inside that time (or one kept without a time) says only that it ended.
-const CUT_END_STATE = (cut: string) => `CASE WHEN end_state IS NOT NULL AND (end_wall_ms IS NULL OR (end_wall_ms > ${cut} AND end_wall_ms < @to)) THEN 'missing' ELSE end_state END`
-
-// A turn or wait that ran on into a deleted app's time, and where it is cut.
-interface CrossingCut {
-  table: 'agent_turns' | 'agent_events'
-  id: number
-  at: number
 }
 
 const ROWS_PER_STEP = 500
@@ -401,202 +386,6 @@ export class Deleter {
   }
 
   /**
-   * Agent session records in [from, to): events and turns that began inside go, and anything that crosses the start is
-   * cut there. A session keeps only the span of its remaining turns, and goes if none remain and it began inside.
-   */
-  private deleteAgentRange(from: number, to: number): number {
-    const db = this.db
-    const events = db.prepare(`SELECT id, session_id, detail FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
-    const turns = db.prepare(`SELECT id, session_id, project_dir, branch FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to LIMIT ${ROWS_PER_STEP}`)
-    const key = (x: { agent: Agent; session_id: string }) => `${x.agent}\n${x.session_id}`
-    const withRecords = new Map(
-      (db.prepare('SELECT agent, session_id FROM agent_turns WHERE start_wall_ms >= @from AND start_wall_ms < @to UNION SELECT agent, session_id FROM agent_events WHERE wall_ms >= @from AND wall_ms < @to').all({ from, to }) as { agent: Agent; session_id: string }[]).map((x) => [key(x), x]),
-    )
-    let n = this.removeById('agent_events', () => events.all({ from, to }) as { id: number }[])
-    n += this.removeById('agent_turns', () => turns.all({ from, to }) as { id: number }[])
-    const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
-    immediateRetrying(db, () => {
-      db.prepare('UPDATE agent_events SET end_wall_ms = @from WHERE wall_ms < @from AND end_wall_ms > @from').run({ from })
-      db.prepare(
-        `UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @from), end_wall_ms = CASE WHEN end_wall_ms > @from THEN @from ELSE end_wall_ms END,
-           end_state = ${CUT_END_STATE('@from')}
-         WHERE start_wall_ms < @from AND (last_activity_wall_ms > @from OR end_wall_ms > @from)`,
-      ).run({ from, to })
-      n += db.prepare(`DELETE FROM agent_sessions WHERE last_wall_ms >= @from AND first_wall_ms < @to AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own}) AND first_wall_ms >= @from`).run({ from, to }).changes
-      db.prepare(
-        `UPDATE agent_sessions SET
-           first_wall_ms = (SELECT min(start_wall_ms) FROM agent_turns t WHERE ${own}),
-           last_wall_ms = (SELECT max(max(last_activity_wall_ms, coalesce(end_wall_ms, 0))) FROM agent_turns t WHERE ${own})
-         WHERE last_wall_ms >= @from AND first_wall_ms < @to AND EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`,
-      ).run({ from, to })
-      n += db.prepare(`UPDATE agent_sessions SET last_wall_ms = @from WHERE first_wall_ms < @from AND last_wall_ms > @from AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE ${own})`).run({ from }).changes
-      // A log read since the range began may hold parser state (open turn, folder, message fingerprints) from inside it.
-      db.prepare('UPDATE agent_sources SET state = NULL WHERE updated_wall_ms >= @from AND state IS NOT NULL').run({ from })
-      db.prepare('UPDATE agent_sources SET updated_wall_ms = @to WHERE updated_wall_ms >= @from AND updated_wall_ms < @to').run({ from, to })
-    })
-    if (hasAgentHosts(db)) {
-      const hosted = db.prepare('SELECT DISTINCT agent, session_id FROM agent_hosts WHERE from_wall_ms >= @from AND from_wall_ms < @to').all({ from, to }) as { agent: Agent; session_id: string }[]
-      const sessions = new Map(hosted.map((x) => [key(x), x]))
-      for (const [k, x] of withRecords) sessions.set(k, x)
-      for (const [k, x] of sessions) immediateRetrying(db, () => this.forgetAgentTime(x.agent, x.session_id, from, to, null, withRecords.has(k)))
-    }
-    return n
-  }
-
-  /**
-   * After a deletion of [from, to) has removed a session's records (`removed`): a session with nothing left keeps no
-   * app, log path or read position; the deletion's tombstones keep its logs from being imported again. Otherwise the
-   * session keeps no app it was seen in from inside the range (with `app`, only that app), though the app in force at
-   * `to` holds from `to`, and its logs keep no parser state, nor a read time inside the range.
-   */
-  private forgetAgentTime(agent: Agent, session: string, from: number, to: number, app: string | null, removed: boolean): void {
-    const db = this.db
-    const args = { agent, session, from, to, app }
-    const left = db
-      .prepare(
-        `SELECT 1 WHERE EXISTS (SELECT 1 FROM agent_sessions WHERE agent = @agent AND (session_id = @session OR parent_session_id = @session))
-           OR EXISTS (SELECT 1 FROM agent_turns WHERE agent = @agent AND session_id = @session) OR EXISTS (SELECT 1 FROM agent_events WHERE agent = @agent AND session_id = @session)`,
-      )
-      .get(args)
-    if (removed && left === undefined) {
-      db.prepare('DELETE FROM agent_hosts WHERE agent = @agent AND session_id = @session').run(args)
-      db.prepare('DELETE FROM agent_sources WHERE agent = @agent AND session_id = @session').run(args)
-      return
-    }
-    const match = app === null ? '1' : 'lower(app_id) = @app'
-    const inForce = db.prepare('SELECT * FROM agent_hosts WHERE agent = @agent AND session_id = @session AND from_wall_ms <= @to ORDER BY from_wall_ms DESC, id DESC LIMIT 1').get(args) as
-      | { app_id: string | null; app_name: string | null; app_path: string | null; basis: string; from_wall_ms: number }
-      | undefined
-    db.prepare(`DELETE FROM agent_hosts WHERE agent = @agent AND session_id = @session AND from_wall_ms >= @from AND from_wall_ms < @to AND ${match}`).run(args)
-    if (inForce && inForce.from_wall_ms >= from && inForce.from_wall_ms < to && (app === null || inForce.app_id?.toLowerCase() === app)) {
-      db.prepare('INSERT INTO agent_hosts (agent, session_id, app_id, app_name, app_path, basis, from_wall_ms) VALUES (@agent, @session, @app_id, @app_name, @app_path, @basis, @to)').run({ ...inForce, agent, session, to })
-    }
-    db.prepare('UPDATE agent_sources SET state = NULL, updated_wall_ms = CASE WHEN updated_wall_ms >= @from AND updated_wall_ms < @to THEN @to ELSE updated_wall_ms END WHERE agent = @agent AND session_id = @session').run(args)
-  }
-
-  /**
-   * Agent records of sessions known to have run in the app, for the time they ran in it within [from, to): the
-   * sessions with a span in it, and their subagents at any depth, each record judged by the app its session resolves
-   * to at its time (a subagent with a span of its own elsewhere stays). A session left with no turns goes. Sessions
-   * whose app is not known stay.
-   */
-  private deleteAgentHost(app: string, from: number, to: number): number {
-    const db = this.db
-    const look = dbHostLookup(db)
-    const roots = db.prepare('SELECT DISTINCT agent, session_id FROM agent_hosts WHERE lower(app_id) = ?').all(app) as { agent: Agent; session_id: string }[]
-    const children = db.prepare('SELECT session_id FROM agent_sessions WHERE agent = ? AND parent_session_id = ?')
-    const sessions = new Map<string, { agent: Agent; session: string }>()
-    for (const queue = roots.map((x) => ({ agent: x.agent, session: x.session_id })); queue.length > 0; ) {
-      const next = queue.shift()!
-      const k = `${next.agent}\n${next.session}`
-      if (sessions.has(k)) continue
-      sessions.set(k, next)
-      for (const c of children.all(next.agent, next.session) as { session_id: string }[]) queue.push({ agent: next.agent, session: c.session_id })
-    }
-    const inApp = (agent: Agent, session: string, at: number) => resolveHost(look, agent, session, at)?.app_id?.toLowerCase() === app
-    const pages = {
-      agent_events: db.prepare(`SELECT id, wall_ms AS at FROM agent_events WHERE agent = @agent AND session_id = @session AND wall_ms >= @from AND wall_ms < @to AND id > @after ORDER BY id LIMIT ${ROWS_PER_STEP}`),
-      agent_turns: db.prepare(`SELECT id, start_wall_ms AS at FROM agent_turns WHERE agent = @agent AND session_id = @session AND start_wall_ms >= @from AND start_wall_ms < @to AND id > @after ORDER BY id LIMIT ${ROWS_PER_STEP}`),
-    }
-    const ownSpan = db.prepare(
-      `SELECT 1 FROM agent_hosts h WHERE h.agent = ? AND h.session_id = ? AND lower(h.app_id) = ? AND h.from_wall_ms < ?
-         AND coalesce((SELECT min(x.from_wall_ms) FROM agent_hosts x WHERE x.agent = h.agent AND x.session_id = h.session_id AND x.from_wall_ms > h.from_wall_ms), ${Number.MAX_SAFE_INTEGER}) > ?`,
-    )
-    const tombstoned = db.prepare('SELECT 1 FROM agent_deleted_spans WHERE agent = ? AND session_id = ? AND from_wall_ms = ? AND to_wall_ms = ?')
-    const anyInApp = (agent: Agent, session: string): boolean => {
-      for (const page of Object.values(pages)) {
-        for (let after = 0; ; ) {
-          const rows = page.all({ agent, session, from, to, after }) as { id: number; at: number }[]
-          if (rows.length === 0) break
-          if (rows.some((row) => inApp(agent, session, row.at))) return true
-          after = rows[rows.length - 1]!.id
-        }
-      }
-      return false
-    }
-    // Every session the deletion reaches is judged, and its tombstone written, before any record goes: after a crash
-    // the records that showed a subagent ran in the app are gone, but its tombstone says so. A session already
-    // tombstoned for this range is one an earlier run reached.
-    const affected: { agent: Agent; session: string; cuts: CrossingCut[] }[] = []
-    for (const { agent, session } of sessions.values()) {
-      const cuts = this.planHostCrossing(look, app, agent, session, from, to)
-      if (cuts.length > 0 || tombstoned.get(agent, session, from, to) !== undefined || ownSpan.get(agent, session, app, to, from) !== undefined || anyInApp(agent, session)) {
-        affected.push({ agent, session, cuts })
-      }
-    }
-    // What the sessions did in the app then is never imported again, whichever app their logs then seem to name.
-    const tombstone = db.prepare('INSERT OR IGNORE INTO agent_deleted_spans (agent, session_id, from_wall_ms, to_wall_ms) VALUES (?, ?, ?, ?)')
-    for (let i = 0; i < affected.length; ) {
-      const batch = affected.slice(i)
-      i += immediateRetrying(db, () => timeBoxed(batch, (x) => tombstone.run(x.agent, x.session, from, to)))
-    }
-    let n = 0
-    // Session rows go only after every record is judged: a subagent resolves through its parent's row.
-    for (const { agent, session, cuts } of affected) {
-      for (const [table, page] of Object.entries(pages)) {
-        const del = db.prepare(`DELETE FROM ${table} WHERE id = ?`)
-        for (let after = 0; ; ) {
-          const rows = page.all({ agent, session, from, to, after }) as { id: number; at: number }[]
-          if (rows.length === 0) break
-          n += this.removeRows(del, rows.filter((row) => inApp(agent, session, row.at)))
-          after = rows[rows.length - 1]!.id
-        }
-      }
-      n += this.cutCrossing(cuts, to)
-    }
-    for (const { agent, session } of affected) {
-      immediateRetrying(db, () => {
-        n += db.prepare(`DELETE FROM agent_sessions WHERE agent = ? AND session_id = ? AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id)`).run(agent, session).changes
-        const own = 't.agent = agent_sessions.agent AND t.session_id = agent_sessions.session_id'
-        db.prepare(
-          `UPDATE agent_sessions SET
-             first_wall_ms = (SELECT min(start_wall_ms) FROM agent_turns t WHERE ${own}),
-             last_wall_ms = (SELECT max(max(last_activity_wall_ms, coalesce(end_wall_ms, 0))) FROM agent_turns t WHERE ${own})
-           WHERE agent = ? AND session_id = ?`,
-        ).run(agent, session)
-        this.forgetAgentTime(agent, session, from, to, app, true)
-      })
-    }
-    return n
-  }
-
-  /**
-   * A turn or wait that began before `from` and runs on into the range is cut where the session is first in the app
-   * within it: at `from`, or where the session or a session above it moved to the app.
-   */
-  private planHostCrossing(look: HostLookup, app: string, agent: Agent, session: string, from: number, to: number): CrossingCut[] {
-    const db = this.db
-    if (from === Number.MIN_SAFE_INTEGER) return []
-    const chain: string[] = []
-    for (let s: string | null = session; s !== null && !chain.includes(s); s = look.parent(agent, s)) chain.push(s)
-    const moves = db.prepare('SELECT from_wall_ms AS at FROM agent_hosts WHERE agent = ? AND session_id = ? AND from_wall_ms > ? AND from_wall_ms < ?').pluck()
-    const cutAt = (until: number): number | null => {
-      const times = [from, ...chain.flatMap((s) => moves.all(agent, s, from, until) as number[])].sort((a, b) => a - b)
-      return times.find((at) => resolveHost(look, agent, session, at)?.app_id?.toLowerCase() === app) ?? null
-    }
-    const turns = db
-      .prepare('SELECT id, max(last_activity_wall_ms, coalesce(end_wall_ms, 0)) AS last FROM agent_turns WHERE agent = ? AND session_id = ? AND start_wall_ms < ? AND (last_activity_wall_ms > ? OR end_wall_ms > ?)')
-      .all(agent, session, from, from, from) as { id: number; last: number }[]
-    const waits = db.prepare('SELECT id, end_wall_ms AS last FROM agent_events WHERE agent = ? AND session_id = ? AND wall_ms < ? AND end_wall_ms > ?').all(agent, session, from, from) as { id: number; last: number }[]
-    return [...turns.map((x) => ({ table: 'agent_turns' as const, ...x })), ...waits.map((x) => ({ table: 'agent_events' as const, ...x }))].flatMap((x) => {
-      const at = cutAt(Math.min(x.last, to))
-      return at === null ? [] : [{ table: x.table, id: x.id, at }]
-    })
-  }
-
-  private cutCrossing(cuts: readonly CrossingCut[], to: number): number {
-    const db = this.db
-    if (cuts.length === 0) return 0
-    immediateRetrying(db, () => {
-      const turn = db.prepare(`UPDATE agent_turns SET last_activity_wall_ms = min(last_activity_wall_ms, @at), end_wall_ms = CASE WHEN end_wall_ms > @at THEN @at ELSE end_wall_ms END,
-         end_state = ${CUT_END_STATE('@at')} WHERE id = @id`)
-      const wait = db.prepare('UPDATE agent_events SET end_wall_ms = @at WHERE id = @id AND end_wall_ms > @at')
-      for (const c of cuts) (c.table === 'agent_turns' ? turn.run({ id: c.id, at: c.at, to }) : wait.run({ id: c.id, at: c.at }))
-    })
-    return cuts.length
-  }
-
-  /**
    * Removes rows by id until `candidates` names none. Candidates are read outside any write transaction, which also
    * brings their pages into the cache, and each transaction removes them one at a time until FTS_STEP_MS has passed:
    * a batch sized by how long the last one took can still meet pages the disk has to supply, with the lock held.
@@ -836,8 +625,9 @@ export class Deleter {
         return Math.max(0, before - (docCount.get() as { n: number }).n)
       })
     }
-    if (t.kind === 'range' && hasAgentTables(db)) r.agentRecords += this.deleteAgentRange(from, to)
-    if (t.kind === 'source' && t.app_id !== null && hasAgentTables(db) && hasAgentHosts(db)) r.agentRecords += this.deleteAgentHost(t.app_id, from, to)
+    if (t.kind === 'range' || (t.kind === 'source' && t.app_id !== null)) {
+      r.agentRecords += runAgentDeletion(db, tombstoneId, t.kind === 'range' ? null : t.app_id, from, to, (del, rows) => this.removeRows(del, rows))
+    }
     if (t.kind === 'range') {
       // The fence moved every gap that crosses an edge out of the range; a pause's gap goes like any other.
       immediateRetrying(db, () => db.prepare('DELETE FROM capture_gaps WHERE start_wall_ms >= ? AND start_wall_ms < ?').run(from, to))

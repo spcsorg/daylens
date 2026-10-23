@@ -10,6 +10,7 @@ import { DeletionWorker, fenceEdges, fenceGaps, planDeletion, pruneStep, type De
 import { Derived, HOUR_MS, siteOf } from './derive.ts'
 import { indexHour, pendingVerdict, readHour, sourceMatches, type Hour, type HourField, type HourSource } from './hours.ts'
 import { applyMigrations } from './migrations.ts'
+import { planAgentDeletion } from './agentDeletion.ts'
 import type { Span } from '../capture/agents/withheld.ts'
 import { DAY_MS, fencedBy, pauseEnd, pendingTombstones, Rules, searchFence, type PauseState, type Tombstone } from './rules.ts'
 import { STORAGE_MIGRATIONS } from './schema.ts'
@@ -476,6 +477,9 @@ export class Storage {
           fenceEdges(this.db, t, () => this.store.allocateObservationId())
           if (t.kind === 'range' && t.from_wall_ms !== null && t.to_wall_ms !== null) fenceGaps(this.db, t.from_wall_ms, t.to_wall_ms, () => this.store.allocateGapId())
           planDeletion(this.db, id, t)
+          if (t.kind === 'range' || (t.kind === 'source' && t.app_id !== null)) {
+            planAgentDeletion(this.db, id, t.kind === 'range' ? null : t.app_id, t.from_wall_ms ?? Number.MIN_SAFE_INTEGER, t.to_wall_ms ?? Number.MAX_SAFE_INTEGER)
+          }
           return id
         },
         () => {
