@@ -369,7 +369,9 @@ export class Normalizer {
         return this.setStop('idle', line.obs.state === 'idle', line) || back
       }
       case 'session': {
-        const back = this.onPresenceEvidence(line, line.obs.state === 'unlocked' && !line.obs.snapshot)
+        // Someone unlocking or connecting is someone there: an unlock, connect or logon as it happens, or an unlock a
+        // snapshot finds after the screen was locked.
+        const back = this.onPresenceEvidence(line, line.obs.snapshot ? line.obs.state === 'unlocked' && this.stops.has('locked') : LOCK_END.has(line.obs.state))
         if (line.obs.state === 'locked' || line.obs.state === 'console_disconnect' || line.obs.state === 'remote_disconnect') {
           this.endExcluded(line)
         }
