@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
+import { claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
 import type { Packet, Ref } from '../../engine/packet.ts'
 import { WRITER_PROMPT } from '../../engine/prompt.ts'
 import { validateHour, type Validation, type WrittenHour } from '../../engine/validate.ts'
@@ -191,15 +191,14 @@ async function write(gold: Gold, name: string): Promise<void> {
   }
 }
 
-function writtenHour(rec: { final: CallResult; validation: Validation | null }): WrittenHour | null {
-  if (rec.validation?.hour) return rec.validation.hour
-  if (!rec.final.text) return null
-  try {
-    const o = JSON.parse(rec.final.text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1')) as WrittenHour
-    return typeof o === 'object' && o !== null && typeof o.title === 'string' ? o : null
-  } catch {
-    return null
-  }
+/**
+ * What the person would see for a written hour, which is what is graded: the writer's hour when it passed validation,
+ * the facts-only hour when it was rejected (as the engine shows it), and nothing when no output came back.
+ */
+export function shownHour(rec: { final: CallResult; validation: Validation | null }, packet: Packet): { hour: WrittenHour; fallback: boolean } | null {
+  if (rec.final.text === null) return null
+  if (rec.validation?.ok && rec.validation.hour) return { hour: rec.validation.hour, fallback: false }
+  return { hour: factsHour(packet), fallback: true }
 }
 
 interface GradeRecord {
@@ -231,13 +230,14 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
       const checklist = gold.checklists.hours[hh(h)]
       if (!checklist) throw new Error(`no checklist for hour ${hh(h)}`)
       const onlyUser = checklist.only_user === true
-      const hour = writtenHour(rec)
-      if (!hour) {
-        const verdict: Verdict = { grade: 'wrong', reason: rec.final.error ? `no hour was written: ${rec.final.error.slice(0, 120)}` : 'the output is not a readable hour', must_missed: checklist.must, should_missed: checklist.should, must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
+      const packet = writerPacket(gold.packet(h).packet, rec.previous_hour ?? null)
+      const shown = shownHour(rec, packet)
+      if (!shown) {
+        const verdict: Verdict = { grade: 'wrong', reason: `no hour was written: ${(rec.final.error ?? 'no output').slice(0, 120)}`, must_missed: checklist.must, should_missed: checklist.should, must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
         writeJson(out, { ...meta, hour: hh(h), written, automatic: true, verdict, inconsistencies: [] })
         continue
       }
-      const message = graderMessage(gold.checklists.rules, checklist, gold.key[hh(h)] ?? '', writerPacket(gold.packet(h).packet, rec.previous_hour ?? null), hour)
+      const message = graderMessage(gold.checklists.rules, checklist, gold.key[hh(h)] ?? '', packet, shown.hour)
       let verdict: Verdict | null = null
       const { final, attempts } = await withAttempts(
         () => backend.call(message),
@@ -247,7 +247,7 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
           return p.error
         },
       )
-      writeJson(out, { ...meta, hour: hh(h), written, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
+      writeJson(out, { ...meta, hour: hh(h), written, facts_fallback: shown.fallback, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
       console.log(graderName, name, hh(h), verdict ? (verdict as Verdict).grade : `ERROR ${final.error ?? attempts.at(-1)?.problem}`)
       if (final.quota) {
         console.log(graderName, 'stopped: usage limit reached')

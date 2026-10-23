@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { CallResult } from '../../engine/backends.ts'
-import { buildPacket } from '../../engine/packet.ts'
+import { factsHour, type CallResult } from '../../engine/backends.ts'
+import { buildPacket, type Packet } from '../../engine/packet.ts'
 import type { Validation } from '../../engine/validate.ts'
-import { gradeIsCurrent, isCurrent, previousHour, writeId, writerPacket, type WriteRecord } from '../../tools/eval/run.ts'
+import { gradeIsCurrent, isCurrent, previousHour, shownHour, writeId, writerPacket, type WriteRecord } from '../../tools/eval/run.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 
@@ -67,4 +67,12 @@ test('the evaluation passes the previous hour exactly as the engine does once th
   assert.equal(writerPacket(frozen, null), frozen)
   assert.throws(() => writerPacket(engine, previous), /already carries context/)
   r.close()
+})
+
+test('a rejected hour is graded as the facts-only hour the person would see, and a call with no output as nothing', () => {
+  const packet: Packet = { hour: '2030-03-05 10:00-11:00', tz: 'Etc/UTC', away: [], unknown: [], windows: [{ id: 'i1', app: 'Editor', title: 'plan.md', min: 30, from: '10:00', to: '10:30', times: 1 }], pages: [], agents: [], commits: [], scheduled_events: [] }
+  assert.deepEqual(shownHour(rec({ validation: written('Planned the week') }), packet), { hour: written('Planned the week').hour, fallback: false })
+  assert.deepEqual(shownHour(rec({ validation: written('Shipped the launch', false) }), packet), { hour: factsHour(packet), fallback: true })
+  assert.deepEqual(shownHour({ final: { ...call(), text: 'not json' }, validation: { ok: false, errors: [{ code: 'not_json', detail: '' }], warnings: [], hour: null, cited: [] } }, packet), { hour: factsHour(packet), fallback: true })
+  assert.equal(shownHour(rec({ final: call('timed out'), validation: null }), packet), null)
 })
