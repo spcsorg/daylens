@@ -276,7 +276,9 @@ test('input is checked, the longest span is the one the person set, and limits h
   assert.throws(() => runReadTool('get_hour', { hour_id: 1, date: DATE }, s.ctx), ToolInputError)
   assert.throws(() => runReadTool('get_hour', { hour_id: 999 }, s.ctx), /no hour 999/)
   assert.throws(() => runReadTool('delete_day', {}, s.ctx), ToolInputError)
+  const before = s.reads().length
   assert.throws(() => runReadTool('search', { query: 'x' }, { ...s.ctx, limits: { perGroup: 5 } as never }), /maxDays must be a positive whole number/)
+  assert.deepEqual(s.reads().slice(before).map((x) => [x.tool, s.items(x.id)]), [['search', []]], 'a server started without its limits still logs the call')
   assert.deepEqual(READ_TOOLS.map((t) => t.name), ['list_days', 'get_day', 'get_hour', 'search', 'get_agent_work'])
   s.close()
 })

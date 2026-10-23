@@ -341,8 +341,8 @@ export const READ_TOOLS: readonly ReadTool[] = [
  * deletion refused may name what it deleted.
  */
 export function runReadTool(name: string, args: Record<string, unknown>, ctx: ToolContext): unknown {
-  checkLimits(ctx.limits)
   try {
+    checkLimits(ctx.limits)
     const tool = READ_TOOLS.find((t) => t.name === name)
     if (!tool) throw new ToolInputError(`there is no tool ${name}`)
     return tool.run(args ?? {}, ctx, ctx.reader.deletionMark())
