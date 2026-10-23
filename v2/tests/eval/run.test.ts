@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { factsHour, type CallResult } from '../../engine/backends.ts'
 import { buildPacket, type Packet } from '../../engine/packet.ts'
 import type { Validation } from '../../engine/validate.ts'
-import { gradeIsCurrent, isCurrent, previousHour, shownHour, writeId, writerPacket, type WriteRecord } from '../../tools/eval/run.ts'
+import { gradeIsCurrent, isCurrent, previousHour, shownHour, staleResults, writeId, writerPacket, type RunInfo, type WriteRecord } from '../../tools/eval/run.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 
@@ -75,4 +75,20 @@ test('a rejected hour is graded as the facts-only hour the person would see, and
   assert.deepEqual(shownHour(rec({ validation: written('Shipped the launch', false) }), packet), { hour: factsHour(packet), fallback: true })
   assert.deepEqual(shownHour({ final: { ...call(), text: 'not json' }, validation: { ok: false, errors: [{ code: 'not_json', detail: '' }], warnings: [], hour: null, cited: [] } }, packet), { hour: factsHour(packet), fallback: true })
   assert.equal(shownHour(rec({ final: call('timed out'), validation: null }), packet), null)
+})
+
+test('a summary takes only writes made on its run\'s packets, and only grades of those writes', () => {
+  const run: RunInfo = { packets_dir: 'packet-v2', packet_version: 2, manifest: { 'packets/hour_09.json': 'p9', 'packets/hour_10.json': 'p10' } }
+  const writes = [
+    { name: 'm', hour: '09', packet_sha256: 'p9', id: 'w9' },
+    { name: 'm', hour: '10', packet_sha256: 'p10', id: 'w10' },
+  ]
+  const grades = [
+    { grader: 'g', name: 'm', hour: '09', written: 'w9' },
+    { grader: 'g', name: 'm', hour: '10', written: 'w10' },
+  ]
+  assert.deepEqual(staleResults(run, writes, grades), [])
+  assert.deepEqual(staleResults(run, [writes[0]!, { ...writes[1]!, packet_sha256: 'p10-v3' }], grades), ['writes/m/hour_10: not made on packet version 2'])
+  assert.deepEqual(staleResults(run, writes, [grades[0]!, { ...grades[1]!, written: 'older' }]), ['grades/g/m/hour_10: grades another write'])
+  assert.deepEqual(staleResults(run, writes.slice(0, 1), grades), ['grades/g/m/hour_10: no write for it'])
 })
