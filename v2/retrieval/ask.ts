@@ -364,9 +364,12 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
       prev.sightings.push(...s.sightings)
       prev.ms = (prev.ms ?? 0) + s.ms
+      // Last seen, with the title and the app it was last seen with.
       if (s.last_wall_ms > prev.last_wall_ms) {
         prev.last_wall_ms = s.last_wall_ms
         prev.title = s.title
+        prev.app_id = s.app_id
+        prev.app_name = s.app_name
       }
       continue
     }

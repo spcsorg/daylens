@@ -254,6 +254,29 @@ test('a time written with a.m. and a thing called first or last pass; a claim ab
   s.close()
 })
 
+test('a source is sent with the app it was last seen in, within an hour and across hours', async () => {
+  const s = setup()
+  const safari = app('com.apple.Safari', { name: 'Safari' })
+  const seenIn = (who: ReturnType<typeof app>, t: number, seq: number) => {
+    s.r.feed(focus(who, null, t, 'app_changed'))
+    s.r.store.insertObservation({ ...page(t, 'https://docs.example.com/d/budget', 'Budget review'), app_id: who.app_id, app_name: who.name, seq })
+    s.r.feed(focus(who, null, t + MIN))
+    s.r.feed(line('session', { state: 'locked', snapshot: false }, t + 2 * MIN))
+  }
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 50 * MIN))
+  seenIn(safari, T0 + 50 * MIN, 1)
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 8 * HOUR))
+  seenIn(safari, T0 + 8 * HOUR, 2)
+  s.r.store.flush()
+  const hour = s.reader.hourAt(T0)!.sources.find((x) => x.kind === 'page')!
+  assert.equal(hour.app_name, 'Safari', 'within the hour: seen in Chrome for 10 minutes, then in Safari')
+  const seen: AskRequest[] = []
+  await ask('what did I do yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => NEXT_DAY }, LIMITS)
+  const sent = (JSON.parse(seen[0]!.prompt) as { sources: { app: string; address?: string; last_seen: string }[] }).sources.find((x) => x.address)!
+  assert.deepEqual([sent.app, sent.last_seen.slice(0, 13)], ['Safari', '2026-10-16 16'])
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)

@@ -254,9 +254,12 @@ export class Reader {
               if (last.app_id === i.app_id && cs <= last.to_wall_ms) last.to_wall_ms = Math.max(last.to_wall_ms, ce)
               else prev.sightings.push({ app_id: i.app_id, from_wall_ms: cs, to_wall_ms: ce })
               prev.first_wall_ms = Math.min(prev.first_wall_ms, cs)
+              // The title and the app are those it was last seen with.
               if (ce >= prev.last_wall_ms) {
                 prev.last_wall_ms = ce
                 prev.title = i.title
+                prev.app_id = i.app_id
+                prev.app_name = i.app_name
               }
             } else {
               slot.sources.set(src.key, { kind: src.kind, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: src.file, ms, first_wall_ms: cs, last_wall_ms: ce, sightings: [{ app_id: i.app_id, from_wall_ms: cs, to_wall_ms: ce }] })
