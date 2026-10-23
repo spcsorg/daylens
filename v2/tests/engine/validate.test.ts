@@ -8,9 +8,15 @@ const packet: Packet = {
   tz: 'Africa/Kigali',
   away: [{ id: 'w1', from: '10:30', to: '10:50', why: 'locked' }],
   unknown: [],
-  windows: [{ id: 'i1', app: 'Editor', title: 'alpha — main.ts', min: 25, from: '10:00', to: '10:29', times: 1 }],
+  windows: [
+    { id: 'i1', app: 'Editor', title: 'alpha — main.ts', min: 25, from: '10:00', to: '10:29', times: 1 },
+    { id: 'i2', app: 'Terminal', title: 'deploy.log', min: 0, away_min: 6, from: '10:31', to: '10:45', times: 1 },
+  ],
   pages: [{ id: 'p1', app: 'Dia', title: 'Release notes', site: 'example.com', min: 3, from: '10:52', to: '10:55', times: 1 }],
-  agents: [{ id: 'a1', agent: 'Codex', project: 'alpha', with_you_min: 20, while_away_min: 15, messages: ['10:05 prompt'] }],
+  agents: [
+    { id: 'a1', agent: 'Codex', project: 'alpha', with_you_min: 20, while_away_min: 15, messages: ['10:05 prompt'] },
+    { id: 'a2', agent: 'Claude Code', project: 'beta', with_you_min: 0, while_away_min: 12, messages: [] },
+  ],
   commits: [
     { id: 'c1', at: '10:15', repos: ['alpha'], subject: 'Parse the config once' },
     { id: 'c2', at: '10:40', repos: ['alpha'], subject: 'Stop retrying failed uploads', while_away: 'screen locked', agents_working: ['a1'] },
@@ -20,6 +26,8 @@ const packet: Packet = {
 const refs: Record<string, Ref> = {
   w1: { kind: 'away' },
   i1: { kind: 'observations', ids: [1, 2] },
+  i2: { kind: 'observations', ids: [4] },
+  a2: { kind: 'agent', agent: 'claude_code', session: 's2' },
   p1: { kind: 'observations', ids: [3] },
   a1: { kind: 'agent', agent: 'codex', session: 's1' },
   c1: { kind: 'commit', hash: 'aaa' },
@@ -31,7 +39,7 @@ const good: WrittenHour = {
   title: 'Worked on alpha with Codex',
   summary: 'You worked on alpha in the editor with Codex until 10:29, then stepped away.',
   apps: ['Editor', 'Codex'],
-  detail: 'Standup was on the calendar from 09:30. Codex committed a fix to uploads at 10:40 while you were away.',
+  detail: 'Standup was on the calendar from 09:30. Codex committed a fix to uploads at 10:40, while the screen was locked.',
   outcome: 'The config change was committed at 10:15.',
   sources: ['i1', 'a1', 'c1', 'c2', 'w1'],
   suggestion: null,
@@ -82,10 +90,16 @@ test('times are within the hour, unless the packet itself states them', () => {
   assert.deepEqual(codes({ detail: 'Standup was scheduled 09:30 to 10:30.' }), [])
 })
 
-test('work done while away is never credited to the person', () => {
+test('work the packet marks as done while away is never credited to the person, whatever the words', () => {
   assert.deepEqual(codes({ detail: 'You committed the upload fix at 10:40.' }), ['away_work_credited'])
   assert.deepEqual(codes({ detail: 'You shipped stop retrying failed uploads.' }), ['away_work_credited'])
   assert.deepEqual(codes({ detail: 'At 10:35 you reviewed the diff.' }), ['away_work_credited'])
-  assert.deepEqual(codes({ detail: 'Codex committed the upload fix at 10:40 while you were away.' }), [])
+  assert.deepEqual(codes({ detail: 'You finished the refactor while locked at 10:40.' }), ['away_work_credited'], 'saying "locked" is no excuse')
+  assert.deepEqual(codes({ detail: 'Codex committed the upload fix at 10:40 while you were away.' }), ['away_work_credited'], 'nor is naming an agent')
+  assert.deepEqual(codes({ detail: 'You worked with Claude Code on the refactor.' }), ['away_work_credited'], 'it only worked while away')
+  assert.deepEqual(codes({ detail: 'You moved the beta work along.' }), ['away_work_credited'], 'its project only had work while away')
+  assert.deepEqual(codes({ detail: 'You read deploy.log.' }), ['away_work_credited'], 'it was only in front while away')
+  assert.deepEqual(codes({ detail: 'While the screen was locked, Claude Code worked in beta and Codex committed the upload fix at 10:40.' }), [])
+  assert.deepEqual(codes({ detail: 'You worked with Codex on alpha.' }), [], 'Codex also worked while you were there')
   assert.deepEqual(codes({ detail: 'You committed the config change at 10:15.' }), [], 'a commit made while present can be yours')
 })

@@ -243,7 +243,7 @@ export function factsHour(packet: Packet): WrittenHour {
     said([i.id])
   }
   for (const a of packet.agents) {
-    lines.push(`${a.agent} in ${a.project ?? 'an unknown folder'}: ${Math.round(a.with_you_min)} min working with you there, ${Math.round(a.while_away_min)} min while you were away`)
+    lines.push(`${a.agent} in ${a.project ?? 'an unknown folder'}: ${Math.round(a.with_you_min)} min working while present, ${Math.round(a.while_away_min)} min while away`)
     said([a.id])
   }
   for (const c of packet.commits) {

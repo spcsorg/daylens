@@ -37,9 +37,6 @@ const KEYS = ['title', 'summary', 'apps', 'detail', 'outcome', 'sources', 'sugge
 const TEXT_FIELDS = ['title', 'summary', 'detail', 'outcome', 'suggestion'] as const
 const ID_TOKEN = /\b[a-z]\d{1,4}\b/g
 const CLOCK = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g
-const MADE = /\b(commit|commits|committed|pushed|shipped|merged|landed|fixed)\b/i
-const AGENT_WORDS = /\b(codex|claude|agent|agents)\b/i
-const AWAY_WORDS = /\b(away|locked|lock|idle|asleep|sleep|stepped)\b/i
 
 export function validateHour(raw: string, packet: Packet, refs: Record<string, Ref>): Validation {
   const v: Validation = { ok: false, errors: [], warnings: [], hour: null, cited: [] }
@@ -103,17 +100,37 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     }
   }
 
+  // What the packet marks as done while the person was away: any time inside an away span, a commit made then, and an
+  // agent, project or window that only worked or stayed in front then. A sentence that speaks to the person ("you")
+  // may not name any of it, whatever else it says.
+  const span = (a: { from: string; to: string }) => [toMinute(/(\d+):(\d+)/.exec(a.from)!), toMinute(/(\d+):(\d+)/.exec(a.to)!)] as const
+  const awaySpans = packet.away.map(span)
   const awayCommits = packet.commits.filter((c) => c.while_away)
-  const presentCommits = packet.commits.length - awayCommits.length
-  const awaySpans = packet.away.map((a) => [toMinute(/(\d+):(\d+)/.exec(a.from)!), toMinute(/(\d+):(\d+)/.exec(a.to)!)] as const)
+  const onlyAway = <T>(items: T[], name: (t: T) => string | null | undefined, away: (t: T) => boolean) => {
+    const byName = new Map<string, boolean>()
+    for (const t of items) {
+      const n = name(t)?.trim().toLowerCase()
+      if (n && n.length >= 3) byName.set(n, (byName.get(n) ?? true) && away(t))
+    }
+    return [...byName].filter(([, all]) => all).map(([n]) => n)
+  }
+  const agentAway = (a: Packet['agents'][number]) => a.with_you_min === 0 && a.while_away_min > 0
+  const itemAway = (i: Packet['windows'][number]) => i.min === 0 && (i.away_min ?? 0) > 0
+  const awayNames = [
+    ...onlyAway(packet.agents, (a) => a.agent, agentAway),
+    ...onlyAway(packet.agents, (a) => a.project, agentAway),
+    ...onlyAway([...packet.windows, ...packet.pages], (i) => i.title, itemAway),
+  ]
+  const awaySubjects = awayCommits.map((c) => c.subject.toLowerCase().slice(0, 24))
+  const mentions = (sentence: string, name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(sentence)
   for (const f of TEXT_FIELDS) {
-    for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+/)) {
-      if (!/\byou\b/i.test(sentence) || AWAY_WORDS.test(sentence)) continue
+    for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
+      if (!/\byou\b/i.test(sentence)) continue
       const times = [...sentence.matchAll(CLOCK)].map((m) => toMinute(m))
-      const namesAwayCommit = awayCommits.some((c) => times.includes(toMinute(/(\d+):(\d+)/.exec(c.at)!)) || sentence.toLowerCase().includes(c.subject.toLowerCase().slice(0, 24)))
-      const creditsCommit = MADE.test(sentence) && !AGENT_WORDS.test(sentence) && (namesAwayCommit || (awayCommits.length > 0 && presentCommits === 0))
       const insideAway = times.some((t) => awaySpans.some(([s, e]) => t > s && t < e))
-      if (creditsCommit || insideAway) err('away_work_credited', `${f}: ${sentence}`)
+      const awayCommit = awayCommits.some((c) => times.includes(toMinute(/(\d+):(\d+)/.exec(c.at)!))) || awaySubjects.some((x) => sentence.toLowerCase().includes(x))
+      const named = awayNames.find((n) => mentions(sentence, n))
+      if (insideAway || awayCommit || named) err('away_work_credited', `${f}: ${sentence}`)
     }
   }
 
