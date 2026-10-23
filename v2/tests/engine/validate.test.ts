@@ -78,11 +78,15 @@ test('apps are named exactly as the packet names them', () => {
   assert.deepEqual(codes({ apps: ['Dia', 'Codex'] }), [])
 })
 
-test('nothing is finished without a cited commit or page', () => {
+test('nothing is finished without a cited commit, in the outcome, the title or the summary', () => {
   assert.deepEqual(codes({ sources: ['i1', 'a1'] }), ['outcome_without_proof'])
-  assert.deepEqual(codes({ sources: ['i1', 'p1'], outcome: 'The release notes page was published.' }), [])
+  assert.deepEqual(codes({ sources: ['i1', 'p1'], outcome: 'The release notes page was published.' }), ['outcome_without_proof'], 'an open page proves nothing was done')
   assert.deepEqual(codes({ sources: ['i1'], outcome: null }), [])
   assert.equal(check({ sources: ['i1'], outcome: 'null' }).hour?.outcome, null, 'the word null means no outcome')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, title: 'Finished the payroll export' }), ['finished_without_proof'])
+  assert.deepEqual(codes({ sources: ['i1', 'p1'], outcome: null, summary: 'You published the release notes.' }), ['finished_without_proof'])
+  assert.deepEqual(codes({ sources: ['i1', 'p1'], outcome: null, summary: 'The release notes were open, but the record does not show whether you published them.' }), [])
+  assert.deepEqual(codes({ title: 'Finished the config change' }), [], 'the cited commit proves it')
 })
 
 test('times are within the hour, unless the packet itself states them', () => {

@@ -21,6 +21,7 @@ export type ValidationCode =
   | 'ids_in_text'
   | 'unknown_app'
   | 'outcome_without_proof'
+  | 'finished_without_proof'
   | 'time_outside_hour'
   | 'away_work_credited'
 
@@ -35,6 +36,9 @@ export interface Validation {
 
 const KEYS = ['title', 'summary', 'apps', 'detail', 'outcome', 'sources', 'suggestion'] as const
 const TEXT_FIELDS = ['title', 'summary', 'detail', 'outcome', 'suggestion'] as const
+const FINISHED = /\b(finish(ed|es)?|complet(ed|es)|shipp(ed|ing)|ships|publish(ed|es)|releas(ed|es)|merg(ed|es)|deploy(ed|s)|submitt(ed|s)|launch(ed|es)|deliver(ed|s)|fix(ed|es)|resolv(ed|es)|wrapped up)\b/i
+// A sentence that says the record cannot show completion ("not whether you published it") claims none.
+const UNPROVEN = /\b(not|no|never|nothing|whether|unclear|unknown|cannot)\b|n't\b/i
 const ID_TOKEN = /\b[a-z]\d{1,4}\b/g
 const CLOCK = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g
 
@@ -85,8 +89,15 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
   const known = new Set([...packet.windows, ...packet.pages].map((i) => i.app).filter((a): a is string => !!a).concat(packet.agents.map((a) => a.agent)))
   for (const a of h.apps) if (!known.has(a)) err('unknown_app', a)
 
-  if (h.outcome !== null && !sources.some((id) => refs[id]?.kind === 'commit' || (refs[id]?.kind === 'observations' && packet.pages.some((p) => p.id === id)))) {
-    err('outcome_without_proof', h.outcome)
+  // Only evidence of the action itself proves something was finished: a commit. A page or window shows what was open.
+  const proven = sources.some((id) => refs[id]?.kind === 'commit')
+  if (h.outcome !== null && !proven) err('outcome_without_proof', h.outcome)
+  if (!proven) {
+    for (const f of ['title', 'summary'] as const) {
+      for (const sentence of h[f].split(/(?<=[.!?;])\s+|\n+/)) {
+        if (FINISHED.test(sentence) && !UNPROVEN.test(sentence)) err('finished_without_proof', `${f}: ${sentence}`)
+      }
+    }
   }
 
   // Times the packet itself states (a calendar entry that started earlier, say) are evidence, not invention.

@@ -21,7 +21,7 @@ How to read the packet:
 Rules:
 - The title names the work, not the app.
 - Speak to the person as "you", in plain words and short sentences.
-- Something is finished only if the packet proves it: a commit, a published page, a sent message. Opening something is not finishing it.
+- Something is finished only if a cited commit proves it. Opening a page, a dialog or an app is not finishing anything. This applies to the title and summary as much as the outcome.
 - If the packet cannot tell what happened, say so. Never fill gaps. If the person was away or nothing was recorded for the whole hour, say that.
 - A suggestion only when the hour clearly shows a repeatable workflow or an obvious next step. Most hours get none.
 - Every claim traces to IDs in the packet. Put IDs only in sources, never in the text.
