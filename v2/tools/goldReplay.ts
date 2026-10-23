@@ -176,6 +176,7 @@ export async function replayGoldDay(day: GoldDay): Promise<{ storage: Storage; s
   }
   hello(events[0]!.ts_ms)
   let openGap: number | null = null
+  let lastSwitch: number | null = null
   let visitIdx = 0
   const point = (at: number) => ({ wall_ms: at, mono_us: at * 1000, boot: 'gold' })
   // The capture normalizer keeps a window's row open across a lock or sleep, so time after the return would never
@@ -192,6 +193,7 @@ export async function replayGoldDay(day: GoldDay): Promise<{ storage: Storage; s
     }
     sightUntil(e.ts_ms)
     const at = e.ts_ms
+    if (e.event_type === 'app_activated' && e.source === 'nsworkspace_event') lastSwitch = at
     switch (e.event_type) {
       case 'app_activated':
       case 'window_changed': {
@@ -232,7 +234,7 @@ export async function replayGoldDay(day: GoldDay): Promise<{ storage: Storage; s
         if (!held()) sendFocus('snapshot', at)
         break
       case 'idle_started':
-        normalizer.handle(mk('input', { state: 'idle', last_input_wall_ms: at - IDLE_THRESHOLD_S * 1000, threshold_s: IDLE_THRESHOLD_S, snapshot: false }, at))
+        normalizer.handle(mk('input', { state: 'idle', last_input_wall_ms: idleLastInput(at, lastSwitch), threshold_s: IDLE_THRESHOLD_S, snapshot: false }, at))
         break
       case 'idle_ended':
         normalizer.handle(mk('input', { state: 'active', last_input_wall_ms: at, threshold_s: IDLE_THRESHOLD_S, snapshot: false }, at))
@@ -307,6 +309,14 @@ export async function replayGoldDay(day: GoldDay): Promise<{ storage: Storage; s
       store.close()
     },
   }
+}
+
+/**
+ * When the person last gave input before V1 noticed idle. V1 kept no input times: idle was noticed a threshold after
+ * the last input, but an app switch recorded later than that is input too, so away cannot start before it.
+ */
+export function idleLastInput(noticeMs: number, lastSwitchMs: number | null): number {
+  return Math.min(noticeMs, Math.max(noticeMs - IDLE_THRESHOLD_S * 1000, lastSwitchMs ?? -Infinity))
 }
 
 export function parseHours(spec: string): number[] {
