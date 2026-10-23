@@ -179,8 +179,12 @@ interface SentSource {
   last_wall_ms: number
   // The sent hours it was seen in.
   hour_starts: number[]
-  // Every stretch it was seen, sent or not, with the app it was seen in.
+  // Every stretch it was seen, sent or not, with the app it was seen in, as search keeps them: an entry's first to its
+  // last time in an hour, which can span time it was not on screen. Wide is safe for withdrawing after a deletion.
   sightings: Sighting[]
+  // What it can be cited for: the stretches it was on screen in the hours sent, read from their intervals, and the
+  // moment it was last seen.
+  seen: Sighting[]
 }
 
 function siteOf(url: string | null): string | null {
@@ -324,7 +328,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       continue
     }
     const seen = i.seen_in.map((s) => s.hour_start_wall_ms)
-    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), sightings: [...i.sightings] })
+    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), sightings: [...i.sightings], seen: [{ app_id: i.app_id, from_wall_ms: i.last_wall_ms, to_wall_ms: i.last_wall_ms }] })
   }
   const own = hours.flatMap((h) => h.sources.map((s) => ({ h, s }))).sort((a, b) => b.s.ms - a.s.ms)
   for (const { h, s } of own) {
@@ -333,6 +337,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     if (prev) {
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
       prev.sightings.push(...s.sightings)
+      prev.seen.push(...s.sightings)
       prev.ms = (prev.ms ?? 0) + s.ms
       // Last seen, with the title and the app it was last seen with.
       if (s.last_wall_ms > prev.last_wall_ms) {
@@ -347,7 +352,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       notSent.add(key)
       continue
     }
-    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], sightings: [...s.sightings] })
+    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], sightings: [...s.sightings], seen: [...s.sightings] })
   }
   const sources = [...sent.values()]
   if (hours.length === 0 && sources.length === 0) return { kind: 'no_answer', missing: null, results }
@@ -447,9 +452,9 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
   hours.forEach((h, i) => evidence.set(`h${i + 1}`, { windows: h.recorded_spans, bounds: [h.start_wall_ms, h.end_wall_ms], apps: h.apps.flatMap((a) => [a.app_name, a.app_id]), sites: [], files: [], title: null, url: null }))
   sources.forEach((s, i) =>
     evidence.set(`s${i + 1}`, {
-      windows: s.sightings.map((x) => [x.from_wall_ms, x.to_wall_ms]),
+      windows: s.seen.map((x) => [x.from_wall_ms, x.to_wall_ms]),
       bounds: [],
-      apps: [s.app_name, s.app_id, ...s.sightings.flatMap((x) => [x.app_id, nameOf.get(x.app_id?.toLowerCase() ?? '') ?? null])],
+      apps: [s.app_name, s.app_id, ...s.seen.flatMap((x) => [x.app_id, nameOf.get(x.app_id?.toLowerCase() ?? '') ?? null])],
       sites: [siteOf(s.url)],
       files: [s.file],
       title: s.title,

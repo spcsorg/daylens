@@ -293,6 +293,32 @@ test('the days of a question are searched together, so the best match on any of 
   s.close()
 })
 
+test('a source supports a time only when it was on screen then, not anywhere between its first and last sighting', async () => {
+  const s = setup()
+  const chrome = app('com.google.Chrome', { name: 'Chrome' })
+  for (const [from, seq] of [[40, 1], [55, 2]] as const) {
+    s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + from * MIN))
+    s.r.feed(focus(chrome, null, T0 + from * MIN, 'app_changed'))
+    s.r.store.insertObservation({ ...page(T0 + from * MIN, 'https://docs.example.com/d/plan', 'Hiring plan'), seq })
+    s.r.feed(focus(chrome, null, T0 + (from + 3) * MIN))
+    s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 + (from + 5) * MIN))
+  }
+  s.r.store.flush()
+  const model = fakeModel((req) => {
+    const plan = (JSON.parse(req.prompt) as { sources: { id: string; address?: string }[] }).sources.find((x) => x.address?.endsWith('/plan'))!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'At 8:42 you read the hiring plan.', sources: [plan] },
+        { text: 'At 8:50 you read the hiring plan.', sources: [plan] },
+      ],
+    }
+  })
+  const res = await ask('hiring plan', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['At 8:42 you read the hiring plan.'], 'between 8:45 and 8:55 the screen was locked')
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)
