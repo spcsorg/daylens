@@ -60,6 +60,8 @@ export interface SearchOptions {
   perGroup: number
   fromWallMs?: number
   toWallMs?: number
+  // Instead of fromWallMs and toWallMs: several spans, [from, to) each, searched as one, so relevance orders them all.
+  ranges?: readonly (readonly [number, number])[]
   // 'all': every word must appear (the search box), else any word does, as looser matches. 'any': ranked by how many
   // and how rare (Ask's question words).
   match?: 'all' | 'any'
@@ -140,16 +142,17 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
   const q = ftsQuery(text, match)
   if (q === null) return EMPTY
   const db = reader.db
-  const from = opts.fromWallMs ?? Number.MIN_SAFE_INTEGER
-  const to = opts.toWallMs ?? Number.MAX_SAFE_INTEGER
+  const spans = opts.ranges ?? [[opts.fromWallMs ?? Number.MIN_SAFE_INTEGER, opts.toWallMs ?? Number.MAX_SAFE_INTEGER] as const]
+  const spanSql = `(${spans.map(() => 'd.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ?').join(' OR ') || '0'})`
+  const spanParams = spans.flatMap(([a, b]) => [a, b])
   return db.transaction(() => {
     const fence = searchFence(pendingTombstones(db))
-    const where = `d.hour_start_wall_ms >= ? AND d.hour_start_wall_ms < ? AND ${fence.sql}`
+    const where = `${spanSql} AND ${fence.sql}`
     // Each group's matches best first (ties: newest entry first), read one at a time and no further than the group
     // needs. Ordering by rank scores every match, once per group; entries are read from the table only as they are
     // reached. Across all time the ranking is the index's alone; within dates, entries outside them are left out
     // before ranking, so a narrow range ranks only its own.
-    const dated = opts.fromWallMs !== undefined || opts.toWallMs !== undefined
+    const dated = opts.ranges !== undefined || opts.fromWallMs !== undefined || opts.toWallMs !== undefined
     const rows = (match: string, only: string) =>
       db
         .prepare(
@@ -158,7 +161,7 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
             : `SELECT d.id, ${COLUMNS} FROM (SELECT rowid AS id FROM search WHERE search MATCH ? ORDER BY rank, rowid DESC LIMIT -1) m
                CROSS JOIN search_docs d ON d.id = m.id WHERE ${only} AND ${where}`,
         )
-        .iterate(match, from, to, ...fence.params) as IterableIterator<Doc & { id: number }>
+        .iterate(match, ...spanParams, ...fence.params) as IterableIterator<Doc & { id: number }>
     const chosen = new Map<Group, Map<string, Doc>>(GROUPS.map((g) => [g, new Map()]))
     // One item past the limit is chosen to learn whether the group has more; it is not read further.
     const full = (g: Group) => chosen.get(g)!.size > opts.perGroup
@@ -202,7 +205,7 @@ function searchWith(reader: Reader, text: string, opts: SearchOptions, match: 'a
       if (words.length === 0) return [first]
       const phrase = `${field[g]} : (${words.map((w) => `"${w}"`).join(' ')})`
       const key = keyOf(g, first)
-      const rows = entriesOf.all(phrase, g, first.url, first.title, from, to, ...fence.params) as Doc[]
+      const rows = entriesOf.all(phrase, g, first.url, first.title, ...spanParams, ...fence.params) as Doc[]
       const own =
         g === 'files'
           ? rows.flatMap((d) => fileNames(d.files).filter((f) => f.toLowerCase() === key).map((f) => ({ ...d, files: f })))

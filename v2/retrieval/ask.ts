@@ -275,33 +275,6 @@ const OCCURRENCE = new Set(
     .split(' '),
 )
 
-/** Results of the days searched one by one, as one: taken from each day in turn, an item seen on several days once. */
-function mergeDays(perDay: readonly SearchResults[], perGroup: number): SearchResults {
-  const out: SearchResults = { pages: [], files: [], windows: [], hours: [], more: [...new Set(perDay.flatMap((r) => r.more))], looser: false }
-  for (const g of ['pages', 'files', 'windows'] as const) {
-    const merged = new Map<string, FoundItem>()
-    const lists = perDay.map((r) => r[g])
-    for (let i = 0; lists.some((l) => i < l.length); i++) {
-      for (const l of lists) {
-        const item = l[i]
-        if (!item) continue
-        const key = `${item.url ?? item.file ?? `${item.app_id.toLowerCase()}\u0000${item.title}`}`
-        const prev = merged.get(key)
-        if (prev) {
-          const latest = item.last_wall_ms > prev.last_wall_ms ? item : prev
-          merged.set(key, { ...latest, first_wall_ms: Math.min(prev.first_wall_ms, item.first_wall_ms), seen_in: [...prev.seen_in, ...item.seen_in].sort((a, b) => b.hour_start_wall_ms - a.hour_start_wall_ms), sightings: [...prev.sightings, ...item.sightings] })
-        } else if (merged.size < perGroup) merged.set(key, item)
-        else if (!out.more.includes(g)) out.more.push(g)
-      }
-    }
-    out[g] = [...merged.values()]
-  }
-  const hours = perDay.flatMap((r) => r.hours)
-  out.hours = hours.slice(0, perGroup)
-  if (hours.length > perGroup && !out.more.includes('hours')) out.more.push('hours')
-  return out
-}
-
 function checkLimits(l: AskLimits): void {
   for (const k of ['maxHours', 'maxSources', 'perGroup'] as const) {
     if (!Number.isInteger(l[k]) || l[k] < 1) throw new RangeError(`${k} must be a positive whole number`)
@@ -314,12 +287,9 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
   const mark = deps.reader.deletionMark()
   const days = daysIn(question, now)
   const words = searchWords(question)
-  // Each day asked is searched on its own: the days between two named days are not asked about.
-  const find = (): SearchResults => {
-    if (!words) return { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
-    if (days.length === 0) return search(deps.reader, words, { perGroup: limits.perGroup, match: 'any' })
-    return mergeDays(days.map(([fromWallMs, toWallMs]) => search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', fromWallMs, toWallMs })), limits.perGroup)
-  }
+  // The days asked are searched as one, ranked together; the days between two named days are not searched.
+  const find = (): SearchResults =>
+    words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...(days.length > 0 ? { ranges: days } : {}) }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
   let results = find()
   if (!deps.model) return { kind: 'search_only', results }
 

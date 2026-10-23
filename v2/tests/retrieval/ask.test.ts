@@ -277,6 +277,22 @@ test('a source is sent with the app it was last seen in, within an hour and acro
   s.close()
 })
 
+test('the days of a question are searched together, so the best match on any of them comes first', async () => {
+  const s = setup()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 40 * MIN))
+  s.r.feed(focus(notes, 'Hiring notes', T0 + 40 * MIN, 'app_changed'))
+  s.r.feed(focus(notes, 'Hiring notes', T0 + 45 * MIN))
+  const t = T0 + 2 * 24 * HOUR
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+  s.r.feed(focus(notes, 'Forecast for the hiring plan', t, 'app_changed'))
+  s.r.feed(focus(notes, 'Forecast for the hiring plan', t + 5 * MIN))
+  s.r.store.flush()
+  const res = await ask('the hiring plan forecast on 2026-10-16 and 2026-10-18', { reader: s.reader, model: null, log: s.log, now: () => T0 + 3 * 24 * HOUR }, { ...LIMITS, perGroup: 1 })
+  assert.deepEqual(res.results.windows.map((w) => w.title), ['Forecast for the hiring plan'], 'every word matches on the later day; one on the earlier')
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)
