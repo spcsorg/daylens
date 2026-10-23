@@ -400,6 +400,11 @@ export class Normalizer {
           this.setStop('display_unknown', false, line)
           return this.setStop('display_off', true, line)
         }
+        // The helper could not read the display's state: nothing is recorded until it can.
+        if (s === 'display_unknown') {
+          this.setStop('display_off', false, line)
+          return this.setStop('display_unknown', true, line)
+        }
         const known = this.setStop('display_unknown', false, line)
         return this.setStop('display_off', false, line) || known
       }

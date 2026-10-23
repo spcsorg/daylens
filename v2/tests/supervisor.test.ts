@@ -377,3 +377,14 @@ test('a display state the helper cannot read for longer than its reconcile inter
   assert.deepEqual(s.gaps().map((g) => g.e), [80_000])
   s.close()
 })
+
+test('a display the helper can no longer read stops recording, and is a gap once it has lasted a reconcile interval', () => {
+  const s = fed()
+  s.open()
+  s.heartbeat(15_000, 15_000, 15_000)
+  s.feed('power', { state: 'display_unknown', snapshot: true }, 20_000)
+  for (let t = 30_000; t <= 90_000; t += 15_000) s.heartbeat(t, t, t)
+  assert.deepEqual(s.seen(), [15_000], 'the row is not carried on while the display is not known')
+  assert.deepEqual(s.gaps(), [{ reason: 'events_unavailable', scope: 'power', s: 20_000, e: null, detail: '{"state":"unknown"}' }])
+  s.close()
+})

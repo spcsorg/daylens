@@ -7,10 +7,12 @@ public final class StateWatch {
   public init() {}
 
   /// A read of the display ("display_on" or "display_off", nil when it cannot be read): the state to report, or nil.
+  /// A read that fails is reported once as "display_unknown", so the service stops recording until one succeeds.
   public func readDisplay(_ state: String?) -> String? {
-    guard let state, state != display else { return nil }
-    display = state
-    return state
+    let read = state ?? "display_unknown"
+    if read == display { return nil }
+    display = read
+    return read
   }
 
   public func noteDisplay(_ state: String) { display = state }

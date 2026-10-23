@@ -12,7 +12,7 @@ internal static unsafe class Program
 {
     const string Version = "2.0.0-dev";
     const nuint TimerHeartbeat = 1, TimerIdle = 2, TimerReconcile = 3, TimerRegister = 4, TimerTitleHook = 5;
-    const uint MsgShutdown = Native.WM_APP + 1, MsgSnapshot = Native.WM_APP + 2;
+    const uint MsgShutdown = Native.WM_APP + 1, MsgSnapshot = Native.WM_APP + 2, MsgReconcileFocus = Native.WM_APP + 3;
     const long ResolverStuckExitMs = 30_000;
 
     static Emitter _emitter = null!;
@@ -135,7 +135,11 @@ internal static unsafe class Program
     // A lock or dark display whose notice was missed, or a state that could not be read before, is reported when it is read.
     static void ReconcileStates()
     {
-        if (_registrations.IsRegistered(RegistrationRetry.Source.Display) && !RegisterDisplay()) Diag.Write("display_status_read_failed");
+        if (_registrations.IsRegistered(RegistrationRetry.Source.Display) && !RegisterDisplay())
+        {
+            Diag.Write("display_status_read_failed");
+            if (_watch.ReadDisplay(null) is string unknown) Emit("power", "power", Obs.Power(unknown, snapshot: true));
+        }
         var lockState = _watch.ReadLock(SessionState());
         if (lockState is null) return;
         _locked = lockState == "locked";
@@ -338,6 +342,10 @@ internal static unsafe class Program
                 case MsgSnapshot:
                     Snapshot();
                     return 0;
+                case MsgReconcileFocus:
+                    var fg = Native.GetForegroundWindow();
+                    Focus(fg != _fgHwnd ? FocusTrigger.AppChanged : FocusTrigger.Reconcile, fg, Clock.Now());
+                    return 0;
                 case MsgShutdown:
                     Emit("bye", "helper", Obs.Bye("shutdown"));
                     _emitter.Flush(TimeSpan.FromSeconds(1));
@@ -388,9 +396,10 @@ internal static unsafe class Program
         else if (id == TimerRegister) RetryRegistrations();
         else if (id == TimerReconcile)
         {
-            var fg = Native.GetForegroundWindow();
-            Focus(fg != _fgHwnd ? FocusTrigger.AppChanged : FocusTrigger.Reconcile, fg, Clock.Now());
+            // The display and the lock first. The display's value arrives as a message, so the window is read from a
+            // message posted after it: one read while they are being found locked or dark is not recorded.
             ReconcileStates();
+            Native.PostMessage(_hwnd, MsgReconcileFocus, 0, 0);
         }
     }
 

@@ -20,8 +20,10 @@ public class StateWatchTests
     public void AStateThatCannotBeReadIsReadAgainUntilItCanAndAnUnknownLockIsReportedOnce()
     {
         var w = new StateWatch();
+        Assert.Equal("display_unknown", w.ReadDisplay(null));
         Assert.Null(w.ReadDisplay(null));
         Assert.Equal("display_on", w.ReadDisplay("display_on"));
+        Assert.Equal("display_unknown", w.ReadDisplay(null));
         Assert.Equal("unknown", w.ReadLock("unknown"));
         Assert.Null(w.ReadLock("unknown"));
         Assert.Equal("unlocked", w.ReadLock("unlocked"));

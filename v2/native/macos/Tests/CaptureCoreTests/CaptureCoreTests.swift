@@ -336,8 +336,10 @@ final class StateWatchTests: XCTestCase {
 
   func testAStateThatCannotBeReadIsReadAgainUntilItCanAndAnUnknownLockIsReportedOnce() {
     let w = StateWatch()
+    XCTAssertEqual(w.readDisplay(nil), "display_unknown")
     XCTAssertNil(w.readDisplay(nil))
     XCTAssertEqual(w.readDisplay("display_on"), "display_on")
+    XCTAssertEqual(w.readDisplay(nil), "display_unknown", "a read that fails after a known state is reported")
     XCTAssertEqual(w.readLock("unknown"), "unknown")
     XCTAssertNil(w.readLock("unknown"))
     XCTAssertEqual(w.readLock("unlocked"), "unlocked")

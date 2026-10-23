@@ -8,11 +8,13 @@ public sealed class StateWatch
     public string? Lock { get; private set; }
 
     /// A read of the display ("display_on", "display_off", "display_dim"; null when it cannot be read): the state to report, or null.
+    /// A read that fails is reported once as "display_unknown", so the service stops recording until one succeeds.
     public string? ReadDisplay(string? state)
     {
-        if (state is null || state == Display) return null;
-        Display = state;
-        return state;
+        var read = state ?? "display_unknown";
+        if (read == Display) return null;
+        Display = read;
+        return read;
     }
 
     public void NoteDisplay(string state) => Display = state;

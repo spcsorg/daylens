@@ -100,7 +100,7 @@ export interface SessionObs {
   state: SessionState
   snapshot: boolean
 }
-export type PowerState = 'sleep' | 'resume' | 'resume_user' | 'display_off' | 'display_on' | 'display_dim'
+export type PowerState = 'sleep' | 'resume' | 'resume_user' | 'display_off' | 'display_on' | 'display_dim' | 'display_unknown'
 export interface PowerObs {
   state: PowerState
   // The display's current state, sent in a snapshot, not a change.
@@ -232,7 +232,7 @@ const SESSION_STATES = [
   'logon',
   'unknown',
 ] as const
-const POWER_STATES = ['sleep', 'resume', 'resume_user', 'display_off', 'display_on', 'display_dim'] as const
+const POWER_STATES = ['sleep', 'resume', 'resume_user', 'display_off', 'display_on', 'display_dim', 'display_unknown'] as const
 const CLOCK_CHANGES = ['time_changed', 'timezone_changed'] as const
 const TAB_TRIGGERS = ['activated', 'focus', 'updated', 'removed', 'snapshot', 'startup', 'paused'] as const
 const TAB_UNKNOWN_REASONS = ['no_focused_window', 'not_normal', 'no_tab', 'no_address', 'paused'] as const

@@ -131,10 +131,9 @@ func readLock() -> String {
 
 // The display and the lock go first: the service records nothing until it knows both, so the focus read after them counts.
 func snapshot() {
-  if let display = readDisplay() {
-    watch.noteDisplay(display)
-    emit("power", "cg_display", Obs.power(display, snapshot: true))
-  }
+  let display = readDisplay() ?? "display_unknown"
+  watch.noteDisplay(display)
+  emit("power", "cg_display", Obs.power(display, snapshot: true))
   let lock = readLock()
   watch.noteLock(lock)
   emit("session", "cg_session", Obs.session(lock, snapshot: true))
@@ -273,8 +272,9 @@ reconcile.setEventHandler { autoreleasepool {
   let app = NSWorkspace.shared.frontmostApplication
   let changed = (app?.processIdentifier ?? 0) != frontPid
   frontPid = app?.processIdentifier ?? 0
-  requestFocus(changed ? .app_changed : .reconcile, app)
+  // The display and the lock first: a window read while they are being found locked or dark is not recorded.
   reconcileStates()
+  requestFocus(changed ? .app_changed : .reconcile, app)
 } }
 reconcile.resume()
 
