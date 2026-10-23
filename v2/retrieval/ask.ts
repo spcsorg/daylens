@@ -196,16 +196,18 @@ function siteOf(url: string | null): string | null {
   }
 }
 
-/** What a cited hour or source can show: when, in which apps, on which sites, which files, under what title. */
-interface Evidence {
-  windows: [number, number][]
-  // Times it can be named by though nothing was seen at them: an hour's start and end.
-  bounds: number[]
-  apps: (string | null)[]
-  sites: (string | null)[]
-  files: (string | null)[]
-  title: string | null
-  url: string | null
+/**
+ * One stretch a cited hour or source was on screen, with what was seen in it: its app, and for a source its file, site,
+ * title and address. A cited hour's start and end are stretches of no length, with every app of the hour.
+ */
+interface Seen {
+  from: number
+  to: number
+  apps: string[]
+  files: string[]
+  sites: string[]
+  // Title and address, lowercased.
+  text: string
 }
 
 const minuteOfDay = (ms: number) => {
@@ -234,30 +236,33 @@ const names = (text: string, list: readonly string[], caseSensitive: boolean) =>
 const DOTTED = /(?<![\p{L}\p{N}_@+.-])[\p{L}\p{N}_@+-]+(?:\.[\p{L}\p{N}_@+-]+)*\.[\p{L}\p{N}_-]*\p{L}[\p{L}\p{N}_-]*/gu
 
 /**
- * Whether the cited hours and sources can be what a statement rests on, as far as code can tell: every time it names
- * falls in a stretch one of them was seen, every day it names has one of them, every app it names (of the apps ever
- * recorded) is one of theirs, and every file, site or other dotted name it uses is one of theirs or in their title or
- * address. What it says happened in them is not checked.
+ * Whether the cited hours and sources can be what a statement rests on, as far as code can tell, each part checked on
+ * one stretch: every app (of the apps ever recorded) and dotted name (a file, a site, an app id) it names was seen on a
+ * day it names, and every time it names falls in a stretch, on such a day, with one of those names, or any stretch if
+ * it names none. What it says happened in them is not checked.
  */
-export function supported(text: string, cites: readonly Evidence[], appNames: readonly string[], nowMs: number): boolean {
-  const windows = cites.flatMap((c) => c.windows)
-  const bounds = cites.flatMap((c) => c.bounds).map(minuteOfDay)
-  for (const options of timesIn(text)) {
-    const fits = windows.some(([a, b]) => {
-      const [x, y] = [minuteOfDay(a), b - a >= 86_400_000 ? 24 * 60 : minuteOfDay(b) || 24 * 60]
-      return options.some((m) => (x <= y ? m >= x && m <= y : m >= x || m <= y))
-    })
-    if (!fits && !options.some((m) => bounds.includes(m % (24 * 60)))) return false
-  }
-  for (const [from, to] of daysIn(text, nowMs)) if (!windows.some(([a, b]) => b > from && a < to)) return false
-  const lower = (x: string | null) => x?.toLowerCase() ?? null
-  const inText = (n: string) => cites.some((c) => lower(c.title)?.includes(n) || lower(c.url)?.includes(n))
-  const appOk = (n: string) => cites.some((c) => c.apps.some((x) => lower(x) === n.toLowerCase())) || inText(n.toLowerCase())
-  const dottedOk = (n: string) =>
-    cites.some((c) => c.files.some((f) => lower(f) === n) || c.apps.some((a) => lower(a) === n) || c.sites.some((s) => s !== null && (s === n || s.endsWith(`.${n}`) || n.endsWith(`.${s}`)))) || inText(n)
+export function supported(text: string, cited: readonly Seen[], appNames: readonly string[], nowMs: number): boolean {
+  const days = daysIn(text, nowMs)
+  const onDay = (s: Seen, [a, b]: [number, number]) => (s.to > a || s.from >= a) && s.from < b
+  if (days.some((d) => !cited.some((s) => onDay(s, d)))) return false
+  const pool = days.length === 0 ? cited : cited.filter((s) => days.some((d) => onDay(s, d)))
   // a.m., p.m., e.g. and i.e. are not names.
   const plain = text.replace(/\b(?:[ap]\.m|e\.g|i\.e)\.?/gi, ' ')
-  return names(text, appNames, true).every(appOk) && [...plain.matchAll(DOTTED)].every((m) => dottedOk(m[0].toLowerCase().replace(/\.$/, '')))
+  const things: ((s: Seen) => boolean)[] = [
+    ...names(text, appNames, true).map((n) => n.toLowerCase()).map((n) => (s: Seen) => s.apps.includes(n) || s.text.includes(n)),
+    ...[...plain.matchAll(DOTTED)].map((m) => m[0].toLowerCase().replace(/\.$/, '')).map(
+      (n) => (s: Seen) => s.files.includes(n) || s.apps.includes(n) || s.sites.some((x) => x === n || x.endsWith(`.${n}`) || n.endsWith(`.${x}`)) || s.text.includes(n),
+    ),
+  ]
+  if (!things.every((has) => pool.some(has))) return false
+  for (const options of timesIn(text)) {
+    const at = (s: Seen) => {
+      const [x, y] = [minuteOfDay(s.from), s.to - s.from >= 86_400_000 ? 24 * 60 : s.to === s.from ? minuteOfDay(s.to) : minuteOfDay(s.to) || 24 * 60]
+      return options.some((m) => (x <= y ? m >= x && m <= y : m >= x || m <= y))
+    }
+    if (!pool.some((s) => at(s) && (things.length === 0 || things.some((has) => has(s))))) return false
+  }
+  return true
 }
 
 /** A claim about every occurrence: true only of the whole record, never of part of it. */
@@ -445,23 +450,23 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
       open: s.url ? { kind: 'url', url: s.url } : { kind: 'app', app_id: s.app_id ?? '', app_name: s.app_name },
     }),
   )
-  // What each id can support: an hour, its recorded stretches and apps; a source, the stretches it was seen and its apps.
-  const vocabulary = deps.reader.appNames()
-  const nameOf = new Map(hours.flatMap((h) => h.apps.map((a) => [a.app_id?.toLowerCase() ?? '', a.app_name] as const)))
-  const evidence = new Map<string, Evidence>()
-  hours.forEach((h, i) => evidence.set(`h${i + 1}`, { windows: h.recorded_spans, bounds: [h.start_wall_ms, h.end_wall_ms], apps: h.apps.flatMap((a) => [a.app_name, a.app_id]), sites: [], files: [], title: null, url: null }))
-  sources.forEach((s, i) =>
-    evidence.set(`s${i + 1}`, {
-      windows: s.seen.map((x) => [x.from_wall_ms, x.to_wall_ms]),
-      bounds: [],
-      apps: [s.app_name, s.app_id, ...s.seen.flatMap((x) => [x.app_id, nameOf.get(x.app_id?.toLowerCase() ?? '') ?? null])],
-      sites: [siteOf(s.url)],
-      files: [s.file],
-      title: s.title,
-      url: s.url,
-    }),
-  )
-  const appNames = [...new Set([...vocabulary, ...hours.flatMap((h) => h.apps.map((a) => a.app_name ?? a.app_id)), ...sources.map((s) => s.app_name ?? s.app_id)].filter((a): a is string => !!a))]
+  // What each id can support: an hour, each stretch with its app, and its start and end; a source, each stretch it was
+  // on screen in the hours sent, with its app, and when it was last seen.
+  const recorded = deps.reader.apps()
+  const nameOf = new Map(recorded.map((a) => [a.app_id.toLowerCase(), a.app_name]))
+  const appsOf = (id: string | null) => [id?.toLowerCase(), nameOf.get(id?.toLowerCase() ?? '')?.toLowerCase()].filter((x): x is string => !!x)
+  const evidence = new Map<string, Seen[]>()
+  hours.forEach((h, i) => {
+    const all = h.apps.flatMap((a) => appsOf(a.app_id))
+    const bound = (at: number): Seen => ({ from: at, to: at, apps: all, files: [], sites: [], text: '' })
+    evidence.set(`h${i + 1}`, [...h.sightings.map((x) => ({ from: x.from_wall_ms, to: x.to_wall_ms, apps: appsOf(x.app_id), files: [], sites: [], text: '' })), bound(h.start_wall_ms), bound(h.end_wall_ms)])
+  })
+  sources.forEach((s, i) => {
+    const site = siteOf(s.url)
+    const text = `${s.title ?? ''}\u0000${s.url ?? ''}`.toLowerCase()
+    evidence.set(`s${i + 1}`, s.seen.map((x) => ({ from: x.from_wall_ms, to: x.to_wall_ms, apps: appsOf(x.app_id), files: s.file ? [s.file.toLowerCase()] : [], sites: site ? [site] : [], text })))
+  })
+  const appNames = [...new Set(recorded.map((a) => a.app_name ?? a.app_id).filter((a): a is string => !!a))]
   const statements: { text: string; cites: Citation[] }[] = []
   let dropped = 0
   let withdrawn = 0
@@ -470,7 +475,7 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     const ids = Array.isArray(s.sources) ? s.sources : []
     const ok =
       typeof s.text === 'string' && s.text.trim() !== '' && ids.length > 0 && ids.every((id) => typeof id === 'string' && byId.has(id)) &&
-      supported(s.text, (ids as string[]).map((id) => evidence.get(id)!), appNames, now) &&
+      supported(s.text, (ids as string[]).flatMap((id) => evidence.get(id)!), appNames, now) &&
       // Search finds by words, not by app or anything else a claim can be about, so only a whole day read is complete.
       !(claimsAll(s.text) && (days.length === 0 || incomplete))
     if (!ok) {

@@ -319,6 +319,41 @@ test('a source supports a time only when it was on screen then, not anywhere bet
   s.close()
 })
 
+test('a statement’s time, day and app must hold for one and the same sighting', async () => {
+  const s = setup()
+  const safari = app('com.apple.Safari', { name: 'Safari' })
+  // The budget page: in Chrome at 08:20 (from the day), in Safari at 16:00 that day and at 09:00 the next.
+  for (const [t, seq] of [[T0 + 8 * HOUR, 1], [T0 + 25 * HOUR, 2]] as const) {
+    s.r.feed(line('session', { state: 'unlocked', snapshot: false }, t))
+    s.r.feed(focus(safari, null, t, 'app_changed'))
+    s.r.store.insertObservation({ ...page(t, 'https://docs.example.com/d/budget', 'Budget review'), app_id: 'com.apple.Safari', app_name: 'Safari', seq })
+    s.r.feed(focus(safari, null, t + 3 * MIN))
+    s.r.feed(line('session', { state: 'locked', snapshot: false }, t + 5 * MIN))
+  }
+  s.r.store.flush()
+  const model = fakeModel((req) => {
+    const budget = (JSON.parse(req.prompt) as { sources: { id: string; address?: string }[] }).sources.find((x) => x.address?.endsWith('/budget'))!.id
+    return {
+      answerable: true,
+      statements: [
+        'At 16:00 you read the budget review in Safari.',
+        'At 16:00 you read the budget review in Chrome.',
+        'At 8:25 you read the budget review in Chrome.',
+        'At 8:25 you read the budget review in Safari.',
+        'On 2026-10-17 at 9:01 you read the budget review.',
+        'On 2026-10-16 at 9:01 you read the budget review.',
+      ].map((text) => ({ text, sources: [budget] })),
+    }
+  })
+  const res = await ask('budget review on 2026-10-16 and 2026-10-17', { reader: s.reader, model, log: s.log, now: () => T0 + 3 * 24 * HOUR }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), [
+    'At 16:00 you read the budget review in Safari.',
+    'At 8:25 you read the budget review in Chrome.',
+    'On 2026-10-17 at 9:01 you read the budget review.',
+  ])
+  s.close()
+})
+
 test('when the record cannot answer, Ask says so and still shows what search found; with nothing recorded the AI is not called', async () => {
   const s = setup()
   const res = await ask('who did I meet for lunch yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'Nothing recorded mentions lunch.' })), log: s.log, now: () => NEXT_DAY }, LIMITS)

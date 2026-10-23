@@ -56,8 +56,8 @@ export interface HourView {
   // The written or corrected hour as every screen shows it; null while the hour is facts only.
   hour: Hour | null
   recorded_ms: number
-  // The stretches of the hour with recorded activity, [from, to), in order.
-  recorded_spans: [number, number][]
+  // The stretches of the hour with recorded activity, each with its app, in order.
+  sightings: Sighting[]
   apps: AppTime[]
   sources: Source[]
   gaps: HourGap[]
@@ -198,10 +198,9 @@ export class Reader {
     return this.db.prepare(`SELECT id, kind, from_wall_ms, to_wall_ms, lower(app_id) AS app_id, lower(site) AS site, state FROM deletions WHERE id > ? ORDER BY id`).all(mark) as Tombstone[]
   }
 
-  /** Every app ever recorded, by name, so text naming one can be recognised. */
-  appNames(): string[] {
-    const rows = this.db.prepare('SELECT app_id, app_name FROM intervals WHERE id IN (SELECT max(id) FROM intervals GROUP BY app_id)').all() as { app_id: string | null; app_name: string | null }[]
-    return [...new Set(rows.map((r) => r.app_name ?? r.app_id).filter((n): n is string => !!n))]
+  /** Every app ever recorded, with the name it was last recorded under, so text naming one can be recognised. */
+  apps(): { app_id: string; app_name: string | null }[] {
+    return this.db.prepare('SELECT app_id, app_name FROM intervals WHERE app_id IS NOT NULL AND id IN (SELECT max(id) FROM intervals GROUP BY app_id)').all() as { app_id: string; app_name: string | null }[]
   }
 
   /** The hour as every screen shows it (corrections win, pending deletions already applied), or null. */
@@ -227,7 +226,7 @@ export class Reader {
          WHERE start_wall_ms >= ? AND start_wall_ms < ? AND end_wall_ms > ? ORDER BY start_wall_ms, id`,
       )
       .all(from - HOUR_MS - MAX_INTERVAL_MS, to + HOUR_MS, from - HOUR_MS) as IntervalRow[]
-    const byHour = new Map<number, { tz: number; apps: Map<string, AppTime>; sources: Map<string, Source>; recorded: number; spans: [number, number][] }>()
+    const byHour = new Map<number, { tz: number; apps: Map<string, AppTime>; sources: Map<string, Source>; recorded: number; sightings: Sighting[] }>()
     for (const i of rows) {
       for (const [s, e] of fenced(i, pending)) {
         for (const h of hoursOf(s, e, i.tz_offset_min)) {
@@ -237,11 +236,11 @@ export class Reader {
           if (ce < cs) continue
           const ms = ce - cs
           let slot = byHour.get(h)
-          if (!slot) byHour.set(h, (slot = { tz: i.tz_offset_min, apps: new Map(), sources: new Map(), recorded: 0, spans: [] }))
+          if (!slot) byHour.set(h, (slot = { tz: i.tz_offset_min, apps: new Map(), sources: new Map(), recorded: 0, sightings: [] }))
           slot.recorded += ms
-          const piece = slot.spans.at(-1)
-          if (piece && cs <= piece[1]) piece[1] = Math.max(piece[1], ce)
-          else slot.spans.push([cs, ce])
+          const piece = slot.sightings.at(-1)
+          if (piece && piece.app_id === i.app_id && cs <= piece.to_wall_ms) piece.to_wall_ms = Math.max(piece.to_wall_ms, ce)
+          else slot.sightings.push({ app_id: i.app_id, from_wall_ms: cs, to_wall_ms: ce })
           const appKey = (i.app_id ?? '').toLowerCase()
           const app = slot.apps.get(appKey) ?? { app_id: i.app_id, app_name: i.app_name, ms: 0 }
           app.ms += ms
@@ -287,7 +286,7 @@ export class Reader {
         tz_offset_min: slot?.tz ?? null,
         hour,
         recorded_ms: slot?.recorded ?? 0,
-        recorded_spans: slot?.spans ?? [],
+        sightings: slot?.sightings ?? [],
         apps: [...(slot?.apps.values() ?? [])].sort((a, b) => b.ms - a.ms),
         sources: [...(slot?.sources.values() ?? [])].sort((a, b) => b.ms - a.ms || a.first_wall_ms - b.first_wall_ms),
         gaps: gaps(start, end),
