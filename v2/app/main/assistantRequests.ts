@@ -9,6 +9,8 @@ export interface RequestDeps {
   // A write through the capture service, as the app's actions make.
   control: (op: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; error?: string }>
   act: (a: Action) => Promise<ActionResult>
+  // Whether recording is paused now: an assistant's pause never replaces one, which would end it sooner.
+  paused: () => Promise<boolean>
   // Tells the person a request waits on them, outside the window too.
   notify: (r: AssistantRequest) => void
   log: (line: string) => void
@@ -89,6 +91,10 @@ export class AssistantRequests {
     this.running.add(r.id)
     try {
       if (!(await this.settle(r.id, 'running'))) return { ok: false, error: 'request_expired' }
+      if (r.change.kind === 'pause' && (await this.d.paused())) {
+        await this.settle(r.id, 'failed', 'Daylens is already paused, and an assistant can’t shorten a pause')
+        return { ok: false, error: 'already_paused' }
+      }
       for (const step of steps(r.change)) {
         const out = 'a' in step ? await this.d.act(step as Action) : await this.d.control(step)
         if (!out.ok) {
@@ -99,6 +105,11 @@ export class AssistantRequests {
       }
       await this.settle(r.id, 'done')
       return { ok: true }
+    } catch (err) {
+      // Once claimed, a request must end: a reader or service that throws would leave it running for good.
+      const error = err instanceof Error ? err.message : String(err)
+      await this.settle(r.id, 'failed', error).catch(() => {})
+      return { ok: false, error }
     } finally {
       this.running.delete(r.id)
     }

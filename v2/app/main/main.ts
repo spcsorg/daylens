@@ -4,8 +4,8 @@ import { BrowserWindow, MessageChannelMain, Notification, Tray, app, dialog, ipc
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import type { AssistantRequest } from '../shared/assistants.ts'
-import type { Action, ActionResult, DayView, Query, ShellState } from '../shared/types.ts'
-import { describeRequest } from '../../storage/assistantRequests.ts'
+import type { Action, ActionResult, DayView, Query, RecordingView, ShellState } from '../shared/types.ts'
+import { describeRequest, runsWithoutAsking } from '../../storage/assistantRequests.ts'
 import { AssistantRequests } from './assistantRequests.ts'
 import { Capture } from './capture.ts'
 import { chrome, followTheme } from './chrome.ts'
@@ -190,6 +190,7 @@ const requests = new AssistantRequests({
   pending: () => query<AssistantRequest[]>({ q: 'assistant_requests' }),
   control: (op) => capture.request(op),
   act: (a) => act(ctx, a),
+  paused: async () => (await query<RecordingView>({ q: 'recording' })).pause !== null,
   notify: (r) => {
     if (!Notification.isSupported()) return
     const n = new Notification({ title: `${r.assistant} asks Daylens`, body: `${describeRequest(r.change)}. Open Daylens to answer.` })
@@ -272,7 +273,7 @@ app.whenReady().then(() => {
         const names = h ? h.title ?? h.facts.apps.slice(0, 3).map((x) => x.name).join(' · ') : ''
         const title = h ? `${hourLabel(h.start_ms)}${names ? ` · ${names}` : ''}` : 'Daylens'
         const summary = rec.pause ? (rec.pause.until_ms ? `Paused until ${clockLabel(rec.pause.until_ms)}` : 'Paused until you resume') : 'Recording now'
-        const asking = (await query<AssistantRequest[]>({ q: 'assistant_requests' }).catch(() => [])).filter((r) => r.state === 'pending').length
+        const asking = (await query<AssistantRequest[]>({ q: 'assistant_requests' }).catch(() => [])).filter((r) => r.state === 'pending' && !runsWithoutAsking(r.change)).length
         return { title, summary, paused: rec.pause, asking }
       },
       pause: async (until) => (await act(ctx, { a: 'pause', until })).ok,

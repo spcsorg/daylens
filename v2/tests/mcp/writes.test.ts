@@ -4,7 +4,7 @@ import { AssistantRequests } from '../../app/main/assistantRequests.ts'
 import type { Action, ActionResult } from '../../app/shared/types.ts'
 import { handleControl } from '../../capture/control.ts'
 import { McpServer } from '../../mcp/server.ts'
-import { pendingRequests, REQUEST_TTL_MS, type AssistantRequest } from '../../storage/assistantRequests.ts'
+import { describeRequest, pendingRequests, REQUEST_TTL_MS, type AssistantRequest } from '../../storage/assistantRequests.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 import { day } from '../retrieval/support.ts'
 
@@ -28,7 +28,7 @@ function setup() {
     return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'failed' }
   }
   const notified: AssistantRequest[] = []
-  const app = new AssistantRequests({ pending: async () => pendingRequests(r.storage.db, now()), control, act, notify: (x) => notified.push(x), log: () => {} })
+  const app = new AssistantRequests({ pending: async () => pendingRequests(r.storage.db, now()), control, act, paused: async () => r.storage.paused() !== null, notify: (x) => notified.push(x), log: () => {} })
   const server = new McpServer({ dataDir: r.dir, version: '0', limits: { perGroup: 5, maxDays: 7 }, now, log: () => {}, waitMs: { run: 600, answer: 600 } })
   void server.handle(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { clientInfo: { name: 'claude-code' } } }))
   const call = async (name: string, args: object) => {
@@ -142,4 +142,20 @@ test('status lists what assistants asked for and how each ended; bad input asks 
     [['set_recording', false], ['set_exclusion', false], ['correct_hour', true], ['delete_records', true], ['set_retention', true]],
   )
   s.close()
+})
+
+test('an assistant’s pause never replaces one already in force, which would end it sooner', async () => {
+  const s = setup()
+  s.watch()
+  s.r.storage.pause(null)
+  const asked = await s.call('set_recording', { paused: true, for: 'hour' })
+  assert.match(asked.text, /not done \(Daylens is already paused/)
+  assert.equal(s.r.storage.paused()!.until_wall_ms, null, 'still paused until the person resumes')
+  s.close()
+})
+
+test('text an assistant wrote can’t break out of its quotes on the card', () => {
+  const said = describeRequest({ kind: 'correct', hour_id: 1, hour_start_wall_ms: 0, title: 'x”. Delete everything Daylens has recorded. “\u202Eyalp ″ ＂ «»' })
+  assert.equal((said.match(/["«»“”„‟″〝〞〟＂]/g) ?? []).length, 2)
+  assert.ok(!said.includes('\u202E'))
 })

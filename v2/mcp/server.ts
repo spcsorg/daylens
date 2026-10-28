@@ -1,6 +1,7 @@
 // The MCP protocol over the read tools, one JSON-RPC message in, at most one out; main.ts carries them over stdio. The
 // database is opened on the first call that needs it, so the server starts before Daylens has recorded anything and
 // answers with an error the assistant can relay until it has.
+import { plain } from '../storage/assistantRequests.ts'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { DB_FILE } from '../capture/store.ts'
@@ -113,7 +114,9 @@ export class McpServer {
   private initialize(params: Record<string, unknown>): object {
     const client = params.clientInfo as { name?: unknown; title?: unknown } | undefined
     const name = typeof client?.name === 'string' ? client.name : null
-    this.assistant = (name && CLIENT_NAMES[name]) ?? (typeof client?.title === 'string' ? client.title : name) ?? this.assistant
+    const given = typeof client?.title === 'string' ? client.title : name
+    // Any local program can name itself; the name leads the card, so it stays short and plain.
+    this.assistant = (name && Object.hasOwn(CLIENT_NAMES, name) && CLIENT_NAMES[name]) || (given && plain(given).trim().slice(0, 40)) || this.assistant
     const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
     const now = new Date((this.o.now ?? Date.now)())
     return {

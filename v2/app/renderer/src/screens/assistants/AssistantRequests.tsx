@@ -5,6 +5,8 @@ import { Button } from '../../ui/controls.tsx'
 import { Dialog, useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 
+const ARM_MS = 700
+
 // Changes that delete or can't be taken back get the red button.
 const deletes = (c: RequestChange) => c.kind === 'delete' || (c.kind === 'retention' && c.days !== null)
 
@@ -14,6 +16,7 @@ const failed = (code: string) => (code === 'request_expired' ? 'That request had
 export function AssistantRequests() {
   const { data, refetch } = useQuery({ q: 'assistant_requests' })
   const [busy, setBusy] = useState(false)
+  const [armed, setArmed] = useState<number | null>(null)
   const toast = useToast()
   const r = data?.find((x) => x.state === 'pending' && !runsWithoutAsking(x.change))
   // A lapsed request leaves the screen when it lapses, not at the next change.
@@ -22,7 +25,14 @@ export function AssistantRequests() {
     const t = setTimeout(refetch, Math.max(0, r.at_wall_ms + REQUEST_TTL_MS - Date.now()))
     return () => clearTimeout(t)
   }, [r, refetch])
+  // A new card's yes waits a moment, so a click meant for the card before can't answer this one.
+  useEffect(() => {
+    if (!r) return
+    const t = setTimeout(() => setArmed(r.id), ARM_MS)
+    return () => clearTimeout(t)
+  }, [r?.id])
   if (!r) return null
+  const ready = !busy && armed === r.id
   const answer = async (allow: boolean) => {
     setBusy(true)
     const out = await act({ a: 'assistant_request', id: r.id, allow })
@@ -36,7 +46,7 @@ export function AssistantRequests() {
         {r.assistant} asks: {describeRequest(r.change)}.
       </div>
       <div className="dialog-actions">
-        <Button kind={deletes(r.change) ? 'danger' : 'primary'} onClick={() => void answer(true)} disabled={busy}>
+        <Button kind={deletes(r.change) ? 'danger' : 'primary'} onClick={() => void answer(true)} disabled={!ready}>
           {deletes(r.change) ? 'Delete' : 'Allow'}
         </Button>
         <Button onClick={() => void answer(false)} disabled={busy} autoFocus>

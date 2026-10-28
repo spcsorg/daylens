@@ -226,7 +226,8 @@ export async function runWriteTool(name: string, args: Record<string, unknown>, 
   const asked = describeRequest(change)
   const auto = runsWithoutAsking(change)
   const r = await settled(ctx, id, auto ? ctx.waitMs.run : ctx.waitMs.answer)
-  if (r.state === 'failed') return `${asked}: Daylens tried and failed (${r.error ?? 'no reason given'}). Nothing changed.`
+  // A step may have run before one failed or timed out, so don't promise that nothing changed.
+  if (r.state === 'failed') return `${asked}: not done (${r.error ?? 'no reason given'}). get_status shows what is in force.`
   if (OUTCOMES[r.state]) return `${asked}: ${OUTCOMES[r.state]}`
   if (r.state === 'running') return `${asked}: Daylens is doing it now (request ${id}); get_status shows when it's done.`
   if (auto) {
