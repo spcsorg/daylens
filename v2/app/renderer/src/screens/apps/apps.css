@@ -28,6 +28,75 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
+  padding: var(--space-20) var(--space-20) var(--space-12);
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+/* Which hours of the day the app was in: filled cells on a labeled strip. */
+.app-strip {
+  display: flex;
+  gap: 3px;
+}
+
+.app-strip-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
+.app-strip-mark {
+  width: 100%;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.app-strip-cell.on {
+  color: var(--text-2);
+}
+
+.app-strip-cell.on .app-strip-mark {
+  background: var(--text-2);
+  animation: fade 200ms var(--ease) both;
+}
+
+/* The app's time on each day of the week. */
+.app-days {
+  display: flex;
+  gap: var(--space-6);
+  height: 76px;
+}
+
+.app-day {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
+.app-day-bar {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-day-bar > span {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--text-2);
+  transform-origin: bottom;
+  animation: bar-grow 400ms var(--ease) both;
 }
 
 .app-head {

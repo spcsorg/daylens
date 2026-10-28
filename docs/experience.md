@@ -96,6 +96,7 @@ Ask answers questions about any day from the same record.
 - Day and week views.
 - Each app shows its total time, the hours it appeared in, and the pages, documents or windows used in it. Each opens.
 - A breakdown bar is used only if each segment is labeled. Each app in the list shows its share of the day or week as a thin bar under its name, labeled "22% of the day".
+- An app's detail sits on its own card. On a day it shows a strip of the day's hours with the ones the app was used in filled, each labeled; on a week, the app's time on each day as labeled bars.
 - The week's bars are labeled with each day's time; today's bar is ink, the others grey. Clicking a day's bar opens that day.
 - Removing an app's records for a day is one action in the app's detail view, not a menu on every row. It is a trash icon with a tooltip naming exactly what it removes ("Remove Notes from 28 October"), and it confirms first.
 

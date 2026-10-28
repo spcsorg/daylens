@@ -112,6 +112,41 @@ function WeekBars({ view, today, onDay }: { view: AppsView; today: string; onDay
   )
 }
 
+/** The hours of the day the app was used in, on a strip from morning to evening, each labeled. */
+function HourStrip({ hours }: { hours: number[] }) {
+  const on = new Set(hours.map((h) => new Date(h).getHours()))
+  const lo = Math.min(8, ...on)
+  const hi = Math.max(17, ...on)
+  return (
+    <div className="app-strip" aria-label={`Used in the ${hoursList(hours)} ${hours.length === 1 ? 'hour' : 'hours'}`}>
+      {Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map((h) => (
+        <span key={h} className={`app-strip-cell${on.has(h) ? ' on' : ''}`}>
+          <span className="app-strip-mark" />
+          {h % 12 || 12}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** The app's time on each day of the week, each bar labeled with its day. */
+function DayStrip({ from, perDay }: { from: string; perDay: AppDetail['per_day'] }) {
+  const ms = new Map(perDay.map((p) => [p.date, p.ms]))
+  const max = Math.max(1, ...perDay.map((p) => p.ms))
+  return (
+    <div className="app-days">
+      {Array.from({ length: 7 }, (_, i) => addDays(from, i)).map((date) => (
+        <span key={date} className="app-day" title={ms.get(date) ? `${duration(ms.get(date)!)} on ${plainDay(date)}` : undefined}>
+          <span className="app-day-bar">
+            <span style={{ height: `${ms.get(date) ? Math.max(6, (ms.get(date)! / max) * 100) : 0}%` }} />
+          </span>
+          {shortDay(date).slice(0, 1)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function Detail({ id, from, days, when, live }: { id: string; from: string; days: number; when: string; live: boolean }) {
   const { data } = useQuery({ q: 'app', id, from, days }, { live })
   const [filter, setFilter] = useState('')
@@ -150,6 +185,7 @@ function Detail({ id, from, days, when, live }: { id: string; from: string; days
           }
         />
       </div>
+      {days === 1 ? <HourStrip hours={d.hours} /> : <DayStrip from={from} perDay={d.per_day} />}
       {d.browser && d.sources.length > 0 && (
         <label className="apps-filter">
           <Icon name="search" />
