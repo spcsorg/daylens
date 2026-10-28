@@ -1,0 +1,603 @@
+/* Option B: scenario cards and split windows on a colour field. Window sizes are design pixels, scaled by their placement. */
+
+.d-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.d-placed {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+
+.d-pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  transform-origin: 0 0;
+}
+
+/* Cards */
+
+.d-card,
+.d-open {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 0 11%;
+  text-align: center;
+}
+
+.d-card.is-4x5 {
+  padding: 0 8%;
+}
+
+.d-card p,
+.d-open h1 {
+  margin: 0;
+  font-family: var(--w-serif);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.d-card small {
+  display: block;
+  max-width: 30em;
+  margin-top: 1.4em;
+  font: 400 30px/1.45 var(--w-sans);
+  color: var(--w-text-2);
+  text-wrap: balance;
+}
+
+.d-card.is-4x5 small {
+  font-size: 34px;
+}
+
+.d-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 36px;
+  padding: 10px 22px 10px 16px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.55);
+  font: 500 26px/1 var(--w-sans);
+  letter-spacing: -0.005em;
+  color: var(--w-text);
+}
+
+.d-card.is-4x5 .d-label {
+  font-size: 30px;
+}
+
+.d-label i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--d-ink);
+}
+
+.d-open {
+  gap: 28px;
+}
+
+.d-open img {
+  border-radius: 22%;
+  box-shadow: 0 24px 48px -20px rgb(20 22 25 / 0.35);
+}
+
+.d-open p {
+  margin: 0;
+  color: var(--w-text-2);
+  letter-spacing: -0.01em;
+}
+
+/* Windows */
+
+.d-pane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--w-bg);
+  box-shadow: 0 50px 100px -30px rgb(20 22 25 / 0.32), 0 0 0 1px rgb(20 22 25 / 0.07);
+  font: 400 15px/22px var(--w-sans);
+  color: var(--w-text);
+  text-align: left;
+}
+
+.d-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-side);
+}
+
+.d-lights {
+  position: absolute;
+  left: 16px;
+  top: 15px;
+  display: flex;
+  gap: 8px;
+}
+
+.d-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
+}
+
+.d-lights i:nth-child(2) {
+  background: #febc2e;
+}
+
+.d-lights i:nth-child(3) {
+  background: #28c840;
+}
+
+.d-bar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 13px/18px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-bar-title img {
+  border-radius: 4px;
+}
+
+/* Ask */
+
+.d-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 26px 6px;
+}
+
+.d-head-title {
+  font: 400 26px/32px var(--w-serif);
+  letter-spacing: -0.01em;
+}
+
+.d-beta {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--d-soft);
+  font: 500 12px/16px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-thread {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 26px;
+}
+
+.d-cc .d-thread {
+  padding-top: 26px;
+}
+
+.d-me {
+  align-self: flex-end;
+  max-width: 82%;
+  padding: 10px 16px;
+  border-radius: 20px 20px 6px 20px;
+  background: var(--d-ink);
+  color: #fff;
+  font: 400 18px/25px var(--w-sans);
+  transform-origin: 100% 100%;
+}
+
+.d-thinking {
+  overflow: hidden;
+  font: 400 15px/30px var(--w-sans);
+}
+
+.d-them {
+  max-width: 94%;
+  padding: 12px 16px;
+  border-radius: 20px 20px 20px 6px;
+  background: #f1f2f4;
+  font: 400 18px/26px var(--w-sans);
+}
+
+.d-them > span {
+  display: inline-block;
+  white-space: pre;
+}
+
+.d-sel {
+  border-radius: 3px;
+}
+
+.d-from {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.d-page {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--w-bg);
+  box-shadow: 0 1px 2px rgb(20 22 25 / 0.08), 0 0 0 1px var(--w-line);
+  transition: none;
+}
+
+.d-page.is-hot {
+  background: var(--d-soft);
+  box-shadow: 0 0 0 1.5px var(--d-ink);
+}
+
+.d-page > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.d-page b {
+  display: block;
+  font: 500 15px/21px var(--w-sans);
+}
+
+.d-page small {
+  display: block;
+  font: 400 12px/17px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.d-page .f-glyph {
+  color: var(--w-text-2);
+}
+
+.d-hours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.d-hours span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--w-side);
+  box-shadow: 0 0 0 1px var(--w-line);
+  font: 500 13px/18px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-hours .f-apps {
+  margin: 0;
+  gap: 3px;
+}
+
+.d-hours .d-more {
+  background: none;
+  box-shadow: none;
+  color: var(--w-text-3);
+}
+
+.d-composer {
+  position: absolute;
+  right: 22px;
+  bottom: 20px;
+  left: 22px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 18px;
+  border-radius: 26px;
+  background: var(--w-bg);
+  box-shadow: 0 6px 16px -6px rgb(20 23 26 / 0.18), 0 0 0 1px var(--w-line-strong);
+  font: 400 16px/22px var(--w-sans);
+}
+
+.d-composer i {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--w-hover);
+  color: var(--w-text-3);
+}
+
+.d-composer i.is-ready {
+  background: var(--d-ink);
+  color: #fff;
+}
+
+/* Chrome */
+
+.d-tabs {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  height: 42px;
+  padding-left: 86px;
+  background: #e9ebee;
+}
+
+.d-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 10px 10px 0 0;
+  background: var(--w-bg);
+  font: 400 12.5px/1 var(--w-sans);
+  color: var(--w-text);
+}
+
+.d-url {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--w-line);
+  color: var(--w-text-2);
+}
+
+.d-url span {
+  flex: 1;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: var(--w-side);
+  font: 400 13px/18px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-progress {
+  height: 2px;
+  background: var(--d-ink);
+  transform-origin: 0 50%;
+}
+
+.d-article {
+  padding: 40px 56px;
+}
+
+.d-article small {
+  font: 500 12px/16px var(--w-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--d-ink);
+}
+
+.d-article h2 {
+  margin: 12px 0 12px;
+  font: 400 42px/48px var(--w-serif);
+  letter-spacing: -0.02em;
+}
+
+.d-article p {
+  margin: 0 0 14px;
+  font: 400 16px/26px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-article .d-byline {
+  margin-bottom: 26px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--w-line);
+  font-size: 14px;
+  color: var(--w-text-3);
+}
+
+/* Mail */
+
+.d-field {
+  display: flex;
+  gap: 10px;
+  padding: 12px 26px;
+  border-bottom: 1px solid var(--w-line);
+  font: 400 15px/21px var(--w-sans);
+}
+
+.d-field span {
+  width: 64px;
+  color: var(--w-text-3);
+}
+
+.d-letter {
+  padding: 20px 26px;
+  font: 400 16px/24px var(--w-sans);
+}
+
+.d-letter p {
+  margin: 0 0 16px;
+}
+
+.d-muted {
+  color: var(--w-text-2);
+}
+
+.d-table {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--w-line);
+}
+
+.d-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--w-side);
+  font: 500 16px/1 var(--w-sans);
+}
+
+.d-cell.is-wait {
+  box-shadow: 0 0 0 1.5px var(--w-line-strong);
+}
+
+.d-cell.is-full {
+  background: var(--d-soft);
+  box-shadow: 0 0 0 1.5px var(--d-ink);
+  color: var(--w-text);
+}
+
+.d-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 19;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 10px 24px -8px rgb(20 22 25 / 0.35), 0 0 0 1px var(--d-ink);
+  font: 500 15px/20px var(--w-sans);
+  transform-origin: 0 0;
+}
+
+/* Claude Code and Today */
+
+.d-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  background: var(--d-soft);
+  font: 500 13px/18px var(--w-sans);
+  transform-origin: 0 50%;
+}
+
+.d-tool img {
+  border-radius: 4px;
+}
+
+.d-standup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  width: 94%;
+}
+
+.d-standup > b {
+  font-weight: 500;
+}
+
+.d-li {
+  position: relative;
+  padding-left: 18px;
+}
+
+.d-li::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--w-text-3);
+}
+
+.d-li > span {
+  display: inline-block;
+  white-space: pre;
+}
+
+.d-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 22px 26px 10px;
+}
+
+.d-day-head span {
+  font: 400 26px/32px var(--w-serif);
+  letter-spacing: -0.01em;
+}
+
+.d-day-head small {
+  font: 400 13px/18px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.d-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  margin: 0 14px;
+  padding: 14px 12px;
+  border-top: 1px solid var(--w-line);
+}
+
+.d-row b {
+  display: block;
+  font: 500 16px/22px var(--w-sans);
+  letter-spacing: -0.01em;
+}
+
+.d-row .f-apps {
+  margin-top: 6px;
+}
+
+.d-row.is-away b {
+  font-weight: 400;
+  color: var(--w-text-3);
+}
+
+.d-row-at {
+  position: relative;
+  padding-top: 2px;
+  font: 400 12px/18px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.d-lit {
+  position: absolute;
+  inset: 4px 0;
+  border-radius: 10px;
+  background: var(--d-soft);
+  box-shadow: inset 3px 0 0 var(--d-ink);
+}
+
+.d-row > :not(.d-lit) {
+  position: relative;
+}
+
+.d-note {
+  position: absolute;
+  right: 0;
+  bottom: 34px;
+  left: 0;
+  margin: 0;
+  text-align: center;
+  font: 400 24px/1.3 var(--w-sans);
+  color: var(--w-text-2);
+}
+

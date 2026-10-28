@@ -19,7 +19,9 @@ export const SKY = { dawn: "#f2d2c7", morning: "#f5dca2", noon: "#ccdfee", after
 export type Beat =
   | { kind: "shot"; shot: Shot; sky: string }
   | { kind: "caption"; text: string; dur: number; sky: string; small?: string }
-  | { kind: "end"; dur: number; sky: string };
+  | { kind: "end"; dur: number; sky: string }
+  // Draws the whole stage itself; t runs from -0.5 to dur + 0.5 so it can handle its own entrance and exit.
+  | { kind: "scene"; dur: number; sky: string; render: (t: number, ratio: Ratio) => ReactNode };
 
 const dur = (b: Beat) => (b.kind === "shot" ? b.shot.dur : b.dur);
 const starts = (beats: Beat[]) => beats.reduce<number[]>((a, b, i) => [...a, i ? a[i - 1] + dur(beats[i - 1]) : 0], []);
@@ -124,6 +126,8 @@ export function Film({ t, ratio, beats }: { t: number; ratio: Ratio; beats: Beat
       const enter = i === 0 ? prog(lt, 0, 0.9) : fromShot ? prog(lt, -0.08, 0.14) : prog(lt, -0.15, 0.55);
       const exit = toShot ? (lt > d + 0.14 ? 1 : 0) : prog(lt, d - 0.25, d + 0.25, inOut);
       layers.push(<ShotFrame key={i} shot={b.shot} t={clamp(lt, 0, d)} ratio={ratio} enter={enter} exit={exit} riseIn={!fromShot} riseOut={!toShot} />);
+    } else if (b.kind === "scene") {
+      layers.push(<div key={i}>{b.render(lt, ratio)}</div>);
     } else if (b.kind === "caption") {
       if (lt >= 0 && lt <= d) layers.push(<Caption key={i} text={b.text} t={lt} d={d} size={r.type} small={b.small} />);
     } else if (lt >= 0) {
