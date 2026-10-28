@@ -1,14 +1,13 @@
 // Settings › Assistants: the MCP apps on this computer, each connected in one click; setup for any other app; and
 // what assistants read and asked to change.
 import { useEffect, useState } from 'react'
-import { describeRequest, type RequestState } from '../../../../../storage/assistantRequests.ts'
+import { describeRequest, quoted, type RequestState } from '../../../../../storage/assistantRequests.ts'
 import type { AssistantApp, AssistantAppState, ReadEntry } from '../../../../shared/assistants.ts'
 import { act, useQuery } from '../../lib/api.ts'
 import { dateKey, plainDay, rangeTitle, seenAt, span } from '../../lib/format.ts'
 import { Button } from '../../ui/controls.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { AppIcon } from '../../ui/records.tsx'
-import { errorText } from '../../ui/status.tsx'
 import { Row } from './Row.tsx'
 
 // The app's own icon; command-line assistants show the terminal they run in.
@@ -47,7 +46,7 @@ function days(r: ReadEntry): string {
 function readText(r: ReadEntry): string {
   switch (r.tool) {
     case 'search':
-      return `Searched for “${r.query ?? ''}”`
+      return `Searched for ${quoted(r.query ?? '')}`
     case 'get_hour':
       return `Read ${plainDay(dateKey(new Date(r.from_wall_ms)))}, ${span(r.from_wall_ms, r.to_wall_ms)}`
     case 'get_agent_work':
@@ -63,19 +62,20 @@ function readText(r: ReadEntry): string {
 
 export function AssistantsTab() {
   const [apps, setApps] = useState<AssistantApp[] | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
   const [test, setTest] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const { data: log } = useQuery({ q: 'assistant_log' })
   const toast = useToast()
 
   useEffect(() => {
-    void act({ a: 'assistant_apps' }).then((r) => r.ok && setApps(r.result as AssistantApp[]))
+    void act({ a: 'assistant_apps' }).then((r) => (r.ok ? setApps(r.result as AssistantApp[]) : setListError(r.error)))
   }, [])
 
   const toggle = async (app: AssistantApp) => {
     const on = app.state !== 'connected'
     const r = await act({ a: 'assistant_connect', id: app.id, on })
-    if (!r.ok) return toast({ text: errorText(r.error), error: true })
+    if (!r.ok) return toast({ text: `Couldn’t ${on ? 'connect' : 'disconnect'} ${app.name}: ${r.error}`, error: true })
     setApps(r.result as AssistantApp[])
     toast({ text: on ? `Connected. Restart ${app.name} to use Daylens.` : `Disconnected from ${app.name}.` })
   }
@@ -87,7 +87,7 @@ export function AssistantsTab() {
   }
   const copy = async () => {
     const r = await act({ a: 'assistant_copy_setup' })
-    toast(r.ok ? { text: 'Copied. Paste it into the app’s MCP settings.' } : { text: errorText(r.error), error: true })
+    toast(r.ok ? { text: 'Copied. Paste it into the app’s MCP settings.' } : { text: r.error, error: true })
   }
 
   const entries = [
@@ -98,6 +98,7 @@ export function AssistantsTab() {
   return (
     <>
       <div className="settings-group">
+        {listError && <Row label="Assistant apps couldn’t be listed" detail={listError} />}
         {apps?.length === 0 && <Row label="No assistant apps found" detail="Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI connect here once installed." />}
         {apps?.map((app) => (
           <div className="settings-row" key={app.id}>
