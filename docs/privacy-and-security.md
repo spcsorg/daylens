@@ -37,7 +37,7 @@ The record is stored in a local database on the user's computer. There is no Day
 | What | Goes to | When | How to stop it |
 |---|---|---|---|
 | One hour's facts: window and page titles, addresses, app names and times, agent sessions and their projects, commit messages, calendar events, the previous hour's text, open threads and corrections from nearby hours, plus screen text and transcripts when those are on | The chosen AI provider, directly | Each hour, while AI is on | Choose no AI. Hours stay as facts. |
-| The hours relevant to a question | The chosen AI provider, directly | When Ask is used | Choose no AI. Ask then searches instead. |
+| Only the excerpts a question needs: the hours and the pages, files and windows that match it, up to Ask's limits, with the person's own corrections to those hours. Daylens's own written hour text is not sent. A test checks the exact request. | The chosen AI provider, directly | When Ask is used | Choose no AI. Ask then searches instead. |
 | What an assistant reads | That assistant's own AI service | When a connected assistant reads days | Disconnect it. Every read is logged in Settings. |
 | Account, plan, usage and payments | The Daylens billing service | When the user has an account or plan | Never includes activity, prompts or answers |
 | Usage analytics: features and screens used, milestones, errors, speed, AI usage and cost, app version and operating system, under a random install ID | Daylens | On by default | Turn off in Settings › Recording and privacy. Never the record: titles, addresses, file names, commit messages, screen text, transcripts, prompts or answers. |
