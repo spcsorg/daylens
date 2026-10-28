@@ -454,7 +454,7 @@ function Ask({ t, f }: { t: number; f: Frame }) {
       </div>
       <div className="mm-answer-area" style={{ width: f.col }}>
         <p className="mm-thinking" style={{ opacity: thinking, height: 24 * (1 - prog(t, A_ANSWER - 0.1, A_ANSWER + 0.3)) }}>
-          <span style={{ backgroundPosition: `${-220 + ((t * 170) % 440)}px 0` }}>Reading Tuesday, 10 AM to 3 PM</span>
+          <span style={{ backgroundPosition: `${-220 + ((t * 170) % 440)}px 0` }}>Reading Tuesday</span>
         </p>
         <p className="mm-answer">
           {A_WORDS.map((w, i) => {
