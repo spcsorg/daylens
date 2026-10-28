@@ -1,4 +1,5 @@
 // Storage tables beyond capture's, one named migration per logical change.
+import { assistantRequestsMigration } from './assistantRequests.ts'
 import { changeLogMigration } from './changes.ts'
 import { filesOf } from './derive.ts'
 import type { Migration } from './migrations.ts'
@@ -463,4 +464,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   hourObservations,
   fileNamesWithSpaces,
   siteDeletionsEnd,
+  assistantRequestsMigration,
 ]

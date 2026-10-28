@@ -1,0 +1,48 @@
+import { useEffect, useState } from 'react'
+import { describeRequest, REQUEST_TTL_MS, runsWithoutAsking, type RequestChange } from '../../../../../storage/assistantRequests.ts'
+import { act, useQuery } from '../../lib/api.ts'
+import { Button } from '../../ui/controls.tsx'
+import { Dialog, useToast } from '../../ui/overlays.tsx'
+import { errorText } from '../../ui/status.tsx'
+
+// Changes that delete or can't be taken back get the red button.
+const deletes = (c: RequestChange) => c.kind === 'delete' || (c.kind === 'retention' && c.days !== null)
+
+const failed = (code: string) => (code === 'request_expired' ? 'That request had waited too long, so nothing changed. Ask again if you still want it.' : code === 'request_gone' ? 'That request was already answered.' : errorText(code))
+
+/** A change an assistant asked for, waiting on the person's answer: one at a time, oldest first, over any screen. */
+export function AssistantRequests() {
+  const { data, refetch } = useQuery({ q: 'assistant_requests' })
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+  const r = data?.find((x) => x.state === 'pending' && !runsWithoutAsking(x.change))
+  // A lapsed request leaves the screen when it lapses, not at the next change.
+  useEffect(() => {
+    if (!r) return
+    const t = setTimeout(refetch, Math.max(0, r.at_wall_ms + REQUEST_TTL_MS - Date.now()))
+    return () => clearTimeout(t)
+  }, [r, refetch])
+  if (!r) return null
+  const answer = async (allow: boolean) => {
+    setBusy(true)
+    const out = await act({ a: 'assistant_request', id: r.id, allow })
+    setBusy(false)
+    if (!out.ok) toast({ text: failed(out.error), error: true })
+    else if (allow) toast({ text: 'Done.' })
+  }
+  return (
+    <Dialog onClose={() => void answer(false)} label={`${r.assistant} asks`}>
+      <div>
+        {r.assistant} asks: {describeRequest(r.change)}.
+      </div>
+      <div className="dialog-actions">
+        <Button kind={deletes(r.change) ? 'danger' : 'primary'} onClick={() => void answer(true)} disabled={busy}>
+          {deletes(r.change) ? 'Delete' : 'Allow'}
+        </Button>
+        <Button onClick={() => void answer(false)} disabled={busy} autoFocus>
+          Don’t
+        </Button>
+      </div>
+    </Dialog>
+  )
+}

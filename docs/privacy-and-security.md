@@ -55,6 +55,7 @@ The record is stored in a local database on the user's computer. There is no Day
 - Delete the last ten minutes, an hour, a day, a range, or everything. Deletion reaches observations, hours, the search index, Ask answers that cited the material, and day notes. Tombstones stop deleted material from being imported again.
 - Disconnect any assistant.
 - Settings shows what was sent to AI and when, and every read by each assistant.
+- Answer what an assistant asks to change: delete, resume, record an app again, correct an hour, or change retention. Nothing happens without a yes.
 
 ## Security requirements
 
@@ -63,7 +64,7 @@ The record is stored in a local database on the user's computer. There is no Day
 - **Secrets** (API keys, account tokens) are stored in the platform's secure storage and never written to logs or the database.
 - **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, signed packages on Linux. On Windows, Daylens ships through the Microsoft Store, which signs the package and installs its updates. Any Windows build distributed outside the Store is Authenticode-signed (installer, app and helper, timestamped and verified after packaging), and its updates refuse to install when the publisher cannot be verified.
 - **Updates** are signed and verified before install.
-- **The MCP server** is local to the machine. Assistants can read the record, pause recording and add exclusions; resuming, removing an exclusion, corrections and deletions wait for the user's yes in Daylens.
+- **The MCP server** is local to the machine. Its reads change nothing. Its writes only file requests: an assistant can pause recording or exclude an app or site on its own, and anything that deletes, records more or changes the record waits for the person's yes on a card in Daylens, which an assistant can't give. See [System design](system-design.md#assistants).
 - **Running the app as Node.** The packaged app lets its binary run as Node (Electron's `runAsNode` fuse), so assistants can start the MCP server without installing Node. On macOS any local program could then run code as Daylens with Daylens's permissions, so the main app holds no macOS privacy permission: Accessibility belongs to the capture helper's own bundle, and any later permission (calendar, for example) goes to a helper too.
 - **Payments.** Card data is entered only in the payment provider's hosted checkout.
 

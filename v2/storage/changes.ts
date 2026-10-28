@@ -7,7 +7,7 @@ import { readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from '
 import path from 'node:path'
 import type { Migration } from './migrations.ts'
 
-export type ChangeKind = 'kept_titles' | 'correction' | 'deletion' | 'exclusion' | 'ai_choice' | 'plan' | 'usage' | 'pause' | 'retention' | 'setting' | 'hour'
+export type ChangeKind = 'kept_titles' | 'correction' | 'deletion' | 'exclusion' | 'ai_choice' | 'plan' | 'usage' | 'pause' | 'retention' | 'setting' | 'hour' | 'assistant_request'
 
 export interface Change {
   seq: number

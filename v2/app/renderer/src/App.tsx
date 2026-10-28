@@ -4,6 +4,7 @@ import { act, bridge, query, useQuery, useShell } from './lib/api.ts'
 import { dateKey } from './lib/format.ts'
 import { Apps, type AppsNav } from './screens/apps/Apps.tsx'
 import { Ask } from './screens/ask/Ask.tsx'
+import { AssistantRequests } from './screens/assistants/AssistantRequests.tsx'
 import { Onboarding } from './screens/onboarding/Onboarding.tsx'
 import { SearchOverlay } from './screens/search/Search.tsx'
 import { Settings } from './screens/settings/Settings.tsx'
@@ -111,6 +112,7 @@ function Shell() {
           }}
         />
       )}
+      <AssistantRequests />
     </div>
   )
 }

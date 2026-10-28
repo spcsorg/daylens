@@ -1,6 +1,8 @@
 // Writes the app asks for over the service's stdin, one JSON object per line. The service is the only writer, so the
 // interface's pause, deletions, exclusions and retention all arrive here. Each op with an id gets one reply line.
 import type { ExclusionRule } from './defaults.ts'
+import { settleRequest } from '../storage/assistantRequests.ts'
+import type { HourField } from '../storage/hours.ts'
 import type { DeletionHandle, PauseFor, Storage } from '../storage/index.ts'
 
 export type DeleteWhat =
@@ -18,6 +20,8 @@ export type ControlMsg =
   | { op: 'unexclude'; id: string; match: ExclusionRule['match']; value: string }
   | { op: 'retention'; id: string; days: number | null }
   | { op: 'setting'; id: string; key: string; value: unknown }
+  | { op: 'correct'; id: string; hour_id: number; field: HourField; text: string }
+  | { op: 'assistant_request'; id: string; request_id: number; state: 'running' | 'done' | 'declined' | 'failed' | 'expired'; error?: string }
 
 export type ControlReply =
   | { op: 'reply'; id: string; ok: true; result?: unknown }
@@ -70,7 +74,7 @@ function startDeletion(storage: Storage, what: DeleteWhat, now: number): Deletio
 /** Returns false for a message that is not a control op, so the caller can route it elsewhere. */
 export function handleControl(storage: Storage, raw: Record<string, unknown>, send: (reply: ControlReply) => void, now: () => number = Date.now): boolean {
   const msg = raw as ControlMsg
-  if (!['pause', 'resume', 'delete', 'exclude', 'unexclude', 'retention', 'setting'].includes(msg.op)) return false
+  if (!['pause', 'resume', 'delete', 'exclude', 'unexclude', 'retention', 'setting', 'correct', 'assistant_request'].includes(msg.op)) return false
   const id = typeof msg.id === 'string' && msg.id.length <= 64 ? msg.id : null
   if (id === null) return true
   const fail = (err: unknown) => send({ op: 'reply', id, ok: false, error: err instanceof Error ? err.message : 'failed' })
@@ -119,6 +123,15 @@ export function handleControl(storage: Storage, raw: Record<string, unknown>, se
         if (typeof msg.key !== 'string' || !APP_SETTING.test(msg.key)) throw new Error('bad_setting')
         storage.setSetting(msg.key, msg.value)
         send({ op: 'reply', id, ok: true })
+        break
+      case 'correct':
+        if (!Number.isInteger(msg.hour_id) || !['title', 'summary'].includes(msg.field) || !isText(msg.text)) throw new Error('bad_correction')
+        if (!storage.hour(msg.hour_id)) throw new Error('no_hour')
+        send({ op: 'reply', id, ok: true, result: { correction: storage.correct(msg.hour_id, msg.field, msg.text) } })
+        break
+      case 'assistant_request':
+        if (!Number.isInteger(msg.request_id) || !['running', 'done', 'declined', 'failed', 'expired'].includes(msg.state)) throw new Error('bad_request')
+        send({ op: 'reply', id, ok: true, result: { settled: settleRequest(storage.db, storage.bus, msg.request_id, msg.state, typeof msg.error === 'string' ? msg.error.slice(0, 200) : null, now()) } })
         break
     }
   } catch (err) {

@@ -6,6 +6,8 @@ export interface TrayNow {
   title: string
   summary: string
   paused: { until_ms: number | null } | null
+  // Changes assistants asked for that wait on the person's answer.
+  asking: number
 }
 
 export interface TrayActions {
@@ -33,10 +35,11 @@ export function createTray(iconPath: string, actions: TrayActions): Tray {
     try {
       now = await actions.now()
     } catch {
-      now = { title: 'Daylens', summary: '', paused: null }
+      now = { title: 'Daylens', summary: '', paused: null, asking: 0 }
     }
     const items: MenuItemConstructorOptions[] = [{ label: now.title, enabled: false }]
     if (now.summary) items.push({ label: now.summary, enabled: false })
+    if (now.asking > 0) items.push({ label: now.asking === 1 ? 'An assistant is asking you something…' : `Assistants are asking you ${now.asking} things…`, click: () => actions.openToday() })
     items.push({ type: 'separator' })
     if (now.paused) {
       items.push({ label: 'Resume', click: async () => (await actions.resume()) || failed('Daylens couldn’t resume recording.') })

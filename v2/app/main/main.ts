@@ -1,9 +1,12 @@
 // Daylens V2 shell. Owns the window, the menu bar item and launch at login, starts the capture service and the reader
 // in their own processes, and routes the interface's actions. It never opens the database.
-import { BrowserWindow, MessageChannelMain, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
+import { BrowserWindow, MessageChannelMain, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
+import type { AssistantRequest } from '../shared/assistants.ts'
 import type { Action, ActionResult, DayView, Query, ShellState } from '../shared/types.ts'
+import { describeRequest } from '../../storage/assistantRequests.ts'
+import { AssistantRequests } from './assistantRequests.ts'
 import { Capture } from './capture.ts'
 import { chrome, followTheme } from './chrome.ts'
 import { onKeyChange, savedKey } from './ipc/ai.ts'
@@ -69,7 +72,7 @@ function startReader(): void {
     if (typeof data?.id === 'number') {
       queries.get(data.id)?.(data)
       queries.delete(data.id)
-    }
+    } else if (data?.e === 'changed' && (data.kinds as string[]).some((k) => k === 'assistant_request' || k === 'connected' || k === 'reset')) void requests.refresh()
   })
   port2.start()
   reader.on('exit', (code) => {
@@ -183,6 +186,19 @@ function clockLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
+const requests = new AssistantRequests({
+  pending: () => query<AssistantRequest[]>({ q: 'assistant_requests' }),
+  control: (op) => capture.request(op),
+  act: (a) => act(ctx, a),
+  notify: (r) => {
+    if (!Notification.isSupported()) return
+    const n = new Notification({ title: `${r.assistant} asks Daylens`, body: `${describeRequest(r.change)}. Open Daylens to answer.` })
+    n.on('click', showToday)
+    n.show()
+  },
+  log,
+})
+
 const ctx: Ctx = {
   capture,
   win: () => win,
@@ -190,6 +206,7 @@ const ctx: Ctx = {
   savePrefs,
   pushShell,
   quit: () => void quit(),
+  requests,
 }
 
 async function quit(): Promise<void> {
@@ -242,6 +259,8 @@ app.whenReady().then(() => {
   capture.on('activity', () => reader?.postMessage({ type: 'activity' }))
   capture.start()
   startReader()
+  // Requests filed while Daylens was closed: those still in time run or show, the rest expire.
+  void requests.refresh()
   // Opened at login, Daylens starts in the menu bar; the window opens from there or from the Dock.
   if (!(app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin)) win = createWindow()
   if (!BENCH) {
@@ -253,7 +272,8 @@ app.whenReady().then(() => {
         const names = h ? h.title ?? h.facts.apps.slice(0, 3).map((x) => x.name).join(' · ') : ''
         const title = h ? `${hourLabel(h.start_ms)}${names ? ` · ${names}` : ''}` : 'Daylens'
         const summary = rec.pause ? (rec.pause.until_ms ? `Paused until ${clockLabel(rec.pause.until_ms)}` : 'Paused until you resume') : 'Recording now'
-        return { title, summary, paused: rec.pause }
+        const asking = (await query<AssistantRequest[]>({ q: 'assistant_requests' }).catch(() => [])).filter((r) => r.state === 'pending').length
+        return { title, summary, paused: rec.pause, asking }
       },
       pause: async (until) => (await act(ctx, { a: 'pause', until })).ok,
       resume: async () => (await act(ctx, { a: 'resume' })).ok,

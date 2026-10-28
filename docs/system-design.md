@@ -32,8 +32,8 @@ The interface never waits on AI, the network, or a long query. Background work r
    ┌────┼──────────────┬─────────────┬──────────────┐
    ▼    ▼              ▼             ▼              ▼
  Engine  Search index  Interface    MCP server     Day notes
- (writes hours)        (calendar,    (assistants,   (optional files)
-   │                    Ask, Apps)   read only)
+ (writes hours)        (calendar,    (assistants;   (optional files)
+   │                    Ask, Apps)   writes on a yes)
    ▼
  AI provider: Daylens AI, own key, local CLI, or none
 ```
@@ -189,10 +189,10 @@ Search runs on the local full-text index and works without AI. Results are group
 
 ## Assistants
 
-A read-only MCP server lets any MCP app read days, hours, search results and sources.
+An MCP server lets any MCP app read days, hours, apps, search results and sources, and ask Daylens to change what a person can change in the app.
 
 - Known clients on the machine (Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet. ChatGPT's apps connect only to remote servers, so they can't use this one.
-- The server has no tools that change anything. Each tool says so to the client (`readOnlyHint`).
+- Reads change nothing and say so to the client (`readOnlyHint`). Writes never change the record themselves: each files a request (below).
 - Every read is logged and shown in Settings, under the name the client gives itself when it connects.
 - Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting.
 
@@ -207,6 +207,18 @@ A read-only MCP server lets any MCP app read days, hours, search results and sou
 - **Tools.** Seven reads, one per thing a person looks at in the app. `get_status`: today's date and zone, recording, paused, stopped or not running (Daylens quit, or no heartbeat for 10 minutes), where they left off, the built-in exclusions and how many the person added (never what they excluded), and retention. `list_days`: the week and month views (per day, time, top apps and each hour's title). `get_day`: one day, hour by hour, with each hour's longest windows, pages and files. `get_hour`: one hour in full. `get_apps`: the Apps screen, all apps or one in detail. `search`. `get_agent_work`: Claude Code and Codex sessions. Like every screen, none shows anything past the retention period, even before pruning removes it. The hour reads (`list_days`, `get_day`, `get_hour`) leave out the hour the cutoff falls in.
 - **Limits.** Search returns up to 10 results per group. A call that reads a span of days (`list_days`, `get_apps`, `get_agent_work`) takes at most 31; search covers every day unless given a span.
 - **Connecting.** `v2/mcp/clients.ts` finds Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI by the folder each makes when it first runs, and adds a `daylens` entry to each one's own config file, replacing an older Daylens entry and keeping everything else. A file that isn't plain JSON (comments, a typo) is reported and never rewritten. Any other app gets a snippet to paste. ChatGPT's desktop app only connects to remote servers, so it can't use this one. A check starts the server as a client would and lists its tools. From the command line: `node v2/mcp/connect.ts` (`--all`, `--app <id>`, `--remove <id>`, `--snippet`, `--check`, `--installed <Daylens.app or install folder>`).
+- **Writes.** Captured titles are untrusted, and an assistant can be steered by a page that says "delete today", so the rule is: an assistant may make Daylens record less, reversibly, on its own; anything that deletes, records more or changes what the record says needs the person's yes in Daylens.
+
+  | Tool | Runs | Why |
+  |---|---|---|
+  | `set_recording` pause (an hour, until tomorrow) | at once | records less, ends on its own, shows in the menu bar |
+  | `set_exclusion` add an app or site | at once | records less, undone in Settings |
+  | `set_recording` resume, `set_exclusion` remove | on a yes | would record a moment the person paused or excluded on purpose |
+  | `correct_hour` | on a yes | corrections win everywhere and are the only text the writer trusts as evidence |
+  | `delete_records` (last minutes, a span, an app, a site, everything) | on a yes | can't be undone |
+  | `set_retention` | on a yes | shortening deletes |
+
+  The tool files a request in `assistant_requests` (`storage/assistantRequests.ts`), which announces it like any change. The app's main process (`app/main/assistantRequests.ts`) claims it and carries it out through the same action as the app's own buttons: at once for the first two rows, otherwise only after the person answers a card in Daylens's window (also announced by a notification and the menu bar). The card's wording is built from the request's fields, never from the assistant's words, with names and text quoted. A request runs at most once and never after 10 minutes; one that needs no yes but finds Daylens closed is refused, not queued. The tool waits up to 5 seconds for a no-yes change and 45 seconds for an answer, then returns what happened or that it is still waiting; `get_status` lists the last day's requests and how each ended. Settled requests are kept a day, then removed.
 - **Protocol.** MCP 2025-06-18, 2025-03-26 and 2024-11-05; a client asking for another version gets the newest.
 
 ## AI access

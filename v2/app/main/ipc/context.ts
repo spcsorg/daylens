@@ -1,6 +1,7 @@
 // What an action handler can reach in the shell. Each screen's actions live in their own file under ipc/.
 import type { BrowserWindow } from 'electron'
 import type { Action, ActionResult, Query } from '../../shared/types.ts'
+import type { AssistantRequests } from '../assistantRequests.ts'
 import type { Capture } from '../capture.ts'
 import type { Prefs } from '../prefs.ts'
 
@@ -11,6 +12,7 @@ export interface Ctx {
   savePrefs(next: Partial<Prefs>): void
   pushShell(): void
   quit(): void
+  requests: AssistantRequests
 }
 
 export type ActionHandlers<A extends Action> = { [K in A['a']]: (ctx: Ctx, a: Extract<A, { a: K }>) => Promise<ActionResult> }
