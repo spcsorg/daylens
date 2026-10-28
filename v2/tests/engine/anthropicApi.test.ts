@@ -91,3 +91,20 @@ test('the person\u2019s key is the only credential sent, and only to the API, wh
     await Promise.all([api.close(), other.close()])
   }
 })
+
+test('headers the environment adds through ANTHROPIC_CUSTOM_HEADERS can neither add a credential nor replace the key', async () => {
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{}'] }))
+  const saved = process.env.ANTHROPIC_CUSTOM_HEADERS
+  process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer someone-elses-token\nx-api-key: someone-elses-key\nX-Route: elsewhere'
+  try {
+    assert.equal((await anthropicClient('claude-haiku-5-5', { apiKey: 'sk-mine', baseURL: api.url, timeoutMs: 5000 })({ message: 'hi' })).error, null)
+    const { headers } = api.seen[0]!
+    assert.equal(headers['x-api-key'], 'sk-mine')
+    assert.equal(headers.authorization, undefined)
+    assert.equal(headers['x-route'], undefined)
+  } finally {
+    if (saved === undefined) delete process.env.ANTHROPIC_CUSTOM_HEADERS
+    else process.env.ANTHROPIC_CUSTOM_HEADERS = saved
+    await api.close()
+  }
+})
