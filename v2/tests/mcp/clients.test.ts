@@ -21,8 +21,8 @@ test('only apps that have run on the computer are listed, at each platform’s o
   mkdirSync(path.join(mac.home, 'Library', 'Application Support', 'Claude'), { recursive: true })
   mkdirSync(path.join(mac.home, '.cursor'))
   assert.deepEqual(detect(SPEC, mac).map((c) => [c.id, c.state, path.relative(mac.home, c.file)]), [
-    ['claude', 'not_connected', 'Library/Application Support/Claude/claude_desktop_config.json'],
-    ['cursor', 'not_connected', '.cursor/mcp.json'],
+    ['claude', 'not_connected', path.join('Library', 'Application Support', 'Claude', 'claude_desktop_config.json')],
+    ['cursor', 'not_connected', path.join('.cursor', 'mcp.json')],
   ])
 
   const win = home('win32')
@@ -141,7 +141,8 @@ test('the check starts the server as a client would and lists its tools', async 
   assert.deepEqual(notMcp, { ok: false, error: 'not an MCP server: hello' })
 })
 
-test('a config file keeps its permissions, and a symlinked one is written where it points', () => {
+// Windows has no POSIX modes, and symlinks there need a privilege most accounts lack.
+test('a config file keeps its permissions, and a symlinked one is written where it points', { skip: process.platform === 'win32' }, () => {
   const w = home('darwin')
   const file = path.join(w.home, '.claude.json')
   put(file, '{}')

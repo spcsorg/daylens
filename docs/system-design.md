@@ -191,7 +191,7 @@ Search runs on the local full-text index and works without AI. Results are group
 
 A read-only MCP server lets any MCP app read days, hours, search results and sources.
 
-- Known clients on the machine (Claude, Claude Code, Codex, Cursor, ChatGPT, VS Code and others) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet.
+- Known clients on the machine (Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet. ChatGPT's apps connect only to remote servers, so they can't use this one.
 - The server has no tools that change anything. Each tool says so to the client (`readOnlyHint`).
 - Every read is logged and shown in Settings, under the name the client gives itself when it connects.
 - Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting.
