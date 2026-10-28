@@ -128,7 +128,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   }
 
   return (
-    <div className={`search-scrim${closing ? ' closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div className={`scrim${closing ? ' closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="search-panel" role="dialog" aria-modal="true" aria-label="Search" onKeyDown={onPanelKey}>
         <div className="search-field">
           <Icon name="search" size={20} />
