@@ -66,7 +66,7 @@ Current choice, on your own Anthropic key:
 | Job | Model | Why |
 |---|---|---|
 | Writing hours | Claude Opus 5.5 (`claude-opus-5-5`), default effort | Most correct on the gold day: 10 of 16 hours right minus wrong, against 9 for Sonnet 5.5 and 6 for facts alone, with the fewest unsupported claims. About $0.59 for a 16-hour day; it runs in the background, so its 12 s per hour doesn't matter. |
-| Answering Ask | Claude Opus 5.5 (`claude-opus-5-5`), low effort | Ask's evaluation (18 questions on the invented day, each asked twice) judges answers the way a person would want to hear them. Opus 5.5 at low effort passes 15 to 17 of 18 where Sonnet 5.5 passes about 11, at about 3 s to the first sentence and 3 to 5.5 s to the whole answer, about a second slower than Sonnet. |
+| Answering Ask | Claude Opus 5.5 (`claude-opus-5-5`), low effort | Ask's evaluation (18 questions on the invented day, each asked twice) judges answers the way a person would want to hear them. Opus 5.5 at low effort passes all 18 on most runs where Sonnet 5.5 passes about 11. Before a summary or a how-long answer it lists the pieces of work and their minutes, so the same question gets the same pieces; that puts a summary's first sentence at about 4 to 6 s, other answers at about 2 to 3 s. |
 
 Both choices rest on one gold day and are rerun on the next. The subscription command-line route (Claude Code or Codex run headlessly) was tried and dropped: a call takes several seconds longer, nothing streams, and it needs a signed-in tool on the machine.
 
