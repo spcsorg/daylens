@@ -33,6 +33,15 @@ export interface AskReply {
   cost_micro_usd: number
 }
 
+/** A call that failed after the provider billed it: the usage is still recorded. */
+export class ModelError extends Error {
+  readonly billed: Omit<AskReply, 'output'> | null
+  constructor(message: string, billed: Omit<AskReply, 'output'> | null) {
+    super(message)
+    this.billed = billed
+  }
+}
+
 export interface AskModel {
   // Shown in the log, as "Ask (<name>)".
   name: string
@@ -517,13 +526,16 @@ export async function ask(
       }
     : undefined
 
+  const billed = (b: Omit<AskReply, 'output'>) =>
+    deps.log.recordUsage({ kind: 'answer', provider: deps.model!.provider, model: b.model, input_tokens: b.input_tokens, output_tokens: b.output_tokens, cost_micro_usd: b.cost_micro_usd, ref: `read:${readId}` })
   let reply: AskReply
   try {
     reply = await deps.model.run({ system: SYSTEM_PROMPT, prompt: JSON.stringify(record), schema: ANSWER_SCHEMA }, onText)
   } catch (err) {
+    if (err instanceof ModelError && err.billed) billed(err.billed)
     throw new AskError('ai_failed', `${deps.model.name} did not answer: ${(err as Error).message}`)
   }
-  deps.log.recordUsage({ kind: 'answer', provider: deps.model.provider, model: reply.model, input_tokens: reply.input_tokens, output_tokens: reply.output_tokens, cost_micro_usd: reply.cost_micro_usd, ref: `read:${readId}` })
+  billed(reply)
 
   const out = reply.output as { answerable?: unknown; statements?: unknown; missing?: unknown } | null
   if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`)

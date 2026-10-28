@@ -593,6 +593,24 @@ test('a failed AI call is reported, not swallowed, and nothing is charged', asyn
   s.close()
 })
 
+test('a refused or cut-off answer is reported as a failure, and what the provider billed for it is still recorded', async () => {
+  const s = setup()
+  const stops = ['refusal', 'max_tokens'] as const
+  let call = 0
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{"answerable":true,'], stop: stops[call++]! }))
+  try {
+    const model = anthropicApi('claude-sonnet-5-5', { apiKey: 'sk-test', baseURL: api.url, timeoutMs: 5000 })
+    await assert.rejects(ask('budget yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS), (e: AskError) => e.reason === 'ai_failed' && /declined to answer/.test(e.message))
+    await assert.rejects(ask('budget yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS), (e: AskError) => e.reason === 'ai_failed' && /cut off/.test(e.message))
+    const reads = s.reads()
+    assert.deepEqual(s.usage(), reads.map((r) => ({ kind: 'answer', provider: 'anthropic', model: 'claude-sonnet-5-5', input_tokens: 1200, output_tokens: 300, ref: `read:${r.id}` })))
+    assert.equal(reads.length, 2)
+  } finally {
+    await api.close()
+    s.close()
+  }
+})
+
 test('days named in a question resolve to local days; the rest of the question is what search looks for', () => {
   const now = new Date(2030, 9, 23, 15, 0).getTime() // a Wednesday
   const day = (y: number, m: number, d: number) => new Date(y, m - 1, d).getTime()
