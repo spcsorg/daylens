@@ -96,7 +96,7 @@ export function AiTab() {
               {testing ? 'Testing…' : 'Test'}
             </Button>
             <Button
-              kind="danger"
+              kind="quiet"
               onClick={async () => {
                 await act({ a: 'ai_key_clear' })
                 setNote(null)
