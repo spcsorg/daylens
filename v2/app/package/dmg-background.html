@@ -1,0 +1,403 @@
+<!doctype html>
+<!-- The DMG window background. Open in a browser to preview; dmg-background.cjs renders it to PNG at 1x and 2x. -->
+<meta charset="utf-8" />
+<title>Daylens DMG background</title>
+<style>
+  body { margin: 0; background: #222; display: grid; place-items: center; min-height: 100vh; }
+  canvas { width: 660px; height: 520px; }
+</style>
+<canvas id="c"></canvas>
+<script>
+  const W = 660
+  // The Finder window takes this size, and macOS 26 draws 68pt of title bar and toolbar over it, plus path and status
+  // bars when they are on. Keep the art in the top 380pt so it stays in view either way.
+  const H = 520
+  const INK = '#1b1c20'
+  const ACCENT = '#d9731a'
+
+  // Seeded so every render is identical.
+  function rng(seed) {
+    return () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      return seed / 4294967296
+    }
+  }
+
+  function layer(w, h, s) {
+    const c = document.createElement('canvas')
+    c.width = Math.round(w * s)
+    c.height = Math.round(h * s)
+    const ctx = c.getContext('2d')
+    ctx.scale(s, s)
+    return { c, ctx }
+  }
+
+  function bloom(ctx, x, y, r, color, alpha) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+    g.addColorStop(0, color)
+    g.addColorStop(1, color.replace(/[\d.]+\)$/, '0)'))
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, W, H)
+    ctx.globalAlpha = 1
+  }
+
+  function grain(ctx, w, h, s, amount, seed) {
+    const { c, ctx: g } = layer(w, h, s)
+    const img = g.createImageData(c.width, c.height)
+    const rand = rng(seed)
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = rand() * 255
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v
+      img.data[i + 3] = 255
+    }
+    g.putImageData(img, 0, 0)
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.globalAlpha = amount
+    ctx.globalCompositeOperation = 'soft-light'
+    ctx.drawImage(c, 0, 0)
+    ctx.restore()
+  }
+
+  // A brush stroke along sampled points, tapering in and out.
+  function brush(ctx, pts, width, taperIn, taperOut, rand) {
+    const n = pts.length
+    const left = []
+    const right = []
+    for (let i = 0; i < n; i++) {
+      const a = pts[Math.max(0, i - 1)]
+      const b = pts[Math.min(n - 1, i + 1)]
+      const dx = b[0] - a[0]
+      const dy = b[1] - a[1]
+      const len = Math.hypot(dx, dy) || 1
+      const t = i / (n - 1)
+      const taper = Math.min(1, t / taperIn, (1 - t) / taperOut)
+      const w = (width / 2) * (0.35 + 0.65 * Math.sqrt(Math.max(0, taper))) * (0.94 + rand() * 0.12)
+      left.push([pts[i][0] - (dy / len) * w, pts[i][1] + (dx / len) * w])
+      right.push([pts[i][0] + (dy / len) * w, pts[i][1] - (dx / len) * w])
+    }
+    ctx.beginPath()
+    ctx.moveTo(left[0][0], left[0][1])
+    for (const p of left) ctx.lineTo(p[0], p[1])
+    for (let i = n - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1])
+    ctx.closePath()
+    ctx.fill()
+    for (const p of [pts[0], pts[n - 1]]) {
+      ctx.beginPath()
+      ctx.arc(p[0], p[1], width * 0.18, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  function bezier(segments, steps) {
+    const pts = []
+    for (const [p0, p1, p2, p3] of segments) {
+      for (let i = pts.length ? 1 : 0; i <= steps; i++) {
+        const t = i / steps
+        const u = 1 - t
+        pts.push([
+          u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+          u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
+        ])
+      }
+    }
+    return pts
+  }
+
+  // ---------- stamp art, each drawn into a 92 x 68 frame ----------
+
+  function morning(ctx, rand) {
+    const sky = ctx.createLinearGradient(0, 0, 0, 68)
+    sky.addColorStop(0, '#f6e6d6')
+    sky.addColorStop(1, '#f0c3ae')
+    ctx.fillStyle = sky
+    ctx.fillRect(0, 0, 92, 68)
+    const glow = ctx.createRadialGradient(60, 40, 4, 60, 40, 34)
+    glow.addColorStop(0, 'rgba(255, 214, 160, 0.9)')
+    glow.addColorStop(1, 'rgba(255, 214, 160, 0)')
+    ctx.fillStyle = glow
+    ctx.fillRect(0, 0, 92, 68)
+    ctx.fillStyle = ACCENT
+    ctx.beginPath()
+    ctx.arc(60, 40, 11, 0, Math.PI * 2)
+    ctx.fill()
+    const hill = (y, amp, phase, color) => {
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.moveTo(0, 68)
+      for (let x = 0; x <= 92; x += 2) ctx.lineTo(x, y + amp * Math.sin((x / 92) * Math.PI * 1.6 + phase))
+      ctx.lineTo(92, 68)
+      ctx.fill()
+    }
+    hill(42, 4, 0.4, '#d9c7b4')
+    hill(48, 5, 2.2, '#b9c4a4')
+    hill(55, 5, 4.1, '#8fa785')
+    ctx.fillStyle = '#f4e8d2'
+    ctx.beginPath()
+    ctx.moveTo(30, 68)
+    ctx.bezierCurveTo(38, 62, 52, 60, 54, 56)
+    ctx.bezierCurveTo(55, 58, 46, 63, 42, 68)
+    ctx.fill()
+    ctx.fillStyle = '#5f7a5c'
+    ctx.fillRect(73.2, 45, 1.4, 7)
+    ctx.beginPath()
+    ctx.ellipse(74, 45, 7, 2.4, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(60, 52, 48, 0.7)'
+    ctx.lineWidth = 0.8
+    ctx.lineCap = 'round'
+    for (const [bx, by, k] of [[20, 16, 1], [27, 12, 0.8], [31, 19, 0.7]]) {
+      ctx.beginPath()
+      ctx.moveTo(bx - 2.6 * k, by + 0.6 * k)
+      ctx.quadraticCurveTo(bx - 1.2 * k, by - 1.6 * k, bx, by)
+      ctx.quadraticCurveTo(bx + 1.2 * k, by - 1.6 * k, bx + 2.6 * k, by + 0.6 * k)
+      ctx.stroke()
+    }
+  }
+
+  function evening(ctx, rand) {
+    ctx.fillStyle = '#34405a'
+    ctx.fillRect(0, 0, 92, 68)
+    ctx.fillStyle = '#25304a'
+    ctx.beginPath()
+    ctx.roundRect(52, 8, 32, 26, 2)
+    ctx.fill()
+    ctx.fillStyle = '#f6e1b0'
+    ctx.beginPath()
+    ctx.arc(76, 16, 3.4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#25304a'
+    ctx.beginPath()
+    ctx.arc(77.6, 14.8, 3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(250, 240, 214, 0.9)'
+    for (const [sx, sy, r] of [[58, 14, 0.6], [64, 24, 0.5], [70, 12, 0.45], [60, 29, 0.4], [80, 27, 0.5]]) {
+      ctx.beginPath()
+      ctx.arc(sx, sy, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.strokeStyle = '#1f2940'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(68, 8)
+    ctx.lineTo(68, 34)
+    ctx.stroke()
+    const lamp = ctx.createRadialGradient(22, 40, 2, 22, 40, 34)
+    lamp.addColorStop(0, 'rgba(255, 200, 130, 0.75)')
+    lamp.addColorStop(1, 'rgba(255, 200, 130, 0)')
+    ctx.fillStyle = lamp
+    ctx.fillRect(0, 0, 92, 68)
+    const screen = ctx.createRadialGradient(48, 38, 2, 48, 38, 26)
+    screen.addColorStop(0, 'rgba(255, 222, 170, 0.6)')
+    screen.addColorStop(1, 'rgba(255, 222, 170, 0)')
+    ctx.fillStyle = screen
+    ctx.fillRect(0, 0, 92, 68)
+    ctx.fillStyle = '#8a5a40'
+    ctx.fillRect(0, 50, 92, 18)
+    ctx.fillStyle = '#a56c4c'
+    ctx.fillRect(0, 50, 92, 2.4)
+    ctx.fillStyle = '#2a2f3d'
+    ctx.fillRect(21.3, 34, 1.6, 16)
+    ctx.fillRect(16, 49, 12, 1.6)
+    ctx.fillStyle = ACCENT
+    ctx.beginPath()
+    ctx.moveTo(15, 35)
+    ctx.lineTo(29, 35)
+    ctx.lineTo(26, 27)
+    ctx.lineTo(18, 27)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#20242f'
+    ctx.beginPath()
+    ctx.roundRect(36, 30, 26, 18, 1.6)
+    ctx.fill()
+    ctx.fillStyle = '#fff3dc'
+    ctx.beginPath()
+    ctx.roundRect(38, 32, 22, 14, 0.8)
+    ctx.fill()
+    // A day's hours on the laptop screen.
+    ctx.fillStyle = 'rgba(217, 115, 26, 0.85)'
+    ctx.fillRect(41, 35, 12, 1.6)
+    ctx.fillStyle = 'rgba(52, 64, 90, 0.55)'
+    ctx.fillRect(41, 38.6, 16, 1.6)
+    ctx.fillRect(41, 42.2, 9, 1.6)
+    ctx.fillStyle = '#171a22'
+    ctx.beginPath()
+    ctx.roundRect(33, 48, 32, 2.4, 1)
+    ctx.fill()
+    ctx.fillStyle = '#f3ece0'
+    ctx.beginPath()
+    ctx.roundRect(72, 42, 7, 8, 1.4)
+    ctx.fill()
+    ctx.strokeStyle = '#f3ece0'
+    ctx.lineWidth = 1.1
+    ctx.beginPath()
+    ctx.arc(79.4, 45.6, 2, -Math.PI / 2, Math.PI / 2)
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(243, 236, 224, 0.55)'
+    ctx.lineWidth = 0.7
+    for (const ox of [74.2, 76.8]) {
+      ctx.beginPath()
+      ctx.moveTo(ox, 40)
+      ctx.bezierCurveTo(ox - 1.2, 38, ox + 1.2, 36.5, ox, 34.5)
+      ctx.stroke()
+    }
+  }
+
+  function stamp(s, art, seed) {
+    const SW = 104
+    const SH = 80
+    const M = 6
+    const { c, ctx } = layer(SW, SH, s)
+    ctx.fillStyle = '#fffdf8'
+    ctx.fillRect(0, 0, SW, SH)
+    ctx.save()
+    ctx.translate(M, M)
+    ctx.beginPath()
+    ctx.rect(0, 0, SW - 2 * M, SH - 2 * M)
+    ctx.clip()
+    art(ctx, rng(seed))
+    ctx.restore()
+    grain(ctx, SW, SH, s, 0.22, seed + 1)
+    ctx.strokeStyle = 'rgba(40, 30, 20, 0.12)'
+    ctx.lineWidth = 0.5
+    ctx.strokeRect(M, M, SW - 2 * M, SH - 2 * M)
+    // Perforations: bite half-circles out of every edge.
+    ctx.globalCompositeOperation = 'destination-out'
+    const r = 2.5
+    const step = 6.4
+    const holes = []
+    for (let x = step / 2; x < SW; x += step) holes.push([x, 0], [x, SH])
+    for (let y = step / 2; y < SH; y += step) holes.push([0, y], [SW, y])
+    for (const [x, y] of holes) {
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    return { c, w: SW, h: SH }
+  }
+
+  function place(ctx, s, item, x, y, deg, shadow) {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate((deg * Math.PI) / 180)
+    ctx.shadowColor = shadow.color
+    ctx.shadowBlur = shadow.blur * s
+    ctx.shadowOffsetY = shadow.y * s
+    const k = item.k || 1
+    ctx.drawImage(item.c, (-item.w * k) / 2, (-item.h * k) / 2, item.w * k, item.h * k)
+    ctx.restore()
+  }
+
+  function postmark(ctx, x, y) {
+    ctx.save()
+    ctx.globalCompositeOperation = 'multiply'
+    ctx.strokeStyle = 'rgba(52, 46, 44, 0.55)'
+    ctx.lineCap = 'round'
+    ctx.lineWidth = 1.3
+    ctx.beginPath()
+    ctx.arc(x, y, 19, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.lineWidth = 0.7
+    ctx.beginPath()
+    ctx.arc(x, y, 15.5, 0, Math.PI * 2)
+    ctx.stroke()
+    // A sun on the horizon in the middle of the ring.
+    ctx.lineWidth = 1.1
+    ctx.beginPath()
+    ctx.arc(x, y + 3, 6, Math.PI, 0)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(x - 10, y + 3)
+    ctx.lineTo(x + 10, y + 3)
+    ctx.stroke()
+    ctx.lineWidth = 1.2
+    ctx.strokeStyle = 'rgba(52, 46, 44, 0.42)'
+    for (let i = 0; i < 4; i++) {
+      const yy = y - 9 + i * 6
+      // Each wave skips a short stretch, like ink that didn't take.
+      const gap = x + 40 + i * 11
+      ctx.beginPath()
+      for (let xx = x + 24; xx <= x + 86; xx += 1) {
+        const v = yy + 2.2 * Math.sin((xx - x) / 4.2)
+        if (xx === x + 24 || xx === gap + 5) ctx.moveTo(xx, v)
+        else if (xx < gap || xx > gap + 5) ctx.lineTo(xx, v)
+      }
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  function draw(s) {
+    const canvas = document.getElementById('c')
+    canvas.width = W * s
+    canvas.height = H * s
+    const ctx = canvas.getContext('2d')
+    ctx.setTransform(s, 0, 0, s, 0, 0)
+
+    ctx.fillStyle = '#fbf6f0'
+    ctx.fillRect(0, 0, W, H)
+    bloom(ctx, 90, 400, 340, 'rgba(242, 210, 199, 1)', 0.95)
+    bloom(ctx, 600, 60, 300, 'rgba(249, 222, 190, 1)', 0.9)
+    bloom(ctx, 380, 470, 250, 'rgba(244, 196, 188, 1)', 0.55)
+    bloom(ctx, 30, 10, 230, 'rgba(219, 232, 240, 1)', 0.75)
+    bloom(ctx, 660, 320, 200, 'rgba(226, 234, 238, 1)', 0.45)
+
+    // The sun, rising from the lower left.
+    const sun = ctx.createRadialGradient(36, 452, 60, 36, 452, 128)
+    sun.addColorStop(0, 'rgba(236, 150, 88, 0.6)')
+    sun.addColorStop(0.97, 'rgba(242, 176, 124, 0.5)')
+    sun.addColorStop(1, 'rgba(242, 176, 124, 0)')
+    ctx.fillStyle = sun
+    ctx.beginPath()
+    ctx.arc(36, 452, 128, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Calendar paper.
+    ctx.strokeStyle = 'rgba(27, 28, 32, 0.045)'
+    ctx.lineWidth = 0.5
+    for (let x = 22; x < W; x += 22) {
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, H)
+      ctx.stroke()
+    }
+    for (let y = 22; y < H; y += 22) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(W, y)
+      ctx.stroke()
+    }
+
+    grain(ctx, W, H, s, 0.32, 11)
+
+    const paper = { color: 'rgba(70, 40, 20, 0.22)', blur: 10, y: 4 }
+    const K = 1.12
+    place(ctx, s, { ...stamp(s * K, morning, 3), k: K }, 96, 74, -6, paper)
+    postmark(ctx, 154, 98)
+    place(ctx, s, { ...stamp(s * K, evening, 5), k: K }, 588, 336, -6, paper)
+
+    // The hand-drawn arrow from Daylens to Applications.
+    const rand = rng(29)
+    ctx.fillStyle = INK
+    const line = bezier(
+      [
+        [[262, 216], [272, 200], [292, 192], [312, 195]],
+        [[312, 195], [334, 198], [336, 220], [320, 221]],
+        [[320, 221], [304, 222], [304, 200], [326, 193]],
+        [[326, 193], [348, 186], [374, 188], [398, 190]],
+      ],
+      60,
+    )
+    brush(ctx, line, 6.6, 0.08, 0.02, rand)
+    brush(ctx, bezier([[[398, 190], [392, 185], [385, 181], [377, 176]]], 30), 6, 0.02, 0.5, rand)
+    brush(ctx, bezier([[[398, 190], [392, 195], [385, 200], [378, 205]]], 30), 6, 0.02, 0.5, rand)
+  }
+
+  window.render = (s) => {
+    draw(s)
+    return document.getElementById('c').toDataURL('image/png')
+  }
+  draw(2)
+</script>
