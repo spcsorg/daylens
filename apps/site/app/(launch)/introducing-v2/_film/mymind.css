@@ -530,7 +530,7 @@
 }
 
 .mm-thinking span {
-  background: linear-gradient(90deg, #8a9097 0%, #8a9097 40%, #e3e6ea 50%, #8a9097 60%, #8a9097 100%) no-repeat;
+  background: linear-gradient(90deg, #8a9097 0%, #8a9097 40%, #c4c9cf 50%, #8a9097 60%, #8a9097 100%);
   background-size: 440px 100%;
   background-clip: text;
   color: transparent;
