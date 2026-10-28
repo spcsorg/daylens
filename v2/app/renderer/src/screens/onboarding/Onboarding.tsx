@@ -71,16 +71,16 @@ export function Onboarding({ shell, onDone }: { shell: ShellState | null; onDone
         <p className="ob-detail">Pause or delete any time from the menu bar.</p>
         <div className="ob-actions">
           {allowed ? (
-            <Button kind="primary" size="regular" onClick={() => setStep('morning')}>
+            <Button kind="primary" size="large" enter onClick={() => setStep('morning')}>
               Continue
             </Button>
           ) : (
             <>
-              <Button kind="primary" size="regular" onClick={() => void openSettings()}>
+              <Button kind="primary" size="large" enter onClick={() => void openSettings()}>
                 Open System Settings
               </Button>
               {visited && (
-                <Button size="regular" onClick={() => setStep('morning')}>
+                <Button size="large" onClick={() => setStep('morning')}>
                   Continue without
                 </Button>
               )}
@@ -157,7 +157,8 @@ function Morning({ onBack, onDone }: { onBack?: () => void; onDone: () => void }
         <div>
           <Button
             kind="primary"
-            size="regular"
+            size="large"
+            enter
             onClick={async () => {
               await act({ a: 'onboarded' })
               onDone()
