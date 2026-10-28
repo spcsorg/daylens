@@ -487,7 +487,7 @@ export class Storage {
   /** Deletes one site (and its subdomains), in a range or across all time. */
   deleteSite(site: string, range?: { from_wall_ms: number; to_wall_ms: number }): DeletionHandle {
     const s = siteName(site) ?? site.toLowerCase()
-    return this.delete({ kind: 'site', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? null, app_id: null, site: s })
+    return this.delete({ kind: 'site', from_wall_ms: range?.from_wall_ms ?? null, to_wall_ms: range?.to_wall_ms ?? this.now(), app_id: null, site: s })
   }
 
   private delete(t: Omit<Tombstone, 'id' | 'state'>, everything = false): DeletionHandle {

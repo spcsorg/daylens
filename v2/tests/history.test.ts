@@ -411,3 +411,37 @@ test('a day known only from history is marked in the calendar, shows in the week
   hist.close()
   r.close()
 })
+
+test('deleting a site removes its visits so far; visits after the deletion are recorded, as after deleting an app', async () => {
+  const { r, hist, reader, visits } = setup()
+  r.clock.t = NOON
+  r.storage.start()
+  chromiumVisit(hist, { url: 'https://recipes.example/soup', title: 'Soup', at: NOON - HOUR })
+  await reader().readAll()
+  await r.storage.deleteSite('recipes.example').done
+  assert.deepEqual(visits(), [])
+  r.clock.t = NOON + HOUR
+  chromiumVisit(hist, { url: 'https://recipes.example/bread', title: 'Bread', at: NOON + HOUR - MIN })
+  await reader().readAll()
+  assert.deepEqual(visits().map((v) => v.url), ['https://recipes.example/bread'])
+  r.close()
+})
+
+test('a site deletion stored without an end ends when it was made', async () => {
+  const { r, home, hist } = setup()
+  r.clock.t = NOON
+  r.storage.start()
+  await r.storage.deleteSite('recipes.example').done
+  const db = r.store.database
+  db.prepare(`UPDATE deletions SET to_wall_ms = NULL WHERE kind = 'site'`).run()
+  db.prepare(`DELETE FROM migrations WHERE name = 'site_deletions_end'`).run()
+  r.close()
+  const r2 = rig(r.dir)
+  r2.clock.t = NOON + HOUR
+  r2.storage.start()
+  chromiumVisit(hist, { url: 'https://recipes.example/bread', title: 'Bread', at: NOON + HOUR - MIN })
+  await new HistoryReader(r2.store, { home, copyDir: path.join(r2.dir, 'history-copy'), intervalMs: 60_000, now: () => r2.clock.t }).readAll()
+  assert.deepEqual(r2.q<{ url: string }>(`SELECT url FROM observations WHERE kind = 'visit'`).map((v) => v.url), ['https://recipes.example/bread'])
+  assert.deepEqual(r2.q(`SELECT to_wall_ms FROM deletions WHERE kind = 'site'`), [{ to_wall_ms: NOON }])
+  r2.close()
+})

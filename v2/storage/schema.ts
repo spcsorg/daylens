@@ -425,6 +425,12 @@ const hourObservations: Migration = {
   up: (db) => db.exec(`ALTER TABLE hours ADD COLUMN observations TEXT NOT NULL DEFAULT '[]'`),
 }
 
+const siteDeletionsEnd: Migration = {
+  name: 'site_deletions_end',
+  // A site deleted with no range was refused forever after; like an app's, the deletion ends when it was made.
+  up: (db) => db.exec(`UPDATE deletions SET to_wall_ms = created_wall_ms WHERE kind = 'site' AND to_wall_ms IS NULL`),
+}
+
 export const STORAGE_MIGRATIONS: readonly Migration[] = [
   changeLogMigration,
   intervals,
@@ -456,4 +462,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   pausesByHolder,
   hourObservations,
   fileNamesWithSpaces,
+  siteDeletionsEnd,
 ]
