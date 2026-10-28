@@ -372,7 +372,7 @@ test('time per app over a span, and one app in detail, as the Apps screen shows 
   assert.equal(read.tool, 'get_apps')
   assert.deepEqual(s.items(read.id).map((i) => i.app_id ?? i.site), ['com.google.chrome', 'docs.example.com'])
 
-  assert.throws(() => runReadTool('get_apps', { from: DATE, to: DATE, app: 'Spreadsheet' }, s.ctx), /no app named Spreadsheet was used then; used: Editor, Chrome, Notes/)
+  assert.throws(() => runReadTool('get_apps', { from: DATE, to: DATE, app: 'Spreadsheet' }, s.ctx), /^Error: no app named Spreadsheet was used then$/)
   s.close()
 })
 
@@ -385,12 +385,20 @@ test('status gives today, recording or paused, where the person left off, and wh
   assert.equal(now.now, '2026-10-16T01:40:00-05:00')
   assert.equal(now.recording, 'recording')
   assert.deepEqual(now.left_off.map((x: { title: string }) => x.title), ['Groceries', 'Budget review', 'Scratch - Editor'])
-  assert.ok(now.excluded.some((e: { kind: string; name: string }) => e.kind === 'site' && e.name === 'bank.example.com'))
+  assert.equal(now.excluded.added_by_person, 1)
+  assert.ok(!JSON.stringify(now).includes('bank.example.com'), 'what the person excluded stays private')
   assert.equal(now.history_kept_days, null)
   s.r.storage.pause(T0 + 2 * HOUR)
   const paused = runReadTool('get_status', {}, s.ctx) as Record<string, any>
   assert.deepEqual([paused.recording, paused.paused_until], ['paused', '2026-10-16T03:00:00-05:00'])
   assert.equal(s.reads().at(-1)!.tool, 'get_status')
+  // The server runs without the app: quit, the status says so rather than "recording".
+  s.r.storage.resume()
+  const db = new Database(path.join(s.r.dir, DB_FILE))
+  db.prepare(`INSERT INTO meta (key, value) VALUES ('service_stopped_wall_ms', ?)`).run(String(T0 + 50 * MIN))
+  db.close()
+  const quit = runReadTool('get_status', {}, s.ctx) as Record<string, any>
+  assert.deepEqual([quit.recording, quit.not_running_since], ['not running', '2026-10-16T01:50:00-05:00'])
   s.close()
 })
 
@@ -408,5 +416,17 @@ test('nothing past the retention period is shown, before pruning has removed it'
   assert.deepEqual([found.pages, found.files, found.windows, found.hours], [[], [], [], []])
   assert.deepEqual((runReadTool('get_apps', { from: DATE, to: DATE }, s.ctx) as { apps: unknown[] }).apps, [])
   assert.equal((runReadTool('get_status', {}, s.ctx) as { history_kept_days: number }).history_kept_days, 7)
+  s.close()
+})
+
+test('the hour the retention cutoff falls in is not shown, since part of it is past the period', () => {
+  const s = setup()
+  s.r.clock.t = T0 + 7 * 86_400_000 + 10 * MIN
+  const db = new Database(path.join(s.r.dir, DB_FILE))
+  db.prepare(`INSERT INTO settings (key, value, updated_wall_ms) VALUES ('retention_days', '7', 0) ON CONFLICT (key) DO UPDATE SET value = excluded.value`).run()
+  db.close()
+  assert.deepEqual((runReadTool('get_day', { date: DATE }, s.ctx) as { hours: unknown[] }).hours, [])
+  assert.deepEqual((runReadTool('list_days', { from: DATE, to: DATE }, s.ctx) as { days: unknown[] }).days, [])
+  assert.equal((runReadTool('get_hour', { date: DATE, hour: 1 }, s.ctx) as { recorded: boolean }).recorded, false)
   s.close()
 })

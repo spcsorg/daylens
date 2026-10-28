@@ -16,7 +16,7 @@ import { search, type OpenAction } from './search.ts'
 export interface ToolLimits {
   // Search results per group.
   perGroup: number
-  // The longest span, in days, list_days and get_agent_work accept.
+  // The longest span, in days, list_days, get_apps and get_agent_work accept.
   maxDays: number
 }
 
@@ -89,14 +89,15 @@ export function localIso(ms: number): string {
 
 const localDay = (ms: number) => localIso(ms).slice(0, 10)
 const minutes = (ms: number) => Math.round(ms / 60_000)
+const NOT_RUNNING_AFTER_MS = 10 * 60_000
 
 /** The screens' reads on the same connection and clock, for what the tools show as the screens do. */
 const screens = (ctx: ToolContext) => new ScreenReader(ctx.reader.db, ctx.now)
 
-/** Hours in [from, to) as the reader gives them, without those wholly past the retention period. */
+/** Hours in [from, to) as the reader gives them, from the first that starts inside the retention period. */
 function keptHours(ctx: ToolContext, from: number, to: number): HourView[] {
   const cutoff = screens(ctx).cutoff()
-  return ctx.reader.hours(cutoff === null ? from : Math.max(from, cutoff - HOUR_MS), to).filter((h) => cutoff === null || h.end_wall_ms > cutoff)
+  return ctx.reader.hours(cutoff === null ? from : Math.max(from, cutoff), to).filter((h) => cutoff === null || h.start_wall_ms >= cutoff)
 }
 
 /** The app an assistant named, by id or name, among those used in the span. */
@@ -106,8 +107,8 @@ function appNamed(apps: readonly { id: string; name: string; ms: number }[], ask
   if (exact) return exact
   const near = apps.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
   if (near.length === 1) return near[0]!
-  const names = (near.length > 1 ? near : apps).map((a) => a.name).join(', ')
-  throw new ToolInputError(near.length > 1 ? `more than one app matches ${asked}: ${names}` : `no app named ${asked} was used then${names ? `; used: ${names}` : ''}`)
+  // No app names here: an error isn't logged as a read, so it may show nothing.
+  throw new ToolInputError(near.length > 1 ? `more than one app matches ${asked}; call get_apps without app to see their names` : `no app named ${asked} was used then`)
 }
 
 /** What a read showed, for its log entry: the hours by id, and every app and site whose activity it showed. */
@@ -283,7 +284,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         start = d.getTime()
       }
       const cutoff = screens(ctx).cutoff()
-      const h = cutoff !== null && start + HOUR_MS <= cutoff ? null : ctx.reader.hourAt(start)
+      const h = cutoff !== null && start < cutoff ? null : ctx.reader.hourAt(start)
       const shown = new Shown()
       if (!h) {
         shown.logged(ctx, mark, 'get_hour', start, start + HOUR_MS)
@@ -401,6 +402,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
           total_minutes: minutes(all.total_ms),
           apps: all.apps.filter((a) => a.ms >= 30_000).map((a) => ({ app_id: a.id, name: a.name, minutes: minutes(a.ms) })),
           per_day: all.per_day.map((d) => ({ date: d.date, minutes: minutes(d.total_ms) })),
+          note: UNTRUSTED,
         }
       }
       if (typeof args.app !== 'string' || args.app.trim() === '') throw new ToolInputError('app must be a name or an app id')
@@ -426,18 +428,23 @@ export const READ_TOOLS: readonly ReadTool[] = [
     name: 'get_status',
     title: 'Today and recording status',
     description:
-      "Start here when you need the date: today's local date, time and time zone; whether Daylens is recording, paused (and until when) or stopped, and any problem with what it can see; the last three things the person had open today (where they left off); and the settings that limit the record: excluded apps and sites, and how many days history is kept. " + UNTRUSTED,
+      "Start here when you need the date: today's local date, time and time zone; whether Daylens is recording, paused (and until when), stopped or not running, and any problem with what it can see; the last three things the person had open today (where they left off); and the settings that limit the record: the built-in exclusions, how many apps and sites the person excluded, and how many days history is kept. " + UNTRUSTED,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run(_args, ctx, mark) {
       const now = (ctx.now ?? Date.now)()
       const sr = screens(ctx)
       const shown = new Shown()
-      const { rec, left, exclusions, retention } = sr.read(() => ({
+      const { rec, left, exclusions, quit, retention } = sr.read(() => ({
         rec: sr.recording(),
         left: leftOff(sr),
-        exclusions: ctx.reader.db.prepare('SELECT match, label, is_default FROM exclusions ORDER BY id').all() as { match: string; label: string; is_default: number }[],
+        exclusions: ctx.reader.db.prepare('SELECT label, is_default FROM exclusions ORDER BY id').all() as { label: string; is_default: number }[],
+        // Set when the capture service stops cleanly, cleared when it starts.
+        quit: ctx.reader.db.prepare(`SELECT value FROM meta WHERE key = 'service_stopped_wall_ms'`).get() as { value: string } | undefined,
         retention: sr.cutoff() === null ? null : Math.round((now - sr.cutoff()!) / 86_400_000),
       }))
+      // The server runs without the app: quit cleanly, or no heartbeat for a while (a crash, or asleep).
+      const quiet = !rec.pause && rec.stopped_since_ms === null && rec.last_heartbeat_ms !== null && now - rec.last_heartbeat_ms > NOT_RUNNING_AFTER_MS
+      const notRunning = quit ? Number(quit.value) : quiet ? rec.last_heartbeat_ms : null
       const problems = [
         ...(rec.titles && rec.titles !== 'ok' ? [`window titles can't be read (${rec.titles.replace('_', ' ')})`] : []),
         ...rec.agents.map((a) => `${a.agent === 'codex' ? 'Codex' : a.agent === 'claude_code' ? 'Claude Code' : a.agent} sessions: ${a.state.replaceAll('_', ' ')}`),
@@ -447,8 +454,8 @@ export const READ_TOOLS: readonly ReadTool[] = [
         now: localIso(now),
         today: localDay(now),
         time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        recording: rec.stopped_since_ms !== null ? 'stopped' : rec.pause ? 'paused' : 'recording',
-        ...(rec.stopped_since_ms !== null ? { stopped_since: localIso(rec.stopped_since_ms) } : {}),
+        recording: notRunning !== null ? 'not running' : rec.stopped_since_ms !== null ? 'stopped' : rec.pause ? 'paused' : 'recording',
+        ...(notRunning !== null ? { not_running_since: localIso(notRunning) } : rec.stopped_since_ms !== null ? { stopped_since: localIso(rec.stopped_since_ms) } : {}),
         ...(rec.pause ? { paused_since: localIso(rec.pause.since_ms), paused_until: rec.pause.until_ms === null ? 'until resumed' : localIso(rec.pause.until_ms) } : {}),
         problems,
         first_day: rec.first_day,
@@ -457,7 +464,8 @@ export const READ_TOOLS: readonly ReadTool[] = [
           shown.page(x.url)
           return { kind: x.kind, title: x.title, app: x.app.name, url: x.url, last_seen: localIso(x.last_ms) }
         }),
-        excluded: exclusions.map((e) => ({ kind: e.match === 'site' ? 'site' : 'app', name: e.label, default: e.is_default === 1 })),
+        // What the person chose to keep out stays private; only the built-in exclusions are named.
+        excluded: { defaults: exclusions.filter((e) => e.is_default === 1).map((e) => e.label), added_by_person: exclusions.filter((e) => e.is_default !== 1).length },
         history_kept_days: retention,
         note: UNTRUSTED,
       }
