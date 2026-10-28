@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { claudeCli, cleanEnv, cliWriter, codexCli, factsHour, noAi, parseClaude, parseCodex, runProcess, type RunResult, type Runner } from '../../engine/backends.ts'
+import { claudeCli, cleanEnv, textWriter, codexCli, factsHour, noAi, parseClaude, parseCodex, runProcess, type RunResult, type Runner } from '../../engine/backends.ts'
 import type { Packet, Ref } from '../../engine/packet.ts'
 import { validateHour } from '../../engine/validate.ts'
 
@@ -78,7 +78,7 @@ test('the CLIs run in the given empty folder with tools off, and never see API k
   }
   const env = cleanEnv({ PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'k', OPENAI_API_KEY: 'k', CLAUDE_EFFORT: 'high', ANTHROPIC_BASE_URL: 'x', CLAUDECODE: '1' })
   assert.deepEqual(env, { PATH: '/bin', HOME: '/h' })
-  await cliWriter(claudeCli('claude-haiku-5-5', { cwd: '/empty', run, env })).write(packet)
+  await textWriter(claudeCli('claude-haiku-5-5', { cwd: '/empty', run, env })).write(packet)
   await codexCli('gpt-6.1-sol', 'low', { cwd: '/empty', instructionsFile: '/i.txt', run, env, allowFileReads: true }).call('hi')
   const [c, x] = calls
   assert.equal(c!.cwd, '/empty')

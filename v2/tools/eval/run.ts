@@ -1,7 +1,8 @@
 // Runs candidate writers on a gold day's frozen packets, grades every hour against its frozen checklist, and
 // summarizes the numbers per model. Gold data and results live outside the repository, in the gold-day folder.
 // Usage:
-//   node tools/eval/run.ts --gold <dir> [--packets <dir>] write <candidate>   (--allow-codex-file-reads for codex)
+//   node tools/eval/run.ts --gold <dir> [--packets <dir>] write <candidate>   (--allow-codex-file-reads for codex;
+//     an api candidate reads its key from DAYLENS_TEST_ANTHROPIC_API_KEY)
 //   node tools/eval/run.ts --gold <dir> --packets <dir> pin       (records which packets existing results were made on)
 //   node tools/eval/run.ts --gold <dir> grade <grader> <candidate>
 //   node tools/eval/run.ts --gold <dir> sample             (hours to check by hand)
@@ -14,7 +15,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { CODEX_READS_FLAG, claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
+import { ANTHROPIC_RATES, CODEX_READS_FLAG, anthropicApi, claudeCli, cleanEnv, cliScratch, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend, textWriter } from '../../engine/backends.ts'
 import type { Packet, Ref } from '../../engine/packet.ts'
 import { WRITER_PROMPT } from '../../engine/prompt.ts'
 import { validateHour, type Validation, type WrittenHour } from '../../engine/validate.ts'
@@ -30,19 +31,21 @@ export const WRITER_TRIES = { attempts: 2, waitMs: 60_000 }
 const GRADER_TRIES = { attempts: 3, waitMs: 0 }
 
 interface Candidate {
-  kind: 'claude' | 'codex' | 'none'
+  kind: 'claude' | 'api' | 'codex' | 'none'
   model: string
   effort: string | null
   rate: Rate | null
 }
 
-// US dollars per million tokens, standard tier. Anthropic: model pricing table (docs.claude.com, as of 2026-10-06).
-// OpenAI: developers.openai.com/api/docs/pricing, read October 2026, short context (up to 272K input tokens).
+// US dollars per million tokens, standard tier. Anthropic: ANTHROPIC_RATES. OpenAI: developers.openai.com/api/docs/pricing, read 2026-10-21, short context (up to 272K input tokens).
 export const CANDIDATES: Record<string, Candidate> = {
-  'haiku-5.5': { kind: 'claude', model: 'claude-haiku-5-5', effort: null, rate: { input: 0.1, output: 0.5 } },
-  'sonnet-5.5': { kind: 'claude', model: 'claude-sonnet-5-5', effort: null, rate: { input: 2, output: 10 } },
-  'opus-5.5': { kind: 'claude', model: 'claude-opus-5-5', effort: null, rate: { input: 4, output: 20 } },
-  'fable-5.1': { kind: 'claude', model: 'claude-fable-5-1', effort: null, rate: { input: 10, output: 50 } },
+  'haiku-5.5': { kind: 'claude', model: 'claude-haiku-5-5', effort: null, rate: ANTHROPIC_RATES['claude-haiku-5-5']! },
+  'sonnet-5.5': { kind: 'claude', model: 'claude-sonnet-5-5', effort: null, rate: ANTHROPIC_RATES['claude-sonnet-5-5']! },
+  'opus-5.5': { kind: 'claude', model: 'claude-opus-5-5', effort: null, rate: ANTHROPIC_RATES['claude-opus-5-5']! },
+  'fable-5.1': { kind: 'claude', model: 'claude-fable-5-1', effort: null, rate: ANTHROPIC_RATES['claude-fable-5-1']! },
+  'haiku-5.5-api': { kind: 'api', model: 'claude-haiku-5-5', effort: null, rate: ANTHROPIC_RATES['claude-haiku-5-5']! },
+  'sonnet-5.5-api': { kind: 'api', model: 'claude-sonnet-5-5', effort: null, rate: ANTHROPIC_RATES['claude-sonnet-5-5']! },
+  'opus-5.5-api': { kind: 'api', model: 'claude-opus-5-5', effort: null, rate: ANTHROPIC_RATES['claude-opus-5-5']! },
   'gpt-6-luna': { kind: 'codex', model: 'gpt-6-luna', effort: null, rate: { input: 0.1, output: 0.5 } },
   'gpt-6.1-sol-low': { kind: 'codex', model: 'gpt-6.1-sol', effort: 'low', rate: { input: 2, output: 10 } },
   'no-ai': { kind: 'none', model: 'none', effort: null, rate: null },
@@ -194,6 +197,11 @@ export function staleResults(
 
 function backendFor(c: Candidate, scratch: { cwd: string; instructionsFile: string }): TextBackend {
   if (c.kind === 'claude') return claudeCli(c.model, { cwd: scratch.cwd })
+  if (c.kind === 'api') {
+    const apiKey = process.env.DAYLENS_TEST_ANTHROPIC_API_KEY
+    if (!apiKey) throw new Error('an api candidate needs DAYLENS_TEST_ANTHROPIC_API_KEY')
+    return anthropicApi(c.model, { apiKey, timeoutMs: 900_000 })
+  }
   if (c.kind === 'codex') return codexCli(c.model, c.effort, { cwd: scratch.cwd, instructionsFile: scratch.instructionsFile, allowFileReads: codexFileReads })
   throw new Error('no backend for no-ai')
 }
@@ -273,7 +281,7 @@ async function write(gold: Gold, name: string): Promise<void> {
   if (!c) throw new Error(`unknown candidate ${name}; one of ${Object.keys(CANDIDATES).join(', ')}`)
   const scratch = cliScratch(CODEX_BASE)
   try {
-    const writer: HourWriter = c.kind === 'none' ? noAi : cliWriter(backendFor(c, scratch))
+    const writer: HourWriter = c.kind === 'none' ? noAi : textWriter(backendFor(c, scratch))
     const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), codex_file_reads: c.kind === 'codex', versions: versions() }
     const outOf = (h: number) => path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`)
     const recordOf = (h: number) => {

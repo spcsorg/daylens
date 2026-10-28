@@ -1,5 +1,7 @@
-// The ways an hour can be written, behind one interface: Claude Code (`claude -p`), Codex (`codex exec`), or no AI.
-// The CLIs run on the person's own subscription, in an empty folder, with tools switched off as far as each allows.
+// The ways an hour can be written, behind one interface: the Anthropic API on the person's own key, Claude Code
+// (`claude -p`), Codex (`codex exec`), or no AI. The CLIs run on the person's own subscription, in an empty folder, with
+// tools switched off as far as each allows.
+import Anthropic from '@anthropic-ai/sdk'
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -23,6 +25,8 @@ export interface CallResult {
   // The call stopped on a usage or quota limit; retrying will not help until it resets.
   quota: boolean
   latency_ms: number
+  // When the first words of the answer arrived, for a backend that streams.
+  first_token_ms: number | null
   usage: Usage | null
   // What the CLI itself reports, when it reports a cost (claude -p does, at API rates).
   reported_cost_usd: number | null
@@ -96,7 +100,7 @@ export function cleanEnv(from: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   return env
 }
 
-const QUOTA = /usage limit|rate limit|quota|limit reached|resets? (at|in)|hit your .*limit|requires usage credits/i
+const QUOTA = /usage limit|rate limit|quota|limit reached|resets? (at|in)|hit your .*limit|requires usage credits|credit balance/i
 
 interface CliOptions {
   // Must be an empty folder: the CLI reads nothing from it.
@@ -136,7 +140,7 @@ function undelivered(r: RunResult, out: CallResult): CallResult {
 }
 
 function readClaude(r: RunResult): CallResult {
-  const out: CallResult = { text: null, error: null, quota: false, latency_ms: Math.round(r.ms), usage: null, reported_cost_usd: null, model: null, tool_calls: [], raw: null }
+  const out: CallResult = { text: null, error: null, quota: false, latency_ms: Math.round(r.ms), first_token_ms: null, usage: null, reported_cost_usd: null, model: null, tool_calls: [], raw: null }
   let d: Record<string, unknown>
   try {
     d = JSON.parse(r.stdout) as Record<string, unknown>
@@ -195,7 +199,7 @@ export function codexCli(model: string, effort: string | null, opts: CliOptions 
 }
 
 function readCodex(r: RunResult, model: string): CallResult {
-  const out: CallResult = { text: null, error: null, quota: false, latency_ms: Math.round(r.ms), usage: null, reported_cost_usd: null, model, tool_calls: [], raw: null }
+  const out: CallResult = { text: null, error: null, quota: false, latency_ms: Math.round(r.ms), first_token_ms: null, usage: null, reported_cost_usd: null, model, tool_calls: [], raw: null }
   const texts: string[] = []
   const errors: string[] = []
   const events: unknown[] = []
@@ -229,7 +233,85 @@ function readCodex(r: RunResult, model: string): CallResult {
   return out
 }
 
-export function cliWriter(backend: TextBackend): HourWriter {
+// US dollars per million tokens, standard tier, from the Anthropic model pricing table (as of 2026-10-06).
+export const ANTHROPIC_RATES: Record<string, { input: number; output: number }> = {
+  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+  'claude-opus-5-5': { input: 4, output: 20 },
+  'claude-fable-5-1': { input: 10, output: 50 },
+}
+
+export interface ApiOptions {
+  apiKey: string
+  // A local server stands in for the API in tests.
+  baseURL?: string
+  timeoutMs: number
+}
+
+export interface ApiRequest {
+  system?: string
+  message: string
+  // The answer must be JSON matching it.
+  schema?: Record<string, unknown>
+  // Each piece of the answer as it arrives.
+  onText?: (text: string) => void
+  signal?: AbortSignal
+}
+
+// Thinking counts against it; an hour or an answer is far shorter.
+const API_MAX_TOKENS = 16_000
+
+/** The Anthropic Messages API, streamed, with no tools. Never throws: a failure is a CallResult with its error. */
+export function anthropicClient(model: string, opts: ApiOptions): (req: ApiRequest) => Promise<CallResult> {
+  if (!ANTHROPIC_RATES[model]) throw new Error(`no price for ${model}`)
+  if (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1) throw new RangeError('timeoutMs must be a positive whole number')
+  const client = new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs })
+  return async (req) => {
+    const t0 = performance.now()
+    const out: CallResult = { text: null, error: null, quota: false, latency_ms: 0, first_token_ms: null, usage: null, reported_cost_usd: null, model: null, tool_calls: [], raw: null }
+    try {
+      const stream = client.messages.stream(
+        {
+          model,
+          max_tokens: API_MAX_TOKENS,
+          ...(req.system ? { system: req.system } : {}),
+          messages: [{ role: 'user', content: req.message }],
+          ...(req.schema ? { output_config: { format: { type: 'json_schema' as const, schema: req.schema } } } : {}),
+        },
+        { signal: req.signal },
+      )
+      stream.on('text', (t) => {
+        out.first_token_ms ??= Math.round(performance.now() - t0)
+        req.onText?.(t)
+      })
+      const m = await stream.finalMessage()
+      const u = m.usage
+      const cacheWrite = u.cache_creation_input_tokens ?? 0
+      const cacheRead = u.cache_read_input_tokens ?? 0
+      out.usage = { input: u.input_tokens + cacheWrite + cacheRead, cached_input: cacheRead, cache_write: cacheWrite, output: u.output_tokens, reasoning: null }
+      out.model = m.model
+      out.tool_calls = m.content.filter((b) => b.type !== 'text' && b.type !== 'thinking' && b.type !== 'redacted_thinking').map((b) => b.type)
+      if (m.stop_reason === 'refusal') out.error = `${model} declined to answer${m.stop_details?.category ? ` (${m.stop_details.category})` : ''}`
+      else if (m.stop_reason === 'max_tokens') out.error = `the answer was cut off at ${API_MAX_TOKENS} tokens`
+      else out.text = m.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('')
+    } catch (e) {
+      if (e instanceof Anthropic.AuthenticationError) out.error = 'the API key was refused'
+      else if (e instanceof Anthropic.APIError) {
+        out.error = `${e.status ?? 'no status'}: ${e.message}`
+        out.quota = e.status === 429 || QUOTA.test(e.message)
+      } else out.error = (e as Error).message
+    }
+    out.latency_ms = Math.round(performance.now() - t0)
+    return out
+  }
+}
+
+export function anthropicApi(model: string, opts: ApiOptions): TextBackend {
+  const call = anthropicClient(model, opts)
+  return { name: `api:${model}`, call: (message) => call({ message }) }
+}
+
+export function textWriter(backend: TextBackend): HourWriter {
   return { name: backend.name, write: (packet) => backend.call(writerMessage(packet)) }
 }
 
@@ -250,7 +332,7 @@ export const noAi: HourWriter = {
   async write(packet) {
     const t0 = performance.now()
     const hour = factsHour(packet)
-    return { text: JSON.stringify(hour), error: null, quota: false, latency_ms: Math.round(performance.now() - t0), usage: null, reported_cost_usd: 0, model: null, tool_calls: [], raw: null }
+    return { text: JSON.stringify(hour), error: null, quota: false, latency_ms: Math.round(performance.now() - t0), first_token_ms: null, usage: null, reported_cost_usd: 0, model: null, tool_calls: [], raw: null }
   },
 }
 
