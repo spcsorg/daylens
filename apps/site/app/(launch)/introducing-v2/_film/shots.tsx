@@ -411,7 +411,7 @@ const ask: Shot = {
           {sent ? (
             <p className="f-thinking" style={{ opacity: thinking }}>
               <span className="f-shimmer" style={{ backgroundPosition: `${-200 + ((t * 160) % 400)}px 0` }}>
-                Reading Tuesday, 10 AM to 3 PM
+                Reading Tuesday
               </span>
             </p>
           ) : null}

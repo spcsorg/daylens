@@ -140,7 +140,7 @@ export const SEARCH = {
 export const ASK = {
   question: "what was that site about pricing I looked at on Tuesday?",
   answer:
-    "Kestrel’s post, “Per-seat or usage pricing?” You read it for 7 minutes at 10:41 AM while drafting the spring pricing memo, and opened it again at 2:12 PM next to the pricing tiers draft.",
+    "Kestrel’s post on per-seat versus usage pricing. You read it Tuesday morning while drafting the spring pricing memo, then went back to it after lunch for the pricing tiers.",
   page: { title: "Per-seat or usage pricing? – Kestrel", host: "kestrel.dev/blog/per-seat-or-usage", icon: APPS.chrome },
   hours: [
     { at: "Tue 10 AM", title: "Drafted the spring pricing memo", line: "Wrote the first two sections in Google Docs.", apps: [APPS.chrome, APPS.notion] },
