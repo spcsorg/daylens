@@ -192,9 +192,20 @@ Search runs on the local full-text index and works without AI. Results are group
 A read-only MCP server lets any MCP app read days, hours, search results and sources.
 
 - Known clients on the machine (Claude, Claude Code, Codex, Cursor, ChatGPT, VS Code and others) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet.
-- The server has no tools that change anything.
-- Every read is logged and shown in Settings.
+- The server has no tools that change anything. Each tool says so to the client (`readOnlyHint`).
+- Every read is logged and shown in Settings, under the name the client gives itself when it connects.
 - Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting.
+
+### The server
+
+`v2/mcp/main.ts` speaks MCP over stdio, one JSON-RPC message per line, and nothing else ever prints to stdout. Each client starts its own copy.
+
+- **No Node to install.** Packaged, a client runs the app's own binary as Node: `ELECTRON_RUN_AS_NODE=1 <Daylens> <app.asar>/build/app/mcp/main.js`. From source, `node v2/mcp/main.ts`. This needs Electron's `runAsNode` fuse, which the package turns on (`v2/app/package/build.ts`). Started as the full app instead, even with the GPU off, it would be four or five processes and 320 to 460 MB per client, and it would open the window; as Node it is one process of about 115 MB, idle at under 0.2% CPU (measured on Linux).
+- **It lives as long as its client.** It exits when stdin ends or closes, when stdout breaks, and when the process that started it is gone (checked every 2 seconds, for a client that dies with stdin still held open). Copies never pile up.
+- **It starts before there is anything to read.** The database is opened on the first call. With no database yet, one storage hasn't finished setting up, or a schema newer than the server knows (an update while it runs), a call returns an error the assistant can pass on, and the server keeps running.
+- **Where it reads.** `--data-dir`, else `DAYLENS_V2_DATA_DIR`, else the app's data folder: `~/Library/Application Support/Daylens V2` on macOS, `%APPDATA%\Daylens V2` on Windows, `~/.local/share/daylens-v2` on Linux (or `$XDG_DATA_HOME`). Runs from source use `Daylens V2 Dev` (`daylens-v2-dev`).
+- **Limits.** Search returns up to 10 results per group. A call that reads a span of days (`list_days`, `get_agent_work`) takes at most 31; search covers every day unless given a span.
+- **Protocol.** MCP 2025-06-18, 2025-03-26 and 2024-11-05; a client asking for another version gets the newest.
 
 ## AI access
 
