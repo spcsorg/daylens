@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from '../../capture/normalize.ts'
-import type { AppIdentity, Kind, Line, ObsByKind } from '../../capture/protocol.ts'
+import type { AppIdentity, Kind, Line, LineOf, ObsByKind } from '../../capture/protocol.ts'
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
 
@@ -24,10 +24,12 @@ mkdirSync(dir, { recursive: true })
 const MIN = 60_000
 const tzOffset = -new Date().getTimezoneOffset()
 let seq = 0
+// One capture run per day seeded: the engine counts time as recorded only inside a run.
+let run = 'run-seed'
 function line<K extends Kind>(kind: K, obs: ObsByKind[K], wallMs: number): Line {
   return {
     v: 1,
-    run: 'run-seed',
+    run,
     seq: seq++,
     boot: 'boot-seed',
     t: { wall_ms: wallMs, mono_us: wallMs * 1000, tz: 'Example/Town', tz_offset_min: tzOffset },
@@ -99,7 +101,11 @@ const switchMs = values['switch-s'] ? Number(values['switch-s']) * 1000 : null
 const today = new Date(now)
 for (let d = days - 1; d >= 0; d--) {
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - d).getTime()
-  seedDay(start, d === 0 ? now : start + 24 * 60 * MIN)
+  const until = d === 0 ? now : start + 24 * 60 * MIN
+  run = `run-seed-${d}`
+  store.startRun(line('hello', { awake_us: 0, helper: 'seed', boot_identity: 'kernel', version: '1', pid: 1, os: 'seed', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, start + 8 * 60 * MIN) as LineOf<'hello'>)
+  seedDay(start, until)
+  store.recordHeartbeat(line('heartbeat', { awake_us: 0, permissions: { accessibility: 'granted' }, registrations: { focus: true, session: true, power: true }, titles: 'ok', stall_ms: 0, dropped: 0 }, Math.min(until, start + (8 + HOURS.length) * 60 * MIN)))
 }
 store.flush(true)
 storage.start()

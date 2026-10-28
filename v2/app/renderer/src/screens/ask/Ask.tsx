@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AskResult, Citation, Statement } from '../../../../shared/ai.ts'
 import { act, bridge, query } from '../../lib/api.ts'
-import { seenAt } from '../../lib/format.ts'
+import { addDays, dateKey, hourLabel, seenAt } from '../../lib/format.ts'
 import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
@@ -197,6 +197,15 @@ function NoKey({ onSaved }: { onSaved: () => void }) {
   )
 }
 
+/** An hour as a chip names it: "9 AM" today, "Yesterday 4 PM", else its day. */
+function when(ms: number): string {
+  const day = dateKey(new Date(ms))
+  const today = dateKey(new Date())
+  if (day === today) return hourLabel(ms)
+  if (day === addDays(today, -1)) return `Yesterday ${hourLabel(ms)}`
+  return seenAt(ms)
+}
+
 /** The hours and pages the answer cites, once each: an hour opens in Today, a page in the browser. */
 function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHour: (start: number) => void }) {
   const toast = useToast()
@@ -214,7 +223,7 @@ function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHo
         .map((c) => (
           <button type="button" key={c.start_wall_ms} className="ask-chip" onClick={() => onOpenHour(c.start_wall_ms)}>
             <Icon name="today" size={14} />
-            <span>{c.title ? `${seenAt(c.start_wall_ms)} · ${c.title}` : seenAt(c.start_wall_ms)}</span>
+            <span>{c.title ? `${when(c.start_wall_ms)} · ${c.title}` : when(c.start_wall_ms)}</span>
           </button>
         ))}
       {[...pages.values()].map((c) => (
