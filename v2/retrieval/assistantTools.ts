@@ -2,7 +2,9 @@
 // call is logged before anything is returned, with the hours and the apps and sites it showed, so Settings can list it
 // and a deletion removes it. Like every screen, nothing past the retention period is shown. Nothing here writes to the
 // record.
+import { app, appsView } from '../app/reader/apps.ts'
 import { Reader as ScreenReader } from '../app/reader/queries.ts'
+import { leftOff } from '../app/reader/today.ts'
 import { HOUR_MS, siteOf } from '../storage/derive.ts'
 import { pendingVerdict, type HourSource } from '../storage/hours.ts'
 import { fencedBy, pendingTombstones } from '../storage/rules.ts'
@@ -391,7 +393,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       const first = localDay(from)
       const sr = screens(ctx)
       const shown = new Shown()
-      const all = sr.read(() => sr.apps(first, days))
+      const all = sr.read(() => appsView(sr, first, days))
       if (args.app === undefined) {
         for (const a of all.apps) shown.app(a.id)
         shown.logged(ctx, mark, 'get_apps', from, to)
@@ -403,7 +405,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       }
       if (typeof args.app !== 'string' || args.app.trim() === '') throw new ToolInputError('app must be a name or an app id')
       const named = appNamed(all.apps, args.app)
-      const d = sr.read(() => sr.app(named.id, first, days))!
+      const d = sr.read(() => app(sr, named.id, first, days))!
       shown.app(d.app.id)
       const used = d.sources.slice(0, 50).map((x) => {
         shown.page(x.url)
@@ -432,7 +434,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       const shown = new Shown()
       const { rec, left, exclusions, retention } = sr.read(() => ({
         rec: sr.recording(),
-        left: sr.leftOff(),
+        left: leftOff(sr),
         exclusions: ctx.reader.db.prepare('SELECT match, label, is_default FROM exclusions ORDER BY id').all() as { match: string; label: string; is_default: number }[],
         retention: sr.cutoff() === null ? null : Math.round((now - sr.cutoff()!) / 86_400_000),
       }))
