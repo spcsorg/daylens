@@ -38,7 +38,7 @@ export const QUESTIONS: { q: string; kind: Kind; expect: string }[] = [
   { q: 'What took most of my time today?', kind: 'amount', expect: 'Grouped by work, the website and its order form took the most: about 80 minutes (the dev server, the order-form notes and checklist, the git log), or about two hours counting the card payment questions as part of it; the rest took about an hour each. Saying that, or that time was spread fairly evenly, is right; the two answers must agree.' },
   { q: 'Which supplier was I looking at this morning?', kind: 'whether', expect: 'Mill Lane Flour, its wholesale prices, on screen from about 9:20 to 9:35 AM, alongside a supplier price change email.' },
   { q: 'What was I working on before the pickup schedule today?', kind: 'summary', expect: 'October invoicing, from 1 to 2 PM: the Corner Café invoice and sending the October invoice. Calling it just after lunch is fine.' },
-  { q: 'What did I do on the order form?', kind: 'summary', expect: 'Late morning today and yesterday: the order-form notes (about 25 minutes) and its checklist (about 10 minutes), about 35 minutes a day and 70 in all, alongside the website’s dev server. Nothing shows it finished.' },
+  { q: 'What did I do on the order form?', kind: 'summary', expect: 'Late morning today and yesterday: the order-form notes (about 25 minutes) and its checklist (about 10 minutes), about 35 minutes a day and 70 in all, right after opening the website’s dev server. Nothing shows it finished.' },
   { q: 'What did I plan for tomorrow?', kind: 'summary', expect: 'Around 5 PM: Tomorrow’s bakes in Notes and Thursday in Calendar.' },
 ]
 
@@ -67,7 +67,7 @@ const GRADE_SCHEMA = {
   },
 }
 
-export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs.
+export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has today’s date, the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs.
 
 The seed day repeats: yesterday had the same work at the same times, 8 AM to 6 PM, except that yesterday the computer was away for lunch from 12 to 1, while today 12 to 1 was the site's git log and card payment questions. Mentioning yesterday's matching work is correct, not invented.
 
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     picked.map(async (item) => {
       const runs: ReturnType<typeof run>[] = []
       for (let i = 0; i < REPEATS; i++) runs.push(await ask(item.q, { reader, model, log, now: () => now }, LIMITS).then(run, (e: Error) => ({ text: `(error: ${e.message})`, sources: [] })))
-      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ question: item.q, kind: item.kind, expect: item.expect, answers: runs.map((x) => x.text) }), schema: GRADE_SCHEMA })
+      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ today: new Date(now).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), question: item.q, kind: item.kind, expect: item.expect, answers: runs.map((x) => x.text) }), schema: GRADE_SCHEMA })
       const g = JSON.parse(r.text ?? '{}') as Grade
       const pass = r.error === null && !g.by_clock_hour && !g.lists_windows && g.leads_with_answer && g.correct && g.consistent && g.sounds_like_a_person
       return { question: item.q, kind: item.kind, runs, pass, rules: g, grader_error: r.error }
