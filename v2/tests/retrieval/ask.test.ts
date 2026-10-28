@@ -254,6 +254,32 @@ test('what is deleted while the AI is answering is taken out of the answer, and 
   }
 })
 
+test('a "last" sentence is withdrawn when a deletion during the answer takes what led up to it, though it is not shown citing it', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR))
+  s.r.feed(focus(editor, 'notes-a.md - Editor', T0 + HOUR, 'app_changed'))
+  s.r.feed(focus(editor, 'notes-a.md - Editor', T0 + HOUR + 5 * MIN))
+  s.r.feed(focus(editor, 'notes-b.md - Editor', T0 + 2 * HOUR, 'app_changed'))
+  s.r.feed(focus(editor, 'notes-b.md - Editor', T0 + 2 * HOUR + 5 * MIN))
+  s.r.store.flush()
+  const time = (t: number) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const model: AskModel = {
+    name: 'Fake',
+    provider: 'fake',
+    run: async (req) => {
+      const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
+      const of = (f: string) => files.find((x) => x.file === f)!.id
+      s.r.clock.t = NEXT_DAY
+      await s.r.storage.deleteRange(T0 + HOUR, T0 + 2 * HOUR).done
+      return { output: { answerable: true, statements: [{ text: `You last had your notes open at ${time(T0 + 2 * HOUR + 5 * MIN)}, after the other notes.`, sources: [of('notes-b.md'), of('notes-a.md')] }] }, model: 'fake-1', input_tokens: 1, output_tokens: 1, cost_micro_usd: 0 }
+    },
+  }
+  const res = await ask('when did I last open notes md', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 10, perGroup: 10 })
+  assert.deepEqual([res.kind, res.kind === 'withdrawn' && res.withdrawn], ['withdrawn', 1])
+  s.close()
+})
+
 test('a source seen in two apps is withdrawn when a deletion during the answer takes either sighting', async () => {
   const s = setup()
   const safari = app('com.apple.Safari', { name: 'Safari' })
@@ -703,6 +729,12 @@ test('a claim of only, first, last or never stands only when the whole of the da
     const r = await ask(q, { reader: s.reader, model: inOrder, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
     assert.deepEqual(r.kind === 'answer' && r.statements.map((x) => x.text), ['You opened ledger-3.xlsx.', 'You opened ledger-10.xlsx.'], `"${q}" asks about a stretch of time, not the latest occurrence`)
   }
+  const named = fakeModel((req) => {
+    const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
+    return { answerable: true, statements: [{ text: 'You last opened ledger-9.xlsx at 10:05 AM.', sources: [files.find((x) => x.file === 'ledger-9.xlsx')!.id] }] }
+  })
+  const nine = await ask('when did I last open ledger-9.xlsx', { reader: s.reader, model: named, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.deepEqual(nine.kind === 'answer' && nine.statements.map((x) => x.text), ['You last opened ledger-9.xlsx at 10:05 AM.'], 'a file the question names is the one asked about, newer files with the same words or not')
   const olderOnly = fakeModel((req) => {
     const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
     return { answerable: true, statements: [{ text: 'ledger-3.xlsx at 4:05 AM yesterday.', sources: [files.find((x) => x.file === 'ledger-3.xlsx')!.id] }] }

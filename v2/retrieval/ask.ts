@@ -498,7 +498,9 @@ export async function ask(
   if (latestFirst) sources.sort((a, b) => b.last_wall_ms - a.last_wall_ms)
   // What the question is about, as far as words tell: the sources matching most of its words. The newest of them is the
   // one a "you last…" statement may name, when search found every match.
-  const matchCount = (x: SentSource) => words.split(' ').filter((w) => w && `${x.title ?? ''} ${x.file ?? ''} ${x.url ?? ''}`.toLowerCase().includes(w)).length
+  // A file the question names outright ("ledger-9.xlsx", whose number is no search word) beats any count of words.
+  const matchCount = (x: SentSource) =>
+    (x.file && mentions(question.toLowerCase(), x.file.toLowerCase(), false) ? 1000 : 0) + words.split(' ').filter((w) => w && `${x.title ?? ''} ${x.file ?? ''} ${x.url ?? ''}`.toLowerCase().includes(w)).length
   const best = Math.max(0, ...sources.map(matchCount))
   const newest = best > 0 ? sources.reduce<SentSource | null>((n, x) => (matchCount(x) === best && (!n || x.last_wall_ms > n.last_wall_ms) ? x : n), null) : null
   const newestId = newest ? `s${sources.indexOf(newest) + 1}` : null
@@ -596,7 +598,8 @@ export async function ask(
     const src = id !== newestId && id.startsWith('s') ? sources[Number(id.slice(1)) - 1] : undefined
     return src !== undefined && matchCount(src) === best
   }
-  const check = (st: unknown): { statement: Statement; ids: string[] } | null => {
+  // ids: what the statement is shown citing; given: everything it rests on, all withdrawn with a deletion.
+  const check = (st: unknown): { statement: Statement; ids: string[]; given: string[] } | null => {
     const s = st as { text?: unknown; sources?: unknown } | null
     const given = Array.isArray(s?.sources) ? s.sources : []
     // A "last" sentence rests on the newest best match alone: what led up to it ("after the draft") is not its evidence,
@@ -610,7 +613,7 @@ export async function ask(
       // claim about the last time is checked either way: it holds for the newest of what best matches the question.
       !(claimsAll(s.text) && (days.length === 0 || incomplete) && !(!incomplete && !claimsAll(s.text.replace(LAST, '')) && lastHolds(s.text, ids as string[]))) &&
       !(claimsAll(s.text) && SAYS_LAST.test(s.text) && !lastHolds(s.text, ids as string[]))
-    return ok ? { statement: { text: s!.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) }, ids: ids as string[] } : null
+    return ok ? { statement: { text: s!.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) }, ids: ids as string[], given: given as string[] } : null
   }
   let streamed = ''
   let shown = 0
@@ -677,7 +680,7 @@ export async function ask(
       continue
     }
     const ids = ok.ids
-    if (ids.some((id) => gone.has(id))) {
+    if (ok.given.some((id) => gone.has(id))) {
       withdrawn++
       continue
     }
