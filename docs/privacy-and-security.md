@@ -2,6 +2,16 @@
 
 Your record stays on your computer, and you decide what Daylens sees. It never records what you type, and it records the screen or audio only if the user turns that on.
 
+## In the beta
+
+This document describes the finished product. The beta differs in these ways:
+
+- **Not notarized, macOS only.** The app is signed with a local identity, so macOS asks the user to choose Open Anyway the first time. Updates are off; new versions come from GitHub releases.
+- **No usage analytics.** The beta sends no usage data to Daylens.
+- **No Daylens AI and no billing.** AI runs on the user's own API key, or not at all.
+- **No log of what was sent to AI yet.** Settings doesn't show it in the beta.
+- **The record isn't encrypted by Daylens.** It's a database in the user's Library folder. Other accounts on the computer can't open it; any program running as the user can. FileVault encrypts it at rest.
+
 ## What Daylens records
 
 - The app in front and its window titles.
@@ -53,7 +63,7 @@ The record is stored in a local database on the user's computer. There is no Day
 - **Secrets** (API keys, account tokens) are stored in the platform's secure storage and never written to logs or the database.
 - **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, signed packages on Linux. On Windows, Daylens ships through the Microsoft Store, which signs the package and installs its updates. Any Windows build distributed outside the Store is Authenticode-signed (installer, app and helper, timestamped and verified after packaging), and its updates refuse to install when the publisher cannot be verified.
 - **Updates** are signed and verified before install.
-- **The MCP server** is read-only and local to the machine.
+- **The MCP server** is local to the machine. Assistants can read the record, pause recording and add exclusions; resuming, removing an exclusion, corrections and deletions wait for the user's yes in Daylens.
 - **Payments.** Card data is entered only in the payment provider's hosted checkout.
 
 ## Promises that need proof
