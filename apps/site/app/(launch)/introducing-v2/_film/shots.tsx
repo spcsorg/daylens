@@ -15,11 +15,11 @@ export type Shot = {
 };
 
 type Cam = { t: number; s: number; x: number; y: number; w: number };
-const cam = (t: number, s: number, x: number, y: number, w: number): Cam => ({ t, s, x, y, w });
+export const cam = (t: number, s: number, x: number, y: number, w: number): Cam => ({ t, s, x, y, w });
 type Pt = { t: number; x: number; y: number; press: number };
-const pt = (t: number, x: number, y: number, press = 0): Pt => ({ t, x, y, press });
+export const pt = (t: number, x: number, y: number, press = 0): Pt => ({ t, x, y, press });
 // A click: arrive, press for 0.12 s, release.
-const click = (t: number, x: number, y: number): Pt[] => [pt(t - 0.12, x, y), pt(t, x, y, 1), pt(t + 0.14, x, y)];
+export const click = (t: number, x: number, y: number): Pt[] => [pt(t - 0.12, x, y), pt(t, x, y, 1), pt(t + 0.14, x, y)];
 
 export function cursorAt(frames: Key[] | undefined, t: number) {
   if (!frames) return null;
@@ -29,7 +29,7 @@ export function cursorAt(frames: Key[] | undefined, t: number) {
 }
 
 // Words go from blurred and faint to sharp, one after another.
-function Ink({ text, t, start, step = 0.06, dur = 0.4 }: { text: string; t: number; start: number; step?: number; dur?: number }) {
+export function Ink({ text, t, start, step = 0.06, dur = 0.4 }: { text: string; t: number; start: number; step?: number; dur?: number }) {
   return (
     <>
       {text.split(" ").map((w, i) => {
@@ -44,7 +44,7 @@ function Ink({ text, t, start, step = 0.06, dur = 0.4 }: { text: string; t: numb
   );
 }
 
-function Caret({ t }: { t: number }) {
+export function Caret({ t }: { t: number }) {
   return <i className="f-caret" style={{ opacity: Math.floor(t * 2) % 2 ? 0 : 1 }} />;
 }
 

@@ -152,3 +152,25 @@ export const PRIVACY =
   "The record stays on this computer. With AI on, only the hour being written (with a little context from the hours around it), or the excerpts a question needs, go to the AI provider you pick.";
 
 export const WAITLIST_URL = "christian-tonny.dev/daylens";
+
+// Ask, one thread: three questions about the invented week, each answered with the page and hours it came from.
+export const ASK_THREAD = [
+  { question: ASK.question, reading: "Reading Tuesday", answer: ASK.answer, page: ASK.page, hours: ASK.hours },
+  {
+    question: "where did I leave the pricing memo?",
+    reading: "Reading Monday and Tuesday",
+    answer: "You started it Monday and wrote most of it Tuesday morning. After lunch you finished the pricing section, and the tiers are still open as a draft in Claude.",
+    page: { title: "Spring pricing memo – Google Docs", host: "docs.google.com", icon: APPS.chrome },
+    hours: [
+      { at: "Tue 1 PM", title: "Sent invoice 1042, then back on the memo", line: "Replied to Harbor Studio in Mail and finished the pricing section.", apps: [APPS.mail, APPS.chrome] },
+      { at: "Tue 2 PM", title: "Pricing tiers with Claude", line: "Drafted three tiers in Claude, with the Kestrel post open.", apps: [APPS.chrome, APPS.claude] },
+    ],
+  },
+  {
+    question: "did Harbor Studio get their invoice?",
+    reading: "Reading Tuesday",
+    answer: "Yes. You sent invoice 1042 to Harbor Studio from Mail on Tuesday, just after lunch, then went back to the pricing memo.",
+    page: { title: "Invoice 1042 – Mail", host: "Mail · to Harbor Studio", icon: APPS.mail },
+    hours: [{ at: "Tue 1 PM", title: "Sent invoice 1042, then back on the memo", line: "Replied to Harbor Studio in Mail and finished the pricing section.", apps: [APPS.mail, APPS.chrome] }],
+  },
+];

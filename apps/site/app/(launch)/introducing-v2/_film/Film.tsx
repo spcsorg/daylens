@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { asset } from "../../../_v2/base";
 import { cursorAt, SHOTS, type Shot } from "./shots";
-import { clamp, inOut, keys, mix, out, prog } from "./time";
+import { StepCaption, type Step } from "./steps";
+import { clamp, inOut, keys, mix, out, prog, type Key } from "./time";
 import { WAITLIST_URL } from "./world";
 
 // The launch film: serif caption cards between oversized crops of the app, on a field that moves through the day.
@@ -16,8 +17,9 @@ export type Ratio = keyof typeof RATIOS;
 // V4 sky tokens, dawn to dusk.
 export const SKY = { dawn: "#f2d2c7", morning: "#f5dca2", noon: "#ccdfee", afternoon: "#f0c397", dusk: "#d7cde6" };
 
+// shift moves the app in the frame, in frame pixels, to clear room for step captions; camera replaces the shot's for one ratio.
 export type Beat =
-  | { kind: "shot"; shot: Shot; sky: string }
+  | { kind: "shot"; shot: Shot; sky: string; steps?: Step[]; shift?: Partial<Record<Ratio, [number, number]>>; camera?: Partial<Record<Ratio, Key[]>> }
   | { kind: "caption"; text: string; dur: number; sky: string; small?: string }
   | { kind: "end"; dur: number; sky: string };
 
@@ -94,13 +96,13 @@ function End({ t, size }: { t: number; size: number }) {
   );
 }
 
-function ShotFrame({ shot, t, ratio, enter, exit, riseIn = true, riseOut = true }: { shot: Shot; t: number; ratio: Ratio; enter: number; exit: number; riseIn?: boolean; riseOut?: boolean }) {
+function ShotFrame({ shot, t, ratio, enter, exit, riseIn = true, riseOut = true, shift = [0, 0] }: { shot: Shot; t: number; ratio: Ratio; enter: number; exit: number; riseIn?: boolean; riseOut?: boolean; shift?: [number, number] }) {
   const { w, h, base, fit } = RATIOS[ratio];
   const c = keys(shot.camera, t);
   const s = fit ? Math.min(c.s * base, (w - 40) / c.w) : c.s * base;
   const dy = (riseIn ? (1 - enter) * 90 : 0) - (riseOut ? exit * 50 : 0);
   return (
-    <div className="f-camera" style={{ opacity: Math.min(enter, 1 - exit), transform: `translate(${w / 2 - s * c.x}px, ${h / 2 - s * c.y + dy}px) scale(${s})` }}>
+    <div className="f-camera" style={{ opacity: Math.min(enter, 1 - exit), transform: `translate(${w / 2 - s * c.x + shift[0]}px, ${h / 2 - s * c.y + dy + shift[1]}px) scale(${s})` }}>
       {shot.view(t)}
       {cursorAt(shot.cursor, t)}
     </div>
@@ -123,7 +125,9 @@ export function Film({ t, ratio, beats }: { t: number; ratio: Ratio; beats: Beat
       const toShot = beats[i + 1]?.kind === "shot";
       const enter = i === 0 ? prog(lt, 0, 0.9) : fromShot ? prog(lt, -0.08, 0.14) : prog(lt, -0.15, 0.55);
       const exit = toShot ? (lt > d + 0.14 ? 1 : 0) : prog(lt, d - 0.25, d + 0.25, inOut);
-      layers.push(<ShotFrame key={i} shot={b.shot} t={clamp(lt, 0, d)} ratio={ratio} enter={enter} exit={exit} riseIn={!fromShot} riseOut={!toShot} />);
+      const shot = b.camera?.[ratio] ? { ...b.shot, camera: b.camera[ratio] } : b.shot;
+      layers.push(<ShotFrame key={i} shot={shot} t={clamp(lt, 0, d)} ratio={ratio} enter={enter} exit={exit} riseIn={!fromShot} riseOut={!toShot} shift={b.shift?.[ratio]} />);
+      b.steps?.forEach((s, j) => layers.push(<StepCaption key={`${i}-${j}`} step={s} t={lt} />));
     } else if (b.kind === "caption") {
       if (lt >= 0 && lt <= d) layers.push(<Caption key={i} text={b.text} t={lt} d={d} size={r.type} small={b.small} />);
     } else if (lt >= 0) {
