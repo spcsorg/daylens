@@ -145,22 +145,27 @@ function createWindow(): BrowserWindow {
   return w
 }
 
+// A window still loading gets the message once it has loaded; the preload holds it until the page listens.
+function showAndNavigate(to: 'today' | 'search' | 'search-toggle'): void {
+  if (!win) win = createWindow()
+  win.show()
+  win.focus()
+  const w = win
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', () => w.webContents.send('navigate', to))
+  else w.webContents.send('navigate', to)
+}
+
 function showToday(): void {
-  if (!win) win = createWindow()
-  win.show()
-  win.focus()
-  win.webContents.send('navigate', 'today')
+  showAndNavigate('today')
 }
 
-function showSearch(): void {
-  if (!win) win = createWindow()
-  win.show()
-  win.focus()
-  win.webContents.send('navigate', 'search')
+// 'search-toggle' is Cmd+K pressed in the menu bar; a click on Search… only ever opens it.
+function showSearch(to: 'search' | 'search-toggle' = 'search'): void {
+  showAndNavigate(to)
 }
 
-// Search has no sidebar item, so the menu bar lists it with its shortcut, as Mac apps list their commands. The shortcut
-// itself is the window's own (registerAccelerator: false), so it never fires twice.
+// Search has no sidebar item, so the menu bar lists it with its shortcut, as Mac apps list their commands. On macOS this
+// item owns Cmd+K (the window leaves it alone, see screens/search/shortcut.ts), so one key press does one thing.
 function setAppMenu(): void {
   if (process.platform !== 'darwin') return
   Menu.setApplicationMenu(
@@ -168,7 +173,7 @@ function setAppMenu(): void {
       { role: 'appMenu' },
       {
         label: 'Edit',
-        submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { type: 'separator' }, { label: 'Search…', accelerator: 'Command+K', registerAccelerator: false, click: showSearch }],
+        submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { type: 'separator' }, { label: 'Search…', accelerator: 'Command+K', click: (_item, _win, e) => showSearch(e.triggeredByAccelerator ? 'search-toggle' : 'search') }],
       },
       { role: 'viewMenu' },
       { role: 'windowMenu' },
@@ -305,7 +310,7 @@ app.whenReady().then(() => {
       resume: async () => (await act(ctx, { a: 'resume' })).ok,
       deleteLastTenMinutes: async () => (await act(ctx, { a: 'delete', what: { kind: 'last', ms: 10 * 60_000 } })).ok,
       openToday: showToday,
-      openSearch: showSearch,
+      openSearch: () => showSearch(),
       update: () => updateReady,
       restartToUpdate: () => void restartToUpdate(),
       quit: () => void quit(),

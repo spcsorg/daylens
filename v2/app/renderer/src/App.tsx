@@ -46,6 +46,7 @@ function Shell() {
           setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
         }
         if (to === 'search') setSearch(true)
+        if (to === 'search-toggle') setSearch((s) => !s)
       }),
     [],
   )

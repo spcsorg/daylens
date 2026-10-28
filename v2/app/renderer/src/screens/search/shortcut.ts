@@ -1,6 +1,6 @@
-// The key that opens Search: Cmd+K on macOS, Ctrl+K elsewhere. On a Mac, Ctrl+K deletes to the end of a line in a text
-// field, so it is left alone there.
+// The key the window handles to open Search: Ctrl+K on Windows and Linux. On macOS the app menu's Search… item owns Cmd+K
+// (Electron registers menu shortcuts there regardless), and Ctrl+K deletes to the end of a line in a text field, so the
+// window handles neither.
 export function opensSearch(e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'key'>, platform: string): boolean {
-  const mod = platform === 'darwin' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-  return mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k'
+  return platform !== 'darwin' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k'
 }
