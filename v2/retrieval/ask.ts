@@ -203,7 +203,9 @@ function dayEnds(sightings: readonly Sighting[]): Sighting[] {
     const [a, b] = days.get(d) ?? [x, x]
     days.set(d, [x.from_wall_ms < a.from_wall_ms ? x : a, x.to_wall_ms > b.to_wall_ms ? x : b])
   }
-  return [...days.values()].flatMap(([a, b]) => [{ app_id: a.app_id, from_wall_ms: a.from_wall_ms, to_wall_ms: a.from_wall_ms }, { app_id: b.app_id, from_wall_ms: b.to_wall_ms, to_wall_ms: b.to_wall_ms }])
+  // An end is exclusive: one at midnight belongs to the day before.
+  const end = (x: Sighting) => Math.max(x.from_wall_ms, x.to_wall_ms - 1)
+  return [...days.values()].flatMap(([a, b]) => [{ app_id: a.app_id, from_wall_ms: a.from_wall_ms, to_wall_ms: a.from_wall_ms }, { app_id: b.app_id, from_wall_ms: end(b), to_wall_ms: end(b) }])
 }
 
 // Each day something was on screen, from its first to its last time that day, oldest day first.
