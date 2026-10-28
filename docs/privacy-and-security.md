@@ -64,6 +64,7 @@ The record is stored in a local database on the user's computer. There is no Day
 - **Signing.** Releases are signed on every platform with a stable identity: Developer ID with notarization on macOS, signed packages on Linux. On Windows, Daylens ships through the Microsoft Store, which signs the package and installs its updates. Any Windows build distributed outside the Store is Authenticode-signed (installer, app and helper, timestamped and verified after packaging), and its updates refuse to install when the publisher cannot be verified.
 - **Updates** are signed and verified before install.
 - **The MCP server** is local to the machine. Assistants can read the record, pause recording and add exclusions; resuming, removing an exclusion, corrections and deletions wait for the user's yes in Daylens.
+- **Running the app as Node.** The packaged app lets its binary run as Node (Electron's `runAsNode` fuse), so assistants can start the MCP server without installing Node. On macOS any local program could then run code as Daylens with Daylens's permissions, so the main app holds no macOS privacy permission: Accessibility belongs to the capture helper's own bundle, and any later permission (calendar, for example) goes to a helper too.
 - **Payments.** Card data is entered only in the payment provider's hosted checkout.
 
 ## Promises that need proof
