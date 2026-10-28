@@ -227,7 +227,8 @@ export function check(spec: ServerSpec, timeoutMs = 10_000): Promise<{ ok: true;
 
 /** The server inside an installed Daylens: the .app on macOS, the install folder on Windows and Linux. */
 export function installedSpec(appPath: string, platform: NodeJS.Platform = process.platform): ServerSpec {
-  const resources = platform === 'darwin' ? path.join(appPath, 'Contents', 'Resources') : path.join(appPath, 'resources')
-  const binary = platform === 'darwin' ? path.join(appPath, 'Contents', 'MacOS', 'Daylens') : path.join(appPath, platform === 'win32' ? 'Daylens.exe' : 'daylens')
-  return serverSpec(binary, path.join(resources, 'app.asar', 'build', 'app', 'mcp', 'main.js'), true)
+  const p = platform === 'win32' ? path.win32 : path.posix
+  const resources = platform === 'darwin' ? p.join(appPath, 'Contents', 'Resources') : p.join(appPath, 'resources')
+  const binary = platform === 'darwin' ? p.join(appPath, 'Contents', 'MacOS', 'Daylens') : p.join(appPath, platform === 'win32' ? 'Daylens.exe' : 'daylens')
+  return serverSpec(binary, p.join(resources, 'app.asar', 'build', 'app', 'mcp', 'main.js'), true)
 }

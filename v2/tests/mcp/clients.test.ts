@@ -123,8 +123,8 @@ test('Codex’s TOML gains one table for Daylens, replacing an older one and its
 test('an installed Daylens is started as Node from its own binary on every platform', () => {
   assert.deepEqual(installedSpec('/Applications/Daylens.app', 'darwin'), SPEC)
   const win = installedSpec('C:\\Users\\a\\AppData\\Local\\Programs\\Daylens', 'win32')
-  assert.equal(path.basename(win.command), 'Daylens.exe')
-  assert.ok(win.args[0]!.endsWith(path.join('resources', 'app.asar', 'build', 'app', 'mcp', 'main.js')))
+  assert.equal(win.command, 'C:\\Users\\a\\AppData\\Local\\Programs\\Daylens\\Daylens.exe')
+  assert.equal(win.args[0], 'C:\\Users\\a\\AppData\\Local\\Programs\\Daylens\\resources\\app.asar\\build\\app\\mcp\\main.js')
   assert.deepEqual(win.env, { ELECTRON_RUN_AS_NODE: '1' })
   assert.deepEqual(JSON.parse(snippet(SPEC)), { mcpServers: { daylens: SPEC } })
 })
