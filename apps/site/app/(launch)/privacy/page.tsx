@@ -206,7 +206,7 @@ export default function PrivacyPage() {
               you chose, under your agreement with them. It never touches our servers.
             </li>
             <li>
-              <strong>An AI tool on your computer.</strong> Daylens runs a command-line AI tool you have installed,
+              <strong>An AI tool on your computer</strong> (not in the beta yet). Daylens runs a command-line AI tool you have installed,
               which sends the request to its own provider under your subscription. It never touches our servers.
             </li>
             <li>
@@ -258,7 +258,8 @@ export default function PrivacyPage() {
           <h3>Updates</h3>
           <p>
             On Windows, the Microsoft Store installs Daylens and its updates. On macOS, Daylens checks for updates and
-            downloads them. These requests carry the app version and platform, not your history.
+            downloads them. These requests carry the app version and platform, not your history. In the beta, updates
+            are off: new versions come from GitHub releases, and Daylens makes no update requests.
           </p>
 
           <h2 id="controls">Your controls</h2>
@@ -288,7 +289,8 @@ export default function PrivacyPage() {
               site again.
             </li>
             <li>
-              <strong>AI.</strong> Switch between Daylens AI, your own key, an AI tool on your computer, or none.
+              <strong>AI.</strong> Switch between Daylens AI, your own key, an AI tool on your computer, or none. In the
+              beta: your own key or none.
             </li>
             <li>
               <strong>Assistants.</strong> See what each one read, and disconnect any of them.
