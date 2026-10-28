@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { symlinkSync } from 'node:fs'
 import { once } from 'node:events'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -168,5 +169,71 @@ test('a line that is not JSON gets a parse error, and the server carries on', as
   s.child.stdin!.end()
   await once(s.child, 'exit')
   assert.equal(r.q<{ n: number }>('SELECT count(*) AS n FROM assistant_reads')[0]!.n, 0)
+  r.close()
+})
+
+test('a server whose parent died while it started exits too', { skip: process.platform === 'win32' && 'needs a named pipe' }, async () => {
+  const r = seeded()
+  const fifo = path.join(tmpDir(), 'stdin')
+  execFileSync('mkfifo', [fifo])
+  const parent = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { spawn } from 'node:child_process'
+       import { openSync } from 'node:fs'
+       const c = spawn(process.execPath, [${JSON.stringify(MAIN)}, '--data-dir', ${JSON.stringify(r.dir)}], { stdio: [openSync(${JSON.stringify(fifo)}, 'r+'), 'ignore', 'ignore'] })
+       process.stderr.write('server ' + c.pid + '\\n', () => process.exit(0))`,
+    ],
+    { stdio: ['ignore', 'ignore', 'pipe'] },
+  )
+  const [line] = (await once(createInterface({ input: parent.stderr! }), 'line')) as [string]
+  const pid = Number(/server (\d+)/.exec(line)![1])
+  let gone = false
+  for (let i = 0; i < 30 && !gone; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    try {
+      process.kill(pid, 0)
+    } catch {
+      gone = true
+    }
+  }
+  if (!gone) process.kill(pid, 'SIGKILL')
+  assert.ok(gone, 'the server outlived a parent that died before it started')
+  r.close()
+})
+
+test('a batch gets one reply per request in it', async () => {
+  const r = seeded()
+  const s = start(r.dir)
+  const reply = new Promise<string>((resolve) => createInterface({ input: s.child.stdout! }).once('line', resolve))
+  s.child.stdin!.write(
+    `${JSON.stringify([
+      { jsonrpc: '2.0', id: 'a', method: 'initialize', params: { protocolVersion: '2025-03-26', clientInfo: { name: 'codex-mcp-client' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 'b', method: 'ping' },
+    ])}\n`,
+  )
+  const replies = JSON.parse(await reply) as { id: string; result: Record<string, unknown> }[]
+  assert.deepEqual(replies.map((x) => x.id), ['a', 'b'])
+  assert.equal(replies[0]!.result.protocolVersion, '2025-03-26')
+  s.child.stdin!.end()
+  await once(s.child, 'exit')
+  r.close()
+})
+
+test('the packaged build compiles the server, and the compiled entry answers', async () => {
+  const v2 = path.resolve(import.meta.dirname, '../..')
+  const out = tmpDir()
+  execFileSync(process.execPath, [path.join(v2, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', path.join(v2, 'app', 'package', 'tsconfig.json'), '--outDir', out])
+  symlinkSync(path.join(v2, 'node_modules'), path.join(out, 'node_modules'), 'junction')
+  const r = seeded()
+  const s = start(r.dir, spawn(process.execPath, [path.join(out, 'mcp', 'main.js'), '--data-dir', r.dir], { stdio: ['pipe', 'pipe', 'pipe'] }))
+  assert.equal((await s.initialize()).result.serverInfo.name, 'daylens')
+  const day = await s.request('tools/call', { name: 'get_day', arguments: { date: '2026-10-16' } })
+  assert.equal(day.result.isError, undefined, day.result.content[0].text)
+  s.child.stdin!.end()
+  await once(s.child, 'exit')
   r.close()
 })

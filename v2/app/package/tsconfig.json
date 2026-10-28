@@ -7,5 +7,5 @@
     "rewriteRelativeImportExtensions": true,
     "sourceMap": false
   },
-  "include": ["../main/**/*.ts", "../reader/**/*.ts", "../shared/**/*.ts", "../../capture/service.ts", "../../capture/agents/backfillMain.ts", "../../storage/deletionWorker.ts"]
+  "include": ["../main/**/*.ts", "../reader/**/*.ts", "../shared/**/*.ts", "../../capture/service.ts", "../../capture/agents/backfillMain.ts", "../../storage/deletionWorker.ts", "../../mcp/main.ts"]
 }

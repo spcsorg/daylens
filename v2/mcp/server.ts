@@ -58,16 +58,27 @@ export class McpServer {
     this.reader = this.store = null
   }
 
-  /** The reply to one message, or null for a notification or a reply from the client. */
+  /** The reply to one line, or null for a notification or a reply from the client. */
   handle(raw: string): object | null {
-    let msg: Message
+    let msg: unknown
     try {
-      msg = JSON.parse(raw) as Message
+      msg = JSON.parse(raw)
     } catch {
       return { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'not JSON' } }
     }
-    if (typeof msg !== 'object' || msg === null || Array.isArray(msg) || typeof msg.method !== 'string') {
-      // A reply to a request we never send, or a batch, which protocol 2025-06-18 removed.
+    // A batch, which protocol 2025-03-26 allows: one reply per request in it, none if it held only notifications.
+    if (Array.isArray(msg)) {
+      if (msg.length === 0) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'empty batch' } }
+      const replies = msg.map((m) => this.one(m)).filter((r) => r !== null)
+      return replies.length ? replies : null
+    }
+    return this.one(msg)
+  }
+
+  private one(raw: unknown): object | null {
+    const msg = raw as Message
+    if (typeof msg !== 'object' || msg === null || typeof msg.method !== 'string') {
+      // A reply to a request we never send.
       return msg && typeof msg === 'object' && 'id' in msg && !('result' in msg || 'error' in msg) ? { jsonrpc: '2.0', id: msg.id ?? null, error: { code: -32600, message: 'not a request' } } : null
     }
     if (msg.id === undefined || msg.id === null) return null

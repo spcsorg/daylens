@@ -60,6 +60,8 @@ function exit(): void {
 }
 
 const parent = process.ppid
+// A parent that died while this started has already handed it to init (pid 1) on macOS and Linux.
+if (process.platform !== 'win32' && parent === 1) exit()
 setInterval(() => {
   if (process.ppid !== parent || !alive(parent)) exit()
 }, PARENT_CHECK_MS).unref()
