@@ -65,7 +65,8 @@ export function AssistantsTab() {
   const [listError, setListError] = useState<string | null>(null)
   const [test, setTest] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const { data: log } = useQuery({ q: 'assistant_log' })
+  // Reads don't announce a change, so the log refreshes with new activity while the tab is open.
+  const { data: log, error: logError } = useQuery({ q: 'assistant_log' }, { live: true })
   const toast = useToast()
 
   useEffect(() => {
@@ -123,6 +124,7 @@ export function AssistantsTab() {
           </Button>
         </Row>
       </div>
+      {logError && <Row label="What assistants read couldn’t be loaded" detail={logError} />}
       {entries.length > 0 && (
         <div>
           <h2 className="settings-heading">Recent</h2>
