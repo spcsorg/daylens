@@ -195,6 +195,17 @@ const local = (ms: number) => {
 }
 const minutes = (ms: number) => Math.round(ms / 60_000)
 
+// The first and last moment of each day in a list of sightings, as sightings of no length.
+function dayEnds(sightings: readonly Sighting[]): Sighting[] {
+  const days = new Map<number, [Sighting, Sighting]>()
+  for (const x of sightings) {
+    const d = localMidnight(x.from_wall_ms)
+    const [a, b] = days.get(d) ?? [x, x]
+    days.set(d, [x.from_wall_ms < a.from_wall_ms ? x : a, x.to_wall_ms > b.to_wall_ms ? x : b])
+  }
+  return [...days.values()].flatMap(([a, b]) => [{ app_id: a.app_id, from_wall_ms: a.from_wall_ms, to_wall_ms: a.from_wall_ms }, { app_id: b.app_id, from_wall_ms: b.to_wall_ms, to_wall_ms: b.to_wall_ms }])
+}
+
 // Each day something was on screen, from its first to its last time that day, oldest day first.
 function onScreen(seen: readonly Sighting[]): string[] {
   const days = new Map<number, [number, number]>()
@@ -471,8 +482,9 @@ export async function ask(
     }
     sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], sightings: [...s.sightings], seen: [...s.sightings] })
   }
+  // Each day's first and last moment it was seen, in a sent hour or not, so "when did I…" gets that day's real times.
+  for (const s of sent.values()) s.seen.push(...dayEnds(s.sightings))
   const sources = [...sent.values()]
-  // "When did I last…": the most recent sighting comes first, so the answer leads with it ("first…": the earliest).
   // "When did I last…": the answer leads with the most recent sighting, in the record and in what is shown; such an answer
   // is shown whole rather than streamed, so it never reorders on screen.
   const latestFirst = /\b(last|latest|most recent(ly)?)\b(?! (week|month|year|night|morning|afternoon|evening))/i.test(question)

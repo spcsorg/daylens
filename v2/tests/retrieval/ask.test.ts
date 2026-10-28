@@ -545,6 +545,32 @@ test('when the limits leave part of the record out, the AI is told how much, and
   s.close()
 })
 
+test('a source is sent with each day’s first and last time on screen, from hours not sent too, and can be cited for them', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR))
+  for (let h = 1; h <= 8; h++) {
+    s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + h * HOUR + 2 * MIN, 'app_changed'))
+    s.r.feed(focus(other, 'Scratch', T0 + h * HOUR + 30 * MIN, 'app_changed'))
+  }
+  s.r.store.flush()
+  const time = (t: number) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const seen: AskRequest[] = []
+  const model = fakeModel((req) => {
+    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file === 'roadmap.md')!
+    return { answerable: true, statements: [{ text: `You opened roadmap.md at ${time(T0 + HOUR + 2 * MIN)}.`, sources: [file.id] }] }
+  }, seen)
+  const res = await ask('when did I open roadmap md', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 3, maxSources: 10, perGroup: 5 })
+  const sent = JSON.parse(seen[0]!.prompt) as { hours: unknown[]; sources: { file?: string; on_screen: string[] }[] }
+  assert.equal(sent.hours.length, 3)
+  const onScreen = sent.sources.find((x) => x.file === 'roadmap.md')!.on_screen
+  assert.equal(onScreen.length, 1)
+  assert.ok(onScreen[0]!.slice(11).startsWith(`${time(T0 + HOUR + 2 * MIN)} to `), onScreen[0]!)
+  assert.equal(res.kind === 'answer' && res.statements.length, 1)
+  s.close()
+})
+
 test('a claim of only, first, last or never stands only when the whole of the days asked was sent', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
