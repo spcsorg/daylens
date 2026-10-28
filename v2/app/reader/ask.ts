@@ -29,7 +29,13 @@ export async function answer(file: string, finder: Reader, port: MessagePortMain
     const usage = store.db.prepare(
       'INSERT INTO usage_ledger (at_wall_ms, kind, provider, model, input_tokens, output_tokens, cost_micro_usd, ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     )
-    const state = String(store.db.prepare(`SELECT (SELECT coalesce(max(id), 0) FROM observations) || '/' || (SELECT coalesce(max(seq), 0) FROM change_log)`).pluck().get())
+    // A window still in front extends its newest observation in place, so its last sighting counts as a change too.
+    const state = String(
+      store.db
+        .prepare(`SELECT (SELECT coalesce(max(id), 0) || ':' || coalesce(max(last_seen_wall_ms), 0) FROM (SELECT id, last_seen_wall_ms FROM observations ORDER BY id DESC LIMIT 1)) || '/' || (SELECT coalesce(max(seq), 0) FROM change_log)`)
+        .pluck()
+        .get(),
+    )
     // "Today" means another day after midnight, though nothing new was recorded.
     const asked = `${new Date().toDateString()}\u0000${q.question.trim().toLowerCase()}`
     const before = answered.get(asked)

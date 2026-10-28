@@ -101,9 +101,9 @@ export const ANSWER_SCHEMA = {
 export const SYSTEM_PROMPT = [
   'You answer a person’s question about what they did on their computer, using only the record you are given as JSON. Answer the way they would describe their day to their boss in the evening.',
   'The record holds hours (ids starting with h) and the pages, files and windows seen in them (ids starting with s). An hour’s "corrected" fields are what the person wrote about it themselves.',
-  'Lead with the answer. A summary opens with the gist of the work; asked what got done, it opens with what was finished, then what moved, by theme, leaving no piece of work out. For what took the most time, compare the pieces of work by their minutes, and say so plainly when none stood out. A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "You last had the order form open at 12 PM today, in Notes, right after updating the notes in TextEdit." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
+  'Lead with the answer. A summary opens with the gist of the work; asked what got done, it opens with what was finished, then what moved, by theme, leaving no piece of work out. For what took the most time, compare each piece of work on its own by its minutes, never two merged into one, and say so plainly when none stood out. A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "You last had the order form open at 12 PM today, in Notes, right after updating the notes in TextEdit." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
   'Write about the work, not the windows: the projects, what moved, what got finished, what is still open, grouped by piece of work. For how long, add up the minutes of the sources that belong to the work, once each; an hour’s app minutes already include them. A window title, page or file name is evidence of the work; name one only when it is the answer or what the person would open.',
-  'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as a clock time or a part of the day, such as "around 1:45 PM" or "just after lunch", never "in the 1 PM hour".',
+  'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as one clock time or a part of the day, such as "around 1:45 PM" or "just after lunch", never a span like "1 to 2 PM" or "in the 1 PM hour".',
   'Answer what was asked and stop: a question about one moment or one piece of work gets that, not the rest of the day. Say "most" only when the minutes show it.',
   'A summary’s first sentence names the main pieces of work in one line, such as "This morning was mostly weekend orders, supplier prices and the autumn menu." Then a sentence or two covers every piece of work in the time asked, grouped into two or three themes ("the admin: invoices, pickups and the wholesale follow-ups"), with no times unless one matters, such as when something was sent. Never more than four sentences, and never a run of sentences that each start "You worked on". Any other question gets one or two. Plain and warm, like a colleague who saw the day. Don’t say which app or window something was in, or how long a window was open, unless the question asks; say what the person did. Don’t hedge ("only shows", "likely", "appears", "can’t pin down", "I can’t say exactly"): say what was done, such as "You planned tomorrow’s bakes and looked over Thursday." Talk about what the record can’t show only when the question can’t be answered without it, and then in a few words; never end an answer on it.',
   'When the same thing shows on several days, give the most recent and mention the others, without guessing which one counts.',
@@ -286,9 +286,9 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
   // an app it wasn't in.
   if (!appIn.every((has) => pool.some(has))) return false
   if (!dottedIn.every((has) => pool.some((s) => has(s) && (apps.length === 0 || apps.some((n) => s.apps.includes(n)))))) return false
-  // Each time it names holds for a cited sighting of something it names, or of anything it cites when it names nothing.
-  // A time that is a cited hour's start or end holds for anything seen in that hour.
-  const things = [...appIn, ...dottedIn]
+  // Each time it names holds for a cited sighting of a file or site it names, or else of an app it names, or of anything
+  // it cites when it names nothing. A time that is a cited hour's start or end holds for anything seen in that hour.
+  const things = dottedIn.length ? dottedIn : appIn
   const named = (s: Seen) => things.length === 0 || things.some((has) => has(s))
   const hours = cited.flatMap((s) => (s.hour ? [s.hour] : []))
   for (const options of timesIn(text)) {
@@ -320,7 +320,7 @@ export function claimsAll(text: string): boolean {
 
 const OCCURRENCE = new Set(
   ('time times thing things one ones visit visits session sessions activity app apps page pages file files window windows hour hours day days ' +
-    'open opened use used seen saw see visited worked work edited read did was were touched looked viewed of you i we it they')
+    'open opened use used seen saw see visited worked work edited read did was were had touched looked viewed of you i we it they')
     .split(' '),
 )
 
@@ -461,11 +461,13 @@ export async function ask(
   const best = Math.max(0, ...sources.map(matchCount))
   const newest = best > 0 ? sources.reduce<SentSource | null>((n, x) => (matchCount(x) === best && (!n || x.last_wall_ms > n.last_wall_ms) ? x : n), null) : null
   const newestId = newest ? `s${sources.indexOf(newest) + 1}` : null
-  const lastSeenNamed = (text: string, ids: string[]) =>
-    ids.some((id) => {
-      const x = id.startsWith('s') ? sources[Number(id.slice(1)) - 1] : undefined
-      return x !== undefined && timesIn(text).some((o) => o.some((m) => Math.abs(m - minuteOfDay(x.last_wall_ms)) <= 15))
-    })
+  // "You last had it open at 12 PM today" holds only for the newest best match, at the time and on the day it was last seen.
+  const lastHolds = (text: string, ids: string[]) => {
+    if (!newest || !newestId || !ids.includes(newestId)) return false
+    const at = minuteOfDay(newest.last_wall_ms)
+    const days = daysIn(text, now)
+    return timesIn(text).some((o) => o.some((m) => Math.abs(m - at) <= 15)) && (days.length === 0 || days.some(([a, b]) => newest.last_wall_ms >= a && newest.last_wall_ms < b))
+  }
   if (hours.length === 0 && sources.length === 0) return { kind: 'no_answer', missing: null, results }
 
   // Search stops at its limit per group, so a group with more can hold hours and sources no count here sees.
@@ -553,9 +555,8 @@ export async function ask(
       typeof s?.text === 'string' && s.text.trim() !== '' && ids.length > 0 && ids.every((id) => typeof id === 'string' && byId.has(id)) &&
       supported(s.text, (ids as string[]).flatMap((id) => evidence.get(id)!), appNames, now) &&
       // Search finds by words, not by app or anything else a claim can be about, so only a whole day read is complete. The
-      // exception, when search found every match: "you last had…" about the newest of what best matches the question, or
-      // naming when a cited source was last seen ("most recently around 4 PM").
-      !(claimsAll(s.text) && (days.length === 0 || incomplete) && !(!incomplete && !claimsAll(s.text.replace(LAST, '')) && ((newestId !== null && ids.includes(newestId)) || lastSeenNamed(s.text, ids as string[]))))
+      // exception, when search found every match: "you last had…" about the newest of what best matches the question.
+      !(claimsAll(s.text) && (days.length === 0 || incomplete) && !(!incomplete && !claimsAll(s.text.replace(LAST, '')) && lastHolds(s.text, ids as string[])))
     return ok ? { text: s!.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) } : null
   }
   let streamed = ''

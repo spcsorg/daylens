@@ -562,6 +562,7 @@ test('a claim of only, first, last or never stands only when the whole of the da
       statements: [
         { text: `The only ledger you opened was ${file.file}.`, sources: [file.id] },
         { text: `You opened ${file.file} last.`, sources: [file.id] },
+        { text: `You last had ${file.file} open at 11:05 AM.`, sources: [file.id] },
         { text: `You opened ${file.file}.`, sources: [file.id] },
       ],
     }
@@ -573,42 +574,54 @@ test('a claim of only, first, last or never stands only when the whole of the da
   assert.equal(res.kind, 'answer')
   if (res.kind !== 'answer') return
   assert.deepEqual(res.statements.map((x) => x.text.replace(/ledger-\d+/, 'ledger-n')), ['You opened ledger-n.xlsx.'])
-  assert.equal(res.dropped, 2)
+  assert.equal(res.dropped, 3, 'a search cut short never backs "only" or "last", however it is worded')
 
   const found = await ask('which ledger xlsx', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.equal((JSON.parse(seen[1]!.prompt) as { incomplete: boolean }).incomplete, false)
   const cited = (JSON.parse(seen[1]!.prompt) as { sources: { file?: string }[] }).sources.find((x) => x.file?.startsWith('ledger-'))!.file!
-  const expected = cited === 'ledger-10.xlsx' ? [`You opened ${cited} last.`, `You opened ${cited}.`] : [`You opened ${cited}.`]
-  assert.deepEqual(found.kind === 'answer' && found.statements.map((x) => x.text), expected, 'search finds by words, so "only" never stands; "last" does only for the newest match')
+  const expected = [...(cited === 'ledger-10.xlsx' ? [`You last had ${cited} open at 11:05 AM.`] : []), `You opened ${cited}.`]
+  assert.deepEqual(found.kind === 'answer' && found.statements.map((x) => x.text), expected, 'search finds by words, so "only" never stands, nor "last" without the time; "last" does for the newest match at its time')
 
   // "Last" may name the newest of what best matches the question, when search found every match; never an older one.
   const lastModel = fakeModel((req) => {
     const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
     const of = (f: string) => files.find((x) => x.file === f)!.id
-    return { answerable: true, statements: [{ text: 'You opened ledger-10.xlsx last.', sources: [of('ledger-10.xlsx')] }, { text: 'You opened ledger-3.xlsx last.', sources: [of('ledger-3.xlsx')] }] }
-  })
-  const last = await ask('which ledger xlsx did I open last', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
-  assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You opened ledger-10.xlsx last.'])
-  const day = await ask('which ledger xlsx yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
-  assert.equal((JSON.parse(seen[2]!.prompt) as { incomplete: boolean }).incomplete, false)
-  assert.equal(day.kind === 'answer' && day.statements.length, 3, 'with the whole day sent, the claim about it stands')
-  s.close()
-})
-
-test('"most recently" stands when it names when the cited thing was last seen, and not otherwise', async () => {
-  const s = setup()
-  const model = fakeModel((req) => {
-    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file === 'q4-budget.xlsx')!.id
     return {
       answerable: true,
       statements: [
-        { text: 'You had q4-budget.xlsx open in Editor, most recently around 1:09 AM.', sources: [file] },
-        { text: 'You had q4-budget.xlsx open in Editor, most recently around 1:40 AM.', sources: [file] },
+        { text: 'You last opened ledger-10.xlsx at 11:05 AM.', sources: [of('ledger-10.xlsx')] },
+        { text: 'You last opened ledger-3.xlsx at 4:05 AM.', sources: [of('ledger-3.xlsx')] },
+        { text: 'You last opened ledger-10.xlsx at 9 AM.', sources: [of('ledger-10.xlsx')] },
+      ],
+    }
+  })
+  const last = await ask('which ledger xlsx did I open last', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.'])
+  const day = await ask('which ledger xlsx yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.equal((JSON.parse(seen[2]!.prompt) as { incomplete: boolean }).incomplete, false)
+  const dayFile = (JSON.parse(seen[2]!.prompt) as { sources: { file?: string }[] }).sources.find((x) => x.file?.startsWith('ledger-'))!.file!
+  assert.equal(day.kind === 'answer' && day.statements.length, dayFile === 'ledger-10.xlsx' ? 4 : 3, 'with the whole day sent, the claims about it stand, a time still where it was seen')
+  s.close()
+})
+
+test('"most recently" stands for the newest best match, at the time and on the day it was last seen, and nothing else', async () => {
+  const s = setup()
+  const model = fakeModel((req) => {
+    const src = (JSON.parse(req.prompt) as { sources: { id: string; file?: string; address?: string }[] }).sources
+    const file = src.find((x) => x.file === 'q4-budget.xlsx')!.id
+    const page = src.find((x) => x.address?.endsWith('/budget'))!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'You most recently read the budget review around 1:29 AM yesterday.', sources: [page] },
+        { text: 'You most recently read the budget review around 1:29 AM today.', sources: [page] },
+        { text: 'You most recently read the budget review around 1 AM yesterday.', sources: [page] },
+        { text: 'You most recently had q4-budget.xlsx open around 1:09 AM yesterday.', sources: [file] },
       ],
     }
   })
   const res = await ask('budget', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
-  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['You had q4-budget.xlsx open in Editor, most recently around 1:09 AM.'])
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['You most recently read the budget review around 1:29 AM yesterday.'])
   s.close()
 })
 
@@ -660,6 +673,7 @@ test('a statement may name several things from what it cites, each file with an 
         { text: 'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome and Notes.', sources: [h1, budget] },
         { text: 'At 2:30 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
+        { text: 'At 1:15 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
