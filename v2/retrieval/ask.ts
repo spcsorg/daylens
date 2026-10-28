@@ -195,6 +195,10 @@ const local = (ms: number) => {
 }
 const minutes = (ms: number) => Math.round(ms / 60_000)
 
+// A sighting's last moment: its end is exclusive (one at midnight or on the hour belongs to the time before), unless it
+// has no length.
+const moment = (x: Sighting) => Math.max(x.from_wall_ms, x.to_wall_ms - 1)
+
 // The first and last moment of each day in a list of sightings, as sightings of no length.
 function dayEnds(sightings: readonly Sighting[]): Sighting[] {
   const days = new Map<number, [Sighting, Sighting]>()
@@ -203,9 +207,7 @@ function dayEnds(sightings: readonly Sighting[]): Sighting[] {
     const [a, b] = days.get(d) ?? [x, x]
     days.set(d, [x.from_wall_ms < a.from_wall_ms ? x : a, x.to_wall_ms > b.to_wall_ms ? x : b])
   }
-  // An end is exclusive: one at midnight belongs to the day before.
-  const end = (x: Sighting) => Math.max(x.from_wall_ms, x.to_wall_ms - 1)
-  return [...days.values()].flatMap(([a, b]) => [{ app_id: a.app_id, from_wall_ms: a.from_wall_ms, to_wall_ms: a.from_wall_ms }, { app_id: b.app_id, from_wall_ms: end(b), to_wall_ms: end(b) }])
+  return [...days.values()].flatMap(([a, b]) => [{ app_id: a.app_id, from_wall_ms: a.from_wall_ms, to_wall_ms: a.from_wall_ms }, { app_id: b.app_id, from_wall_ms: moment(b), to_wall_ms: moment(b) }])
 }
 
 // Each day something was on screen, from its first to its last time that day, oldest day first.
@@ -693,8 +695,8 @@ export async function ask(
     statements.splice(0, statements.length, ...byTime.map((x) => x.st))
     // The answer's first link is the moment it names: the hour its newest source was last seen in, when that was sent.
     const lead = byTime[0]
-    const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? [sources[Number(id.slice(1)) - 1]!.last_wall_ms] : []))) : -Infinity
-    const at = hours.findIndex((h) => h.start_wall_ms <= t - 1 && t - 1 < h.end_wall_ms)
+    const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? sources[Number(id.slice(1)) - 1]!.seen.map(moment) : []))) : -Infinity
+    const at = hours.findIndex((h) => h.start_wall_ms <= t && t < h.end_wall_ms)
     if (lead && at >= 0 && !gone.has(`h${at + 1}`)) lead.st.cites = [byId.get(`h${at + 1}`)!, ...lead.st.cites.filter((c) => c !== byId.get(`h${at + 1}`))]
   }
   if (statements.length === 0 && withdrawn > 0) return { kind: 'withdrawn', withdrawn, results }

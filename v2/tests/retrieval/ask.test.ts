@@ -597,6 +597,26 @@ test('a source seen until midnight is on screen that day, not from 12 AM the nex
   s.close()
 })
 
+test('a "when did I last" answer links first to the hour of the moment it names, a moment on the hour in that hour', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 9 * HOUR + 30 * MIN))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 9 * HOUR + 30 * MIN, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 10 * HOUR, 'app_changed'))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 11 * HOUR, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 11 * HOUR, 'app_changed'))
+  s.r.store.flush()
+  const seen: AskRequest[] = []
+  const model = fakeModel((req) => {
+    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file === 'roadmap.md')!
+    return { answerable: true, statements: [{ text: 'You had roadmap.md open.', sources: [file.id] }] }
+  }, seen)
+  const res = await ask('when did I last open roadmap md', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 10, perGroup: 5 })
+  assert.deepEqual(res.kind === 'answer' && res.statements[0]!.cites.map((c) => (c.kind === 'hour' ? c.start_wall_ms : c.file)), [T0 + 11 * HOUR, 'roadmap.md'])
+  s.close()
+})
+
 test('a claim of only, first, last or never stands only when the whole of the days asked was sent', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
