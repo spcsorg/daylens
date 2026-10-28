@@ -14,7 +14,9 @@ test('Ask through the API sends the system prompt, the record as the one message
   })
   try {
     const model = anthropicApi('claude-sonnet-5-5', { apiKey: 'sk-test-2', baseURL: api.url, timeoutMs: 5000 })
-    const reply = await model.run({ system: 'sys', prompt: '{"question":"q"}', schema: ANSWER_SCHEMA })
+    const pieces: string[] = []
+    const reply = await model.run({ system: 'sys', prompt: '{"question":"q"}', schema: ANSWER_SCHEMA }, (t) => pieces.push(t))
+    assert.deepEqual(pieces, [answer.slice(0, 30), answer.slice(30)], 'the answer reaches Ask as it streams')
     assert.deepEqual(reply, { output: JSON.parse(answer), model: 'claude-sonnet-5-5', input_tokens: 1200, output_tokens: 300, cost_micro_usd: 1200 * 2 + 300 * 10 })
     const body = api.seen[0]!.body
     assert.equal(body.system, 'sys')

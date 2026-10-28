@@ -9,8 +9,8 @@ export function anthropicApi(model: string, opts: ApiOptions): AskModel {
   return {
     name: 'Claude',
     provider: 'anthropic',
-    async run(req) {
-      const r = await call({ system: req.system, message: req.prompt, schema: req.schema })
+    async run(req, onText) {
+      const r = await call({ system: req.system, message: req.prompt, schema: req.schema, onText })
       if (r.error !== null || r.text === null) throw new Error(r.error ?? 'no answer')
       let output: unknown
       try {

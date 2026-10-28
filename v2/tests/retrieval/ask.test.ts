@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
-import { ask, AskError, type AskLog, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
+import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
 import { claudeCli } from '../../retrieval/claudeCli.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
@@ -79,6 +79,49 @@ test('an answer keeps only statements that cite what the AI was given, and each 
   assert.deepEqual(s.usage(), [{ kind: 'answer', provider: 'fake', model: 'fake-1', input_tokens: 1200, output_tokens: 80, ref: `read:${s.reads()[0]!.id}` }])
 
   assert.equal(seen[0]!.system, SYSTEM_PROMPT)
+  s.close()
+})
+
+test('statements are read from the answer as it streams, each once it is complete, braces and quotes in its text included', () => {
+  const full = JSON.stringify({ answerable: true, statements: [{ text: 'You wrote "a {b}" \\ c.', sources: ['s1'] }, { text: 'Then lunch.', sources: ['h1'] }], missing: 'x' })
+  const seen = new Set<number>()
+  for (let n = 0; n <= full.length; n++) seen.add(completeStatements(full.slice(0, n)).length)
+  assert.deepEqual([...seen], [0, 1, 2], 'never more than what has fully arrived, and never fewer once it has')
+  assert.deepEqual(completeStatements(full), JSON.parse(full).statements)
+  assert.deepEqual(completeStatements('{"answerable":false,"statements":[]}'), [])
+  assert.deepEqual(completeStatements('{"answerable":tr'), [])
+})
+
+test('a streamed answer shows each statement that passes the checks as it arrives, and the result is the same answer', async () => {
+  const s = setup()
+  const shown: { text: string; at: number }[] = []
+  let chunks = 0
+  const model: AskModel = {
+    name: 'Fake',
+    provider: 'fake',
+    async run(req, onText) {
+      const rec = JSON.parse(req.prompt) as { hours: { id: string }[]; sources: { id: string; address?: string }[] }
+      const page = rec.sources.find((x) => x.address)!.id
+      const answer = JSON.stringify({
+        answerable: true,
+        statements: [
+          { text: 'You reviewed the Q4 budget.', sources: [rec.hours[0]!.id, page] },
+          { text: 'You also emailed the bank.', sources: ['s99'] },
+          { text: 'You read the budget doc.', sources: [page] },
+        ],
+      })
+      for (let i = 0; i < answer.length; i += 7) {
+        chunks++
+        onText?.(answer.slice(i, i + 7))
+      }
+      return { output: JSON.parse(answer), model: 'fake-1', input_tokens: 1, output_tokens: 1, cost_micro_usd: 0 }
+    },
+  }
+  const res = await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY, onStatement: (st) => shown.push({ text: st.text, at: chunks }) }, LIMITS)
+  assert.deepEqual(shown.map((x) => x.text), ['You reviewed the Q4 budget.', 'You read the budget doc.'], 'a statement that fails the checks is never shown')
+  assert.ok(shown[0]!.at < shown[1]!.at && shown[1]!.at < chunks, 'each is shown as it completes, before the answer ends')
+  assert.equal(res.kind, 'answer')
+  if (res.kind === 'answer') assert.deepEqual(res.statements.map((x) => x.text), shown.map((x) => x.text))
   s.close()
 })
 

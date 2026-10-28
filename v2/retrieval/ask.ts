@@ -37,7 +37,8 @@ export interface AskModel {
   // Shown in the log, as "Ask (<name>)".
   name: string
   provider: string
-  run(request: AskRequest): Promise<AskReply>
+  // onText, when the model streams, gets each piece of the answer as it arrives.
+  run(request: AskRequest, onText?: (text: string) => void): Promise<AskReply>
 }
 
 /** Where Ask records what it sent (AssistantStore.recordRead) and what it cost (Storage.recordUsage). */
@@ -53,7 +54,7 @@ export type Citation =
 
 export type AskResult =
   // withdrawn: statements left out because what they cite was deleted while the AI was answering.
-  | { kind: 'answer'; statements: { text: string; cites: Citation[] }[]; dropped: number; withdrawn: number; results: SearchResults }
+  | { kind: 'answer'; statements: Statement[]; dropped: number; withdrawn: number; results: SearchResults }
   // The record does not answer the question; the search results are still shown.
   | { kind: 'no_answer'; missing: string | null; results: SearchResults }
   // Every statement cited something deleted while the AI was answering, so none is shown.
@@ -294,7 +295,55 @@ function checkLimits(l: AskLimits): void {
   }
 }
 
-export async function ask(question: string, deps: { reader: Reader; model: AskModel | null; log: AskLog; now?: () => number }, limits: AskLimits): Promise<AskResult> {
+export interface Statement {
+  text: string
+  cites: Citation[]
+}
+
+/**
+ * The statements an answer holds so far, from the JSON as streamed: each complete object in its "statements" array.
+ * Strings are read with their escapes, so a brace inside a statement's text does not end it.
+ */
+export function completeStatements(json: string): unknown[] {
+  const key = json.search(/"statements"\s*:\s*\[/)
+  if (key < 0) return []
+  const out: unknown[] = []
+  let i = json.indexOf('[', key) + 1
+  let depth = 0
+  let start = -1
+  let inString = false
+  for (; i < json.length; i++) {
+    const c = json[i]
+    if (inString) {
+      if (c === '\\') i++
+      else if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') inString = true
+    else if (c === '{') {
+      if (depth++ === 0) start = i
+    } else if (c === '}') {
+      if (--depth === 0) {
+        try {
+          out.push(JSON.parse(json.slice(start, i + 1)))
+        } catch {
+          return out
+        }
+      }
+    } else if (c === ']' && depth === 0) break
+  }
+  return out
+}
+
+/**
+ * onStatement gets each statement as soon as it is complete and passes the same checks as the final answer, while no
+ * deletion has begun. The result is still the whole answer: it replaces what was shown, and can withdraw a statement.
+ */
+export async function ask(
+  question: string,
+  deps: { reader: Reader; model: AskModel | null; log: AskLog; now?: () => number; onStatement?: (s: Statement) => void },
+  limits: AskLimits,
+): Promise<AskResult> {
   checkLimits(limits)
   const now = (deps.now ?? Date.now)()
   const mark = deps.reader.deletionMark()
@@ -413,37 +462,6 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     sources: readSources,
   }, mark)
 
-  let reply: AskReply
-  try {
-    reply = await deps.model.run({ system: SYSTEM_PROMPT, prompt: JSON.stringify(record), schema: ANSWER_SCHEMA })
-  } catch (err) {
-    throw new AskError('ai_failed', `${deps.model.name} did not answer: ${(err as Error).message}`)
-  }
-  deps.log.recordUsage({ kind: 'answer', provider: deps.model.provider, model: reply.model, input_tokens: reply.input_tokens, output_tokens: reply.output_tokens, cost_micro_usd: reply.cost_micro_usd, ref: `read:${readId}` })
-
-  const out = reply.output as { answerable?: unknown; statements?: unknown; missing?: unknown } | null
-  if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`)
-
-  // A deletion begun since the record was read takes out of the answer everything it covers, though the AI saw it.
-  const later = deps.reader.deletionsSince(mark)
-  const gone = new Set<string>()
-  if (later.length > 0) {
-    results = find()
-    const covered = (spans: ReadSpan[]) => spans.some((span) => later.some((t) => deletionCovers(t, span)))
-    hours.forEach((h, i) => {
-      const span = {
-        from: h.start_wall_ms,
-        to: h.end_wall_ms,
-        apps: [...h.apps.map((a) => a.app_id), ...(h.hour?.sources ?? []).map((s) => s.app_id)],
-        sites: [...h.sources.map((s) => siteOf(s.url)), ...(h.hour?.sources ?? []).map((s) => s.site)],
-      }
-      if (covered([span])) gone.add(`h${i + 1}`)
-    })
-    sources.forEach((s, i) => {
-      // Every sighting behind it, in whichever app: the statement may rest on any of them.
-      if (covered(s.sightings.map((x) => ({ from: x.from_wall_ms, to: Math.max(x.to_wall_ms, x.from_wall_ms + 1), apps: [x.app_id], sites: [siteOf(s.url)] })))) gone.add(`s${i + 1}`)
-    })
-  }
   const byId = new Map<string, Citation>()
   hours.forEach((h, i) =>
     byId.set(`h${i + 1}`, { kind: 'hour', start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, hour_id: h.hour?.id ?? null, title: h.hour?.title ?? null, open: { kind: 'hour', hour_start_wall_ms: h.start_wall_ms, hour_id: h.hour?.id ?? null } }),
@@ -475,26 +493,76 @@ export async function ask(question: string, deps: { reader: Reader; model: AskMo
     const text = `${s.title ?? ''}\u0000${s.url ?? ''}`.toLowerCase()
     evidence.set(`s${i + 1}`, s.seen.map((x) => ({ from: x.from_wall_ms, to: x.to_wall_ms, apps: appsOf(x.app_id), files: s.file ? [s.file.toLowerCase()] : [], sites: site ? [site] : [], text })))
   })
-  const statements: { text: string; cites: Citation[] }[] = []
-  let dropped = 0
-  let withdrawn = 0
-  for (const st of out.statements as unknown[]) {
-    const s = st as { text?: unknown; sources?: unknown }
-    const ids = Array.isArray(s.sources) ? s.sources : []
+  const check = (st: unknown): Statement | null => {
+    const s = st as { text?: unknown; sources?: unknown } | null
+    const ids = Array.isArray(s?.sources) ? s.sources : []
     const ok =
-      typeof s.text === 'string' && s.text.trim() !== '' && ids.length > 0 && ids.every((id) => typeof id === 'string' && byId.has(id)) &&
+      typeof s?.text === 'string' && s.text.trim() !== '' && ids.length > 0 && ids.every((id) => typeof id === 'string' && byId.has(id)) &&
       supported(s.text, (ids as string[]).flatMap((id) => evidence.get(id)!), appNames, now) &&
       // Search finds by words, not by app or anything else a claim can be about, so only a whole day read is complete.
       !(claimsAll(s.text) && (days.length === 0 || incomplete))
+    return ok ? { text: s!.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) } : null
+  }
+  let streamed = ''
+  let shown = 0
+  const onText = deps.onStatement
+    ? (t: string) => {
+        streamed += t
+        const done = completeStatements(streamed)
+        for (; shown < done.length; shown++) {
+          if (deps.reader.deletionsSince(mark).length > 0) return
+          const st = check(done[shown])
+          if (st) deps.onStatement!(st)
+        }
+      }
+    : undefined
+
+  let reply: AskReply
+  try {
+    reply = await deps.model.run({ system: SYSTEM_PROMPT, prompt: JSON.stringify(record), schema: ANSWER_SCHEMA }, onText)
+  } catch (err) {
+    throw new AskError('ai_failed', `${deps.model.name} did not answer: ${(err as Error).message}`)
+  }
+  deps.log.recordUsage({ kind: 'answer', provider: deps.model.provider, model: reply.model, input_tokens: reply.input_tokens, output_tokens: reply.output_tokens, cost_micro_usd: reply.cost_micro_usd, ref: `read:${readId}` })
+
+  const out = reply.output as { answerable?: unknown; statements?: unknown; missing?: unknown } | null
+  if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`)
+
+  // A deletion begun since the record was read takes out of the answer everything it covers, though the AI saw it.
+  const later = deps.reader.deletionsSince(mark)
+  const gone = new Set<string>()
+  if (later.length > 0) {
+    results = find()
+    const covered = (spans: ReadSpan[]) => spans.some((span) => later.some((t) => deletionCovers(t, span)))
+    hours.forEach((h, i) => {
+      const span = {
+        from: h.start_wall_ms,
+        to: h.end_wall_ms,
+        apps: [...h.apps.map((a) => a.app_id), ...(h.hour?.sources ?? []).map((s) => s.app_id)],
+        sites: [...h.sources.map((s) => siteOf(s.url)), ...(h.hour?.sources ?? []).map((s) => s.site)],
+      }
+      if (covered([span])) gone.add(`h${i + 1}`)
+    })
+    sources.forEach((s, i) => {
+      // Every sighting behind it, in whichever app: the statement may rest on any of them.
+      if (covered(s.sightings.map((x) => ({ from: x.from_wall_ms, to: Math.max(x.to_wall_ms, x.from_wall_ms + 1), apps: [x.app_id], sites: [siteOf(s.url)] })))) gone.add(`s${i + 1}`)
+    })
+  }
+  const statements: Statement[] = []
+  let dropped = 0
+  let withdrawn = 0
+  for (const st of out.statements as unknown[]) {
+    const ok = check(st)
     if (!ok) {
       dropped++
       continue
     }
-    if ((ids as string[]).some((id) => gone.has(id))) {
+    const ids = (st as { sources: string[] }).sources
+    if (ids.some((id) => gone.has(id))) {
       withdrawn++
       continue
     }
-    statements.push({ text: s.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) })
+    statements.push(ok)
   }
   if (statements.length === 0 && withdrawn > 0) return { kind: 'withdrawn', withdrawn, results }
   // What the AI says the record lacks can name what was deleted.
