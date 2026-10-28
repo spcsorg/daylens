@@ -115,8 +115,9 @@ export class McpServer {
     const client = params.clientInfo as { name?: unknown; title?: unknown } | undefined
     const name = typeof client?.name === 'string' ? client.name : null
     const given = typeof client?.title === 'string' ? client.title : name
-    // Any local program can name itself; the name leads the card, so it stays short and plain.
-    this.assistant = (name && Object.hasOwn(CLIENT_NAMES, name) && CLIENT_NAMES[name]) || (given && plain(given).trim().slice(0, 40)) || this.assistant
+    // Any local program can name itself, and the name leads the card: only a known client is named as itself.
+    const own = given && Array.from(plain(given).trim()).slice(0, 40).join('')
+    this.assistant = (name && Object.hasOwn(CLIENT_NAMES, name) && CLIENT_NAMES[name]) || (own ? `Assistant “${own}”` : this.assistant)
     const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
     const now = new Date((this.o.now ?? Date.now)())
     return {
