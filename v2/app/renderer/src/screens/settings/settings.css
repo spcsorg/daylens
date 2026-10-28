@@ -119,11 +119,6 @@
   color: var(--danger);
 }
 
-.settings-later {
-  color: var(--text-2);
-  padding: var(--space-16) 0;
-}
-
 .settings-options {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

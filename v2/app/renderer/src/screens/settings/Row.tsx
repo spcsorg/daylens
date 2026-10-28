@@ -22,8 +22,3 @@ export function Section({ title, children }: { title: string; children: ReactNod
     </section>
   )
 }
-
-/** A tab whose controls come in a later update. */
-export function Later({ text }: { text: string }) {
-  return <p className="settings-later">{text}</p>
-}
