@@ -611,6 +611,35 @@ test('a refused or cut-off answer is reported as a failure, and what the provide
   }
 })
 
+test('an hour’s start and end hold for anything seen in that hour, still seen together; a day inside a cited title is not a claim', async () => {
+  const s = setup()
+  const errand = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 2 * HOUR + 10 * MIN))
+  s.r.feed(focus(errand, 'Order list for Saturday', T0 + 2 * HOUR + 10 * MIN, 'app_changed'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 2 * HOUR + 20 * MIN))
+  s.r.store.flush()
+  const model = fakeModel((req) => {
+    const r = JSON.parse(req.prompt) as { hours: { id: string; start: string }[]; sources: { id: string; title: string }[] }
+    const h1 = r.hours.find((h) => h.start.endsWith('01:00'))!.id
+    const h3 = r.hours.find((h) => h.start.endsWith('03:00'))!.id
+    const budget = r.sources.find((x) => x.title === 'q4-budget.xlsx - Editor')!.id
+    const order = r.sources.find((x) => x.title === 'Order list for Saturday')!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
+        { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome.', sources: [h1, budget] },
+        { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
+        { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
+        { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
+      ],
+    }
+  })
+  const res = await ask('budget and order list today', { reader: s.reader, model, log: s.log, now: () => T0 + 5 * HOUR }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['From 1 to 2 AM you edited q4-budget.xlsx in Editor.', 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.'])
+  s.close()
+})
+
 test('a question that names no day and nothing to search for is about today', async () => {
   const s = setup()
   const seen: AskRequest[] = []
