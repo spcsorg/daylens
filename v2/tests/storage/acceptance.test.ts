@@ -114,6 +114,7 @@ test('deletion reaches everything: a site and its subdomains, once page addresse
   assert.equal(r2.storage.search('wombat').length, 2)
   assert.equal(r2.storage.search('secret bank').length, 2, 'addresses are searchable')
 
+  r2.clock.t = T0 + HOUR
   await r2.storage.deleteSite('secret-bank.example').done
   assert.deepEqual(containsAnywhere(r2, 'Wombat'), [])
   assert.deepEqual(containsAnywhere(r2, 'secret-bank').filter((w) => !w.startsWith('disk:')), [])
@@ -135,6 +136,7 @@ test('a site deletion reaches addresses written with a trailing dot, whichever f
     for (const row of rows) r.store.database.prepare('UPDATE observations SET url = ? WHERE title = ?').run(row.url, row.title)
     r.storage.derived.rebuild()
     assert.equal(r.storage.search('wombat').length, 2)
+    r.clock.t = T0 + HOUR
     await r.storage.deleteSite(named).done
     assert.deepEqual(containsAnywhere(r, 'Wombat').filter((w) => !w.startsWith('disk:')), [], named)
     assert.equal(r.storage.importObservations(rows).imported, 1, `${named}: a re-import brings back only the other site`)
