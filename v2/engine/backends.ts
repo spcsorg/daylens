@@ -261,18 +261,38 @@ export interface ApiRequest {
 // Thinking counts against it; an hour or an answer is far shorter.
 const API_MAX_TOKENS = 16_000
 
-/** The Anthropic Messages API, streamed, with no tools. Never throws: a failure is a CallResult with its error. */
-export function anthropicClient(model: string, opts: ApiOptions): (req: ApiRequest) => Promise<CallResult> {
-  if (!ANTHROPIC_RATES[model]) throw new Error(`no price for ${model}`)
-  if (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1) throw new RangeError('timeoutMs must be a positive whole number')
-  // Explicit nulls: the SDK would otherwise read ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN, which belong to the
-  // person's own tools, and send that token too. It also merges ANTHROPIC_CUSTOM_HEADERS after the key, so each header
-  // named there is removed, and the key and Authorization are set last.
+// The person's key and nothing from the environment: the SDK would otherwise read ANTHROPIC_BASE_URL and
+// ANTHROPIC_AUTH_TOKEN, which belong to the person's own tools, and it merges ANTHROPIC_CUSTOM_HEADERS after the key, so
+// each header named there is removed, and the key and Authorization are set last.
+function apiClient(opts: ApiOptions): Anthropic {
   const inherited = Object.fromEntries(
     (process.env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n').flatMap((l) => (l.includes(':') ? [[l.slice(0, l.indexOf(':')).trim(), null]] : [])),
   )
   const defaultHeaders = { ...inherited, 'X-Api-Key': opts.apiKey, Authorization: null }
-  const client = new Anthropic({ apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs, defaultHeaders })
+  return new Anthropic({ apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs, defaultHeaders })
+}
+
+function apiError(e: unknown): { error: string; quota: boolean } {
+  if (e instanceof Anthropic.AuthenticationError) return { error: 'the API key was refused', quota: false }
+  if (e instanceof Anthropic.APIError) return { error: `${e.status ?? 'no status'}: ${e.message}`, quota: e.status === 429 || QUOTA.test(e.message) }
+  return { error: (e as Error).message, quota: false }
+}
+
+/** Whether the API accepts the key, without a billed call: null when it does, else why not. */
+export async function checkKey(opts: ApiOptions): Promise<string | null> {
+  try {
+    await apiClient(opts).models.list({ limit: 1 })
+    return null
+  } catch (e) {
+    return apiError(e).error
+  }
+}
+
+/** The Anthropic Messages API, streamed, with no tools. Never throws: a failure is a CallResult with its error. */
+export function anthropicClient(model: string, opts: ApiOptions): (req: ApiRequest) => Promise<CallResult> {
+  if (!ANTHROPIC_RATES[model]) throw new Error(`no price for ${model}`)
+  if (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1) throw new RangeError('timeoutMs must be a positive whole number')
+  const client = apiClient(opts)
   return async (req) => {
     const t0 = performance.now()
     const out: CallResult = { text: null, error: null, quota: false, latency_ms: 0, first_token_ms: null, usage: null, reported_cost_usd: null, model: null, tool_calls: [], raw: null }
@@ -302,11 +322,7 @@ export function anthropicClient(model: string, opts: ApiOptions): (req: ApiReque
       else if (m.stop_reason === 'max_tokens') out.error = `the answer was cut off at ${API_MAX_TOKENS} tokens`
       else out.text = m.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('')
     } catch (e) {
-      if (e instanceof Anthropic.AuthenticationError) out.error = 'the API key was refused'
-      else if (e instanceof Anthropic.APIError) {
-        out.error = `${e.status ?? 'no status'}: ${e.message}`
-        out.quota = e.status === 429 || QUOTA.test(e.message)
-      } else out.error = (e as Error).message
+      Object.assign(out, apiError(e))
     }
     out.latency_ms = Math.round(performance.now() - t0)
     return out

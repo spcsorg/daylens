@@ -28,6 +28,8 @@ import { Supervisor } from './supervisor.ts'
 import { readOrderingPoint } from './ordering.ts'
 import { readV1Privacy } from './v1Privacy.ts'
 import { Storage } from '../storage/index.ts'
+import { anthropicApi, textWriter } from '../engine/backends.ts'
+import { HOUR_MODEL, HourWriting } from '../engine/hourWriter.ts'
 
 const { values } = parseArgs({
   options: {
@@ -77,6 +79,7 @@ const storage = new Storage(store, dataDir, {
 // A first read cut short after its merge leaves its staging copy; with or without agent access it is removed here.
 removeStaging(dataDir)
 storage.onDeleted = () => stopBackfills()
+const hours = new HourWriting(storage, { log })
 const privacy = new Privacy(store.exclusions())
 const pages = new BrowserPages(store, privacy, { log })
 let supervisor: Supervisor | null = null
@@ -174,6 +177,7 @@ async function shutdown(signal: string): Promise<void> {
   await supervisor!.stop()
   await agents?.stop()
   await history?.stop()
+  hours.stop()
   storage.stop()
   store.close()
   process.exit(0)
@@ -190,6 +194,7 @@ if (!parentPort && (process.platform === 'win32' || process.env.DAYLENS_CAPTURE_
 log(`started pid=${process.pid}`)
 supervisor.start()
 storage.start()
+hours.start()
 history?.start()
 agents?.start().catch((err: unknown) => log(`agent reader failed code=${(err as { code?: unknown })?.code ?? 'unknown'}`))
 browserSocket = new BrowserSocket(pages, pause, { log })
@@ -208,7 +213,7 @@ if (localEnabled()) {
 // Only the parent (the Daylens app) writes here: control ops from the interface, and daylens://pair links the operating
 // system delivered to it. Run as an Electron utility process, the parent sends each line as a message instead.
 function onControl(raw: string): void {
-  let msg: { op?: unknown; link?: unknown; id?: unknown; allow?: unknown }
+  let msg: { op?: unknown; link?: unknown; id?: unknown; allow?: unknown; key?: unknown }
   try {
     msg = JSON.parse(raw)
   } catch {
@@ -217,6 +222,11 @@ function onControl(raw: string): void {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return void log('control rejected reason=not_object')
   if (msg.op === 'stop') return void shutdown('stop')
   if (handleControl(storage, msg, out)) return
+  // The person's own key, from the app's secure storage; null turns AI off and hours stay as facts.
+  if (msg.op === 'ai' && (typeof msg.key === 'string' || msg.key === null)) {
+    hours.setWriter(msg.key ? textWriter(anthropicApi(HOUR_MODEL, { apiKey: msg.key, timeoutMs: 120_000 })) : null)
+    return void out({ op: 'reply', id: msg.id, ok: true })
+  }
   if (msg.op === 'pair' && typeof msg.link === 'string' && browserLocal) browserLocal.addPairLink(msg.link)
   else if (msg.op === 'unpair' && typeof msg.id === 'string' && browserLocal) browserLocal.unpair(msg.id)
   else if (msg.op === 'pair_decision' && typeof msg.id === 'string' && typeof msg.allow === 'boolean' && browserLocal) browserLocal.decide(msg.id, msg.allow)

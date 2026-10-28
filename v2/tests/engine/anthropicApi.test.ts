@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { anthropicApi, anthropicClient, factsHour, textWriter } from '../../engine/backends.ts'
+import { anthropicApi, anthropicClient, checkKey, factsHour, textWriter } from '../../engine/backends.ts'
 import type { Packet } from '../../engine/packet.ts'
 import { fakeAnthropic } from '../support/fakeAnthropic.ts'
 
@@ -105,6 +105,18 @@ test('headers the environment adds through ANTHROPIC_CUSTOM_HEADERS can neither 
   } finally {
     if (saved === undefined) delete process.env.ANTHROPIC_CUSTOM_HEADERS
     else process.env.ANTHROPIC_CUSTOM_HEADERS = saved
+    await api.close()
+  }
+})
+
+test('a key is checked without a billed call: the API lists models for a key it accepts and refuses one it does not', async () => {
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{}'] }))
+  try {
+    assert.equal(await checkKey({ apiKey: 'sk-good', baseURL: api.url, timeoutMs: 5000 }), null)
+    assert.equal(await checkKey({ apiKey: 'sk-refused', baseURL: api.url, timeoutMs: 5000 }), 'the API key was refused')
+    assert.ok(api.seen.every((s) => Object.keys(s.body).length === 0), 'no message was sent')
+    assert.equal(api.seen[0]!.headers['x-api-key'], 'sk-good')
+  } finally {
     await api.close()
   }
 })

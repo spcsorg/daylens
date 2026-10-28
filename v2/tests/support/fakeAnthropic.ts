@@ -16,6 +16,13 @@ export async function fakeAnthropic(reply: (body: Record<string, unknown>) => Re
   const server = createServer((req, res) => {
     let raw = ''
     req.setEncoding('utf8').on('data', (c: string) => (raw += c)).on('end', async () => {
+      // The key check lists models: it accepts any key but sk-refused.
+      if (req.method === 'GET') {
+        seen.push({ headers: req.headers, body: {} })
+        if (req.headers['x-api-key'] === 'sk-refused') res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }))
+        else res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [], has_more: false, first_id: null, last_id: null }))
+        return
+      }
       const body = JSON.parse(raw) as Record<string, unknown>
       seen.push({ headers: req.headers, body })
       const r = reply(body)

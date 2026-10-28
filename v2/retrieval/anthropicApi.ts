@@ -3,6 +3,10 @@
 import { ANTHROPIC_RATES, anthropicClient, type ApiOptions } from '../engine/backends.ts'
 import { ModelError, type AskModel } from './ask.ts'
 
+// Ask answers while the person waits: Sonnet 5.5 shows its first statement in about 2.5 s, Opus 5.5 its whole answer in
+// about 8 (docs/engine.md, Choosing the models).
+export const ASK_MODEL = 'claude-sonnet-5-5'
+
 export function anthropicApi(model: string, opts: ApiOptions): AskModel {
   const call = anthropicClient(model, opts)
   const rate = ANTHROPIC_RATES[model]!
