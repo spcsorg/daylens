@@ -109,6 +109,7 @@ export const SYSTEM_PROMPT = [
   'When the same thing shows on several days, give the most recent and mention the others, without guessing which one counts.',
   'Read titles the way the person would: a Mail window titled "Sent: October invoice" means that invoice went out then. Say something was finished only when a title shows it was, like a sent email; otherwise say it was worked on, not sorted out, done or finished, and an email that was open was read, not answered.',
   'Say what the person did ("you sent the October invoice around 1:45 PM"), never what showed on screen ("the sent email showing", "it shows up yesterday").',
+  'A sentence saying when something was last open cites only that thing; what came before it goes in its own sentence.',
   'Every statement is one full sentence that stands alone, since any may be left out; never start one with "Also", "You also", "Just before that" or anything else that leans on another, and lists in "sources" the ids it rests on. Use only ids from the record. Make no statement the record does not support. A statement that names a time, a day, an app, a site or a file cites an hour or source from it.',
   'How good answers read, for someone else’s day: "What did I do yesterday?" "Yesterday was mostly the pricing memo and client invoices. You drafted the memo’s first two sections and reworked its pricing table, sent invoice 1042 and chased the two that are overdue, and cleared the onboarding checklist for the new store." "When did I last open the contract?" "You last had the contract open at 3:40 PM today, right after replying to the client about the start date." "Did I reply to Dana?" "Can’t tell: you had her email open around 4 PM, but nothing shows a reply going out."',
   'People name things loosely: "the order form" can be a window titled "Order form checklist" or a file named order-form notes.txt. Answer from what matches what they mean.',
@@ -277,9 +278,12 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
   const pool = days.length === 0 ? cited : cited.filter((s) => days.some((d) => onDay(s, d)))
   // a.m., p.m., e.g. and i.e. are not names.
   const plain = text.replace(/\b(?:[ap]\.m|e\.g|i\.e)\.?/gi, ' ')
-  const apps = names(text, appNames, true).map((n) => n.toLowerCase())
+  // A dotted name that is an app's id ("com.example.editor") names an app, not a file or site.
+  const dotted = [...plain.matchAll(DOTTED)].map((m) => m[0].toLowerCase().replace(/\.$/, ''))
+  const appIds = dotted.filter((n) => pool.some((s) => s.apps.includes(n)))
+  const apps = [...names(text, appNames, true).map((n) => n.toLowerCase()), ...appIds]
   const appIn = apps.map((n) => (s: Seen) => s.apps.includes(n) || mentions(s.text, n))
-  const dottedIn = [...plain.matchAll(DOTTED)].map((m) => m[0].toLowerCase().replace(/\.$/, '')).map(
+  const dottedIn = dotted.filter((n) => !appIds.includes(n)).map(
     (n) => (s: Seen) => s.files.includes(n) || s.apps.includes(n) || s.sites.some((x) => x === n || x.endsWith(`.${n}`)) || mentions(s.text, n),
   )
   // A sentence may name several things from one piece of work, each seen in what it cites, but never a file or site with
@@ -305,6 +309,7 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
 /** A claim about every occurrence: true only of the whole record, never of part of it. */
 // The words of a claim about the most recent time.
 const LAST = /\b(last|latest|most recent(ly)?)\b/gi
+const SAYS_LAST = /\b(last|latest|most recent(ly)?)\b/i
 
 export function claimsAll(text: string): boolean {
   const t = text.toLowerCase().replace(/\blast (week|month|year|night|morning|afternoon|evening|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g, '')
@@ -461,9 +466,11 @@ export async function ask(
   const best = Math.max(0, ...sources.map(matchCount))
   const newest = best > 0 ? sources.reduce<SentSource | null>((n, x) => (matchCount(x) === best && (!n || x.last_wall_ms > n.last_wall_ms) ? x : n), null) : null
   const newestId = newest ? `s${sources.indexOf(newest) + 1}` : null
-  // "You last had it open at 12 PM today" holds only for the newest best match, at the time and on the day it was last seen.
+  // "You last had it open at 12 PM today" holds only for the newest best match, citing no other best match, at the time
+  // and on the day it was last seen.
   const lastHolds = (text: string, ids: string[]) => {
     if (!newest || !newestId || !ids.includes(newestId)) return false
+    if (ids.some((id) => id !== newestId && id.startsWith('s') && matchCount(sources[Number(id.slice(1)) - 1]!) === best)) return false
     const at = minuteOfDay(newest.last_wall_ms)
     const days = daysIn(text, now)
     return timesIn(text).some((o) => o.some((m) => Math.abs(m - at) <= 15)) && (days.length === 0 || days.some(([a, b]) => newest.last_wall_ms >= a && newest.last_wall_ms < b))
@@ -554,9 +561,10 @@ export async function ask(
     const ok =
       typeof s?.text === 'string' && s.text.trim() !== '' && ids.length > 0 && ids.every((id) => typeof id === 'string' && byId.has(id)) &&
       supported(s.text, (ids as string[]).flatMap((id) => evidence.get(id)!), appNames, now) &&
-      // Search finds by words, not by app or anything else a claim can be about, so only a whole day read is complete. The
-      // exception, when search found every match: "you last had…" about the newest of what best matches the question.
-      !(claimsAll(s.text) && (days.length === 0 || incomplete) && !(!incomplete && !claimsAll(s.text.replace(LAST, '')) && lastHolds(s.text, ids as string[])))
+      // Search finds by words, not by app or anything else a claim can be about, so only a whole day read is complete. A
+      // claim about the last time is checked either way: it holds for the newest of what best matches the question.
+      !(claimsAll(s.text) && (days.length === 0 || incomplete) && !(!incomplete && !claimsAll(s.text.replace(LAST, '')) && lastHolds(s.text, ids as string[]))) &&
+      !(claimsAll(s.text) && SAYS_LAST.test(s.text) && !lastHolds(s.text, ids as string[]))
     return ok ? { text: s!.text as string, cites: [...new Set(ids as string[])].map((id) => byId.get(id)!) } : null
   }
   let streamed = ''
