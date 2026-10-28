@@ -1,6 +1,10 @@
-// What an assistant can read through the MCP server: days, hours, search and agent work. Each call is logged before
-// anything is returned, with the hours and the apps and sites it showed, so Settings can list it and a deletion
-// removes it. Nothing here writes to the record.
+// What an assistant can read through the MCP server: days, hours, apps, search, agent work and recording status. Each
+// call is logged before anything is returned, with the hours and the apps and sites it showed, so Settings can list it
+// and a deletion removes it. Like every screen, nothing past the retention period is shown. Nothing here writes to the
+// record.
+import { app, appsView } from '../app/reader/apps.ts'
+import { Reader as ScreenReader } from '../app/reader/queries.ts'
+import { leftOff } from '../app/reader/today.ts'
 import { HOUR_MS, siteOf } from '../storage/derive.ts'
 import { pendingVerdict, type HourSource } from '../storage/hours.ts'
 import { fencedBy, pendingTombstones } from '../storage/rules.ts'
@@ -12,7 +16,7 @@ import { search, type OpenAction } from './search.ts'
 export interface ToolLimits {
   // Search results per group.
   perGroup: number
-  // The longest span, in days, list_days and get_agent_work accept.
+  // The longest span, in days, list_days, get_apps and get_agent_work accept.
   maxDays: number
 }
 
@@ -85,6 +89,27 @@ export function localIso(ms: number): string {
 
 const localDay = (ms: number) => localIso(ms).slice(0, 10)
 const minutes = (ms: number) => Math.round(ms / 60_000)
+const NOT_RUNNING_AFTER_MS = 10 * 60_000
+
+/** The screens' reads on the same connection and clock, for what the tools show as the screens do. */
+const screens = (ctx: ToolContext) => new ScreenReader(ctx.reader.db, ctx.now)
+
+/** Hours in [from, to) as the reader gives them, from the first that starts inside the retention period. */
+function keptHours(ctx: ToolContext, from: number, to: number): HourView[] {
+  const cutoff = screens(ctx).cutoff()
+  return ctx.reader.hours(cutoff === null ? from : Math.max(from, cutoff), to).filter((h) => cutoff === null || h.start_wall_ms >= cutoff)
+}
+
+/** The app an assistant named, by id or name, among those used in the span. */
+function appNamed(apps: readonly { id: string; name: string; ms: number }[], asked: string): { id: string; name: string } {
+  const q = asked.trim().toLowerCase()
+  const exact = apps.find((a) => a.id.toLowerCase() === q || a.name.toLowerCase() === q)
+  if (exact) return exact
+  const near = apps.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+  if (near.length === 1) return near[0]!
+  // No app names here: an error isn't logged as a read, so it may show nothing.
+  throw new ToolInputError(near.length > 1 ? `more than one app matches ${asked}; call get_apps without app to see their names` : `no app named ${asked} was used then`)
+}
 
 /** What a read showed, for its log entry: the hours by id, and every app and site whose activity it showed. */
 class Shown {
@@ -184,33 +209,54 @@ export const READ_TOOLS: readonly ReadTool[] = [
   {
     name: 'list_days',
     title: 'List recorded days',
-    description: 'The local days from `from` to `to` (inclusive) that have anything recorded, with how much was recorded and how many hours are written.',
+    description: `An overview of the local days from \`from\` to \`to\` (inclusive) that have anything recorded, as the week and month views show them: time recorded, the five apps used most, and each hour's title (its written title, else its three longest apps). Use it for a week or a month; use get_day for one day in detail. ${UNTRUSTED}`,
     inputSchema: { type: 'object', properties: { from: DATE, to: DATE }, required: ['from', 'to'], additionalProperties: false },
     run(args, ctx, mark) {
       const [from, to] = dateSpan(args, ctx.limits.maxDays)
-      const days = new Map<string, { date: string; recorded_ms: number; hours_written: number; hours_facts: number }>()
-      for (const h of ctx.reader.hours(from, to)) {
+      const shown = new Shown()
+      type Day = { date: string; recorded_ms: number; hours_written: number; hours_facts: number; apps: Map<string, { name: string; ms: number }>; hours: { start: string; title: string }[] }
+      const days = new Map<string, Day>()
+      for (const h of keptHours(ctx, from, to)) {
         const date = localDay(h.start_wall_ms)
-        const d = days.get(date) ?? { date, recorded_ms: 0, hours_written: 0, hours_facts: 0 }
+        const d: Day = days.get(date) ?? { date, recorded_ms: 0, hours_written: 0, hours_facts: 0, apps: new Map(), hours: [] }
         d.recorded_ms += h.recorded_ms
         if (h.hour?.status === 'written') d.hours_written++
         else d.hours_facts++
+        for (const a of h.apps) {
+          const k = (a.app_id ?? '').toLowerCase()
+          const t = d.apps.get(k) ?? { name: a.app_name ?? a.app_id ?? 'Unknown', ms: 0 }
+          t.ms += a.ms
+          d.apps.set(k, t)
+        }
+        shown.hour(h.hour?.id)
+        for (const a of h.apps.slice(0, 3)) shown.app(a.app_id)
+        const title = h.hour?.status === 'written' && h.hour.title ? h.hour.title : h.apps.slice(0, 3).map((a) => a.app_name ?? a.app_id).join(' · ')
+        d.hours.push({ start: localIso(h.start_wall_ms), title })
         days.set(date, d)
       }
-      new Shown().logged(ctx, mark, 'list_days', from, to)
-      return { days: [...days.values()].map(({ recorded_ms, ...d }) => ({ ...d, recorded_minutes: minutes(recorded_ms) })) }
+      const out = [...days.values()].map(({ recorded_ms, apps, ...d }) => {
+        const top = [...apps.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, 5)
+        for (const [id] of top) shown.app(id)
+        return { ...d, recorded_minutes: minutes(recorded_ms), apps: top.map(([, a]) => ({ name: a.name, minutes: minutes(a.ms) })) }
+      })
+      shown.logged(ctx, mark, 'list_days', from, to)
+      return { days: out, note: UNTRUSTED }
     },
   },
   {
     name: 'get_day',
     title: 'Read a day',
-    description: `Every hour of a local day that has a record: its written title and summary if it has been written (status "written"), else only facts (status "facts"); fields the person edited; time per app; and gaps with their reason. ${UNTRUSTED}`,
+    description: `Every hour of a local day that has a record: its written title and summary if it has been written (status "written"), else only facts (status "facts"); fields the person edited; time per app; the three windows, pages or files on screen longest; and gaps with their reason. ${UNTRUSTED}`,
     inputSchema: { type: 'object', properties: { date: DATE }, required: ['date'], additionalProperties: false },
     run(args, ctx, mark) {
       const from = localDate(args.date, 'date')
       const to = nextDay(from)
       const shown = new Shown()
-      const hours = ctx.reader.hours(from, to).map((h) => hourSummary(h, shown))
+      const hours = keptHours(ctx, from, to).map((h) => {
+        const longest = h.sources.slice(0, 3)
+        for (const s of longest) shown.page(s.url)
+        return { ...hourSummary(h, shown), longest: longest.map((s) => ({ kind: s.kind, title: s.kind === 'file' ? s.file : s.title, minutes: minutes(s.ms) })) }
+      })
       shown.logged(ctx, mark, 'get_day', from, to)
       return { date: localDay(from), hours, note: UNTRUSTED }
     },
@@ -237,7 +283,8 @@ export const READ_TOOLS: readonly ReadTool[] = [
         d.setHours(args.hour as number)
         start = d.getTime()
       }
-      const h = ctx.reader.hourAt(start)
+      const cutoff = screens(ctx).cutoff()
+      const h = cutoff !== null && start < cutoff ? null : ctx.reader.hourAt(start)
       const shown = new Shown()
       if (!h) {
         shown.logged(ctx, mark, 'get_hour', start, start + HOUR_MS)
@@ -269,7 +316,9 @@ export const READ_TOOLS: readonly ReadTool[] = [
     inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1 }, from: DATE, to: DATE }, required: ['query'], additionalProperties: false },
     run(args, ctx, mark) {
       if (typeof args.query !== 'string' || args.query.trim() === '') throw new ToolInputError('query must be text')
-      const from = args.from === undefined ? undefined : localDate(args.from, 'from')
+      const cutoff = screens(ctx).cutoff()
+      const asked = args.from === undefined ? undefined : localDate(args.from, 'from')
+      const from = cutoff === null ? asked : Math.max(asked ?? cutoff, cutoff)
       const to = args.to === undefined ? undefined : nextDay(localDate(args.to, 'to'))
       const r = search(ctx.reader, args.query, { perGroup: ctx.limits.perGroup, fromWallMs: from, toWallMs: to })
       const shown = new Shown()
@@ -326,10 +375,102 @@ export const READ_TOOLS: readonly ReadTool[] = [
       } else {
         ;[from, to] = dateSpan(args, ctx.limits.maxDays)
       }
+      const cutoff = screens(ctx).cutoff()
+      if (cutoff !== null) from = Math.max(from, cutoff)
       const shown = new Shown()
-      const sessions = agentSessions(ctx.reader, from, to, shown)
+      const sessions = from < to ? agentSessions(ctx.reader, from, to, shown) : []
       shown.logged(ctx, mark, 'get_agent_work', from, to)
       return sessions === null ? { sessions: [], note: 'Reading Claude Code and Codex sessions is off on this computer.' } : { sessions }
+    },
+  },
+  {
+    name: 'get_apps',
+    title: 'Time per app',
+    description: `Time in each app from \`from\` to \`to\` (local dates, inclusive), as the Apps screen shows it, with the total per day. Give \`app\` (a name such as "Chrome", or an app id) for one app instead: its time per day, the hours it was used in, and the pages, documents and windows used in it, longest first. ${UNTRUSTED}`,
+    inputSchema: { type: 'object', properties: { from: DATE, to: DATE, app: { type: 'string', minLength: 1 } }, required: ['from', 'to'], additionalProperties: false },
+    run(args, ctx, mark) {
+      const [from, to] = dateSpan(args, ctx.limits.maxDays)
+      const days = Math.round((to - from) / 86_400_000)
+      const first = localDay(from)
+      const sr = screens(ctx)
+      const shown = new Shown()
+      const all = sr.read(() => appsView(sr, first, days))
+      if (args.app === undefined) {
+        for (const a of all.apps) shown.app(a.id)
+        shown.logged(ctx, mark, 'get_apps', from, to)
+        return {
+          total_minutes: minutes(all.total_ms),
+          apps: all.apps.filter((a) => a.ms >= 30_000).map((a) => ({ app_id: a.id, name: a.name, minutes: minutes(a.ms) })),
+          per_day: all.per_day.map((d) => ({ date: d.date, minutes: minutes(d.total_ms) })),
+          note: UNTRUSTED,
+        }
+      }
+      if (typeof args.app !== 'string' || args.app.trim() === '') throw new ToolInputError('app must be a name or an app id')
+      const named = appNamed(all.apps, args.app)
+      const d = sr.read(() => app(sr, named.id, first, days))!
+      shown.app(d.app.id)
+      const used = d.sources.slice(0, 50).map((x) => {
+        shown.page(x.url)
+        return { kind: x.kind, title: x.title, url: x.url, minutes: minutes(x.ms), first_seen: localIso(x.first_ms), last_seen: localIso(x.last_ms) }
+      })
+      shown.logged(ctx, mark, 'get_apps', from, to)
+      return {
+        app: { app_id: d.app.id, name: d.app.name, minutes: minutes(d.app.ms) },
+        per_day: d.per_day.map((x) => ({ date: x.date, minutes: minutes(x.ms) })),
+        hours: d.hours.map(localIso),
+        used,
+        ...(d.sources.length > used.length ? { more_used: d.sources.length - used.length } : {}),
+        note: UNTRUSTED,
+      }
+    },
+  },
+  {
+    name: 'get_status',
+    title: 'Today and recording status',
+    description:
+      "Start here when you need the date: today's local date, time and time zone; whether Daylens is recording, paused (and until when), stopped or not running, and any problem with what it can see; the last three things the person had open today (where they left off); and the settings that limit the record: the built-in exclusions, how many apps and sites the person excluded, and how many days history is kept. " + UNTRUSTED,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run(_args, ctx, mark) {
+      const now = (ctx.now ?? Date.now)()
+      const sr = screens(ctx)
+      const shown = new Shown()
+      const { rec, left, exclusions, quit, retention } = sr.read(() => ({
+        rec: sr.recording(),
+        left: leftOff(sr),
+        exclusions: ctx.reader.db.prepare('SELECT label, is_default FROM exclusions ORDER BY id').all() as { label: string; is_default: number }[],
+        // Set when the capture service stops cleanly, cleared when it starts.
+        quit: ctx.reader.db.prepare(`SELECT value FROM meta WHERE key = 'service_stopped_wall_ms'`).get() as { value: string } | undefined,
+        retention: sr.cutoff() === null ? null : Math.round((now - sr.cutoff()!) / 86_400_000),
+      }))
+      // The server runs without the app: quit cleanly, or no heartbeat for a while (a crash, or asleep).
+      const quiet = !rec.pause && rec.stopped_since_ms === null && rec.last_heartbeat_ms !== null && now - rec.last_heartbeat_ms > NOT_RUNNING_AFTER_MS
+      const notRunning = quit ? Number(quit.value) : quiet ? rec.last_heartbeat_ms : null
+      const problems = [
+        ...(rec.titles && rec.titles !== 'ok' ? [`window titles can't be read (${rec.titles.replace('_', ' ')})`] : []),
+        ...rec.agents.map((a) => `${a.agent === 'codex' ? 'Codex' : a.agent === 'claude_code' ? 'Claude Code' : a.agent} sessions: ${a.state.replaceAll('_', ' ')}`),
+        ...rec.browsers.filter((b) => b.state !== 'ok').map((b) => `${b.name} history can't be read`),
+      ]
+      const out = {
+        now: localIso(now),
+        today: localDay(now),
+        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        recording: notRunning !== null ? 'not running' : rec.stopped_since_ms !== null ? 'stopped' : rec.pause ? 'paused' : 'recording',
+        ...(notRunning !== null ? { not_running_since: localIso(notRunning) } : rec.stopped_since_ms !== null ? { stopped_since: localIso(rec.stopped_since_ms) } : {}),
+        ...(rec.pause ? { paused_since: localIso(rec.pause.since_ms), paused_until: rec.pause.until_ms === null ? 'until resumed' : localIso(rec.pause.until_ms) } : {}),
+        problems,
+        first_day: rec.first_day,
+        left_off: left.map((x) => {
+          shown.app(x.app.id)
+          shown.page(x.url)
+          return { kind: x.kind, title: x.title, app: x.app.name, url: x.url, last_seen: localIso(x.last_ms) }
+        }),
+        // What the person chose to keep out stays private; only the built-in exclusions are named.
+        excluded: { defaults: exclusions.filter((e) => e.is_default === 1).map((e) => e.label), added_by_person: exclusions.filter((e) => e.is_default !== 1).length },
+        history_kept_days: retention,
+        note: UNTRUSTED,
+      }
+      shown.logged(ctx, mark, 'get_status', new Date(now).setHours(0, 0, 0, 0), now)
+      return out
     },
   },
 ]

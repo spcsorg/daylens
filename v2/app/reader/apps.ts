@@ -3,7 +3,7 @@ import { KNOWN_BROWSER_APP_IDS } from '../../capture/defaults.ts'
 import type { AppDetail, AppsQuery, AppsView } from '../shared/apps.ts'
 import { dateOf, hourStarts, startOf, type Handlers, type Reader } from './queries.ts'
 
-function appsView(r: Reader, from: string, days: number): AppsView {
+export function appsView(r: Reader, from: string, days: number): AppsView {
   const now = r.now()
   const lo = startOf(from)
   const hi = Math.min(startOf(from, days), now)

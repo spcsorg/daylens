@@ -49,18 +49,19 @@ const preview = app('com.apple.Preview', 'Preview', '/System/Applications/Previe
 const textedit = app('com.apple.TextEdit', 'TextEdit', '/System/Applications/TextEdit.app')
 const numbers = app('com.apple.reminders', 'Reminders', '/System/Applications/Reminders.app')
 const terminal = app('com.apple.Terminal', 'Terminal', '/System/Applications/Utilities/Terminal.app')
+const chrome = app('com.google.Chrome', 'Google Chrome', '/Applications/Google Chrome.app')
 
 // [minutes into the hour, app, window title], one hour's worth of focus changes.
 const HOURS: [number, AppIdentity, string][][] = [
   [[0, mail, 'Weekend cake orders'], [18, notes, 'Order list for Saturday'], [40, calendar, 'Week of deliveries']],
-  [[0, numbers, 'Flour and butter costs'], [35, mail, 'Re: Supplier price change']],
+  [[0, numbers, 'Flour and butter costs'], [20, chrome, 'Mill Lane Flour – wholesale prices'], [35, mail, 'Re: Supplier price change']],
   [[0, textedit, 'Autumn menu draft.rtf'], [30, preview, 'Autumn menu proof.pdf']],
   [[0, terminal, 'brightside-site — npm run dev'], [25, textedit, 'order-form notes.txt'], [50, notes, 'Order form checklist']],
   [[0, terminal, 'brightside-site — git log'], [20, notes, 'Card payment questions']],
   [[0, mail, 'Corner Café invoice for October'], [15, numbers, 'Invoices to send'], [45, mail, 'Sent: October invoice']],
   [[0, calendar, 'Pickup schedule'], [30, notes, 'Pickup reminders']],
   [[0, preview, 'Packaging labels.pdf'], [40, textedit, 'Label wording.rtf']],
-  [[0, mail, 'Wholesale enquiry'], [20, numbers, 'Wholesale follow-ups']],
+  [[0, mail, 'Wholesale enquiry'], [10, chrome, 'Corner Café – menu and opening hours'], [20, numbers, 'Wholesale follow-ups']],
   [[0, notes, 'Tomorrow’s bakes'], [30, calendar, 'Thursday']],
 ]
 
