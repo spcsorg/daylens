@@ -223,10 +223,6 @@
   white-space: pre;
 }
 
-.d-sel {
-  border-radius: 3px;
-}
-
 .d-from {
   display: grid;
   gap: 10px;
@@ -267,6 +263,27 @@
 
 .d-page .f-glyph {
   color: var(--w-text-2);
+}
+
+.d-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 10px 16px;
+  border-radius: 12px;
+  background: var(--w-bg);
+  box-shadow: 0 1px 2px rgb(20 22 25 / 0.08), 0 0 0 1px var(--w-line);
+  font: 400 15px/21px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.d-grab {
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--d-soft);
+  box-shadow: 0 0 0 1px var(--d-ink);
+  font: 500 16px/22px var(--w-sans);
+  color: var(--w-text);
 }
 
 .d-hours {

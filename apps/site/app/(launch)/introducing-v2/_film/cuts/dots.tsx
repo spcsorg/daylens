@@ -38,7 +38,7 @@ function Placed({ p, w, h, z, children, tone }: { p: Place; w: number; h: number
 }
 
 // A point inside a placed window, in stage pixels.
-const point = (p: Place, w: number, h: number, dx: number, dy: number) => ({ x: p.x + (dx - w / 2) * p.s, y: p.y + (dy - h / 2) * p.s, k: p.s / 1.3 });
+const point = (p: Place, w: number, h: number, dx: number, dy: number) => ({ x: p.x + (dx - w / 2) * p.s, y: p.y + (dy - h / 2) * p.s });
 
 function Pointer({ x, y, press, o, k }: { x: number; y: number; press: number; o: number; k: number }) {
   return (
@@ -72,18 +72,15 @@ function Caret({ t }: { t: number }) {
   return <i className="f-caret" style={{ opacity: Math.floor(t * 2) % 2 ? 0 : 1 }} />;
 }
 
-function Words({ text, t, start, rate = 11, mark }: { text: string; t: number; start: number; rate?: number; mark?: [number, number, number] }) {
+function Words({ text, t, start, rate = 11 }: { text: string; t: number; start: number; rate?: number }) {
   const n = clamp((t - start) * rate, 0, 999);
   return (
     <>
       {text.split(" ").slice(0, Math.ceil(n)).map((w, i) => {
         const k = clamp(n - i);
-        const sel = mark && i >= mark[0] && i < mark[1] ? mark[2] : 0;
         return (
           <span key={i} style={{ opacity: k, filter: k < 1 ? `blur(${(1 - k) * 3}px)` : undefined }}>
-            <span className="d-sel" style={{ backgroundColor: `rgb(59 124 192 / ${0.24 * sel})` }}>
-              {w}
-            </span>{" "}
+            {w}{" "}
           </span>
         );
       })}
@@ -274,7 +271,7 @@ const sceneFind: Beat = {
             <AskHead />
             <div className="d-thread">
               {t >= A.send ? <Bubble text={A.q} t={t} sent={A.send} /> : null}
-              {t >= A.send ? <Thinking t={t} a={A.read[0]} b={A.read[1]} text="Reading last Tuesday, 10 AM to 3 PM" /> : null}
+              {t >= A.send ? <Thinking t={t} a={A.read[0]} b={A.read[1]} text="Reading last Tuesday" /> : null}
               {t >= A.answer ? (
                 <div className="d-them">
                   <Words text={A_ANSWER} t={t} start={A.answer} />
@@ -353,17 +350,16 @@ const B = {
   send: 3.4,
   read: [3.65, 4.6] as [number, number],
   answer: 4.6,
-  select: 7.0,
   grab: 7.55,
   drop: 8.55,
   dur: 10.4,
 };
-const B_ANSWER = "11h 20m since 6 April, across five days. Most of it was the Harbor site in Cursor, plus two calls with their team in Zoom.";
+const B_ANSWER = "Five days on Harbor this month, mostly building their site in Cursor, plus two calls with their team about the launch.";
 const B_HOURS = ["Mon 6 · 2 PM", "Wed 8 · 10 AM", "Thu 9 · 3 PM", "Mon 13 · 4 PM"];
 
 const MAIL_W = { "16x9": 640, "4x5": 500 };
 const MAIL_H = { "16x9": 420, "4x5": 300 };
-const ASK_B_H = { "16x9": 520, "4x5": 430 };
+const ASK_B_H = { "16x9": 520, "4x5": 450 };
 
 const sceneHours: Beat = {
   kind: "scene",
@@ -377,19 +373,15 @@ const sceneHours: Beat = {
     const [aw, ah, mw, mh] = [ASK_W[ratio], ASK_B_H[ratio], MAIL_W[ratio], MAIL_H[ratio]];
     const o = enter(t, d);
     const r = rise(t, d);
-    const ask = wide ? at(0, 524, 540, 1.3) : at(0, 540, 945, 1.9);
+    const ask = wide ? at(0, 524, 540, 1.3) : at(0, 540, 955, 1.9);
     const mail = keys(wide ? [at(0, 1370, 540, 1.3), at(d, 1366, 540, 1.31)] : [at(0, 540, 300, 1.75), at(d, 540, 302, 1.76)], t);
-    const from = point(ask, aw, ah, wide ? 75 : 75, wide ? 222 : 222);
+    const from = point(ask, aw, ah, wide ? 521 : 422, wide ? 312 : 337);
     const to = point(mail, mw, mh, wide ? 554 : 412, wide ? 224 : 223);
     const ptr = keys(
       [
-        { t: B.select - 0.5, x: from.x + 120, y: from.y + 120, press: 0 },
-        { t: B.select - 0.05, x: from.x - 47 * from.k, y: from.y, press: 0 },
-        { t: B.select + 0.05, x: from.x - 47 * from.k, y: from.y, press: 1 },
-        { t: B.select + 0.35, x: from.x + 48 * from.k, y: from.y, press: 1 },
-        { t: B.select + 0.45, x: from.x + 48 * from.k, y: from.y, press: 0 },
-        { t: B.grab - 0.05, x: from.x + 20, y: from.y, press: 0 },
-        { t: B.grab + 0.05, x: from.x + 20, y: from.y, press: 1 },
+        { t: B.grab - 0.9, x: from.x + 140, y: from.y + 150, press: 0 },
+        { t: B.grab - 0.08, x: from.x, y: from.y, press: 0 },
+        { t: B.grab + 0.05, x: from.x, y: from.y, press: 1 },
         { t: B.drop, x: to.x, y: to.y, press: 1 },
         { t: B.drop + 0.12, x: to.x, y: to.y, press: 0 },
         { t: B.drop + 0.9, x: to.x + 40, y: to.y + 60, press: 0 },
@@ -397,11 +389,11 @@ const sceneHours: Beat = {
       t,
       inOut,
     );
-    const ptrO = prog(t, B.select - 0.6, B.select - 0.3) * (1 - prog(t, B.drop + 0.6, B.drop + 1.0));
-    const sel = prog(t, B.select + 0.05, B.select + 0.35) * (1 - prog(t, B.drop, B.drop + 0.3));
+    const ptrO = prog(t, B.grab - 1.0, B.grab - 0.7) * (1 - prog(t, B.drop + 0.6, B.drop + 1.0));
+    const lift = prog(t, B.grab, B.grab + 0.15) * (1 - prog(t, B.drop, B.drop + 0.2));
     const dragging = t > B.grab && t < B.drop + 0.05;
     const dropped = prog(t, B.drop, B.drop + 0.35, back);
-    const cards = prog(t, B.answer + 2.3, B.answer + 2.8);
+    const cards = prog(t, B.answer + 1.9, B.answer + 2.4);
     return (
       <div className="d-scene" style={{ opacity: o, transform: `translateY(${r}px)` }}>
         <Placed p={mail} w={mw} h={mh} tone={tone} z={1}>
@@ -429,23 +421,29 @@ const sceneHours: Beat = {
             <AskHead />
             <div className="d-thread">
               {t >= B.send ? <Bubble text={B.q} t={t} sent={B.send} /> : null}
-              {t >= B.send ? <Thinking t={t} a={B.read[0]} b={B.read[1]} text="Reading 6 to 14 April" /> : null}
+              {t >= B.send ? <Thinking t={t} a={B.read[0]} b={B.read[1]} text="Reading April so far" /> : null}
               {t >= B.answer ? (
                 <div className="d-them">
-                  <Words text={B_ANSWER} t={t} start={B.answer} mark={[0, 2, sel]} />
+                  <Words text={B_ANSWER} t={t} start={B.answer} />
                 </div>
               ) : null}
               <div className="d-from" style={{ opacity: cards, transform: `translateY(${(1 - cards) * 14}px)` }}>
-                <div className="d-hours">
-                  {B_HOURS.map((h, i) => (
-                    <span key={h} style={{ opacity: prog(t, B.answer + 2.4 + i * 0.1, B.answer + 2.7 + i * 0.1) }}>
-                      {h}
-                    </span>
-                  ))}
-                  <span className="d-more" style={{ opacity: prog(t, B.answer + 2.8, B.answer + 3.1) }}>
-                    10 more hours
-                  </span>
+                <div className="d-total">
+                  <span>Harbor Studio, April so far</span>
+                  <b className="d-grab" style={{ opacity: 1 - 0.55 * lift }}>11h 20m</b>
                 </div>
+                {wide ? (
+                  <div className="d-hours">
+                    {B_HOURS.map((h, i) => (
+                      <span key={h} style={{ opacity: prog(t, B.answer + 2.1 + i * 0.1, B.answer + 2.4 + i * 0.1) }}>
+                        {h}
+                      </span>
+                    ))}
+                    <span className="d-more" style={{ opacity: prog(t, B.answer + 2.5, B.answer + 2.8) }}>
+                      10 more hours
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </div>
             <Composer q={B.q} t={t} typeAt={B.type} sendAt={B.send} />
@@ -473,7 +471,7 @@ const C = {
   answer: 4.5,
   dur: 9.6,
 };
-const C_LINES = ["Answered the Thursday review notes", "Drafted the first two sections of the spring pricing memo", "Design sync, then fixes to the pricing page"];
+const C_LINES = ["Answered the Thursday review notes", "Drafted most of the spring pricing memo", "The design sync ran long, then I fixed the pricing page"];
 
 const CC_W = { "16x9": 600, "4x5": 500 };
 const CC_H = { "16x9": 500, "4x5": 430 };
