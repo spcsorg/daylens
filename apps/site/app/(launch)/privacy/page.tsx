@@ -14,6 +14,7 @@ export const metadata: Metadata = docMetadata(
 
 const SECTIONS = [
   ["short", "The short version"],
+  ["beta", "In the beta"],
   ["records", "What Daylens records"],
   ["never", "What Daylens never records"],
   ["stored", "Where it is stored"],
@@ -85,7 +86,7 @@ export default function PrivacyPage() {
                   <td>Yes. Don&rsquo;t connect it, or disconnect it</td>
                 </tr>
                 <tr>
-                  <td>Usage analytics and error reports</td>
+                  <td>Usage analytics and error reports (not in the beta)</td>
                   <td>Us, through our analytics service</td>
                   <td>Yes. Settings › Recording and privacy</td>
                 </tr>
@@ -103,6 +104,29 @@ export default function PrivacyPage() {
             </table>
           </div>
           <p>We don&rsquo;t sell your data, and we don&rsquo;t use it for advertising.</p>
+
+          <h2 id="beta">In the beta</h2>
+          <p>This page describes Daylens as it will be. The first beta differs in these ways:</p>
+          <ul>
+            <li>
+              <strong>Mac only, not notarized.</strong> macOS asks you to choose Open Anyway the first time. Updates
+              are off; new versions come from GitHub releases.
+            </li>
+            <li>
+              <strong>No usage analytics.</strong> The beta sends no usage data to us.
+            </li>
+            <li>
+              <strong>No Daylens AI and no billing.</strong> AI runs on your own API key, or not at all.
+            </li>
+            <li>
+              <strong>No log of what was sent to AI yet.</strong> Settings doesn&rsquo;t show it in the beta.
+            </li>
+            <li>
+              <strong>The record isn&rsquo;t encrypted by Daylens.</strong> It&rsquo;s a database in your Library
+              folder. Other accounts on the computer can&rsquo;t open it; any program running as you can. Turn on
+              FileVault to encrypt it at rest.
+            </li>
+          </ul>
 
           <h2 id="records">What Daylens records</h2>
           <p>Daylens records on your computer, so that you and the AI you choose can find anything you saw:</p>
@@ -200,7 +224,7 @@ export default function PrivacyPage() {
             assistant at any time.
           </p>
 
-          <h3>Usage analytics and error reports</h3>
+          <h3>Usage analytics and error reports (not in the beta)</h3>
           <p>
             Usage analytics are on by default. They record how the app is used, under a random install ID: which
             features and screens are used, setup milestones, errors, speed, AI usage and cost, the app version and
@@ -270,7 +294,7 @@ export default function PrivacyPage() {
               <strong>Assistants.</strong> See what each one read, and disconnect any of them.
             </li>
             <li>
-              <strong>Usage analytics.</strong> Turn them off in Settings › Recording and privacy.
+              <strong>Usage analytics.</strong> Turn them off in Settings › Recording and privacy. The beta sends none.
             </li>
           </ul>
 
@@ -372,7 +396,7 @@ export default function PrivacyPage() {
           <ul>
             <li>The AI model provider behind Daylens AI, for the requests described above, when you use Daylens AI.</li>
             <li>Polar and Flutterwave, for payments you make.</li>
-            <li>Our analytics service, for usage analytics and error reports, unless you turn them off.</li>
+            <li>Our analytics service, for usage analytics and error reports, unless you turn them off. Not in the beta.</li>
             <li>Resend, which stores waitlist emails and sends our email.</li>
             <li>The services that host our website, waitlist and billing service.</li>
           </ul>
