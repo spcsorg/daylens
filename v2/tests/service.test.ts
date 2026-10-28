@@ -35,7 +35,7 @@ function startService(dataDir: string, work: string, env: Record<string, string>
   let log = ''
   const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--hang-after-s', '1.5', '--tick-ms', '100', ...args], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof'), ...env },
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: [WIN ? 'pipe' : 'ignore', 'ignore', 'pipe'],
   })
   proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
   return { proc, log: () => log }
@@ -55,10 +55,14 @@ function gaps(dataDir: string): Gap[] {
   }
 }
 
+const WIN = process.platform === 'win32'
+
 async function stopService(proc: ChildProcess): Promise<void> {
   if (proc.exitCode !== null) return
   const exited = new Promise((r) => proc.once('exit', r))
-  proc.kill('SIGTERM')
+  // Windows has no SIGTERM (kill ends the process at once); the service stops cleanly when its stdin closes.
+  if (WIN && proc.stdin) proc.stdin.end()
+  else proc.kill('SIGTERM')
   await exited
 }
 
@@ -152,7 +156,12 @@ test('killing the service stops the helper and the next start records an unclean
   await sleep(1500)
   const killedAt = Date.now()
   svc.proc.kill('SIGKILL')
-  await waitFor(() => existsSync(path.join(work, 'eof')), 3000)
+  const [helper] = helperPids(work)
+  await waitFor(() => existsSync(path.join(work, 'eof')), 3000).catch((err) => {
+    let alive = true
+    try { process.kill(helper!, 0) } catch { alive = false }
+    throw new Error(`${err}; helper ${helper} alive=${alive}; log: ${svc.log().slice(-1500)}`)
+  })
   const eofAt = Number(readFileSync(path.join(work, 'eof'), 'utf8'))
   assert.ok(eofAt - killedAt < 1000, `helper exited ${eofAt - killedAt} ms after the service died`)
   await sleep(1000)
@@ -419,7 +428,7 @@ test('started the way the app starts it, the service records agent sessions from
   mkdirSync(project, { recursive: true })
   const at = Date.now() - 60_000
   writeFileSync(path.join(project, `${c.session}.jsonl`), [claude.prompt(c, at, 'hi'), claude.assistant(c, at + 1000, 'end_turn')].map((l) => l + '\n').join(''))
-  const env = { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') }
+  const env = { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') }
   const svc = startService(dataDir, work, env, [...APP_CAPTURE_FLAGS])
   const turns = () => {
     const db = new Database(path.join(dataDir, DB_FILE), { readonly: true })
