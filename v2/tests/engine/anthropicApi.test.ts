@@ -72,3 +72,22 @@ test('the API backend refuses a model it has no price for, and a missing timeout
   assert.throws(() => anthropicClient('claude-unknown', { apiKey: 'k', timeoutMs: 1000 }), /no price/)
   assert.throws(() => anthropicClient('claude-haiku-5-5', { apiKey: 'k', timeoutMs: 0 }), RangeError)
 })
+
+test('the person\u2019s key is the only credential sent, and only to the API, whatever Anthropic variables the environment holds', async () => {
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{}'] }))
+  const other = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{}'] }))
+  const saved = { url: process.env.ANTHROPIC_BASE_URL, token: process.env.ANTHROPIC_AUTH_TOKEN, key: process.env.ANTHROPIC_API_KEY }
+  Object.assign(process.env, { ANTHROPIC_BASE_URL: other.url, ANTHROPIC_AUTH_TOKEN: 'someone-elses-token', ANTHROPIC_API_KEY: 'someone-elses-key' })
+  try {
+    assert.equal((await anthropicClient('claude-haiku-5-5', { apiKey: 'sk-mine', baseURL: api.url, timeoutMs: 5000 })({ message: 'hi' })).error, null)
+    assert.equal(other.seen.length, 0)
+    assert.equal(api.seen[0]!.headers['x-api-key'], 'sk-mine')
+    assert.equal(api.seen[0]!.headers.authorization, undefined)
+  } finally {
+    for (const [k, v] of [['ANTHROPIC_BASE_URL', saved.url], ['ANTHROPIC_AUTH_TOKEN', saved.token], ['ANTHROPIC_API_KEY', saved.key]] as const) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    await Promise.all([api.close(), other.close()])
+  }
+})

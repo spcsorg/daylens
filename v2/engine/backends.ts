@@ -265,7 +265,9 @@ const API_MAX_TOKENS = 16_000
 export function anthropicClient(model: string, opts: ApiOptions): (req: ApiRequest) => Promise<CallResult> {
   if (!ANTHROPIC_RATES[model]) throw new Error(`no price for ${model}`)
   if (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1) throw new RangeError('timeoutMs must be a positive whole number')
-  const client = new Anthropic({ apiKey: opts.apiKey, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs })
+  // Explicit nulls: the SDK would otherwise read ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN, which belong to the
+  // person's own tools, and send that token too.
+  const client = new Anthropic({ apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs })
   return async (req) => {
     const t0 = performance.now()
     const out: CallResult = { text: null, error: null, quota: false, latency_ms: 0, first_token_ms: null, usage: null, reported_cost_usd: null, model: null, tool_calls: [], raw: null }
