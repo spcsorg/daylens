@@ -646,6 +646,7 @@ test('a claim of only, first, last or never stands only when the whole of the da
         { text: 'You last opened ledger-10.xlsx at 9 AM.', sources: [of('ledger-10.xlsx')] },
         { text: 'You last opened ledger-3.xlsx, and ledger-10.xlsx at 11:05 AM.', sources: [of('ledger-3.xlsx'), of('ledger-10.xlsx')] },
         { text: 'You last opened the newest ledger at 11:05 AM, after the one before it.', sources: [of('ledger-10.xlsx'), of('ledger-9.xlsx')] },
+        { text: 'You last opened ledger-10.xlsx at 11:05 AM, after the one in s99.', sources: [of('ledger-10.xlsx'), 's99'] },
       ],
     }
   })

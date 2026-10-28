@@ -587,7 +587,10 @@ export async function ask(
     const text = `${s.title ?? ''}\u0000${s.url ?? ''}`.toLowerCase()
     evidence.set(`s${i + 1}`, s.seen.map((x) => ({ from: x.from_wall_ms, to: x.to_wall_ms, apps: appsOf(x.app_id), files: s.file ? [s.file.toLowerCase()] : [], sites: site ? [site] : [], text })))
   })
-  const isBest = (id: string) => id !== newestId && id.startsWith('s') && matchCount(sources[Number(id.slice(1)) - 1]!) === best
+  const isBest = (id: string) => {
+    const src = id !== newestId && id.startsWith('s') ? sources[Number(id.slice(1)) - 1] : undefined
+    return src !== undefined && matchCount(src) === best
+  }
   const check = (st: unknown): { statement: Statement; ids: string[] } | null => {
     const s = st as { text?: unknown; sources?: unknown } | null
     const given = Array.isArray(s?.sources) ? s.sources : []
