@@ -338,13 +338,16 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
   return true
 }
 
+// "Last Friday", "last week": a stretch of time, not the most recent occurrence of something.
+const PERIODS = ['week', 'month', 'year', 'night', 'morning', 'afternoon', 'evening', ...WEEKDAYS].join('|')
+
 /** A claim about every occurrence: true only of the whole record, never of part of it. */
 // The words of a claim about the most recent time.
 const LAST = /\b(last|latest|most recent(ly)?)\b/gi
 const SAYS_LAST = /\b(last|latest|most recent(ly)?)\b/i
 
 export function claimsAll(text: string): boolean {
-  const t = text.toLowerCase().replace(/\blast (week|month|year|night|morning|afternoon|evening|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g, '')
+  const t = text.toLowerCase().replace(new RegExp(`\\blast (${PERIODS})\\b`, 'g'), '')
   if (/\b(only|never|always|every time|each time|most recent|most recently|no other|nothing else|none of)\b/.test(t)) return true
   // First, last, earliest and latest claim an occurrence when they say when something happened ("first opened", "the
   // last time", "you saw it last", "at first"), not when they name a thing ("the first draft", "first-party").
@@ -491,7 +494,7 @@ export async function ask(
   const sources = [...sent.values()]
   // "When did I last…": the answer leads with the most recent sighting, in the record and in what is shown; such an answer
   // is shown whole rather than streamed, so it never reorders on screen.
-  const latestFirst = /\b(last|latest|most recent(ly)?)\b(?! (week|month|year|night|morning|afternoon|evening))/i.test(question)
+  const latestFirst = new RegExp(`\\b(last|latest|most recent(ly)?)\\b(?! (${PERIODS}|hours?|minutes?|few|\\d))`, 'i').test(question)
   if (latestFirst) sources.sort((a, b) => b.last_wall_ms - a.last_wall_ms)
   // What the question is about, as far as words tell: the sources matching most of its words. The newest of them is the
   // one a "you last…" statement may name, when search found every match.

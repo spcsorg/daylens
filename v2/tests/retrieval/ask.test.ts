@@ -694,6 +694,15 @@ test('a claim of only, first, last or never stands only when the whole of the da
   assert.deepEqual(last.kind === 'answer' && last.statements[0]!.cites.map((c) => (c.kind === 'hour' ? c.start_wall_ms : c.file)), [T0 + 10 * HOUR, 'ledger-10.xlsx'], 'the first link is the hour of the moment the answer names')
   const lastYesterday = await ask('which ledger xlsx did I open last yesterday', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.deepEqual(lastYesterday.kind === 'answer' && lastYesterday.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.', 'You last opened the newest ledger at 11:05 AM, after the one before it.'], 'a whole day sent does not let an older ledger be the last')
+  const inOrder = fakeModel((req) => {
+    const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
+    const of = (f: string) => files.find((x) => x.file === f)!.id
+    return { answerable: true, statements: [{ text: 'You opened ledger-3.xlsx.', sources: [of('ledger-3.xlsx')] }, { text: 'You opened ledger-10.xlsx.', sources: [of('ledger-10.xlsx')] }] }
+  })
+  for (const q of ['which ledger xlsx did I open in the last 2 hours', 'which ledger xlsx did I open last friday']) {
+    const r = await ask(q, { reader: s.reader, model: inOrder, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+    assert.deepEqual(r.kind === 'answer' && r.statements.map((x) => x.text), ['You opened ledger-3.xlsx.', 'You opened ledger-10.xlsx.'], `"${q}" asks about a stretch of time, not the latest occurrence`)
+  }
   const olderOnly = fakeModel((req) => {
     const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
     return { answerable: true, statements: [{ text: 'ledger-3.xlsx at 4:05 AM yesterday.', sources: [files.find((x) => x.file === 'ledger-3.xlsx')!.id] }] }

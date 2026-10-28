@@ -103,8 +103,9 @@ async function main(): Promise<void> {
   })
   const apiKey = process.env.DAYLENS_TEST_ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('set DAYLENS_TEST_ANTHROPIC_API_KEY')
-  if (values.seed && !values.now) throw new Error('--seed needs --now, the time it was seeded as')
-  const now = values.now ? Date.parse(values.now) : evalNow()
+  if (values.seed && values.now === undefined) throw new Error('--seed needs --now, the time it was seeded as')
+  const now = values.now !== undefined ? Date.parse(values.now) : evalNow()
+  if (!Number.isFinite(now)) throw new Error('--now must be a time')
   const dir = values.seed ?? mkdtempSync(path.join(os.tmpdir(), 'daylens-ask-eval-'))
   if (!values.seed) execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', new Date(now).toISOString()], { stdio: 'ignore' })
   const reader = new Reader(openReadOnly(path.join(dir, DB_FILE)))

@@ -74,7 +74,7 @@ const PAGES: Record<string, string> = {
   'Corner Café – menu and opening hours': 'https://cornercafe.example/menu',
 }
 
-const now = values.now ? Date.parse(values.now) : Date.now()
+const now = values.now !== undefined ? Date.parse(values.now) : Date.now()
 if (!Number.isFinite(now)) throw new Error('--now must be a time')
 const store = new Store(dir)
 const storage = new Storage(store, dir, { deletionStallMs: Infinity })
