@@ -1,23 +1,60 @@
-/* Search: an overlay over the whole window, opened from the sidebar or Cmd+K. */
+/* Search: a floating layer over the whole window, opened with Cmd+K on macOS and Ctrl+K elsewhere. It sits clearly
+   above the page: a darker scrim that softens what's behind, a solid panel with a deep shadow, and results right under
+   the field. */
+.search-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: rgb(20 22 25 / 0.28);
+  backdrop-filter: blur(2px);
+  animation: fade 160ms var(--ease);
+  /* Drag regions ignore stacking: without this, a click over a header drags the window instead. */
+  -webkit-app-region: no-drag;
+}
+
 .search-panel {
-  margin-top: 72px;
+  margin-top: min(96px, 12vh);
   width: 640px;
   max-width: calc(100% - 64px);
   background: var(--bg-raised);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-window);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.6),
+    0 32px 80px -16px rgb(20 22 25 / 0.35),
+    0 0 0 1px rgb(20 22 25 / 0.08);
   overflow: hidden;
-  animation: rise var(--reveal) var(--ease);
+  animation: search-in 220ms var(--ease);
+}
+
+:root[data-theme='dark'] .search-scrim {
+  background: rgb(0 0 0 / 0.55);
+}
+
+:root[data-theme='dark'] .search-panel {
+  background: #212429;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    0 32px 80px -16px rgb(0 0 0 / 0.6),
+    0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+@keyframes search-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
 }
 
 .search-field {
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  height: 56px;
+  height: 60px;
   padding: 0 var(--space-20);
-  border-bottom: 1px solid var(--line);
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .search-field input {
@@ -26,13 +63,23 @@
   outline: none;
   background: transparent;
   font: var(--body-large);
+  font-size: 17px;
   color: var(--text);
+}
+
+.search-field input::placeholder {
+  color: var(--text-3);
 }
 
 .search-results {
   max-height: min(520px, calc(100vh - 220px));
   overflow-y: auto;
   padding: var(--space-8);
+  border-top: 1px solid var(--line);
+}
+
+.search-results:empty {
+  display: none;
 }
 
 .search-group {
@@ -44,10 +91,45 @@
   margin-bottom: var(--space-4);
 }
 
+/* The app icon sits on a small white tile with a hairline, so a row reads as a thing, not a line of text. */
+.search-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 1px 2px rgb(20 22 25 / 0.06);
+}
+
+:root[data-theme='dark'] .search-tile {
+  background: var(--sel);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+:root[data-theme='dark'] .search-result[aria-selected='true'] {
+  background: rgb(255 255 255 / 0.08);
+}
+
 .search-note {
   font: var(--caption);
   color: var(--text-2);
   padding: var(--space-8) var(--space-12);
+}
+
+.search-none {
+  padding: var(--space-12) var(--space-12) var(--space-4);
+}
+
+.search-none > p:first-child {
+  font: var(--body-strong);
+}
+
+.search-none .search-note {
+  padding: var(--space-4) 0 0;
 }
 
 .search-more {

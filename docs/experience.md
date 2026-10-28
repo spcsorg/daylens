@@ -41,7 +41,7 @@ Answers that fail these rules don't ship. Ask has an evaluation that checks them
 
 ## Navigation
 
-A sidebar with Today, Apps and Ask, and Settings at the bottom. Search opens from anywhere with Ctrl+K or Cmd+K.
+A sidebar with Today, Apps and Ask, and Settings at the bottom. Search has no sidebar item: it opens from anywhere with Cmd+K on macOS and Ctrl+K on Windows and Linux, as in Raycast, Linear and Arc. (Ctrl+K stays free on a Mac, where it deletes to the end of a line in a text field.)
 
 There is no permanent "Recording" indicator. Recording status appears in the app only when Daylens is paused or something is broken. Pausing lives in the tray or menu bar menu and in Settings.
 
@@ -75,6 +75,10 @@ The week and the month are the same calendar, stepped back.
 
 Search finds anything you saw, across every day.
 
+- **A floating layer.** It opens over whatever screen is showing, under a darker scrim that softens the page, as a solid panel with a deep shadow so it is plainly above everything. The field is focused and results sit right under it. Escape or a click outside closes it and puts focus back where it was.
+- **Before you type.** Where you left off: the last few pages and windows, each opening directly, the way Raycast and Linear show recents. With nothing recorded yet, one line says what Search finds.
+- **Keyboard.** Up and down move the selection, which scrolls into view; Enter opens it.
+- **Nothing found.** Says what was searched and suggests fewer words or a site or app name.
 - Searches page titles and addresses, file names, window titles, and hour text.
 - Results show the actual page, file or window first, with the app icon and when you saw it, and open directly. The hour each result belongs to is shown under it.
 - Works without AI.
