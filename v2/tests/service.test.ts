@@ -102,7 +102,10 @@ test('the service runs without being given a deletion stall time', async () => {
   }
 })
 
-test('a whole-machine pause (service and helper suspended together) is not a hang', async () => {
+// Sleep is simulated by suspending processes with SIGSTOP, which Windows does not have.
+const noStop = process.platform === 'win32' ? 'no SIGSTOP on Windows' : false
+
+test('a whole-machine pause (service and helper suspended together) is not a hang', { skip: noStop }, async () => {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work)
   await waitFor(() => svc.log().includes('helper hello'))
@@ -123,7 +126,7 @@ test('a whole-machine pause (service and helper suspended together) is not a han
   assert.deepEqual(gaps(dataDir).map((g) => g.reason), ['service_starting'], 'sleep reported by the helper leaves no capture gap')
 })
 
-test('the same pause with no sleep reported is recorded as an unexplained helper stall', async () => {
+test('the same pause with no sleep reported is recorded as an unexplained helper stall', { skip: noStop }, async () => {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work)
   await waitFor(() => svc.log().includes('helper hello'))

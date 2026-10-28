@@ -79,7 +79,7 @@ test('the V1 import refuses every folder a cloud drive syncs, however the path r
     path.join(home, 'Dropbox (Personal)', 'eval'),
     path.join(home, 'Documents', 'eval'),
   ]) {
-    const run = spawnSync(process.execPath, ['tools/importV1.ts', '--v1', v1, '--out', out], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home } })
+    const run = spawnSync(process.execPath, ['tools/importV1.ts', '--v1', v1, '--out', out], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } })
     assert.notEqual(run.status, 0, out)
     assert.match(run.stderr, /syncs to a cloud drive/, out)
     assert.equal(existsSync(out), false, out)
@@ -108,7 +108,7 @@ test('the V1 import refuses an output folder that holds the V1 database, and rep
 test('the search evaluation has no default queries folder: it must be named', () => {
   // A home with nothing in it, so nothing private can be read or written whatever the tool would default to.
   const home = tmpDir()
-  const run = spawnSync(process.execPath, ['tools/evalSearch.ts'], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home } })
+  const run = spawnSync(process.execPath, ['tools/evalSearch.ts'], { cwd: V2, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } })
   assert.equal(run.status, 1)
   assert.match(run.stderr, /--queries <folder> is required/)
   assert.deepEqual(readdirSync(home), [])

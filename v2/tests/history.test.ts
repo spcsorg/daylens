@@ -167,7 +167,7 @@ test('the copy of a history file is kept in a private temporary folder, outside 
   mkdirSync(copyDir, { recursive: true, mode: 0o755 })
   const db = chromiumHistory(path.join(dir, 'src', 'History'))
   await snapshot(path.join(dir, 'src', 'History'), copyDir)
-  assert.equal(statSync(copyDir).mode & 0o777, 0o700)
+  if (process.platform !== 'win32') assert.equal(statSync(copyDir).mode & 0o777, 0o700)
   db.close()
   rmSync(copyDir, { recursive: true, force: true })
 })
