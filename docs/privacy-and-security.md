@@ -10,7 +10,7 @@ This document describes the finished product. The beta differs in these ways:
 - **No usage analytics.** The beta sends no usage data to Daylens.
 - **No Daylens AI and no billing.** AI runs on the user's own API key, or not at all.
 - **No log of what was sent to AI yet.** Settings doesn't show it in the beta.
-- **The record isn't encrypted by Daylens.** It's a database in the user's Library folder. Other accounts on the computer can't open it; any program running as the user can. FileVault encrypts it at rest.
+- **The record isn't encrypted by Daylens.** It's a database in the user's Library folder, in a folder only the user's account can open (on macOS and Linux Daylens makes it owner-only, and tightens it on every start; on Windows it's in the user's own app data). Other accounts on the computer can't open it; any program running as the user can. FileVault encrypts it at rest.
 
 ## What Daylens records
 

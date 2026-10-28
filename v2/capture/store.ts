@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_EXCLUSIONS, DEFAULT_SITE_EXCLUSIONS, type ExclusionRule } from './defaults.ts'
@@ -290,7 +290,9 @@ export class Store implements Sink {
 
   constructor(dir: string, opts: StoreOptions = {}) {
     assertNotV1(dir)
-    mkdirSync(dir, { recursive: true })
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // The record is a person's whole day: no other account on the computer may read it, including in a folder made earlier.
+    if (process.platform !== 'win32') chmodSync(dir, 0o700)
     assertNotV1(dir)
     assertRealDatabaseFiles(dir)
     this.releaseLock = acquireWriterLock(dir)

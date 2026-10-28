@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -324,3 +324,16 @@ test('continued overflow while one title stays unchanged: after recovery that ti
   assert.equal(Math.max(...rows.map((r) => r.last_seen_wall_ms)), now + 5000, 'and keeps being extended')
   store.close()
 })
+
+// Windows keeps a user's app data folder private through its own permissions; there are no mode bits to check.
+test('the data folder is readable by its owner alone, made that way and tightened when it already exists', { skip: process.platform === 'win32' }, () => {
+  const made = path.join(tmp(), 'data')
+  new Store(made).close()
+  assert.equal(statSync(made).mode & 0o777, 0o700)
+  const existing = path.join(tmp(), 'data')
+  mkdirSync(existing)
+  chmodSync(existing, 0o755)
+  new Store(existing).close()
+  assert.equal(statSync(existing).mode & 0o777, 0o700)
+})
+
