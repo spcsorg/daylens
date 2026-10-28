@@ -5,6 +5,7 @@
 import { app, appsView } from '../app/reader/apps.ts'
 import { Reader as ScreenReader } from '../app/reader/queries.ts'
 import { leftOff } from '../app/reader/today.ts'
+import { describeRequest, recentRequests } from '../storage/assistantRequests.ts'
 import { HOUR_MS, siteOf } from '../storage/derive.ts'
 import { pendingVerdict, type HourSource } from '../storage/hours.ts'
 import { fencedBy, pendingTombstones } from '../storage/rules.ts'
@@ -432,7 +433,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
     name: 'get_status',
     title: 'Today and recording status',
     description:
-      "Start here when you need the date: today's local date, time and time zone; whether Daylens is recording, paused (and until when), stopped or not running, and any problem with what it can see; the last three things the person had open today (where they left off); and the settings that limit the record: the built-in exclusions, how many apps and sites the person excluded, and how many days history is kept. " + UNTRUSTED,
+      "Start here when you need the date: today's local date, time and time zone; whether Daylens is recording, paused (and until when), stopped or not running, and any problem with what it can see; the last three things the person had open today (where they left off); the settings that limit the record: the built-in exclusions, how many apps and sites the person excluded, and how many days history is kept; and the changes assistants asked for in the last day, with each answer. " + UNTRUSTED,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run(_args, ctx, mark) {
       const now = (ctx.now ?? Date.now)()
@@ -472,6 +473,8 @@ export const READ_TOOLS: readonly ReadTool[] = [
         // What the person chose to keep out stays private; only the built-in exclusions are named.
         excluded: { defaults: exclusions.filter((e) => e.is_default === 1).map((e) => e.label), added_by_person: exclusions.filter((e) => e.is_default !== 1).length },
         history_kept_days: retention,
+        // What assistants asked Daylens to change in the last day, and how each ended.
+        requests: recentRequests(ctx.reader.db, now).map((r) => ({ id: r.id, assistant: r.assistant, asked: describeRequest(r.change), at: localIso(r.at_wall_ms), state: r.state })),
         note: UNTRUSTED,
       }
       shown.logged(ctx, mark, 'get_status', new Date(now).setHours(0, 0, 0, 0), now)

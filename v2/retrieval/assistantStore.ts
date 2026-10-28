@@ -1,7 +1,10 @@
-// The MCP server's own connection for what it must write: the read log now, an assistant's approved writes later. It
+// The MCP server's own connection for what it must write: the read log, and an assistant's requests to change something. It
 // runs in the assistant's process, whether or not capture is running, so it opens the database itself, never migrates
 // it, and keeps every transaction short. A write a pending deletion would cover is refused, as storage refuses it.
 import Database from 'better-sqlite3'
+import path from 'node:path'
+import { fileRequest, request, settleRequest, type AssistantRequest, type RequestChange } from '../storage/assistantRequests.ts'
+import { ChangeBus } from '../storage/changes.ts'
 import { fencedBy, pendingTombstones } from '../storage/rules.ts'
 import { pendingVerdict, sourceMatches, type HourSource } from '../storage/hours.ts'
 import { PendingDeletionError, type AssistantRead } from '../storage/index.ts'
@@ -13,10 +16,13 @@ const BUSY_TIMEOUT_MS = 5000
 export class AssistantStore {
   readonly db: Database.Database
   private readonly now: () => number
+  // Announces a filed request to the app the way storage announces its own changes.
+  private readonly bus: ChangeBus
 
   constructor(db: Database.Database, now: () => number = Date.now) {
     this.db = db
     this.now = now
+    this.bus = new ChangeBus(db, path.dirname(db.name), now)
   }
 
   static open(file: string, now?: () => number): AssistantStore {
@@ -58,6 +64,20 @@ export class AssistantStore {
       for (const s of r.sources ?? []) item.run(id, null, s.app_id?.toLowerCase() ?? null, s.site?.toLowerCase().replace(/^www\./, '') ?? null)
       return id
     }).immediate()
+  }
+
+  /** Files a request for the app to carry out, or to ask the person about. */
+  fileRequest(assistant: string, change: RequestChange): number {
+    return fileRequest(this.db, this.bus, assistant, change, this.now())
+  }
+
+  request(id: number): AssistantRequest | null {
+    return request(this.db, id)
+  }
+
+  /** Expires a request still pending; false when the app has already taken it up. */
+  expireRequest(id: number): boolean {
+    return settleRequest(this.db, this.bus, id, 'expired', null, this.now())
   }
 
   private refuseFenced(hourIds: readonly number[], sources: readonly HourSource[], span: { from_wall_ms: number; to_wall_ms: number }): void {

@@ -1,6 +1,7 @@
 // The MCP protocol over the read tools, one JSON-RPC message in, at most one out; main.ts carries them over stdio. The
 // database is opened on the first call that needs it, so the server starts before Daylens has recorded anything and
 // answers with an error the assistant can relay until it has.
+import { plain } from '../storage/assistantRequests.ts'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { DB_FILE } from '../capture/store.ts'
@@ -8,6 +9,7 @@ import { PendingDeletionError } from '../storage/index.ts'
 import { AssistantStore } from '../retrieval/assistantStore.ts'
 import { READ_TOOLS, runReadTool, ToolInputError, type ToolLimits } from '../retrieval/assistantTools.ts'
 import { checkSchema, KNOWN_SCHEMA_VERSIONS, Reader, UnknownSchemaError } from '../retrieval/reader.ts'
+import { runWriteTool, WRITE_TOOLS, type WriteContext } from './writes.ts'
 
 // Newest first; a client asking for one we don't speak gets the newest and decides.
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05']
@@ -37,6 +39,7 @@ export interface ServerOptions {
   now?: () => number
   // Where the server says what went wrong that the assistant isn't told; stdout is the transport.
   log: (line: string) => void
+  waitMs: WriteContext['waitMs']
 }
 
 /** An error the assistant should pass on to the person as it is. */
@@ -59,7 +62,7 @@ export class McpServer {
   }
 
   /** The reply to one line, or null for a notification or a reply from the client. */
-  handle(raw: string): object | null {
+  async handle(raw: string): Promise<object | null> {
     let msg: unknown
     try {
       msg = JSON.parse(raw)
@@ -69,13 +72,13 @@ export class McpServer {
     // A batch, which protocol 2025-03-26 allows: one reply per request in it, none if it held only notifications.
     if (Array.isArray(msg)) {
       if (msg.length === 0) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'empty batch' } }
-      const replies = msg.map((m) => this.one(m)).filter((r) => r !== null)
+      const replies = (await Promise.all(msg.map((m) => this.one(m)))).filter((r) => r !== null)
       return replies.length ? replies : null
     }
     return this.one(msg)
   }
 
-  private one(raw: unknown): object | null {
+  private async one(raw: unknown): Promise<object | null> {
     const msg = raw as Message
     if (typeof msg !== 'object' || msg === null || typeof msg.method !== 'string') {
       // A reply to a request we never send.
@@ -90,10 +93,19 @@ export class McpServer {
         return ok({})
       case 'tools/list':
         return ok({
-          tools: READ_TOOLS.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: { title: t.title, readOnlyHint: true, openWorldHint: false } })),
+          tools: [
+            ...READ_TOOLS.map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: { title: t.title, readOnlyHint: true, openWorldHint: false } })),
+            ...WRITE_TOOLS.map((t) => ({
+              name: t.name,
+              title: t.title,
+              description: t.description,
+              inputSchema: t.inputSchema,
+              annotations: { title: t.title, readOnlyHint: false, destructiveHint: t.name !== 'set_recording' && t.name !== 'set_exclusion', idempotentHint: false, openWorldHint: false },
+            })),
+          ],
         })
       case 'tools/call':
-        return ok(this.call(msg.params ?? {}))
+        return ok(await this.call(msg.params ?? {}))
       default:
         return { jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `no method ${msg.method}` } }
     }
@@ -102,7 +114,10 @@ export class McpServer {
   private initialize(params: Record<string, unknown>): object {
     const client = params.clientInfo as { name?: unknown; title?: unknown } | undefined
     const name = typeof client?.name === 'string' ? client.name : null
-    this.assistant = (name && CLIENT_NAMES[name]) ?? (typeof client?.title === 'string' ? client.title : name) ?? this.assistant
+    const given = typeof client?.title === 'string' ? client.title : name
+    // Any local program can name itself, and the name leads the card: only a known client is named as itself.
+    const own = given && Array.from(plain(given).trim()).slice(0, 40).join('')
+    this.assistant = (name && Object.hasOwn(CLIENT_NAMES, name) && CLIENT_NAMES[name]) || (own ? `Assistant “${own}”` : this.assistant)
     const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
     const now = new Date((this.o.now ?? Date.now)())
     return {
@@ -117,11 +132,15 @@ export class McpServer {
     }
   }
 
-  private call(params: Record<string, unknown>): object {
+  private async call(params: Record<string, unknown>): Promise<object> {
     const name = typeof params.name === 'string' ? params.name : ''
     const args = params.arguments && typeof params.arguments === 'object' ? (params.arguments as Record<string, unknown>) : {}
     try {
       const { reader, store } = this.open()
+      if (WRITE_TOOLS.some((t) => t.name === name)) {
+        const said = await runWriteTool(name, args, { reader, store, assistant: this.assistant, now: this.o.now ?? Date.now, waitMs: this.o.waitMs })
+        return { content: [{ type: 'text', text: said }] }
+      }
       const result = runReadTool(name, args, { reader, log: store, assistant: this.assistant, limits: this.o.limits, now: this.o.now })
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     } catch (err) {

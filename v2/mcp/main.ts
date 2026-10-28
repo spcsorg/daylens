@@ -48,6 +48,9 @@ const server = new McpServer({
   version: version(),
   // Search results per group, and the longest span in days one call may read: a month.
   limits: { perGroup: 10, maxDays: 31 },
+  // A change that needs no yes is done in well under a second when Daylens runs; a person gets most of a minute to
+  // answer before the call returns, under the minute clients give a tool call by default.
+  waitMs: { run: 5000, answer: 45_000 },
   log: (line) => process.stderr.write(`${line}\n`),
 })
 
@@ -71,8 +74,9 @@ process.stdin.on('error', exit)
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
 lines.on('line', (line) => {
   if (line.trim() === '') return
-  const reply = server.handle(line)
-  if (reply) process.stdout.write(`${JSON.stringify(reply)}\n`)
+  void server.handle(line).then((reply) => {
+    if (reply && !exiting) process.stdout.write(`${JSON.stringify(reply)}\n`)
+  })
 })
 lines.on('close', exit)
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, exit)

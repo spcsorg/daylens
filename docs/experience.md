@@ -102,10 +102,14 @@ Ask answers questions about any day from the same record.
 
 - **General:** start and end of the day, notification times, launch at login, appearance.
 - **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), apps whose window titles are kept (for apps with a built-in browser engine that Daylens does not already trust; adding one says in one line that its private windows could then be recorded), screen recording and audio recording (each off until turned on, asking for its permission when turned on), browsers (each supported browser found on the computer, whether its extension is connected, and one click to add it), usage analytics (on, with an off switch), and delete history.
-- **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read, and setup for any other MCP app.
+- **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read and asked to change, and setup for any other MCP app.
 - **AI:** the current choice (Daylens AI, your own key, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.
 - **Data:** save each day as a note in a folder you choose, let coding agents read those notes, and export everything.
+
+## Assistant requests
+
+When an assistant asks for a change that needs a yes, Daylens shows a card over whatever screen is open: "Claude Code asks: Delete everything recorded from 2:00 PM to 3:00 PM." with the main button (red, "Delete", for anything that deletes; "Allow" otherwise) and "Don't". One card at a time, oldest first. A notification says the same when the window is closed, and the menu bar menu shows "An assistant is asking you something…". Pausing and new exclusions need no card. After 10 minutes a request lapses and the card goes; answering a lapsed one says so.
 
 ## Browser extension
 

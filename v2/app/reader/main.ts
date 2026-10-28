@@ -10,6 +10,7 @@ import { ChangeWatcher } from '../../storage/changes.ts'
 import type { Query, ReaderEvent } from '../shared/types.ts'
 import { answer, setKey } from './ask.ts'
 import { apps } from './apps.ts'
+import { assistants } from './assistants.ts'
 import { Reader, type Handlers, type Sources } from './queries.ts'
 import { search } from './search.ts'
 import { settings } from './settings.ts'
@@ -38,7 +39,7 @@ const core: Handlers<Extract<Query, { q: 'day' | 'recorded_days' | 'recording' |
 }
 
 // Ask answers asynchronously, over the network, so it is not a handler here.
-const handlers: Handlers<Exclude<Query, { q: 'ask' }>> = { ...core, ...today, ...apps, ...search, ...settings }
+const handlers: Handlers<Exclude<Query, { q: 'ask' }>> = { ...core, ...today, ...apps, ...search, ...settings, ...assistants }
 
 function ready(): Promise<void> {
   return reader ? Promise.resolve() : new Promise((resolve) => waiting.push(resolve))

@@ -60,9 +60,9 @@ test('a client lists the tools, reads a day, and the read is logged under its na
   const tools = await s.request('tools/list')
   assert.deepEqual(
     tools.result.tools.map((t: { name: string }) => t.name),
-    ['list_days', 'get_day', 'get_hour', 'search', 'get_agent_work', 'get_apps', 'get_status'],
+    ['list_days', 'get_day', 'get_hour', 'search', 'get_agent_work', 'get_apps', 'get_status', 'set_recording', 'set_exclusion', 'correct_hour', 'delete_records', 'set_retention'],
   )
-  assert.ok(tools.result.tools.every((t: { annotations: { readOnlyHint: boolean } }) => t.annotations.readOnlyHint))
+  assert.ok(tools.result.tools.slice(0, 7).every((t: { annotations: { readOnlyHint: boolean } }) => t.annotations.readOnlyHint))
   const got = await s.request('tools/call', { name: 'get_day', arguments: { date: '2026-10-16' } })
   assert.equal(got.result.isError, undefined, got.result.content[0].text)
   assert.deepEqual(JSON.parse(got.result.content[0].text).hours.map((h: { title: string }) => h.title), ['Budget review'])
