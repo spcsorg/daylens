@@ -157,13 +157,18 @@ test('killing the service stops the helper and the next start records an unclean
   const killedAt = Date.now()
   svc.proc.kill('SIGKILL')
   const [helper] = helperPids(work)
-  await waitFor(() => existsSync(path.join(work, 'eof')), 3000).catch((err) => {
-    let alive = true
-    try { process.kill(helper!, 0) } catch { alive = false }
-    throw new Error(`${err}; helper ${helper} alive=${alive}; log: ${svc.log().slice(-1500)}`)
-  })
-  const eofAt = Number(readFileSync(path.join(work, 'eof'), 'utf8'))
-  assert.ok(eofAt - killedAt < 1000, `helper exited ${eofAt - killedAt} ms after the service died`)
+  const alive = () => {
+    try {
+      process.kill(helper!, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // On Windows the helper can die writing to the broken pipe before it reads the end of its input.
+  await waitFor(() => existsSync(path.join(work, 'eof')) || !alive(), 3000)
+  const stoppedAt = existsSync(path.join(work, 'eof')) ? Number(readFileSync(path.join(work, 'eof'), 'utf8')) : Date.now()
+  assert.ok(stoppedAt - killedAt < 1000, `helper exited ${stoppedAt - killedAt} ms after the service died`)
   await sleep(1000)
   const svc2 = startService(dataDir, work)
   await waitFor(() => svc2.log().includes('helper hello'))
