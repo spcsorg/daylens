@@ -18,6 +18,11 @@
   max-width: 680px;
 }
 
+/* Inset under the hour's title, so it ends where the hour rows do. */
+.today-day > .hour-open {
+  max-width: calc(680px - 84px);
+}
+
 .hour-open {
   margin: var(--space-4) 0 var(--space-12) 84px;
   padding: var(--space-12) 10px;
@@ -35,6 +40,19 @@
 
 .hour-open > div:last-child {
   padding: 0 10px var(--space-4);
+}
+
+/* An hour from browser history: its pages, then one quiet line saying where they came from. */
+.hour.filled .hour-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-top: var(--space-2);
+}
+
+.hour-open > p.hour-open-why {
+  font: var(--caption);
+  color: var(--text-2);
 }
 
 .left-off {

@@ -26,12 +26,13 @@ function Written({ text }: { text: string }) {
 
 export type HourKind = 'written' | 'facts' | 'current' | 'gap' | 'filled'
 
-/** One hour of the day: its time, a title, a line under it and the apps it was spent in. A gap is one quiet line. */
-export function Hour({ start, kind, title, summary, apps = [], note, open, onToggle }: { start: number; kind: HourKind; title: string; summary?: string | null; apps?: AppTime[]; note?: string | null; open?: boolean; onToggle?: () => void }) {
+/** One hour of the day: its time, a title, a line under it and the apps it was spent in. A gap is one quiet line, and
+ * `time` names the range when it covers several hours. An hour from browser history shows its browser in its note. */
+export function Hour({ start, time, kind, title, summary, apps = [], note, open, onToggle }: { start: number; time?: string; kind: HourKind; title: string; summary?: string | null; apps?: AppTime[]; note?: string | null; open?: boolean; onToggle?: () => void }) {
   if (kind === 'gap')
     return (
       <div className="hour gap" data-hour={start}>
-        <span className="hour-time">{hourLabel(start)}</span>
+        <span className="hour-time">{time ?? hourLabel(start)}</span>
         <span className="hour-title">{title}</span>
       </div>
     )
@@ -43,7 +44,7 @@ export function Hour({ start, kind, title, summary, apps = [], note, open, onTog
           <Written text={title} />
         </span>
         {summary && <span className="hour-summary">{summary}</span>}
-        {apps.length > 0 && (
+        {apps.length > 0 && kind !== 'filled' && (
           <span className="hour-apps">
             {apps.map((a) => (
               <span key={a.id} title={`${a.name} · ${duration(a.ms)}`}>
@@ -52,7 +53,12 @@ export function Hour({ start, kind, title, summary, apps = [], note, open, onTog
             ))}
           </span>
         )}
-        {note && <span className="hour-note">{note}</span>}
+        {note && (
+          <span className="hour-note">
+            {kind === 'filled' && apps.map((a) => <AppIcon key={a.id} id={a.id} size={14} />)}
+            {note}
+          </span>
+        )}
       </span>
     </button>
   )
