@@ -92,7 +92,14 @@ function Shell() {
       <main className="main">
         {screen === 'today' && <Today nav={todayNav} setNav={setTodayNav} shell={shell} rec={rec} onMark={onMark} />}
         {screen === 'apps' && <Apps nav={appsNav} setNav={setAppsNav} firstDay={rec?.first_day ?? null} onMark={onMark} />}
-        {screen === 'ask' && <Ask />}
+        {screen === 'ask' && (
+          <Ask
+            onOpenHour={(start) => {
+              setScreen('today')
+              setTodayNav({ date: dateKey(new Date(start)), scope: 'day', openHour: start, jump: Date.now() })
+            }}
+          />
+        )}
         {screen === 'settings' && <Settings shell={shell} rec={rec} />}
       </main>
       {search && (

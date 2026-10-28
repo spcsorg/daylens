@@ -8,6 +8,7 @@ import { DB_FILE } from '../../capture/store.ts'
 import { openReadOnly, Reader as RetrievalReader } from '../../retrieval/reader.ts'
 import { ChangeWatcher } from '../../storage/changes.ts'
 import type { Query, ReaderEvent } from '../shared/types.ts'
+import { answer, setKey } from './ask.ts'
 import { apps } from './apps.ts'
 import { Reader, type Handlers, type Sources } from './queries.ts'
 import { search } from './search.ts'
@@ -15,11 +16,12 @@ import { settings } from './settings.ts'
 import { today } from './today.ts'
 
 type Init = { type: 'init'; dataDir: string }
-type Parent = Init | { type: 'activity' } | { type: 'port' }
+type Parent = Init | { type: 'activity' } | { type: 'port' } | { type: 'ai'; key: string | null }
 
 let reader: Reader | null = null
 let finder: RetrievalReader | null = null
 let db: Database.Database | null = null
+let file: string | null = null
 let watcher: ChangeWatcher | null = null
 const ports = new Set<MessagePortMain>()
 const waiting: (() => void)[] = []
@@ -35,7 +37,8 @@ const core: Handlers<Extract<Query, { q: 'day' | 'recorded_days' | 'recording' |
   app_path: ({ record }, q) => record.appPath(q.id),
 }
 
-const handlers: Handlers<Query> = { ...core, ...today, ...apps, ...search, ...settings }
+// Ask answers asynchronously, over the network, so it is not a handler here.
+const handlers: Handlers<Exclude<Query, { q: 'ask' }>> = { ...core, ...today, ...apps, ...search, ...settings }
 
 function ready(): Promise<void> {
   return reader ? Promise.resolve() : new Promise((resolve) => waiting.push(resolve))
@@ -43,7 +46,7 @@ function ready(): Promise<void> {
 
 // The capture service creates and migrates the database; until it has, try again, more slowly each time.
 function open(dataDir: string, waitMs = 50): void {
-  const file = path.join(dataDir, DB_FILE)
+  file = path.join(dataDir, DB_FILE)
   const retry = () => setTimeout(() => open(dataDir, Math.min(waitMs * 2, 2000)), waitMs)
   if (!existsSync(file)) return void retry()
   try {
@@ -78,6 +81,7 @@ function attach(port: MessagePortMain): void {
   ports.add(port)
   port.on('message', async ({ data }: { data: { id: number; query: Query } }) => {
     await ready()
+    if (data.query.q === 'ask') return void answer(file!, finder!, port, data.id, data.query)
     const t0 = performance.now()
     try {
       const run = handlers[data.query.q] as (src: Sources, q: Query) => unknown
@@ -96,6 +100,7 @@ process.parentPort.on('message', (e: { data: Parent; ports: MessagePortMain[] })
   if (msg.type === 'init') open(msg.dataDir)
   else if (msg.type === 'activity') broadcast({ e: 'activity' })
   else if (msg.type === 'port') for (const p of e.ports) attach(p)
+  else if (msg.type === 'ai') setKey(msg.key)
 })
 
 process.on('exit', () => {

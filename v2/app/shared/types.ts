@@ -1,5 +1,6 @@
 // What the reader returns to the screens and the actions they send. Times are wall-clock milliseconds; days are local
 // dates (YYYY-MM-DD). Shared by every screen and the shell; each screen's own reads and actions live in its own file.
+import type { AiAction, AskEvent, AskQuery, AskResults } from './ai.ts'
 import type { AppsQuery, AppsResults } from './apps.ts'
 import type { OnboardingAction } from './onboarding.ts'
 import type { SearchQuery, SearchResultsByQuery } from './search.ts'
@@ -85,12 +86,12 @@ interface CoreResults {
   app_path: string | null
 }
 
-export type Query = CoreQuery | TodayQuery | AppsQuery | SearchQuery | SettingsQuery
+export type Query = CoreQuery | TodayQuery | AppsQuery | SearchQuery | SettingsQuery | AskQuery
 
-export interface QueryResult extends CoreResults, TodayResults, AppsResults, SearchResultsByQuery, SettingsResults {}
+export interface QueryResult extends CoreResults, TodayResults, AppsResults, SearchResultsByQuery, SettingsResults, AskResults {}
 
 // Changes the reader announces so screens refetch: activity (new observations), or a shared-state change.
-export type ReaderEvent = { e: 'changed'; kinds: string[] } | { e: 'activity' }
+export type ReaderEvent = { e: 'changed'; kinds: string[] } | { e: 'activity' } | AskEvent
 
 export type DeleteWhat =
   | { kind: 'last'; ms: number }
@@ -111,7 +112,7 @@ type CoreAction =
   | { a: 'restart_capture' }
   | { a: 'bench'; marks: Record<string, number> }
 
-export type Action = CoreAction | SettingsAction | OnboardingAction
+export type Action = CoreAction | SettingsAction | OnboardingAction | AiAction
 
 export interface ShellState {
   platform: string
