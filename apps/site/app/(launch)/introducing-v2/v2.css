@@ -21,8 +21,12 @@
   text-wrap: balance;
 }
 
+.iv-page section {
+  scroll-margin-top: 88px;
+}
+
 .iv-hero {
-  max-width: 880px;
+  max-width: 1040px;
   margin: 0 auto;
   padding-top: clamp(128px, 16vw, 184px);
   text-align: center;

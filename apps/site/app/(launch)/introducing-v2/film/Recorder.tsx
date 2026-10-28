@@ -16,14 +16,14 @@ declare global {
   }
 }
 
-// ?cut=tour picks the cut, ?ratio=16x9|4x5 the frame, ?t=12 holds a moment. Without ?record it plays in real time.
+// ?cut=duet picks the cut, ?ratio=16x9|4x5 the frame, ?t=12 holds a moment. Without ?record it plays in real time.
 export default function Recorder() {
   const [state, setState] = useState<{ ratio: Ratio; t: number; cut: string } | null>(null);
 
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     const ratio = (q.get("ratio") === "4x5" ? "4x5" : "16x9") as Ratio;
-    const cut = q.get("cut") ?? "tour";
+    const cut = q.get("cut") ?? "duet";
     if (!CUTS[cut]) throw new Error(`no cut named ${cut}`);
     const length = filmLength(CUTS[cut]);
     const hold = q.get("t");

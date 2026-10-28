@@ -13,7 +13,7 @@ import { SHOTS } from "./_film/shots";
 import { AVAILABILITY, BETA, CLOSING, DEK, FEATURES, POST, PRIVACY_LINE, PRIVACY_MORE, TITLE } from "./copy";
 import "./v2.css";
 
-const URL_ = `${SITE_URL}${route("/introducing-v2").replace(/^\/daylens/, "")}`;
+const URL_ = `${SITE_URL}/introducing-v2`;
 
 export const metadata: Metadata = (() => {
   const base = pageMetadata();
@@ -29,7 +29,7 @@ export const metadata: Metadata = (() => {
 })();
 
 const FIELD: Record<ShotId, string> = { welcome: SKY.dawn, morning: SKY.morning, today: SKY.noon, search: SKY.noon, ask: SKY.dusk, assistants: SKY.morning, trust: SKY.afternoon };
-const POSTER = startOf(CUTS.tour, SHOTS.ask) + SHOTS.ask.dur - 1;
+const POSTER = startOf(CUTS.duet, SHOTS.ask) + SHOTS.ask.dur - 1;
 
 function Feature({ id, children }: { id: Exclude<ShotId, "ask">; children?: React.ReactNode }) {
   const f = FEATURES[id];

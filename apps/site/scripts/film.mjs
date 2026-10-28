@@ -1,6 +1,6 @@
 // Records the launch film from /introducing-v2/film: seeks the stage one frame at a time and pipes each screenshot into ffmpeg,
 // so the video is frame-perfect however slow the machine is. Needs `next dev` running, ffmpeg, and a Chromium build.
-// node scripts/film.mjs --cut tour --ratio 16x9 --out film.mp4 [--fps 60] [--scale 2] [--from 0 --to 12] [--stills dir --at 3,9.5]
+// node scripts/film.mjs --cut duet --ratio 16x9 --out film.mp4 [--fps 60] [--scale 2] [--from 0 --to 12] [--stills dir --at 3,9.5]
 import { spawn } from "node:child_process";
 import { globSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 const { values: a } = parseArgs({
   options: {
     url: { type: "string", default: "http://localhost:3217/introducing-v2/film" },
-    cut: { type: "string", default: "tour" },
+    cut: { type: "string", default: "duet" },
     ratio: { type: "string", default: "16x9" },
     fps: { type: "string", default: "60" },
     scale: { type: "string", default: "2" },

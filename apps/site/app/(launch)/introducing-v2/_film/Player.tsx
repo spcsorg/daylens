@@ -7,7 +7,7 @@ import { SHOTS } from "./shots";
 
 // Plays the film, or one shot of it, live: only while on screen, scaled to its box, portrait on narrow screens.
 // Reduced motion holds one finished frame.
-export default function Player({ cut = "tour", shot, sky = "", still, label, controls }: { cut?: string; shot?: ShotId; sky?: string; still: number; label: string; controls?: boolean }) {
+export default function Player({ cut = "duet", shot, sky = "", still, label, controls }: { cut?: string; shot?: ShotId; sky?: string; still: number; label: string; controls?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [ratio, setRatio] = useState<Ratio>("16x9");
   const [k, setK] = useState(0);

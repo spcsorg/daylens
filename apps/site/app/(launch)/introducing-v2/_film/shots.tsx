@@ -163,7 +163,7 @@ const morning: Shot = {
       </Window>
     );
   },
-  camera: [cam(0, 1.42, 476, 230, 640), cam(2.0, 1.42, 476, 300, 640), cam(4.6, 1.32, 476, 420, 640), cam(6.2, 1.0, 540, 360, 800), cam(7.4, 1.0, 540, 360, 800)],
+  camera: [cam(0, 1.42, 476, 230, 640), cam(2.0, 1.42, 476, 300, 640), cam(4.6, 1.32, 476, 420, 640), cam(6.2, 1.0, 590, 360, 800), cam(7.4, 1.0, 590, 360, 800)],
   cursor: [pt(6.0, 900, 520), pt(6.8, 742, 678), ...click(7.05, 742, 680)],
 };
 
@@ -383,7 +383,7 @@ const search: Shot = {
 /* 5 · Ask: the question, then a calm answer with the pages and hours it came from. */
 
 const A_TYPE = 0.6;
-const A_SEND = A_TYPE + ASK.question.length / 19 + 0.35;
+export const A_SEND = A_TYPE + ASK.question.length / 19 + 0.35;
 const A_ANSWER = A_SEND + 1.5;
 const A_WORDS = ASK.answer.split(" ");
 const A_SOURCES = A_ANSWER + A_WORDS.length / 10 + 0.25;
@@ -397,6 +397,9 @@ const ask: Shot = {
     const thinking = prog(t, A_SEND + 0.2, A_SEND + 0.5) * (1 - prog(t, A_ANSWER - 0.1, A_ANSWER + 0.2));
     const words = clamp((t - A_ANSWER) * 10, 0, A_WORDS.length);
     const cards = prog(t, A_SOURCES, A_SOURCES + 0.5);
+    // Duet's focus pull: the cited page lifts, everything else steps back.
+    const focus = prog(t, A_SOURCES + 1.0, A_SOURCES + 1.6);
+    const back = 1 - 0.55 * focus;
     return (
       <Window sidebar="ask">
         <div className="f-ask">
@@ -412,7 +415,7 @@ const ask: Shot = {
               </span>
             </p>
           ) : null}
-          <p className="f-answer">
+          <p className="f-answer" style={{ opacity: back }}>
             {A_WORDS.map((w, i) => {
               const k = clamp(words - i);
               return (
@@ -423,8 +426,17 @@ const ask: Shot = {
             })}
           </p>
           <div className="f-sources" style={{ opacity: cards, transform: `translateY(${(1 - cards) * 16}px)` }}>
-            <div className="f-sources-head">From this page and these hours</div>
-            <div className="f-source-page" style={{ opacity: prog(t, A_SOURCES + 0.15, A_SOURCES + 0.5) }}>
+            <div className="f-sources-head" style={{ opacity: back }}>
+              From this page and these hours
+            </div>
+            <div
+              className="f-source-page"
+              style={{
+                opacity: prog(t, A_SOURCES + 0.15, A_SOURCES + 0.5),
+                transform: `scale(${1 + 0.04 * focus})`,
+                boxShadow: `0 ${18 * focus}px ${40 * focus}px -${12 * focus}px rgb(20 22 25 / ${0.28 * focus}), 0 0 0 1px var(--w-line)`,
+              }}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={ASK.page.icon} width={18} height={18} alt="" />
               <div>
@@ -434,7 +446,7 @@ const ask: Shot = {
               <Glyph name="arrow" />
             </div>
             {ASK.hours.map((h, i) => (
-              <div key={h.at} className="f-source-hour" style={{ opacity: prog(t, A_SOURCES + 0.35 + i * 0.15, A_SOURCES + 0.7 + i * 0.15) }}>
+              <div key={h.at} className="f-source-hour" style={{ opacity: prog(t, A_SOURCES + 0.35 + i * 0.15, A_SOURCES + 0.7 + i * 0.15) * back }}>
                 <span className="f-at">{h.at}</span>
                 <div>
                   <b>{h.title}</b>
@@ -459,8 +471,8 @@ const ask: Shot = {
   },
   camera: [
     cam(0, 1.0, 590, 360, 740),
-    cam(0.5, 1.55, 620, 560, 680),
-    cam(A_SEND - 0.1, 1.55, 620, 560, 680),
+    cam(0.5, 1.6, 620, 600, 680),
+    cam(A_SEND - 0.1, 1.6, 620, 600, 680),
     cam(A_SEND + 0.7, 1.55, 620, 170, 680),
     cam(A_SOURCES - 0.2, 1.5, 620, 190, 680),
     cam(A_SOURCES + 1.2, 1.38, 620, 300, 680),
