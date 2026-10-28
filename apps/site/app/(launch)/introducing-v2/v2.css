@@ -1,0 +1,305 @@
+/* Introducing Daylens V2: the announcement and a walk through each feature, every animation cut from the launch film. */
+
+.iv-page {
+  --iv-serif: var(--font-serif), "Hedvig Letters Serif", Georgia, serif;
+  --iv-col: 640px;
+  --iv-wide: 1180px;
+  --iv-gutter: clamp(16px, 5vw, 48px);
+  padding: 0 var(--iv-gutter);
+}
+
+.iv-page .lx-nav {
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  border-bottom-color: var(--rule);
+}
+
+.iv-page h1,
+.iv-page h2,
+.iv-page h3 {
+  font-family: var(--iv-serif);
+  font-weight: 400;
+  text-wrap: balance;
+}
+
+.iv-hero {
+  max-width: 880px;
+  margin: 0 auto;
+  padding-top: clamp(128px, 16vw, 184px);
+  text-align: center;
+}
+
+.iv-hero h1 {
+  font-size: clamp(44px, 2rem + 4.4vw, 88px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+}
+
+.iv-dek {
+  max-width: 34em;
+  margin: 24px auto 0;
+  font-size: clamp(18px, 1rem + 0.45vw, 22px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.iv-avail {
+  margin-top: 14px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* Players */
+
+.iv-film {
+  max-width: var(--iv-wide);
+  margin: clamp(40px, 6vw, 64px) auto 0;
+}
+
+.iv-player {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border-radius: clamp(14px, 1.6vw, 22px);
+  background: var(--card);
+  isolation: isolate;
+}
+
+.iv-ratio {
+  display: block;
+}
+
+.iv-player-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  transition: opacity 0.4s var(--ease);
+}
+
+.iv-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.iv-controls button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.86);
+  color: #141619;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(20 22 25 / 0.12);
+}
+
+.iv-controls svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.iv-progress {
+  flex: 1;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(20 22 25 / 0.12);
+}
+
+.iv-progress i {
+  display: block;
+  height: 100%;
+  background: rgb(20 22 25 / 0.55);
+  transform-origin: 0 0;
+}
+
+.iv-join--top {
+  display: flex;
+  justify-content: center;
+}
+
+/* Reading */
+
+.iv-post,
+.iv-beta {
+  max-width: var(--iv-col);
+  margin: clamp(80px, 10vw, 128px) auto 0;
+}
+
+.iv-post p,
+.iv-beta p {
+  font-size: clamp(18px, 1rem + 0.3vw, 20px);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.iv-post p + p,
+.iv-beta p + p {
+  margin-top: 1em;
+}
+
+.iv-beta h2 {
+  margin-bottom: 16px;
+  font-size: clamp(28px, 1.2rem + 1.6vw, 36px);
+  line-height: 1.15;
+}
+
+/* Features */
+
+.iv-feature {
+  max-width: var(--iv-wide);
+  margin: clamp(112px, 14vw, 184px) auto 0;
+}
+
+.iv-text {
+  max-width: var(--iv-col);
+  margin: 0 auto clamp(28px, 4vw, 44px);
+}
+
+.iv-text h2 {
+  font-size: clamp(32px, 1.3rem + 2.2vw, 48px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.iv-text p {
+  margin-top: 14px;
+  font-size: clamp(17px, 1rem + 0.2vw, 19px);
+  line-height: 1.55;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.iv-ask-more {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(3, 1fr);
+  gap: clamp(24px, 3vw, 40px);
+  margin-top: clamp(32px, 4vw, 48px);
+}
+
+.iv-questions {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.iv-questions li {
+  padding: 10px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--paper) 70%, white);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.iv-point {
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+
+.iv-point h3 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.iv-point p {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+/* Privacy */
+
+.iv-privacy {
+  max-width: 880px;
+  margin: clamp(128px, 16vw, 200px) auto 0;
+  text-align: center;
+}
+
+.iv-privacy h2 {
+  font-size: clamp(36px, 1.4rem + 3vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
+.iv-privacy > p {
+  max-width: 34em;
+  margin: 20px auto 0;
+  font-size: clamp(18px, 1rem + 0.35vw, 21px);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.iv-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(24px, 4vw, 56px);
+  max-width: 760px;
+  margin: clamp(40px, 6vw, 64px) auto 0;
+  text-align: left;
+}
+
+.iv-lists h3 {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 22px;
+}
+
+.iv-lists li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.iv-privacy .iv-small {
+  margin-top: 28px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.iv-closing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: clamp(112px, 14vw, 176px);
+  text-align: center;
+}
+
+.iv-closing h2 {
+  font-size: clamp(36px, 1.4rem + 3vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
+@media (max-width: 860px) {
+  .iv-ask-more {
+    grid-template-columns: 1fr;
+  }
+
+  .iv-lists {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iv-player-stage {
+    transition: none;
+  }
+}

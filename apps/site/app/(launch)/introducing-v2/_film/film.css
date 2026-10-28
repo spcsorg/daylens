@@ -1,0 +1,1110 @@
+/* The film stage and the Daylens V4 window inside it. Sizes are the Figma file's, at 1120 × 720. */
+
+.f-stage,
+.f-window {
+  --w-bg: #ffffff;
+  --w-side: #f7f8f9;
+  --w-hover: #eff1f3;
+  --w-sel: #e4e6e9;
+  --w-line: #e4e6e9;
+  --w-line-strong: #c9cdd1;
+  --w-text: #141619;
+  --w-text-2: #4b5158;
+  --w-text-3: #686e75;
+  --w-accent: #d9731a;
+  --w-accent-soft: #fcebd8;
+  --w-ok: #2c7a4e;
+  --w-danger: #c4372c;
+  --w-danger-soft: #fcecea;
+  --w-serif: var(--font-serif), "Hedvig Letters Serif", Georgia, serif;
+  --w-sans: var(--font-sans), Geist, -apple-system, sans-serif;
+}
+
+.f-stage {
+  position: relative;
+  overflow: hidden;
+  color: var(--w-text);
+  font-family: var(--w-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.f-camera {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+}
+
+/* Captions */
+
+.f-cap {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 0 8%;
+  text-align: center;
+}
+
+.f-cap p {
+  margin: 0;
+  font-family: var(--w-serif);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.f-cap small {
+  display: block;
+  max-width: 24em;
+  margin-top: 0.7em;
+  font-family: var(--w-sans);
+  font-size: 0.3em;
+  line-height: 1.4;
+  color: var(--w-text-2);
+  text-wrap: balance;
+}
+
+.f-end {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.2em;
+  text-align: center;
+}
+
+.f-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.28em;
+  margin-bottom: 0.35em;
+  font-family: var(--w-serif);
+  letter-spacing: -0.025em;
+}
+
+.f-lockup img {
+  border-radius: 22%;
+}
+
+.f-end p {
+  margin: 0;
+  color: var(--w-text-2);
+  letter-spacing: -0.01em;
+}
+
+.f-end .f-url {
+  color: var(--w-text);
+  font-weight: 500;
+}
+
+/* Window */
+
+.f-window {
+  position: relative;
+  width: 1120px;
+  height: 720px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--w-bg);
+  box-shadow: 0 40px 90px -24px rgb(20 22 25 / 0.28), 0 0 0 1px rgb(20 22 25 / 0.06);
+  font: 400 14px/21px var(--w-sans);
+  color: var(--w-text);
+  text-align: left;
+}
+
+.f-lights {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+}
+
+.f-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
+}
+
+.f-lights i:nth-child(2) {
+  background: #febc2e;
+}
+
+.f-lights i:nth-child(3) {
+  background: #28c840;
+}
+
+.f-glyph {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.f-apps {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.f-apps img {
+  border-radius: 4px;
+}
+
+.f-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 216px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 52px 16px 18px;
+  background: var(--w-side);
+  border-right: 1px solid var(--w-line);
+}
+
+.f-navs {
+  display: grid;
+  gap: 2px;
+}
+
+.f-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font: 400 13px/18px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.f-nav.is-on {
+  background: var(--w-sel);
+  color: var(--w-text);
+  font-weight: 500;
+}
+
+.f-count {
+  margin-left: auto;
+  color: var(--w-text-3);
+  font-size: 12px;
+}
+
+.f-main {
+  position: absolute;
+  inset: 0 0 0 216px;
+  padding: 36px 48px 0;
+  overflow: hidden;
+}
+
+.f-main.is-full {
+  left: 0;
+  padding: 0;
+}
+
+.f-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 824px;
+  height: 46px;
+  margin-bottom: 14px;
+}
+
+.f-title-serif {
+  margin: 0;
+  font: 400 30px/36px var(--w-serif);
+  letter-spacing: -0.01em;
+}
+
+.f-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--w-text-2);
+}
+
+.f-seg {
+  display: flex;
+  padding: 3px;
+  margin-right: 8px;
+  border-radius: 9px;
+  background: var(--w-hover);
+  font: 500 13px/18px var(--w-sans);
+}
+
+.f-seg span {
+  padding: 5px 13px;
+  border-radius: 7px;
+  color: var(--w-text-2);
+}
+
+.f-seg .is-on {
+  background: var(--w-bg);
+  color: var(--w-text);
+  box-shadow: 0 1px 2px rgb(20 22 25 / 0.12);
+}
+
+.f-seg .is-hover {
+  color: var(--w-text);
+}
+
+/* Hours */
+
+.f-day {
+  width: 680px;
+}
+
+.f-hour {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--w-line);
+  transform-origin: 50% 0;
+}
+
+.f-at {
+  padding-top: 2px;
+  font: 400 12px/18px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-at.is-now {
+  position: relative;
+  color: var(--w-text);
+  font-weight: 500;
+}
+
+.f-at.is-now::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: -13px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-accent);
+}
+
+.f-hour-title {
+  font: 500 17px/24px var(--w-sans);
+  letter-spacing: -0.01em;
+}
+
+.f-hour-line {
+  margin-top: 3px;
+  color: var(--w-text-2);
+}
+
+.f-hour.is-away .f-hour-title {
+  font-weight: 400;
+  color: var(--w-text-3);
+}
+
+/* Welcome */
+
+.f-track {
+  position: absolute;
+  top: 54px;
+  left: 26px;
+  right: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--w-line);
+}
+
+.f-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--w-accent);
+}
+
+.f-track i::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--w-accent);
+}
+
+.f-welcome {
+  position: absolute;
+  top: 96px;
+  left: 46px;
+  width: 452px;
+  bottom: 40px;
+}
+
+.f-display {
+  margin: 0;
+  font: 400 40px/46px var(--w-serif);
+  letter-spacing: -0.015em;
+}
+
+.f-display-xl {
+  margin: 0;
+  font: 400 60px/64px var(--w-serif);
+  letter-spacing: -0.02em;
+}
+
+.f-word {
+  display: inline-block;
+  white-space: pre;
+}
+
+.f-sub {
+  margin: 14px 0 0;
+  font: 400 16px/24px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.f-privacy {
+  position: absolute;
+  bottom: 86px;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  font: 400 12px/17px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-privacy .f-glyph {
+  margin-top: 2px;
+}
+
+.f-button {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--w-text);
+  color: #fff;
+  font: 500 14px/1 var(--w-sans);
+}
+
+.f-start {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+
+.f-preview {
+  position: absolute;
+  top: 80px;
+  right: 20px;
+  bottom: 20px;
+  width: 560px;
+  padding: 44px 28px 0;
+  border-radius: 14px;
+  background: var(--w-side);
+}
+
+.f-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 26px;
+}
+
+.f-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 12px/16px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.f-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-text-3);
+}
+
+.f-preview .f-hour-title {
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.f-preview .f-hour-line {
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.f-preview .f-hour {
+  padding: 14px 0 16px;
+}
+
+/* Your morning */
+
+.f-morning {
+  position: absolute;
+  top: 70px;
+  left: 176px;
+  width: 600px;
+}
+
+.f-meta {
+  margin: 6px 0 14px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-lede {
+  margin: 0 0 20px;
+  font: 400 21px/30px var(--w-serif);
+}
+
+.f-hours {
+  border-top: 1px solid var(--w-line);
+}
+
+.f-fill {
+  display: grid;
+}
+
+.f-fill > div {
+  position: relative;
+  min-height: 0;
+  margin-left: -16px;
+  padding-left: 16px;
+  overflow: hidden;
+}
+
+.f-raw {
+  position: absolute;
+  top: 16px;
+  left: 84px;
+  display: grid;
+  gap: 2px;
+  font: 400 12px/17px var(--font-mono), ui-monospace, monospace;
+  color: var(--w-text-3);
+  transform-origin: 0 0;
+}
+
+.f-bottom-bar {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  justify-content: flex-end;
+  height: 72px;
+  padding: 16px 344px 0 0;
+  background: var(--w-bg);
+  border-top: 1px solid var(--w-line);
+}
+
+/* Week and month */
+
+.f-week {
+  width: 824px;
+}
+
+.f-week-days,
+.f-month-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-left: 48px;
+  margin-bottom: 10px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-2);
+}
+
+.f-week-grid {
+  position: relative;
+  height: 310px;
+  margin-left: 48px;
+}
+
+.f-week-line {
+  position: absolute;
+  left: -48px;
+  right: 0;
+  height: 31px;
+  border-top: 1px solid var(--w-line);
+}
+
+.f-week-line span {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  font: 400 11px/14px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-block {
+  position: absolute;
+  width: calc(100% / 7 - 4px);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--w-hover);
+  font: 500 11.5px/15px var(--w-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.f-byapp {
+  width: 824px;
+  margin-top: 34px;
+}
+
+.f-byapp-head {
+  display: flex;
+  justify-content: space-between;
+  font: 500 13px/18px var(--w-sans);
+}
+
+.f-byapp-head span:last-child {
+  color: var(--w-text-2);
+}
+
+.f-bar {
+  position: relative;
+  height: 6px;
+  margin: 12px 0 12px;
+  border-radius: 3px;
+  background: var(--w-hover);
+}
+
+.f-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+
+.f-legend {
+  display: flex;
+  gap: 18px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.f-legend b {
+  font-weight: 500;
+  color: var(--w-text);
+}
+
+.f-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.f-month {
+  width: 824px;
+}
+
+.f-month-days {
+  margin-left: 0;
+}
+
+.f-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.f-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 92px;
+  padding: 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 8px;
+  font: 400 12px/16px var(--w-sans);
+}
+
+.f-cell b {
+  margin-top: 6px;
+  font: 500 14px/18px var(--w-sans);
+}
+
+.f-cell small {
+  font-size: 11px;
+  color: var(--w-text-3);
+}
+
+.f-cell .f-at.is-now {
+  padding: 0 0 0 10px;
+}
+
+.f-cell .f-at.is-now::before {
+  top: 5px;
+  left: 0;
+}
+
+/* Search */
+
+.f-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(20 22 25 / 0.16);
+}
+
+.f-search {
+  position: absolute;
+  top: 78px;
+  left: 348px;
+  width: 640px;
+  border-radius: 14px;
+  background: var(--w-bg);
+  box-shadow: 0 24px 48px -12px rgb(20 23 26 / 0.22), 0 1px 3px rgb(20 23 26 / 0.08);
+  overflow: hidden;
+}
+
+.f-search-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 58px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--w-line);
+  font: 400 16px/24px var(--w-sans);
+  color: var(--w-text);
+}
+
+.f-search-field .f-glyph {
+  color: var(--w-text-2);
+}
+
+.f-placeholder {
+  color: var(--w-text-3);
+}
+
+.f-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: -0.2em;
+  background: var(--w-accent);
+}
+
+.f-results {
+  padding: 12px 8px 12px;
+}
+
+.f-results-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px 8px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-result {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.f-result.is-on {
+  background: var(--w-hover);
+}
+
+.f-result img,
+.f-result .f-glyph {
+  margin-top: 2px;
+  border-radius: 4px;
+  color: var(--w-text-2);
+}
+
+.f-result b,
+.f-source-page b,
+.f-source-hour b,
+.f-open-row b {
+  display: block;
+  font: 400 14px/20px var(--w-sans);
+}
+
+.f-result small,
+.f-source-page small,
+.f-source-hour small,
+.f-open-row small {
+  display: block;
+  font: 400 12px/17px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+/* Ask */
+
+.f-ask {
+  position: absolute;
+  top: 60px;
+  left: 84px;
+  width: 640px;
+}
+
+.f-question {
+  margin: 0 0 16px;
+  font: 400 23px/30px var(--w-serif);
+  letter-spacing: -0.005em;
+}
+
+.f-thinking {
+  position: absolute;
+  top: 46px;
+  margin: 0;
+  font: 400 14px/20px var(--w-sans);
+}
+
+.f-shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, var(--w-text-3) 30%, var(--w-text) 50%, var(--w-text-3) 70%) 0 0 / 400px 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.f-answer {
+  min-height: 72px;
+  margin: 0 0 20px;
+  font: 400 17px/26px var(--w-sans);
+}
+
+.f-answer span {
+  display: inline-block;
+  white-space: pre;
+}
+
+.f-sources {
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--w-side);
+}
+
+.f-sources-head {
+  padding: 0 0 6px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-source-page {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--w-bg);
+  box-shadow: 0 1px 2px rgb(20 22 25 / 0.08), 0 0 0 1px var(--w-line);
+}
+
+.f-source-page b {
+  font-weight: 500;
+}
+
+.f-source-page > div {
+  flex: 1;
+}
+
+.f-source-page .f-glyph {
+  color: var(--w-text-2);
+}
+
+.f-source-hour {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  padding: 14px 0 12px;
+  border-top: 1px solid var(--w-line);
+}
+
+.f-source-hour:first-of-type {
+  border-top: 0;
+}
+
+.f-source-hour b {
+  font: 500 15px/22px var(--w-sans);
+}
+
+.f-source-hour small {
+  font-size: 13px;
+  color: var(--w-text-2);
+}
+
+.f-source-hour .f-apps {
+  margin-top: 6px;
+}
+
+.f-composer {
+  position: absolute;
+  bottom: 30px;
+  left: 84px;
+  width: 640px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 18px;
+  border-radius: 25px;
+  background: var(--w-bg);
+  box-shadow: 0 6px 16px -6px rgb(20 23 26 / 0.18), 0 0 0 1px var(--w-line-strong);
+  font: 400 14px/20px var(--w-sans);
+}
+
+.f-composer i {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--w-hover);
+  color: var(--w-text-2);
+}
+
+.f-composer i.is-ready {
+  background: var(--w-text);
+  color: #fff;
+}
+
+/* Trust */
+
+.f-paused {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 680px;
+  padding: 0 16px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--w-accent-soft);
+  font: 400 13px/18px var(--w-sans);
+}
+
+.f-paused span {
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.f-open {
+  width: 680px;
+  padding: 18px 16px 12px;
+  border-radius: 14px;
+  background: var(--w-side);
+}
+
+.f-open-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 0 0 6px;
+}
+
+.f-open-head small {
+  display: block;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-open-head b {
+  font: 500 17px/24px var(--w-sans);
+}
+
+.f-ghost {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--w-hover);
+  font: 500 13px/18px var(--w-sans);
+}
+
+.f-open-label {
+  display: block;
+  padding: 14px 8px 4px;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-open-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 47px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+.f-open-row > div {
+  flex: 1;
+}
+
+.f-open-row .f-glyph {
+  color: var(--w-text-2);
+}
+
+.f-min {
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-confirm {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  height: 40px;
+  padding: 0 4px 0 12px;
+  border-radius: 10px;
+  background: var(--w-danger-soft);
+  font: 400 13px/18px var(--w-sans);
+}
+
+.f-confirm > span:first-child {
+  flex: 1;
+  font-weight: 500;
+}
+
+.f-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--w-text-2);
+}
+
+.f-check i {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: 4px;
+  background: var(--w-bg);
+}
+
+.f-danger {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--w-danger);
+  color: #fff;
+  font-weight: 500;
+}
+
+.f-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  transform-origin: 4px 2px;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.2));
+}
+
+/* Assistants */
+
+.f-assistants {
+  margin-top: 26px;
+  padding: 6px 16px;
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+}
+
+.f-assistant {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+}
+
+.f-assistant + .f-assistant {
+  border-top: 1px solid var(--w-line);
+}
+
+.f-assistant img {
+  border-radius: 5px;
+}
+
+.f-assistant > div {
+  flex: 1;
+}
+
+.f-assistant b {
+  display: block;
+  font: 500 14px/20px var(--w-sans);
+}
+
+.f-assistant small {
+  display: block;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
+
+.f-assistant small.is-ok,
+.f-connected {
+  color: var(--w-ok);
+}
+
+.f-connected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 13px/18px var(--w-sans);
+}
+
+.f-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.f-with-icon img {
+  border-radius: 5px;
+}
+
+.f-chat {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--w-line);
+  border-radius: 14px;
+  background: var(--w-bg);
+}
+
+.f-bubble {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--w-hover);
+  font: 400 14px/20px var(--w-sans);
+}
+
+.f-tool {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--w-accent-soft);
+  font: 500 12px/18px var(--w-sans);
+  transform-origin: 0 50%;
+}
+
+.f-answer--chat {
+  min-height: 0;
+  margin: 0;
+  font-size: 15px;
+  line-height: 23px;
+}
+
+.f-footnote {
+  margin: 14px 0 0;
+  font: 400 12px/16px var(--w-sans);
+  color: var(--w-text-3);
+}
