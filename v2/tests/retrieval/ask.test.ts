@@ -5,11 +5,13 @@ import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
 import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
+import { anthropicApi } from '../../retrieval/anthropicApi.ts'
 import { claudeCli } from '../../retrieval/claudeCli.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
 import { day, page } from './support.ts'
+import { fakeAnthropic } from '../support/fakeAnthropic.ts'
 
 process.env.TZ = 'Etc/GMT+5'
 const LIMITS = { maxHours: 5, maxSources: 10, perGroup: 5 }
@@ -90,6 +92,34 @@ test('statements are read from the answer as it streams, each once it is complet
   assert.deepEqual(completeStatements(full), JSON.parse(full).statements)
   assert.deepEqual(completeStatements('{"answerable":false,"statements":[]}'), [])
   assert.deepEqual(completeStatements('{"answerable":tr'), [])
+})
+
+test('the provider gets only the excerpts the question selected: one request, the system prompt and the record built for it', async () => {
+  const s = setup()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 - 2 * 24 * HOUR))
+  s.r.feed(focus(notes, 'Dentist on Thursday', T0 - 2 * 24 * HOUR + MIN, 'app_changed'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 - 2 * 24 * HOUR + 20 * MIN))
+  s.r.store.flush()
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: [JSON.stringify({ answerable: false, statements: [], missing: 'x' })] }))
+  try {
+    const sent: AskRequest[] = []
+    const real = anthropicApi('claude-haiku-5-5', { apiKey: 'sk-test', baseURL: api.url, timeoutMs: 5000 })
+    const model: AskModel = { ...real, run: (req, onText) => (sent.push(req), real.run(req, onText)) }
+    await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+    assert.equal(api.seen.length, 1)
+    const body = api.seen[0]!.body
+    assert.deepEqual(Object.keys(body).sort(), ['max_tokens', 'messages', 'model', 'output_config', 'stream', 'system'])
+    assert.equal(body.system, SYSTEM_PROMPT)
+    assert.deepEqual(body.messages, [{ role: 'user', content: sent[0]!.prompt }], 'nothing but the record Ask built')
+    const text = JSON.stringify(body)
+    assert.ok(text.includes('Budget review'), 'what the question is about is sent')
+    assert.ok(!text.includes('Dentist'), 'another day the question did not ask about is not')
+    assert.ok(!text.includes('Went through Q4 numbers'), 'Daylens’s own hour text is not sent')
+  } finally {
+    await api.close()
+    s.close()
+  }
 })
 
 test('a streamed answer shows each statement that passes the checks as it arrives, and the result is the same answer', async () => {
