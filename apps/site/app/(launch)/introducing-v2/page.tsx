@@ -40,7 +40,7 @@ function Feature({ id, children }: { id: Exclude<ShotId, "ask">; children?: Reac
         <p>{f.body}</p>
         {children}
       </div>
-      <Player shot={id} sky={FIELD[id]} still={SHOTS[id].dur} label={f.title} />
+      <Player shot={id} sky={FIELD[id]} still={SHOTS[id].dur} label={f.title} controls />
     </section>
   );
 }
@@ -83,7 +83,7 @@ export default function Page() {
             <h2 id="iv-ask">{ask.title}</h2>
             <p>{ask.body}</p>
           </div>
-          <Player shot="ask" sky={FIELD.ask} still={SHOTS.ask.dur} label={ask.title} />
+          <Player shot="ask" sky={FIELD.ask} still={SHOTS.ask.dur} label={ask.title} controls />
           <div className="iv-ask-more">
             <ul className="iv-questions" aria-label="Questions you can ask">
               {ask.examples.map((q) => (

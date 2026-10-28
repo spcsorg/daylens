@@ -24,7 +24,7 @@ export type Beat =
 const dur = (b: Beat) => (b.kind === "shot" ? b.shot.dur : b.dur);
 const starts = (beats: Beat[]) => beats.reduce<number[]>((a, b, i) => [...a, i ? a[i - 1] + dur(beats[i - 1]) : 0], []);
 export const filmLength = (beats: Beat[]) => beats.reduce((n, b) => n + dur(b), 0);
-export const startOf = (beats: Beat[], shot: Shot) => starts(beats)[beats.findIndex((b) => b.kind === "shot" && b.shot === shot)];
+export const startOf = (beats: Beat[], shot: Shot) => starts(beats)[beats.findIndex((b) => b.kind === "shot" && b.shot.id === shot.id)];
 
 function sky(beats: Beat[], at: number[], t: number) {
   const i = Math.max(0, at.findLastIndex((s) => s <= t));
