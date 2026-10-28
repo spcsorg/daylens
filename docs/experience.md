@@ -155,3 +155,10 @@ Onboarding is where Daylens wins or loses a user. It must feel effortless and po
 - Errors say what happened and what to do next.
 - Destructive actions confirm in one line.
 - Corrections, edits and successes are quiet; red is reserved for destructive actions and real errors.
+- Amber means now and progress: the current hour, focus, the onboarding progress bar, the caret of an hour being written. Paused is a quiet grey, never amber.
+- Each object icon has one solid piece (the clock's hands, the bin's lid, the sliders' knobs); action icons stay line. The sidebar shows the screen you're on with its filled icon.
+- Buttons darken on hover, darken further and sink slightly when pressed, and show a spinner in place of the label while they work, at the same width. A disabled main button keeps its fill and dims its label, so it doesn't jump when it enables.
+- The Return hint is printed only on onboarding's main button, where Return advances every step. Nowhere else prints a shortcut.
+- Floating layers (Search, dialogs) sit on a scrim that dims and slightly blurs the page; menus and popovers get a shadow with a hairline ring instead of a border.
+- When an hour's title changes after it first appeared, the new words write themselves in from left to right behind an amber caret. Nothing animates on first load.
+- With reduced motion on, movement goes (slides, scales, the writing sweep) and fades and colour changes stay. Spinners keep turning, because a still spinner looks stuck.
