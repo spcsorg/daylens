@@ -88,7 +88,7 @@ export function Today({ nav, setNav, shell, rec, onMark }: { nav: TodayNav; setN
       <div className="today-notice">
         <StatusNotice shell={shell} rec={rec} />
       </div>
-      {scope === 'day' && <DayList nav={nav} setNav={setNav} rec={rec} onMark={onMark} />}
+      {scope === 'day' && <DayList key={nav.date} nav={nav} setNav={setNav} rec={rec} onMark={onMark} />}
       {scope === 'week' && <WeekGrid start={ws} setNav={setNav} onMark={onMark} />}
       {scope === 'month' && <MonthGrid month={monthOf(date)} setNav={setNav} onMark={onMark} />}
     </>

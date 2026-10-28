@@ -18,16 +18,62 @@
   max-width: 680px;
 }
 
+/* A new day settles in rather than swapping. */
+.today-day {
+  animation: rise var(--reveal) var(--ease);
+}
+
+/* Hovering an hour lifts it onto a soft plate; the hours stay a calendar, not cards. */
+.today-day > button.hour {
+  position: relative;
+  isolation: isolate;
+}
+
+.today-day > button.hour::before {
+  content: '';
+  position: absolute;
+  inset: 4px -12px;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  opacity: 0;
+  transition: opacity var(--quick) var(--ease);
+}
+
+.today-day > button.hour:hover::before,
+.today-day > button.hour[aria-expanded='true']::before {
+  opacity: 1;
+}
+
+/* An hour's apps read as one set: icons overlap like avatars, each ringed in the window's colour. */
+.today-day .hour-apps {
+  gap: 0;
+}
+
+.today-day .hour-apps > span {
+  display: flex;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1.5px var(--bg-window);
+}
+
+.today-day .hour-apps > span + span {
+  margin-left: -4px;
+}
+
 /* Inset under the hour's title, so it ends where the hour rows do. */
 .today-day > .hour-open {
   max-width: calc(680px - 84px);
 }
 
+/* An open hour is a sheet pulled out of the day. */
 .hour-open {
   margin: var(--space-4) 0 var(--space-12) 84px;
   padding: var(--space-12) 10px;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--shadow-lift);
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
@@ -56,10 +102,14 @@
 }
 
 .left-off {
-  margin-top: var(--space-12);
+  margin-top: var(--space-16);
   padding: var(--space-16) 10px 10px;
-  background: var(--bg-subtle);
+  background: var(--bg-raised);
   border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--shadow-lift);
+  animation: rise var(--settle) var(--ease) both;
 }
 
 .left-off-title {
