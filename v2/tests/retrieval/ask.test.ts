@@ -611,6 +611,20 @@ test('a refused or cut-off answer is reported as a failure, and what the provide
   }
 })
 
+test('a question that names no day and nothing to search for is about today', async () => {
+  const s = setup()
+  const seen: AskRequest[] = []
+  await ask('what did I do this morning?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  await ask('what was I doing?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  for (const req of seen) {
+    const record = JSON.parse(req.prompt) as { days_asked: string[]; hours: unknown[] }
+    assert.equal(record.days_asked.length, 1)
+    assert.ok(record.hours.length > 0, 'today’s hours are sent')
+  }
+  assert.equal(seen.length, 2)
+  s.close()
+})
+
 test('days named in a question resolve to local days; the rest of the question is what search looks for', () => {
   const now = new Date(2030, 9, 23, 15, 0).getTime() // a Wednesday
   const day = (y: number, m: number, d: number) => new Date(y, m - 1, d).getTime()
@@ -622,6 +636,9 @@ test('days named in a question resolve to local days; the rest of the question i
   assert.deepEqual(daysIn('16th of oct', now).map(([s]) => s), [day(2030, 10, 16)])
   assert.deepEqual(daysIn('december 3', now).map(([s]) => s), [day(2029, 12, 3)], 'a date still ahead this year means last year')
   assert.equal(searchWords('What was the doc about the marmalade order I saw on Monday, October 21st?'), 'doc marmalade order')
+  assert.deepEqual(daysIn('what did I do this morning?', now).map(([s]) => s), [day(2030, 10, 23)])
+  assert.deepEqual(daysIn('and tonight', now).map(([s]) => s), [day(2030, 10, 23)])
+  assert.deepEqual(daysIn('what was I reading last night', now).map(([s]) => s), [day(2030, 10, 22)])
 })
 
 test('Claude Code runs with no tools, no MCP servers and no session on disk, in an empty folder, with the record on stdin', async () => {

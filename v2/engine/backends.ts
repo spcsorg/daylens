@@ -246,6 +246,8 @@ export interface ApiOptions {
   // A local server stands in for the API in tests.
   baseURL?: string
   timeoutMs: number
+  // How much the model thinks before it answers; the model's own default when left out.
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 export interface ApiRequest {
@@ -303,7 +305,7 @@ export function anthropicClient(model: string, opts: ApiOptions): (req: ApiReque
           max_tokens: API_MAX_TOKENS,
           ...(req.system ? { system: req.system } : {}),
           messages: [{ role: 'user', content: req.message }],
-          ...(req.schema ? { output_config: { format: { type: 'json_schema' as const, schema: req.schema } } } : {}),
+          ...(req.schema || opts.effort ? { output_config: { ...(opts.effort ? { effort: opts.effort } : {}), ...(req.schema ? { format: { type: 'json_schema' as const, schema: req.schema } } : {}) } } : {}),
         },
         { signal: req.signal },
       )

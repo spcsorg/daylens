@@ -2,13 +2,13 @@
 // statement is posted to the asking screen as it streams. What was sent is logged on a connection of its own, since
 // the reader's is read-only.
 import type { MessagePortMain } from 'electron'
-import { anthropicApi, ASK_MODEL } from '../../retrieval/anthropicApi.ts'
+import { anthropicApi, ASK_EFFORT, ASK_MODEL } from '../../retrieval/anthropicApi.ts'
 import { ask } from '../../retrieval/ask.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
 import type { Reader } from '../../retrieval/reader.ts'
 import type { AskQuery } from '../shared/ai.ts'
 
-// Measured on the invented record: the first statement in about 2.5 s with these.
+// hours-gold's measured limits for the invented record.
 const LIMITS = { maxHours: 12, maxSources: 40, perGroup: 8 }
 const TIMEOUT_MS = 60_000
 
@@ -30,7 +30,7 @@ export async function answer(file: string, finder: Reader, port: MessagePortMain
       q.question,
       {
         reader: finder,
-        model: key ? anthropicApi(ASK_MODEL, { apiKey: key, timeoutMs: TIMEOUT_MS }) : null,
+        model: key ? anthropicApi(ASK_MODEL, { apiKey: key, timeoutMs: TIMEOUT_MS, effort: ASK_EFFORT }) : null,
         log: {
           recordRead: (r, mark) => store.recordRead(r, mark),
           recordUsage: (u) => Number(usage.run(Date.now(), u.kind, u.provider, u.model, u.input_tokens, u.output_tokens, u.cost_micro_usd, u.ref ?? null).lastInsertRowid),

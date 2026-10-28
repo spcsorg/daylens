@@ -5,7 +5,7 @@
   height: 100%;
 }
 
-.ask-scroll {
+.scroll.ask-scroll {
   padding-top: 56px;
 }
 
@@ -161,50 +161,50 @@
 }
 
 .ask-sources {
-  align-self: flex-start;
   max-width: 78%;
-  margin-top: var(--space-8);
+  margin-top: var(--space-6);
   display: flex;
-  flex-direction: column;
-  border-left: 2px solid var(--line);
-  padding-left: var(--space-12);
+  flex-wrap: wrap;
+  gap: var(--space-6);
   animation: bubble-in var(--settle) var(--ease) both;
 }
 
-.ask-source {
-  display: flex;
-  gap: var(--space-12);
-  align-items: baseline;
-  padding: var(--space-4) var(--space-8);
-  margin-left: calc(-1 * var(--space-8));
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background-color var(--quick) var(--ease);
-}
-
-.ask-source:hover {
-  background: var(--bg-hover);
-}
-
-.ask-source-when {
-  font: var(--caption);
-  color: var(--text-3);
-  flex: none;
-  min-width: 96px;
-}
-
-.ask-source-what {
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  max-width: 320px;
+  padding: var(--space-4) var(--space-12) var(--space-4) var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
   font: var(--label-regular);
   color: var(--text-2);
+  transition: background-color var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+
+.ask-chip span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.ask-chip svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.ask-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ask-bottom {
+  flex: none;
+  padding: var(--space-12) var(--space-32) var(--space-24) var(--space-48);
+}
+
 .ask-composer {
   position: relative;
-  flex: none;
-  padding: var(--space-12) 0 var(--space-24);
 }
 
 .ask-field {
@@ -227,7 +227,7 @@
 .ask-send {
   position: absolute;
   right: 8px;
-  top: calc(var(--space-12) + 8px);
+  top: 8px;
   width: 32px;
   height: 32px;
   border-radius: 50%;
