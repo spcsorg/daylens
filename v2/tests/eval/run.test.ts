@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { claudeCli, factsHour, type CallResult } from '../../engine/backends.ts'
+import { factsHour, type CallResult } from '../../engine/backends.ts'
 import { buildPacket, type Packet, type Ref } from '../../engine/packet.ts'
 import type { Validation } from '../../engine/validate.ts'
 import { checkPackets, gradeIsCurrent, handGradeFor, isCurrent, previousHour, shownHour, staleResults, withAttempts, WRITER_TRIES, writeId, writerPacket, type GradeBasis, type HandCheck, type RunInfo, type WriteRecord } from '../../tools/eval/run.ts'
@@ -43,10 +43,10 @@ test('a grade is reused only for the same write, packet, shown hour, grader prom
   const again = writeId({ started: '2030-03-05T11:00:00Z', final: call() })
   assert.notEqual(first, again)
   const verdict = { grade: 'right' as const, reason: 'ok', must_missed: [], should_missed: [], must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
-  const basis: GradeBasis = { written: first, packet_sha256: 'p', shown_sha256: 's', grader_prompt_sha256: 'gp', checklists_sha256: 'cl', key_sha256: 'k', model: 'claude-opus-5-5', effort: null, cli: '2.1.306 (Claude Code)' }
+  const basis: GradeBasis = { written: first, packet_sha256: 'p', shown_sha256: 's', grader_prompt_sha256: 'gp', checklists_sha256: 'cl', key_sha256: 'k', model: 'claude-opus-5-5', effort: null }
   assert.equal(gradeIsCurrent({ ...basis, verdict }, basis), true)
   assert.equal(gradeIsCurrent({ ...basis, verdict }, { ...basis, written: again }), false, 'the hour was written again')
-  for (const [k, v] of [['packet_sha256', 'p2'], ['shown_sha256', 's2'], ['grader_prompt_sha256', 'gp2'], ['checklists_sha256', 'cl2'], ['key_sha256', 'k2'], ['model', 'claude-sonnet-5-5'], ['effort', 'low'], ['cli', '2.1.308 (Claude Code)']] as const) {
+  for (const [k, v] of [['packet_sha256', 'p2'], ['shown_sha256', 's2'], ['grader_prompt_sha256', 'gp2'], ['checklists_sha256', 'cl2'], ['key_sha256', 'k2'], ['model', 'claude-sonnet-5-5'], ['effort', 'low']] as const) {
     assert.equal(gradeIsCurrent({ ...basis, verdict }, { ...basis, [k]: v }), false, k)
   }
   assert.equal(gradeIsCurrent({ written: first, verdict }, basis), false, 'a grade that does not say what it was made with')
@@ -110,8 +110,8 @@ test("a summary takes only writes made on its run's packets, and a current grade
   const made = (hour: string) => ({ packet_sha256: `p${Number(hour)}`, shown_sha256: `s${hour}`, grader_prompt_sha256: 'gp', checklists_sha256: 'cl', key_sha256: 'k', model: 'claude-opus-5-5', effort: null })
   const verdict = { grade: 'right' as const, reason: 'ok', must_missed: [], should_missed: [], must_not_said: [], unsupported_claims: [], wrong_attribution: [], only_you_stated: [] }
   const grades: Parameters<typeof staleResults>[2] = [
-    { grader: 'g', name: 'm', hour: '09', written: 'w9', ...made('09'), cli: '1', verdict },
-    { grader: 'g', name: 'm', hour: '10', written: 'w10', ...made('10'), cli: '1', verdict },
+    { grader: 'g', name: 'm', hour: '09', written: 'w9', ...made('09'), verdict },
+    { grader: 'g', name: 'm', hour: '10', written: 'w10', ...made('10'), verdict },
   ]
   const want = {
     write: (_name: string, hour: string) => ({ prompt_sha256: 'q', previous_hour: hour === '10' ? { title: 'A', summary: 'B' } : null }),
@@ -119,7 +119,6 @@ test("a summary takes only writes made on its run's packets, and a current grade
   }
   const stale = (w = writes, g = grades, h: HandCheck[] = []) => staleResults(run, w, g, h, ['09', '10'], want)
   assert.deepEqual(stale(), [])
-  assert.deepEqual(stale(writes, [grades[0]!, { ...grades[1]!, cli: '2' }]), [], 'an older grader CLI')
   assert.deepEqual(stale([writes[0]!, { ...writes[1]!, packet_sha256: 'p10-v3' }]), ['writes/m/hour_10: not made on packet version 2'])
   assert.deepEqual(stale([writes[0]!, { ...writes[1]!, prompt_sha256: 'q-old' }]), ['writes/m/hour_10: written with another writer prompt'])
   assert.deepEqual(stale([writes[0]!, { ...writes[1]!, previous_hour: null }]), ["writes/m/hour_10: given another previous hour than its candidate's hour before it gives today"])
@@ -149,14 +148,6 @@ test('nothing runs on packets other than the ones a results folder was made on',
   const run: RunInfo = { packets_dir: '.', packet_version: 3, manifest: { 'packets/hour_09.json': 'p9', 'refs/hour_09.json': 'r9' } }
   assert.doesNotThrow(() => checkPackets(run, { 'refs/hour_09.json': 'r9', 'packets/hour_09.json': 'p9' }))
   assert.throws(() => checkPackets(run, { 'packets/hour_09.json': 'p9-new', 'refs/hour_09.json': 'r9' }), /not the ones results\/ was made on/)
-})
-
-test('a writer that cannot be started is a failed call: retried once, then the hour stays as its facts', async () => {
-  const missing = claudeCli('m', { cwd: tempDir('daylens-no-cli-'), env: { PATH: '/nonexistent' } })
-  const { final, attempts } = await withAttempts(WRITER_TRIES, () => missing.call('hour'), () => null, async () => {})
-  assert.equal(attempts.length, 2)
-  assert.equal(final.text, null)
-  assert.match(final.error ?? '', /ENOENT/)
 })
 
 test('a failed writer call is retried once, a minute later, and then the hour stays as its facts', async () => {

@@ -82,7 +82,7 @@ Ask answers questions about any day from the same record.
 - **General:** start and end of the day, notification times, launch at login, appearance.
 - **Recording and privacy:** recording status and permissions, pause, how long history is kept, what is sent to AI and when, exclusions (apps and sites, with sensible defaults on), private windows (always skipped), apps whose window titles are kept (for apps with a built-in browser engine that Daylens does not already trust; adding one says in one line that its private windows could then be recorded), screen recording and audio recording (each off until turned on, asking for its permission when turned on), browsers (each supported browser found on the computer, whether its extension is connected, and one click to add it), usage analytics (on, with an off switch), and delete history.
 - **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read, and setup for any other MCP app.
-- **AI:** the current choice (Daylens AI, your own key, a CLI on the machine, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
+- **AI:** the current choice (Daylens AI, your own key, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.
 - **Data:** save each day as a note in a folder you choose, let coding agents read those notes, and export everything.
 

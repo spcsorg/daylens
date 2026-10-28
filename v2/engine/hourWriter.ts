@@ -7,7 +7,7 @@ import { ANTHROPIC_RATES, type HourWriter } from './backends.ts'
 import { buildPacket, type PacketOptions } from './packet.ts'
 import { validateHour } from './validate.ts'
 
-// Chosen on the gold day: most correct hours, fewest unsupported claims (docs/engine.md, Choosing the writer).
+// Chosen on the gold day: most correct hours, fewest unsupported claims (docs/engine.md, Choosing the models).
 export const HOUR_MODEL = 'claude-opus-5-5'
 // Late lines from capture and agent logs arrive by then.
 export const WRITE_DELAY_MS = 5 * 60_000

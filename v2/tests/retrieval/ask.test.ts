@@ -6,7 +6,6 @@ import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
 import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
 import { anthropicApi } from '../../retrieval/anthropicApi.ts'
-import { claudeCli } from '../../retrieval/claudeCli.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
@@ -668,53 +667,4 @@ test('days named in a question resolve to local days; the rest of the question i
   assert.deepEqual(daysIn('what did I do this morning?', now).map(([s]) => s), [day(2030, 10, 23)])
   assert.deepEqual(daysIn('and tonight', now).map(([s]) => s), [day(2030, 10, 23)])
   assert.deepEqual(daysIn('what was I reading last night', now).map(([s]) => s), [day(2030, 10, 22)])
-})
-
-test('Claude Code runs with no tools, no MCP servers and no session on disk, in an empty folder, with the record on stdin', async () => {
-  const dir = tmpDir()
-  const fake = path.join(dir, 'claude')
-  const log = path.join(dir, 'call.json')
-  writeFileSync(
-    fake,
-    `#!/usr/bin/env node
-const fs = require('node:fs')
-let input = ''
-process.stdin.on('data', (c) => (input += c)).on('end', () => {
-  fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), files: fs.readdirSync(process.cwd()), input }))
-  if (input === 'slow') return setTimeout(() => {}, 10000)
-  // As Claude Code prints a failed run: its message comes after several hundred characters of usage fields.
-  const failed = (exitCode, text) => {
-    console.log(JSON.stringify({ duration_api_ms: 0, session_id: 'x'.repeat(36), usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 0 }, padding: 'p'.repeat(300) }, is_error: true, subtype: 'success', result: text }))
-    process.exitCode = exitCode
-  }
-  if (input === 'limit') return failed(1, 'Usage limit reached, resets at 6pm')
-  if (input === 'error') return failed(0, 'Not signed in')
-  if (input === 'tool') return console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash' }], structured_output: {} }))
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], structured_output: { answerable: false, statements: [] },
-    usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 500, output_tokens: 40 }, modelUsage: { 'claude-test': {} } }))
-})
-`,
-  )
-  chmodSync(fake, 0o755)
-  const model = claudeCli({ timeoutMs: 5000, command: fake })
-  const reply = await model.run({ system: 'sys', prompt: '{"record":1}', schema: { type: 'object' } })
-  assert.deepEqual(reply, { output: { answerable: false, statements: [] }, model: 'claude-test', input_tokens: 1502, output_tokens: 40, cost_micro_usd: 0 })
-  const call = JSON.parse(readFileSync(log, 'utf8')) as { argv: string[]; cwd: string; files: string[]; input: string }
-  const flag = (f: string) => call.argv[call.argv.indexOf(f) + 1]
-  assert.equal(flag('--tools'), '')
-  assert.equal(flag('--json-schema'), '{"type":"object"}')
-  assert.equal(flag('--system-prompt'), 'sys')
-  for (const f of ['-p', '--strict-mcp-config', '--safe-mode', '--no-session-persistence', '--disable-slash-commands']) assert.ok(call.argv.includes(f), f)
-  assert.equal(call.input, '{"record":1}')
-  assert.ok(!call.argv.includes('{"record":1}'), 'the record is never on the command line')
-  assert.deepEqual(call.files, [])
-  assert.equal(existsSync(call.cwd), false, 'the folder it ran in is removed')
-
-  await assert.rejects(model.run({ system: 's', prompt: 'tool', schema: {} }), /tried to use a tool/)
-  await assert.rejects(model.run({ system: 's', prompt: 'limit', schema: {} }), /exited with 1: Usage limit reached, resets at 6pm$/, 'Claude Code’s own message is shown, not the start of its JSON')
-  await assert.rejects(model.run({ system: 's', prompt: 'error', schema: {} }), /reported an error: Not signed in$/)
-  await assert.rejects(claudeCli({ timeoutMs: 300, command: fake }).run({ system: 's', prompt: 'slow', schema: {} }), /no answer within 300 ms/)
-  await assert.rejects(claudeCli({ timeoutMs: 5000, command: path.join(dir, 'missing') }).run({ system: 's', prompt: 'x', schema: {} }), /ENOENT/)
-  assert.throws(() => claudeCli({ timeoutMs: 0 }), RangeError)
-  assert.ok(readdirSync(dir).length >= 2)
 })

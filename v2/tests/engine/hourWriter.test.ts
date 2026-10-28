@@ -9,7 +9,7 @@ import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
 process.env.TZ = 'Etc/GMT+5'
 const editor = app('com.example.editor', { name: 'Editor' })
 
-const call = (over: Partial<CallResult>): CallResult => ({ text: null, error: null, quota: false, latency_ms: 1, first_token_ms: null, usage: { input: 2000, cached_input: 0, cache_write: 0, output: 300, reasoning: null }, reported_cost_usd: null, model: 'claude-opus-5-5', tool_calls: [], raw: null, ...over })
+const call = (over: Partial<CallResult>): CallResult => ({ text: null, error: null, quota: false, latency_ms: 1, first_token_ms: null, usage: { input: 2000, cached_input: 0, cache_write: 0, output: 300, reasoning: null }, model: 'claude-opus-5-5', tool_calls: [], ...over })
 
 // A writer that answers each hour with its facts, citing the first window, as a valid written hour.
 function writer(seen: Packet[], reply: (p: Packet) => Partial<CallResult> = (p) => ({ text: JSON.stringify({ ...factsHour(p), title: 'Edited the notes', sources: [p.windows[0]!.id] }) })): HourWriter {

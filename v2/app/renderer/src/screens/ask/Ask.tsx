@@ -1,116 +1,97 @@
 // Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; each
 // statement of the answer arrives on the left as it streams, one at a time.
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import type { AskResult, Citation, Statement } from "../../../../shared/ai.ts";
-import { act, bridge, query } from "../../lib/api.ts";
-import { seenAt } from "../../lib/format.ts";
-import { Icon } from "../../ui/Icon.tsx";
-import { useToast } from "../../ui/overlays.tsx";
-import { errorText } from "../../ui/status.tsx";
-import { KeyForm } from "../settings/AiTab.tsx";
-import "./ask.css";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { AskResult, Citation, Statement } from '../../../../shared/ai.ts'
+import { act, bridge, query } from '../../lib/api.ts'
+import { seenAt } from '../../lib/format.ts'
+import { Icon } from '../../ui/Icon.tsx'
+import { useToast } from '../../ui/overlays.tsx'
+import { errorText } from '../../ui/status.tsx'
+import { KeyForm } from '../settings/AiTab.tsx'
+import './ask.css'
 
-const TRY = [
-  "What did I work on yesterday afternoon?",
-  "Where did I see the pricing page last week?",
-  "When did I last open the order form?",
-];
+const TRY = ['What did I do this morning?', 'What did I work on yesterday afternoon?', 'What took most of my time yesterday?']
 // A new statement waits this long after the one before, so a burst still arrives one by one.
-const PACE_MS = 220;
+const PACE_MS = 220
 
 interface Turn {
-  id: number;
-  question: string;
-  streamed: Statement[];
-  result: AskResult | null;
-  error: string | null;
+  id: number
+  question: string
+  streamed: Statement[]
+  result: AskResult | null
+  error: string | null
 }
 
 // The thread lives outside the screen, so an answer still lands while another screen is open.
-let turns: Turn[] = [];
-let nextId = 1;
-const subs = new Set<() => void>();
-const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f));
+let turns: Turn[] = []
+let nextId = 1
+const subs = new Set<() => void>()
+const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f))
 function update(id: number, f: (t: Turn) => Turn): void {
-  turns = turns.map((t) => (t.id === id ? f(t) : t));
-  for (const s of subs) s();
+  turns = turns.map((t) => (t.id === id ? f(t) : t))
+  for (const s of subs) s()
 }
 
 async function send(question: string): Promise<void> {
-  const id = nextId++;
-  turns = [...turns, { id, question, streamed: [], result: null, error: null }];
-  for (const s of subs) s();
+  const id = nextId++
+  turns = [...turns, { id, question, streamed: [], result: null, error: null }]
+  for (const s of subs) s()
   const off = bridge.onReader((e) => {
-    if (e.e === "ask" && e.ask_id === id)
-      update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }));
-  });
+    if (e.e === 'ask' && e.ask_id === id) update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }))
+  })
   try {
-    const result = await query({ q: "ask", ask_id: id, question });
-    update(id, (t) => ({ ...t, result }));
+    const result = await query({ q: 'ask', ask_id: id, question })
+    update(id, (t) => ({ ...t, result }))
   } catch (err) {
-    update(id, (t) => ({ ...t, error: failure((err as Error).message) }));
+    update(id, (t) => ({ ...t, error: failure((err as Error).message) }))
   } finally {
-    off();
+    off()
   }
 }
 
 function failure(message: string): string {
-  if (/key was refused/.test(message))
-    return "Anthropic didn’t accept your key. Check it in Settings › AI.";
-  if (/429|rate limit|credit balance|quota/i.test(message))
-    return "Your Anthropic account is out of credit or over its limit, so Claude couldn’t answer.";
-  if (/timed? ?out|fetch failed|ENOTFOUND|ECONN|network/i.test(message))
-    return "Couldn’t reach Anthropic. Check your connection and try again.";
-  if (/being deleted|deletion began/.test(message))
-    return "Part of your record is being deleted. Ask again in a moment.";
-  return "Claude couldn’t answer that. Try again.";
+  if (/key was refused/.test(message)) return 'Anthropic didn’t accept your key. Check it in Settings › AI.'
+  if (/429|rate limit|credit balance|quota/i.test(message)) return 'Your Anthropic account is out of credit or over its limit, so Claude couldn’t answer.'
+  if (/timed? ?out|fetch failed|ENOTFOUND|ECONN|network/i.test(message)) return 'Couldn’t reach Anthropic. Check your connection and try again.'
+  if (/being deleted|deletion began/.test(message)) return 'Part of your record is being deleted. Ask again in a moment.'
+  return 'Claude couldn’t answer that. Try again.'
 }
 
 /** How many of `total` items to show: one more every PACE_MS until all are out. */
 function usePaced(total: number): number {
-  const [shown, setShown] = useState(total);
-  const first = useRef(true);
+  const [shown, setShown] = useState(total)
+  const first = useRef(true)
   useEffect(() => {
     // An answer already in the thread when the screen opens shows at once.
     if (first.current) {
-      first.current = false;
-      return;
+      first.current = false
+      return
     }
-    if (shown >= total) return void (shown > total && setShown(total));
-    const t = setTimeout(
-      () => setShown((n) => n + 1),
-      shown === 0 ? 0 : PACE_MS,
-    );
-    return () => clearTimeout(t);
-  }, [shown, total]);
-  return Math.min(shown, total);
+    if (shown >= total) return void (shown > total && setShown(total))
+    const t = setTimeout(() => setShown((n) => n + 1), shown === 0 ? 0 : PACE_MS)
+    return () => clearTimeout(t)
+  }, [shown, total])
+  return Math.min(shown, total)
 }
 
 export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
-  const thread = useSyncExternalStore(subscribe, () => turns);
-  const [text, setText] = useState("");
-  const scroller = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLInputElement>(null);
+  const thread = useSyncExternalStore(subscribe, () => turns)
+  const [text, setText] = useState('')
+  const scroller = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
   const ask = (q: string) => {
-    const question = q.trim();
-    if (!question) return;
-    setText("");
-    void send(question);
-  };
+    const question = q.trim()
+    if (!question) return
+    setText('')
+    void send(question)
+  }
 
   // Follow the newest message unless the person has scrolled up to read.
-  const pinned = useRef(true);
+  const pinned = useRef(true)
   useLayoutEffect(() => {
-    const el = scroller.current;
-    if (el && pinned.current)
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  });
+    const el = scroller.current
+    if (el && pinned.current) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  })
 
   return (
     <div className="ask">
@@ -118,9 +99,8 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
         className="scroll ask-scroll"
         ref={scroller}
         onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current =
-            el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          const el = e.currentTarget
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
         }}
       >
         {thread.length === 0 ? (
@@ -128,12 +108,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
             <p className="ask-start-lede">Ask about any day.</p>
             <div className="ask-try">
               {TRY.map((t) => (
-                <button
-                  type="button"
-                  key={t}
-                  className="ask-suggestion"
-                  onClick={() => ask(t)}
-                >
+                <button type="button" key={t} className="ask-suggestion" onClick={() => ask(t)}>
                   {t}
                 </button>
               ))}
@@ -142,12 +117,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
         ) : (
           <div className="ask-thread">
             {thread.map((t) => (
-              <Exchange
-                key={t.id}
-                turn={t}
-                onOpenHour={onOpenHour}
-                onRetry={() => ask(t.question)}
-              />
+              <Exchange key={t.id} turn={t} onOpenHour={onOpenHour} onRetry={() => ask(t.question)} />
             ))}
           </div>
         )}
@@ -156,52 +126,28 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
         <form
           className="ask-composer"
           onSubmit={(e) => {
-            e.preventDefault();
-            ask(text);
-            input.current?.focus();
+            e.preventDefault()
+            ask(text)
+            input.current?.focus()
           }}
         >
-          <input
-            ref={input}
-            className="ask-field"
-            placeholder="Ask about any day"
-            value={text}
-            autoFocus
-            onChange={(e) => setText(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="ask-send"
-            aria-label="Ask"
-            disabled={!text.trim()}
-          >
+          <input ref={input} className="ask-field" placeholder="Ask about any day" value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+          <button type="submit" className="ask-send" aria-label="Ask" disabled={!text.trim()}>
             <Icon name="arrow-right" />
           </button>
         </form>
       </div>
     </div>
-  );
+  )
 }
 
-function Exchange({
-  turn,
-  onOpenHour,
-  onRetry,
-}: {
-  turn: Turn;
-  onOpenHour: (start: number) => void;
-  onRetry: () => void;
-}) {
-  const r = turn.result;
+function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (start: number) => void; onRetry: () => void }) {
+  const r = turn.result
   // The whole answer replaces what streamed: a statement can be withdrawn by a deletion made while Claude answered.
-  const statements = r
-    ? r.kind === "answer"
-      ? r.statements
-      : []
-    : turn.streamed;
-  const shown = usePaced(statements.length);
-  const done = r !== null || turn.error !== null;
-  const settled = done && shown === statements.length;
+  const statements = r ? (r.kind === 'answer' ? r.statements : []) : turn.streamed
+  const shown = usePaced(statements.length)
+  const done = r !== null || turn.error !== null
+  const settled = done && shown === statements.length
   return (
     <div className="ask-exchange">
       <div className="bubble mine">{turn.question}</div>
@@ -213,29 +159,23 @@ function Exchange({
       {!settled && <Typing />}
       {settled && turn.error && (
         <div className="bubble theirs problem" role="alert">
-          {turn.error}{" "}
+          {turn.error}{' '}
           <button type="button" className="link" onClick={onRetry}>
             Try again
           </button>
         </div>
       )}
-      {settled && r?.kind === "no_answer" && (
+      {settled && r?.kind === 'no_answer' && (
         <div className="bubble theirs">
           Your record doesn’t show that.
           {r.missing && <span className="bubble-aside">{r.missing}</span>}
         </div>
       )}
-      {settled && r?.kind === "withdrawn" && (
-        <div className="bubble theirs">
-          What answered this was just deleted, so there’s nothing left to show.
-        </div>
-      )}
-      {settled && r?.kind === "search_only" && <NoKey onSaved={onRetry} />}
-      {settled && r?.kind === "answer" && (
-        <Sources statements={r.statements} onOpenHour={onOpenHour} />
-      )}
+      {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
+      {settled && r?.kind === 'search_only' && <NoKey onSaved={onRetry} />}
+      {settled && r?.kind === 'answer' && <Sources statements={r.statements} onOpenHour={onOpenHour} />}
     </div>
-  );
+  )
 }
 
 function Typing() {
@@ -245,19 +185,16 @@ function Typing() {
       <span />
       <span />
     </div>
-  );
+  )
 }
 
 function NoKey({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="bubble theirs ask-nokey">
-      <span>
-        Add your Anthropic API key and Claude answers from your record. Only the
-        parts a question needs are sent.
-      </span>
+      <span>Add your Anthropic API key and Claude answers from your record. Only the parts a question needs are sent.</span>
       <KeyForm onSaved={onSaved} />
     </div>
-  );
+  )
 }
 
 /** The hours and pages the answer cites, once each: an hour opens in Today, a page in the browser. */

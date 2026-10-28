@@ -16,9 +16,9 @@ export function listPrice(u: Usage, rate: Rate): number {
 
 export interface HourResult {
   hour: string
-  call: Pick<CallResult, 'error' | 'quota' | 'latency_ms' | 'usage' | 'reported_cost_usd' | 'model' | 'tool_calls'>
+  call: Pick<CallResult, 'error' | 'quota' | 'latency_ms' | 'usage' | 'model' | 'tool_calls'>
   // Every call made for the hour, the final one included: retries cost money too.
-  attempts: Pick<CallResult, 'usage' | 'reported_cost_usd'>[]
+  attempts: Pick<CallResult, 'usage'>[]
   validation: Pick<Validation, 'ok' | 'errors' | 'warnings'> | null
   verdict: Verdict | null
   // A hand check of this write and shown hour replaces the grader's grade.
@@ -39,7 +39,6 @@ export interface ModelScore {
   tool_calls: number
   cost_usd: number | null
   cost_per_call_usd: number | null
-  reported_cost_usd: number | null
   latency_mean_ms: number | null
   latency_max_ms: number | null
 }
@@ -51,7 +50,7 @@ export function finalGrade(r: HourResult): Grade | null {
 export function scoreModel(model: string, results: HourResult[], rate: Rate | null): ModelScore {
   const grades = Object.fromEntries(GRADES.map((g) => [g, 0])) as Record<Grade, number>
   let unsupported = 0, invented = 0, attribution = 0, mustMissed = 0, shouldMissed = 0, rejected = 0, failed = 0, tools = 0
-  let cost = 0, reported = 0, priced = 0, reportedN = 0
+  let cost = 0, priced = 0
   const lat: number[] = []
   for (const r of results) {
     const g = finalGrade(r)
@@ -72,13 +71,10 @@ export function scoreModel(model: string, results: HourResult[], rate: Rate | nu
         cost += listPrice(a.usage, rate)
         priced++
       }
-      if (a.reported_cost_usd !== null) {
-        reported += a.reported_cost_usd
-        reportedN++
-      }
     }
   }
-  const noCost = rate === null && results.every((r) => r.attempts.every((a) => a.usage === null && a.reported_cost_usd === 0))
+  // No AI: no rate and no call billed anything.
+  const noCost = rate === null && results.every((r) => r.attempts.every((a) => a.usage === null))
   return {
     model,
     hours: results.length,
@@ -93,7 +89,6 @@ export function scoreModel(model: string, results: HourResult[], rate: Rate | nu
     tool_calls: tools,
     cost_usd: noCost ? 0 : priced ? cost : null,
     cost_per_call_usd: noCost ? 0 : priced ? cost / priced : null,
-    reported_cost_usd: reportedN ? reported : null,
     latency_mean_ms: lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
     latency_max_ms: lat.length ? Math.max(...lat) : null,
   }

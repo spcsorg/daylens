@@ -42,8 +42,8 @@ test('the key is split into its hours, 12 AM as 00 and PM hours on a 24-hour clo
 
 const result = (hour: string, grade: Verdict['grade'], over: Partial<HourResult> = {}, v: Partial<Verdict> = {}): HourResult => ({
   hour,
-  call: { error: null, quota: false, latency_ms: 1000, usage: { input: 10_000, cached_input: 0, cache_write: 0, output: 1_000, reasoning: null }, reported_cost_usd: 0.05, model: 'm', tool_calls: [] },
-  attempts: [{ usage: { input: 10_000, cached_input: 0, cache_write: 0, output: 1_000, reasoning: null }, reported_cost_usd: 0.05 }],
+  call: { error: null, quota: false, latency_ms: 1000, usage: { input: 10_000, cached_input: 0, cache_write: 0, output: 1_000, reasoning: null }, model: 'm', tool_calls: [] },
+  attempts: [{ usage: { input: 10_000, cached_input: 0, cache_write: 0, output: 1_000, reasoning: null } }],
   validation: { ok: true, errors: [], warnings: [] },
   verdict: verdict(grade, v),
   hand: null,
@@ -65,16 +65,14 @@ test('scores count grades, claims and misses per model, price every call at list
   assert.equal(s.should_missed, 2)
   assert.equal(s.rejected, 1)
   assert.equal(s.cost_per_call_usd, 0.03)
-  assert.equal(s.reported_cost_usd, 0.2)
   assert.equal(s.latency_mean_ms, 1000)
 })
 
 test('every call made for an hour is priced, a failed first attempt included', () => {
-  const failed = { usage: { input: 50_000, cached_input: 0, cache_write: 0, output: 0, reasoning: null }, reported_cost_usd: 2 }
+  const failed = { usage: { input: 50_000, cached_input: 0, cache_write: 0, output: 0, reasoning: null } }
   const s = scoreModel('m', [result('08', 'right', { attempts: [failed, result('08', 'right').attempts[0]!] })], { input: 2, output: 10 })
   assert.equal(s.cost_usd, 0.13)
   assert.equal(s.cost_per_call_usd, 0.065)
-  assert.equal(s.reported_cost_usd, 2.05)
 })
 
 test('ranking is correctness first, then cost, then speed', () => {
