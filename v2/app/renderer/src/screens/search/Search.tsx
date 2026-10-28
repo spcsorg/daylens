@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { FoundHour, FoundItem, SearchResults } from '../../../../shared/search.ts'
 import type { Source } from '../../../../shared/types.ts'
 import { act, query, useQuery } from '../../lib/api.ts'
@@ -30,15 +30,21 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   const [text, setText] = useState('')
   const [perGroup, setPerGroup] = useState(FIRST)
   const [active, setActive] = useState(0)
+  const [closing, setClosing] = useState(false)
+  const [shown, setShown] = useState<SearchResults | null>(null)
+  const [highlight, setHighlight] = useState<{ top: number; height: number } | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const typed = text.trim()
   const { data, error, current } = useQuery(typed ? { q: 'search', text: typed, per_group: perGroup } : null, { live: true })
   const { data: leftOff } = useQuery(typed ? null : { q: 'left_off' })
-  // Only results for what is typed now can be opened: an earlier search's never stands in while this one loads.
+  // Only results for what is typed now can be opened. While the next ones load, the last stay in place, dimmed, so the
+  // panel never blanks and jumps on a keystroke.
   const results = typed && data && current ? data : null
-  const { things, hours } = results ? rows(results) : { things: [], hours: [] }
+  const display = results ?? (typed ? shown : null)
+  const stale = display !== null && results === null
+  const { things, hours } = display ? rows(display) : { things: [], hours: [] }
   const recents: Row[] = typed ? [] : (leftOff ?? []).map((s) => ({ key: `recent|${s.app.id}|${s.url ?? ''}|${s.title}`, recent: s }))
   const all = typed ? [...things, ...hours] : recents
 
@@ -53,24 +59,36 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     setPerGroup(FIRST)
   }, [typed])
   useEffect(() => {
-    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
-  }, [active])
+    if (results || !typed) setShown(results)
+  }, [results, typed])
+  // One highlight slides between rows instead of each row lighting up on its own.
+  useLayoutEffect(() => {
+    const el = list.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+    setHighlight(el ? { top: el.offsetTop, height: el.offsetHeight } : null)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [active, display, leftOff, perGroup])
+
+  const close = () => {
+    setClosing(true)
+    setTimeout(onClose, 140)
+  }
 
   const open = async (row: Row) => {
+    if (stale) return
     if ('hour' in row) {
-      onClose()
+      close()
       return onOpenHour(row.hour.start_wall_ms)
     }
     if ('recent' in row) {
       const s = row.recent
       const r = s.url ? await act({ a: 'open_url', url: s.url }) : await act({ a: 'open_app', id: s.app.id })
       if (!r.ok) return toast({ text: errorText(r.error), error: true })
-      return onClose()
+      return close()
     }
     const o = row.item.open
     const r = o.kind === 'url' ? await act({ a: 'open_url', url: o.url }) : o.kind === 'app' ? await act({ a: 'open_app', id: o.app_id }) : (onOpenHour(o.hour_start_wall_ms), { ok: true as const })
     if (!r.ok) return toast({ text: errorText(r.error), error: true })
-    onClose()
+    close()
   }
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -86,8 +104,8 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     }
   }
 
-  const moreThings = results?.more.some((g) => g !== 'hours') && perGroup === FIRST
-  const moreHours = results?.more.includes('hours') && perGroup === FIRST
+  const moreThings = display?.more.some((g) => g !== 'hours') && perGroup === FIRST
+  const moreHours = display?.more.includes('hours') && perGroup === FIRST
   const tile = (icon: ReactNode) => <span className="search-tile">{icon}</span>
   const row = (r: Row, i: number) => {
     const [icon, name, sub] =
@@ -100,13 +118,14 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   }
 
   return (
-    <div className="search-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="search-panel" role="dialog" aria-modal="true" aria-label="Search" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <div className={`search-scrim${closing ? ' closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <div className="search-panel" role="dialog" aria-modal="true" aria-label="Search" onKeyDown={(e) => e.key === 'Escape' && close()}>
         <div className="search-field">
           <Icon name="search" size={20} />
           <input ref={input} placeholder="Search everything you saw" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} aria-label="Search everything you saw" />
         </div>
-        <div className="search-results" ref={list}>
+        <div className={`search-results${stale ? ' stale' : ''}`} ref={list}>
+          {highlight && <span className="search-highlight" style={{ transform: `translateY(${highlight.top}px)`, height: highlight.height }} />}
           {!typed && recents.length > 0 && (
             <div className="search-group">
               <h2 className="section-label">Where you left off</h2>
@@ -121,7 +140,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               <p className="search-note">Try fewer words, or the name of a site or app.</p>
             </div>
           )}
-          {results?.looser && all.length > 0 && <p className="search-note">Nothing had every word, so these have some of them.</p>}
+          {display?.looser && all.length > 0 && <p className="search-note">Nothing had every word, so these have some of them.</p>}
           {things.length > 0 && (
             <div className="search-group">
               <h2 className="section-label">Pages, files and windows</h2>
@@ -144,6 +163,18 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               )}
             </div>
           )}
+        </div>
+        <div className="search-foot" aria-hidden="true">
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> to move
+          </span>
+          <span>
+            <kbd>↵</kbd> to open
+          </span>
+          <span>
+            <kbd>esc</kbd> to close
+          </span>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 // Daylens V2 shell. Owns the window, the menu bar item and launch at login, starts the capture service and the reader
 // in their own processes, and routes the interface's actions. It never opens the database.
-import { BrowserWindow, MessageChannelMain, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
+import { BrowserWindow, Menu, MessageChannelMain, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import type { AssistantRequest } from '../shared/assistants.ts'
@@ -152,6 +152,30 @@ function showToday(): void {
   win.webContents.send('navigate', 'today')
 }
 
+function showSearch(): void {
+  if (!win) win = createWindow()
+  win.show()
+  win.focus()
+  win.webContents.send('navigate', 'search')
+}
+
+// Search has no sidebar item, so the menu bar lists it with its shortcut, as Mac apps list their commands. The shortcut
+// itself is the window's own (registerAccelerator: false), so it never fires twice.
+function setAppMenu(): void {
+  if (process.platform !== 'darwin') return
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      {
+        label: 'Edit',
+        submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { type: 'separator' }, { label: 'Search…', accelerator: 'Command+K', registerAccelerator: false, click: showSearch }],
+      },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+    ]),
+  )
+}
+
 // A browser known only from its history has no recorded path yet; Spotlight finds its bundle by identifier.
 function bundlePath(id: string): Promise<string | null> {
   if (process.platform !== 'darwin' || !/^[A-Za-z0-9.-]+$/.test(id)) return Promise.resolve(null)
@@ -263,6 +287,7 @@ app.whenReady().then(() => {
   // Requests filed while Daylens was closed: those still in time run or show, the rest expire.
   void requests.refresh()
   // Opened at login, Daylens starts in the menu bar; the window opens from there or from the Dock.
+  setAppMenu()
   if (!(app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin)) win = createWindow()
   if (!BENCH) {
     tray = createTray(paths.trayIcon, {
@@ -280,6 +305,7 @@ app.whenReady().then(() => {
       resume: async () => (await act(ctx, { a: 'resume' })).ok,
       deleteLastTenMinutes: async () => (await act(ctx, { a: 'delete', what: { kind: 'last', ms: 10 * 60_000 } })).ok,
       openToday: showToday,
+      openSearch: showSearch,
       update: () => updateReady,
       restartToUpdate: () => void restartToUpdate(),
       quit: () => void quit(),

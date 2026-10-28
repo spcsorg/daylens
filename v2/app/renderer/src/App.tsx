@@ -45,6 +45,7 @@ function Shell() {
           setScreen('today')
           setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
         }
+        if (to === 'search') setSearch(true)
       }),
     [],
   )

@@ -16,6 +16,7 @@ export interface TrayActions {
   resume: () => Promise<boolean>
   deleteLastTenMinutes: () => Promise<boolean>
   openToday: () => void
+  openSearch: () => void
   // The version downloaded and waiting to install, if any.
   update: () => string | null
   restartToUpdate: () => void
@@ -70,6 +71,7 @@ export function createTray(iconPath: string, actions: TrayActions): Tray {
       },
       { type: 'separator' },
       { label: 'Open Today', click: () => actions.openToday() },
+      { label: 'Search…', accelerator: process.platform === 'darwin' ? 'Command+K' : 'Ctrl+K', registerAccelerator: false, click: () => actions.openSearch() },
     )
     if (actions.update()) items.push({ label: 'Restart to Update', click: () => actions.restartToUpdate() })
     items.push({ label: 'Quit Daylens', accelerator: 'Command+Q', click: () => actions.quit() })
