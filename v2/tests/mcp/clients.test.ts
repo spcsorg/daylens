@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { check, connect, detect, disconnect, installedSpec, serverSpec, snippet, type Where } from '../../mcp/clients.ts'
 import { tmpDir } from '../storage/support.ts'
@@ -134,4 +134,36 @@ test('the check starts the server as a client would and lists its tools', async 
   assert.ok(r.ok && r.tools.includes('get_day'), JSON.stringify(r))
   const bad = await check(serverSpec(process.execPath, path.join(tmpDir(), 'missing.js'), false))
   assert.equal(bad.ok, false)
+  // A moved Daylens: the command itself is gone. This must come back as a failure, not throw in the app.
+  const gone = await check(serverSpec(path.join(tmpDir(), 'Daylens'), 'main.js', true))
+  assert.equal(gone.ok, false)
+  const notMcp = await check({ command: process.execPath, args: ['-e', 'console.log("hello"); setTimeout(() => {}, 5000)'], env: {} })
+  assert.deepEqual(notMcp, { ok: false, error: 'not an MCP server: hello' })
+})
+
+test('a config file keeps its permissions, and a symlinked one is written where it points', () => {
+  const w = home('darwin')
+  const file = path.join(w.home, '.claude.json')
+  put(file, '{}')
+  chmodSync(file, 0o600)
+  connect('claude-code', SPEC, w)
+  assert.equal(statSync(file).mode & 0o777, 0o600)
+  const real = path.join(w.home, 'dotfiles', 'config.toml')
+  put(real, 'model = "example"\n')
+  mkdirSync(path.join(w.home, '.codex'))
+  symlinkSync(real, path.join(w.home, '.codex', 'config.toml'))
+  connect('codex', SPEC, w)
+  assert.ok(lstatSync(path.join(w.home, '.codex', 'config.toml')).isSymbolicLink())
+  assert.match(read(real), /^model = "example"\n\n\[mcp_servers\.daylens\]/)
+})
+
+test('Codex with Daylens written another way TOML allows is reported and never rewritten', () => {
+  for (const form of ['[mcp_servers]\ndaylens = { command = "x" }\n', 'mcp_servers.daylens.command = "x"\n', "[mcp_servers.'daylens']\ncommand = \"x\"\n"]) {
+    const w = home('darwin')
+    const file = path.join(w.home, '.codex', 'config.toml')
+    put(file, form)
+    assert.equal(detect(SPEC, w)[0]!.state, 'unreadable')
+    assert.throws(() => connect('codex', SPEC, w))
+    assert.equal(read(file), form)
+  }
 })

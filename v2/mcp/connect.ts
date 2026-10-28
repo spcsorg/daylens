@@ -41,8 +41,13 @@ if (values.snippet) {
     }
   }
   for (const id of values.remove ?? []) {
-    disconnect(id)
-    out(`disconnected ${id}`)
+    try {
+      disconnect(id)
+      out(`disconnected ${id}`)
+    } catch (err) {
+      out(`couldn't disconnect ${id}: ${err instanceof Error ? err.message : String(err)}`)
+      process.exitCode = 1
+    }
   }
   for (const c of detect(spec)) out(`${c.id.padEnd(12)} ${c.name.padEnd(12)} ${STATES[c.state].padEnd(30)} ${c.file}`)
   if (found.length === 0) out('No assistant apps found. Use --snippet to set one up by hand.')

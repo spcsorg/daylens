@@ -1,7 +1,7 @@
 // Connecting assistants: finds the MCP apps on this computer and adds Daylens's server to each one's own config file,
 // leaving everything else in the file as it was. Used by the main process (Settings › Assistants) and by connect.ts.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -81,6 +81,10 @@ export function snippet(spec: ServerSpec): string {
 
 const OUR_TABLE = new RegExp(`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*"?${SERVER_NAME}"?\\s*(\\.[^\\]]*)?\\]\\s*(#.*)?$`)
 
+// Daylens written any other way TOML allows (under [mcp_servers], as dotted keys, single-quoted) can't be edited line
+// by line, and adding our table beside it would make a duplicate key that breaks the whole file.
+const OTHER_FORM = new RegExp(`^\\s*(\\[\\s*mcp_servers\\s*\\.\\s*'${SERVER_NAME}'|(mcp_servers\\s*\\.\\s*)?["']?${SERVER_NAME}["']?\\s*[.=])`)
+
 /** The file's lines split into ours (our table and its subtables) and the rest. */
 function splitToml(toml: string): { ours: string[]; rest: string[] } {
   const out = { ours: [] as string[], rest: [] as string[] }
@@ -89,6 +93,7 @@ function splitToml(toml: string): { ours: string[]; rest: string[] } {
     if (/^\s*\[/.test(line)) inside = OUR_TABLE.test(line)
     ;(inside ? out.ours : out.rest).push(line)
   }
+  if (out.rest.some((l) => OTHER_FORM.test(l))) throw new Error('Daylens is already set up in this file in a form it can’t edit')
   return out
 }
 
@@ -118,15 +123,24 @@ function current(def: ClientDef, w: Where): unknown {
 }
 
 function same(def: ClientDef, found: unknown, spec: ServerSpec): boolean {
-  if (def.format === 'codex') return typeof found === 'string' && found.trim() === codexTable(spec)
+  if (def.format === 'codex') return typeof found === 'string' && found.replaceAll('\r', '').trim() === codexTable(spec)
   return JSON.stringify(found) === JSON.stringify(entry(spec, def.format))
 }
 
+/** Replaces the file in one step, through a symlink to what it points at, keeping its permissions (often 0600). */
 function writeAtomic(file: string, text: string): void {
-  mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.daylens-${process.pid}.tmp`
-  writeFileSync(tmp, text)
-  renameSync(tmp, file)
+  const target = existsSync(file) ? realpathSync(file) : file
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600
+  mkdirSync(path.dirname(target), { recursive: true })
+  const tmp = `${target}.daylens-${process.pid}.tmp`
+  try {
+    writeFileSync(tmp, text, { mode })
+    chmodSync(tmp, mode)
+    renameSync(tmp, target)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
 }
 
 function update(def: ClientDef, w: Where, spec: ServerSpec | null): void {
@@ -196,10 +210,16 @@ export function check(spec: ServerSpec, timeoutMs = 10_000): Promise<{ ok: true;
     child.on('error', (err) => done({ ok: false, error: err.message }))
     child.on('exit', (code) => done({ ok: false, error: `the server exited (${code})${stderr ? `: ${stderr.trim()}` : ''}` }))
     child.stderr.on('data', (d) => (stderr += d))
+    // A command that is missing or exits at once breaks the pipe; 'error' or 'exit' already reports why.
+    child.stdin.on('error', () => {})
     createInterface({ input: child.stdout }).on('line', (line) => {
-      const m = JSON.parse(line) as { id: number; result?: { tools?: { name: string }[] } }
-      if (m.id === 1) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`)
-      if (m.id === 2) done({ ok: true, tools: (m.result?.tools ?? []).map((t) => t.name) })
+      try {
+        const m = JSON.parse(line) as { id: number; result?: { tools?: { name: string }[] } }
+        if (m.id === 1) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`)
+        if (m.id === 2) done({ ok: true, tools: (m.result?.tools ?? []).map((t) => t.name) })
+      } catch {
+        done({ ok: false, error: `not an MCP server: ${line.slice(0, 200)}` })
+      }
     })
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'daylens-check', version: '1' } } })}\n`)
   })
