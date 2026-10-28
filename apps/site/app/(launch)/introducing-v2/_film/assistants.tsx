@@ -13,7 +13,7 @@ const ASSISTANTS = [
 export const ASSISTANT_ICONS = ASSISTANTS.map((a) => a.icon);
 
 const QUESTION = "what did i get done this morning";
-const ANSWER = "You answered the Thursday review notes at 9, drafted the spring pricing memo until 11, then had the design sync and fixed the pricing page.";
+const ANSWER = "This morning you answered the Thursday review notes and drafted most of the spring pricing memo. The design sync ran long, and you fixed the pricing page right after.";
 const WORDS = ANSWER.split(" ");
 
 const CONNECT = 1.6;
