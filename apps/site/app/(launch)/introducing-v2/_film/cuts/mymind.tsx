@@ -249,7 +249,7 @@ function Day({ t, f }: { t: number; f: Frame }) {
   const sweep = prog(t, D_SWEEP, D_SWEEP + 0.42, easeIn);
   const pop = jelly(t - D_SWEEP - 0.42);
   return (
-    <div className="mm-scene" style={{ paddingTop: f.pad }}>
+    <div className="mm-scene" style={{ paddingTop: f.wide ? f.pad : f.pad - 20 }}>
       <Head text="It writes your day,|hour by hour." t={t} f={f} />
       <div className="mm-stack" style={{ width: w }}>
         <div className="mm-card mm-day" style={{ opacity: prog(t, 0.2, 0.7), transform: `translateY(${(1 - prog(t, 0.2, 0.9)) * 24}px) scale(${t > D_SWEEP + 0.42 ? mix(1.012, 1, pop) : 1})` }}>
