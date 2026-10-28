@@ -244,9 +244,9 @@ function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHo
       {[...hours.values()]
         .sort((a, b) => a.start_wall_ms - b.start_wall_ms)
         .map((c) => (
-          <button type="button" key={c.start_wall_ms} className="ask-chip" onClick={() => onOpenHour(c.start_wall_ms)}>
+          <button type="button" key={c.start_wall_ms} className="ask-chip" title={c.title ?? undefined} onClick={() => onOpenHour(c.start_wall_ms)}>
             <Icon name="today" size={14} />
-            <span>{c.title ? `${when(c.start_wall_ms)} · ${c.title}` : when(c.start_wall_ms)}</span>
+            <span>{when(c.start_wall_ms)}</span>
           </button>
         ))}
       {[...pages.values()].map((c) => (

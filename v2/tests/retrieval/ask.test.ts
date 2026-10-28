@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
-import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
+import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest, type Statement } from '../../retrieval/ask.ts'
 import { anthropicApi } from '../../retrieval/anthropicApi.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
@@ -306,7 +306,7 @@ test('a source seen in several hours is sent with when it was last seen, in any 
   const seen: AskRequest[] = []
   await ask('what did I do yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => NEXT_DAY }, LIMITS)
   const scratch = (JSON.parse(seen[0]!.prompt) as { sources: { title: string; minutes: number; last_seen: string; hours: string[] }[] }).sources.find((x) => x.title === 'Scratch - Editor')!
-  assert.deepEqual([scratch.minutes, scratch.hours.length, scratch.last_seen], [12, 2, '2026-10-16 04:02'])
+  assert.deepEqual([scratch.minutes, scratch.hours.length, scratch.last_seen], [12, 2, '2026-10-16 4:02 AM'])
   s.close()
 })
 
@@ -348,7 +348,7 @@ test('a source is sent with the app it was last seen in, within an hour and acro
   const seen: AskRequest[] = []
   await ask('what did I do yesterday?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => NEXT_DAY }, LIMITS)
   const sent = (JSON.parse(seen[0]!.prompt) as { sources: { app: string; address?: string; last_seen: string }[] }).sources.find((x) => x.address)!
-  assert.deepEqual([sent.app, sent.last_seen.slice(0, 13)], ['Safari', '2026-10-16 09'])
+  assert.deepEqual([sent.app, sent.last_seen.replace(/:\d\d /, ' ')], ['Safari', '2026-10-16 9 AM'])
   s.close()
 })
 
@@ -610,7 +610,7 @@ test('a refused or cut-off answer is reported as a failure, and what the provide
   }
 })
 
-test('an hour’s start and end hold for anything seen in that hour, still seen together; a day inside a cited title is not a claim', async () => {
+test('a statement about a whole hour may sum it up, each file with an app it was in; a day inside a cited title is not a claim; times are sent as 12-hour times', async () => {
   const s = setup()
   const errand = app('com.example.notes', { name: 'Notes' })
   s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 2 * HOUR + 10 * MIN))
@@ -619,8 +619,8 @@ test('an hour’s start and end hold for anything seen in that hour, still seen 
   s.r.store.flush()
   const model = fakeModel((req) => {
     const r = JSON.parse(req.prompt) as { hours: { id: string; start: string }[]; sources: { id: string; title: string }[] }
-    const h1 = r.hours.find((h) => h.start.endsWith('01:00'))!.id
-    const h3 = r.hours.find((h) => h.start.endsWith('03:00'))!.id
+    const h1 = r.hours.find((h) => h.start.endsWith(' 1 AM'))!.id
+    const h3 = r.hours.find((h) => h.start.endsWith(' 3 AM'))!.id
     const budget = r.sources.find((x) => x.title === 'q4-budget.xlsx - Editor')!.id
     const order = r.sources.find((x) => x.title === 'Order list for Saturday')!.id
     return {
@@ -628,14 +628,47 @@ test('an hour’s start and end hold for anything seen in that hour, still seen 
       statements: [
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome.', sources: [h1, budget] },
+        { text: 'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
+        { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome and Notes.', sources: [h1, budget] },
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
       ],
     }
   })
-  const res = await ask('budget and order list today', { reader: s.reader, model, log: s.log, now: () => T0 + 5 * HOUR }, LIMITS)
-  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['From 1 to 2 AM you edited q4-budget.xlsx in Editor.', 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.'])
+  const sent: AskRequest[] = []
+  const res = await ask('budget and order list today', { reader: s.reader, model: { ...model, run: (req, t) => (sent.push(req), model.run(req, t)) }, log: s.log, now: () => T0 + 5 * HOUR }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), [
+    'From 1 to 2 AM you edited q4-budget.xlsx in Editor.',
+    'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.',
+    'From 3 to 4 AM you wrote the Order list for Saturday in Notes.',
+  ])
+  const record = JSON.parse(sent[0]!.prompt) as { now: string; hours: { start: string; end: string }[] }
+  for (const t of [record.now, ...record.hours.flatMap((h) => [h.start, h.end])]) assert.match(t, /^\d{4}-\d\d-\d\d \d{1,2}(:\d\d)? [AP]M$/)
+  s.close()
+})
+
+test('a question about the last time sends and shows the most recent sighting first, and about the first time the earliest', async () => {
+  const s = setup()
+  const seen: AskRequest[] = []
+  const model = fakeModel(() => ({ answerable: false, statements: [] }), seen)
+  for (const q of ['when did I last open the budget?', 'when did I first open the budget?', 'budget last week']) await ask(q, { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  const seenAt = (req: AskRequest) => (JSON.parse(req.prompt) as { sources: { last_seen: string }[] }).sources.map((x) => Date.parse(x.last_seen.replace(/ (\d+)(?::(\d\d))? ([AP])M$/, (_m, h, m, ap) => ` ${String((Number(h) % 12) + (ap === 'P' ? 12 : 0)).padStart(2, '0')}:${m ?? '00'}`)))
+  const [last, first] = [seenAt(seen[0]!), seenAt(seen[1]!)]
+  assert.ok(last.length > 1)
+  assert.deepEqual(last, [...last].sort((a, b) => b - a))
+  assert.deepEqual(first, [...first].sort((a, b) => a - b))
+
+  // Whatever order the AI writes them in, the most recent sighting is shown first, and nothing is shown before it is sorted.
+  const older = fakeModel((req) => {
+    const src = (JSON.parse(req.prompt) as { sources: { id: string; title: string }[] }).sources
+    const id = (t: string) => src.find((x) => x.title === t)!.id
+    return { answerable: true, statements: [{ text: 'You had q4-budget.xlsx open in Editor.', sources: [id('q4-budget.xlsx - Editor')] }, { text: 'You had the budget review open in Chrome.', sources: [id('Budget review')] }] }
+  })
+  const streamed: Statement[] = []
+  const res = await ask('when did I last open the budget?', { reader: s.reader, model: older, log: s.log, now: () => NEXT_DAY, onStatement: (x) => streamed.push(x) }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['You had the budget review open in Chrome.', 'You had q4-budget.xlsx open in Editor.'])
+  assert.equal(streamed.length, 0)
   s.close()
 })
 

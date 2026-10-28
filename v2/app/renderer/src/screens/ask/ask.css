@@ -173,7 +173,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
-  max-width: 320px;
+  max-width: 240px;
   padding: var(--space-4) var(--space-12) var(--space-4) var(--space-8);
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
