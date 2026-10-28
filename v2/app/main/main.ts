@@ -6,6 +6,7 @@ import path from 'node:path'
 import type { Action, ActionResult, DayView, Query, ShellState } from '../shared/types.ts'
 import { Capture } from './capture.ts'
 import { chrome, followTheme } from './chrome.ts'
+import { onKeyChange, savedKey } from './ipc/ai.ts'
 import { act } from './ipc/index.ts'
 import type { Ctx } from './ipc/context.ts'
 import { dataDir, paths } from './paths.ts'
@@ -60,6 +61,7 @@ function query<T>(q: Query): Promise<T> {
 function startReader(): void {
   reader = utilityProcess.fork(paths.reader, [], { serviceName: 'Daylens Reader', stdio: 'inherit' })
   reader.postMessage({ type: 'init', dataDir: dataDir() })
+  reader.postMessage({ type: 'ai', key: savedKey() })
   const { port1, port2 } = new MessageChannelMain()
   reader.postMessage({ type: 'port' }, [port1])
   mainPort = port2
@@ -228,7 +230,14 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('action', (_e, a: Action) => act(ctx, a).catch((err: unknown): ActionResult => ({ ok: false, error: err instanceof Error ? err.message : 'failed' })))
   ipcMain.handle('shell', () => shellState())
-  capture.on('state', pushShell)
+  capture.on('state', () => {
+    pushShell()
+    if (capture.state === 'running') void capture.request({ op: 'ai', key: savedKey() })
+  })
+  onKeyChange((key) => {
+    reader?.postMessage({ type: 'ai', key })
+    void capture.request({ op: 'ai', key })
+  })
   capture.on('helper', pushShell)
   capture.on('activity', () => reader?.postMessage({ type: 'activity' }))
   capture.start()

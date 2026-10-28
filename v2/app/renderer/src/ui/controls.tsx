@@ -15,11 +15,11 @@ export function IconButton({ icon, label, onClick, disabled }: { icon: IconName;
   )
 }
 
-export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string; disabled?: boolean }[]; onChange: (v: T) => void; label: string }) {
+export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
   return (
     <div className="segmented" role="group" aria-label={label}>
       {options.map((o) => (
-        <button type="button" key={o.value} aria-pressed={o.value === value} disabled={o.disabled} title={o.disabled ? 'Coming soon' : undefined} onClick={() => onChange(o.value)}>
+        <button type="button" key={o.value} aria-pressed={o.value === value} onClick={() => onChange(o.value)}>
           {o.label}
         </button>
       ))}

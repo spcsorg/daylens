@@ -1,20 +1,20 @@
 // Runs candidate writers on a gold day's frozen packets, grades every hour against its frozen checklist, and
 // summarizes the numbers per model. Gold data and results live outside the repository, in the gold-day folder.
 // Usage:
-//   node tools/eval/run.ts --gold <dir> [--packets <dir>] write <candidate>   (--allow-codex-file-reads for codex)
+//   node tools/eval/run.ts --gold <dir> [--packets <dir>] write <candidate>
 //   node tools/eval/run.ts --gold <dir> --packets <dir> pin       (records which packets existing results were made on)
 //   node tools/eval/run.ts --gold <dir> grade <grader> <candidate>
-//   node tools/eval/run.ts --gold <dir> sample             (hours to check by hand)
-//   node tools/eval/run.ts --gold <dir> summary
+//   node tools/eval/run.ts --gold <dir> [--grader <grader>] sample             (hours to check by hand)
+//   node tools/eval/run.ts --gold <dir> [--grader <grader>] summary
+// Writers and graders call the API with the key in DAYLENS_TEST_ANTHROPIC_API_KEY.
 // results/run.json names the packets a run is made on (the current ones by default); summary refuses any write or
 // grade from other packets, and any hour without a current grade. A result is kept only while it was made from the same packet, prompt and previous hour;
 // anything else is written again.
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { CODEX_READS_FLAG, claudeCli, cleanEnv, cliScratch, cliWriter, codexCli, factsHour, noAi, type CallResult, type HourWriter, type TextBackend } from '../../engine/backends.ts'
+import { ANTHROPIC_RATES, anthropicApi, factsHour, noAi, type ApiOptions, type CallResult, type HourWriter, type TextBackend, textWriter } from '../../engine/backends.ts'
 import type { Packet, Ref } from '../../engine/packet.ts'
 import { WRITER_PROMPT } from '../../engine/prompt.ts'
 import { validateHour, type Validation, type WrittenHour } from '../../engine/validate.ts'
@@ -22,36 +22,31 @@ import { parseHours } from '../goldReplay.ts'
 import { GRADER_PROMPT, graderMessage, inconsistencies, keySections, parseVerdict, type Checklists, type Grade, type Verdict } from './grade.ts'
 import { disagreements, handCheckSample, scoreModel, standings, type HourResult, type ModelScore, type Rate } from './score.ts'
 
-// Codex's base instructions in the first run; kept so its results stay comparable.
-const CODEX_BASE = 'You are a helpful assistant.'
 const BASELINE = 'no-ai'
 // An hour is written once, and a failed call retried once a minute later; then the hour stays as its facts.
 export const WRITER_TRIES = { attempts: 2, waitMs: 60_000 }
 const GRADER_TRIES = { attempts: 3, waitMs: 0 }
 
 interface Candidate {
-  kind: 'claude' | 'codex' | 'none'
+  kind: 'api' | 'none'
   model: string
-  effort: string | null
+  effort: ApiOptions['effort'] | null
   rate: Rate | null
 }
 
-// US dollars per million tokens, standard tier. Anthropic: model pricing table (docs.claude.com, as of 2026-10-06).
-// OpenAI: developers.openai.com/api/docs/pricing, read October 2026, short context (up to 272K input tokens).
 export const CANDIDATES: Record<string, Candidate> = {
-  'haiku-5.5': { kind: 'claude', model: 'claude-haiku-5-5', effort: null, rate: { input: 0.1, output: 0.5 } },
-  'sonnet-5.5': { kind: 'claude', model: 'claude-sonnet-5-5', effort: null, rate: { input: 2, output: 10 } },
-  'opus-5.5': { kind: 'claude', model: 'claude-opus-5-5', effort: null, rate: { input: 4, output: 20 } },
-  'fable-5.1': { kind: 'claude', model: 'claude-fable-5-1', effort: null, rate: { input: 10, output: 50 } },
-  'gpt-6-luna': { kind: 'codex', model: 'gpt-6-luna', effort: null, rate: { input: 0.1, output: 0.5 } },
-  'gpt-6.1-sol-low': { kind: 'codex', model: 'gpt-6.1-sol', effort: 'low', rate: { input: 2, output: 10 } },
+  'haiku-5.5-api': { kind: 'api', model: 'claude-haiku-5-5', effort: null, rate: ANTHROPIC_RATES['claude-haiku-5-5']! },
+  'sonnet-5.5-api': { kind: 'api', model: 'claude-sonnet-5-5', effort: null, rate: ANTHROPIC_RATES['claude-sonnet-5-5']! },
+  'opus-5.5-api': { kind: 'api', model: 'claude-opus-5-5', effort: null, rate: ANTHROPIC_RATES['claude-opus-5-5']! },
   'no-ai': { kind: 'none', model: 'none', effort: null, rate: null },
 }
 
+// Graders think hard: a verdict is worth more than its cost.
 export const GRADERS: Record<string, Candidate> = {
-  'opus-5.5': CANDIDATES['opus-5.5']!,
-  'gpt-6.1-sol': { kind: 'codex', model: 'gpt-6.1-sol', effort: 'low', rate: { input: 2, output: 10 } },
+  'opus-5.5-api': { ...CANDIDATES['opus-5.5-api']!, effort: 'high' },
+  'sonnet-5.5-api': { ...CANDIDATES['sonnet-5.5-api']!, effort: 'high' },
 }
+const DEFAULT_GRADER = 'opus-5.5-api'
 
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex')
 const hh = (h: number) => String(h).padStart(2, '0')
@@ -98,9 +93,6 @@ export function openGold(dir: string, packetsDir = '.'): Gold {
     },
   }
 }
-
-// Set from the command line: codex exec runs only when the evaluation was started with CODEX_READS_FLAG.
-let codexFileReads = false
 
 /** Which packets a results folder was made on. Every write and grade in it must come from them. */
 export interface RunInfo {
@@ -153,7 +145,7 @@ export function staleResults(
   hours: readonly string[],
   want: {
     write: (name: string, hour: string) => { prompt_sha256: string; previous_hour: Packet['previous_hour'] | null }
-    grade: (grader: string, name: string, hour: string) => Omit<GradeBasis, 'written' | 'cli'> | null
+    grade: (grader: string, name: string, hour: string) => Omit<GradeBasis, 'written'> | null
   },
 ): string[] {
   const out: string[] = []
@@ -192,10 +184,11 @@ export function staleResults(
   return out
 }
 
-function backendFor(c: Candidate, scratch: { cwd: string; instructionsFile: string }): TextBackend {
-  if (c.kind === 'claude') return claudeCli(c.model, { cwd: scratch.cwd })
-  if (c.kind === 'codex') return codexCli(c.model, c.effort, { cwd: scratch.cwd, instructionsFile: scratch.instructionsFile, allowFileReads: codexFileReads })
-  throw new Error('no backend for no-ai')
+function backendFor(c: Candidate): TextBackend {
+  if (c.kind === 'none') throw new Error('no backend for no-ai')
+  const apiKey = process.env.DAYLENS_TEST_ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('the API needs DAYLENS_TEST_ANTHROPIC_API_KEY')
+  return anthropicApi(c.model, { apiKey, timeoutMs: 900_000, ...(c.effort ? { effort: c.effort } : {}) })
 }
 
 export async function withAttempts(
@@ -213,17 +206,6 @@ export async function withAttempts(
     if (!problem || r.quota) break
   }
   return { final: attempts.at(-1)!, attempts }
-}
-
-function versions(): Record<string, string> {
-  const v = (cmd: string) => {
-    try {
-      return execFileSync(cmd, ['--version'], { env: cleanEnv(), encoding: 'utf8' }).trim()
-    } catch (e) {
-      return `unavailable: ${(e as Error).message}`
-    }
-  }
-  return { claude: v('claude'), codex: v('codex'), node: process.version }
 }
 
 export interface WriteRecord {
@@ -271,10 +253,8 @@ export function isCurrent(rec: WriteRecord | null, want: { packet_sha256: string
 async function write(gold: Gold, name: string): Promise<void> {
   const c = CANDIDATES[name]
   if (!c) throw new Error(`unknown candidate ${name}; one of ${Object.keys(CANDIDATES).join(', ')}`)
-  const scratch = cliScratch(CODEX_BASE)
-  try {
-    const writer: HourWriter = c.kind === 'none' ? noAi : cliWriter(backendFor(c, scratch))
-    const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), codex_file_reads: c.kind === 'codex', versions: versions() }
+  const writer: HourWriter = c.kind === 'none' ? noAi : textWriter(backendFor(c))
+  const meta = { candidate: name, ...c, prompt_sha256: sha(WRITER_PROMPT), node: process.version }
     const outOf = (h: number) => path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`)
     const recordOf = (h: number) => {
       const rec = existsSync(outOf(h)) ? readJson<WriteRecord>(outOf(h)) : null
@@ -289,16 +269,13 @@ async function write(gold: Gold, name: string): Promise<void> {
       const started = new Date().toISOString()
       const { final, attempts } = await withAttempts(WRITER_TRIES, () => writer.write(packet), () => null)
       const validation = final.text === null ? null : validateHour(final.text, packet, refs)
-      writeJson(out, { ...meta, hour: hh(h), packet_sha256: sha256, previous_hour: previous, previous_hour_missing: missing, started, final, attempts: attempts.map(({ raw: _raw, ...a }) => a), validation })
+      writeJson(out, { ...meta, hour: hh(h), packet_sha256: sha256, previous_hour: previous, previous_hour_missing: missing, started, final, attempts, validation })
       console.log(name, hh(h), final.error ? `ERROR ${final.error.slice(0, 200)}` : `ok ${final.latency_ms}ms valid=${validation?.ok}`, missing ? `(no previous hour: ${missing})` : '')
       if (final.quota) {
         console.log(name, 'stopped: usage limit reached')
         return
       }
     }
-  } finally {
-    scratch.dispose()
-  }
 }
 
 /**
@@ -329,7 +306,6 @@ export interface GradeBasis {
   key_sha256: string
   model: string
   effort: string | null
-  cli: string
 }
 
 export interface GradeRecord extends Partial<GradeBasis> {
@@ -339,11 +315,10 @@ export interface GradeRecord extends Partial<GradeBasis> {
 }
 
 const SUMMARY_KEYS = ['packet_sha256', 'shown_sha256', 'grader_prompt_sha256', 'checklists_sha256', 'key_sha256', 'model', 'effort'] as const
-// A grade made with an older grader CLI is still summarized, but grading again makes it anew.
-const BASIS_KEYS = ['written', ...SUMMARY_KEYS, 'cli'] as const
+const BASIS_KEYS = ['written', ...SUMMARY_KEYS] as const
 
-/** What a grade of this write must be made with, apart from the write itself and the grader CLI's version. */
-function gradeWant(gold: Gold, g: Candidate, h: number, shown: { packet_sha256: string; hour: WrittenHour }): Omit<GradeBasis, 'written' | 'cli'> {
+/** What a grade of this write must be made with, apart from the write itself. */
+function gradeWant(gold: Gold, g: Candidate, h: number, shown: { packet_sha256: string; hour: WrittenHour }): Omit<GradeBasis, 'written'> {
   return {
     packet_sha256: shown.packet_sha256,
     shown_sha256: sha(JSON.stringify(shown.hour)),
@@ -351,7 +326,7 @@ function gradeWant(gold: Gold, g: Candidate, h: number, shown: { packet_sha256: 
     checklists_sha256: sha(JSON.stringify(gold.checklists)),
     key_sha256: sha(gold.key[hh(h)] ?? ''),
     model: g.model,
-    effort: g.effort,
+    effort: g.effort ?? null,
   }
 }
 
@@ -368,17 +343,14 @@ export function gradeIsCurrent(g: GradeRecord | null, want: GradeBasis): boolean
 async function grade(gold: Gold, graderName: string, name: string): Promise<void> {
   const g = GRADERS[graderName]
   if (!g) throw new Error(`unknown grader ${graderName}; one of ${Object.keys(GRADERS).join(', ')}`)
-  const scratch = cliScratch(CODEX_BASE)
-  try {
-    const backend = backendFor(g, scratch)
-    const v = versions()
-    const meta = { grader: graderName, ...g, codex_file_reads: g.kind === 'codex', candidate: name, cli: g.kind === 'codex' ? v.codex! : v.claude!, versions: v }
+  const backend = backendFor(g)
+  const meta = { grader: graderName, ...g, candidate: name, node: process.version }
     for (const h of gold.hours) {
       const out = path.join(gold.dir, 'results/grades', graderName, name, `hour_${hh(h)}.json`)
       const rec = readJson<WriteRecord & { started: string }>(path.join(gold.dir, 'results/writes', name, `hour_${hh(h)}.json`))
       const shown = asShown(gold, h, rec)
       if (rec.packet_sha256 !== shown.packet_sha256) throw new Error(`writes/${name}/hour_${hh(h)} was made on other packets than ${gold.packetsDir}; write it again first`)
-      const basis: GradeBasis = { written: writeId(rec), ...gradeWant(gold, g, h, shown), cli: meta.cli }
+      const basis: GradeBasis = { written: writeId(rec), ...gradeWant(gold, g, h, shown) }
       if (existsSync(out) && gradeIsCurrent(readJson<GradeRecord>(out), basis)) continue
       const checklist = gold.checklists.hours[hh(h)]
       if (!checklist) throw new Error(`no checklist for hour ${hh(h)}`)
@@ -395,16 +367,13 @@ async function grade(gold: Gold, graderName: string, name: string): Promise<void
           return p.error
         },
       )
-      writeJson(out, { ...meta, ...basis, hour: hh(h), facts_fallback: shown.fallback, final: { ...final, raw: undefined }, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
+      writeJson(out, { ...meta, ...basis, hour: hh(h), facts_fallback: shown.fallback, final, attempts: attempts.length, verdict, inconsistencies: verdict ? inconsistencies(verdict) : [] })
       console.log(graderName, name, hh(h), verdict ? (verdict as Verdict).grade : `ERROR ${final.error ?? attempts.at(-1)?.problem}`)
       if (final.quota) {
         console.log(graderName, 'stopped: usage limit reached')
         return
       }
     }
-  } finally {
-    scratch.dispose()
-  }
 }
 
 export interface HandCheck {
@@ -458,11 +427,11 @@ function verdictsOf(gold: Gold, grader: string, name: string): Record<string, Ve
   return out
 }
 
-function sample(gold: Gold): void {
+function sample(gold: Gold, grader: string): void {
   const out: Record<string, string[]> = {}
   for (const name of Object.keys(CANDIDATES)) {
-    if (!existsSync(path.join(gold.dir, 'results/grades/opus-5.5', name))) continue
-    out[name] = handCheckSample(name, verdictsOf(gold, 'opus-5.5', name), sha)
+    if (!existsSync(path.join(gold.dir, 'results/grades', grader, name))) continue
+    out[name] = handCheckSample(name, verdictsOf(gold, grader, name), sha)
   }
   console.log(JSON.stringify(out, null, 1))
 }
@@ -502,17 +471,17 @@ function checkRun(gold: Gold, run: RunInfo): void {
   if (stale.length) throw new Error(`results/ holds results that write or grade would make again; nothing is summarized:\n${stale.join('\n')}`)
 }
 
-function summary(gold: Gold, run: RunInfo): void {
+function summary(gold: Gold, run: RunInfo, grader: string): void {
   checkRun(gold, run)
-  const names = Object.keys(CANDIDATES).filter((n) => existsSync(path.join(gold.dir, 'results/grades/opus-5.5', n)))
-  const scores = names.map((n) => scoreModel(n, loadResults(gold, 'opus-5.5', n), CANDIDATES[n]!.rate))
+  const names = Object.keys(CANDIDATES).filter((n) => existsSync(path.join(gold.dir, 'results/grades', grader, n)))
+  const scores = names.map((n) => scoreModel(n, loadResults(gold, grader, n), CANDIDATES[n]!.rate))
   const { baseline, ranked } = standings(scores, BASELINE)
   const perHour: Record<string, Record<string, Grade | null>> = {}
-  for (const n of names) for (const r of loadResults(gold, 'opus-5.5', n)) (perHour[r.hour] ??= {})[n] = r.hand?.grade ?? r.verdict?.grade ?? null
-  const second = existsSync(path.join(gold.dir, 'results/grades/gpt-6.1-sol/opus-5.5'))
-    ? disagreements(verdictsOf(gold, 'opus-5.5', 'opus-5.5'), verdictsOf(gold, 'gpt-6.1-sol', 'opus-5.5'))
-    : null
-  writeJson(path.join(gold.dir, 'results/summary.json'), { run: { packets_dir: run.packets_dir, packet_version: run.packet_version }, baseline, ranked, per_hour: perHour, grader_disagreements_on_opus: second })
+  for (const n of names) for (const r of loadResults(gold, grader, n)) (perHour[r.hour] ??= {})[n] = r.hand?.grade ?? r.verdict?.grade ?? null
+  // The other grader's verdicts on the default writer, where it graded it too.
+  const other = Object.keys(GRADERS).find((g) => g !== grader && existsSync(path.join(gold.dir, 'results/grades', g, 'opus-5.5-api')))
+  const second = other ? disagreements(verdictsOf(gold, grader, 'opus-5.5-api'), verdictsOf(gold, other, 'opus-5.5-api')) : null
+  writeJson(path.join(gold.dir, 'results/summary.json'), { run: { packets_dir: run.packets_dir, packet_version: run.packet_version }, grader, baseline, ranked, per_hour: perHour, grader_disagreements_on_opus: second })
   const money = (x: number | null) => (x === null ? 'n/a' : `$${x.toFixed(4)}`)
   const row = (s: ModelScore, label: string) =>
     `| ${label} | ${s.grades.right} | ${s.grades.partly} | ${s.grades.wrong} | ${s.grades.only_you} | ${s.unsupported_claims} | ${s.invented_ids} | ${s.wrong_attribution} | ${s.must_missed}/${s.should_missed} | ${s.rejected} | ${money(s.cost_per_call_usd)} | ${s.latency_mean_ms === null ? 'n/a' : (s.latency_mean_ms / 1000).toFixed(1) + ' s'} |`
@@ -520,13 +489,13 @@ function summary(gold: Gold, run: RunInfo): void {
   console.log('|---|---|---|---|---|---|---|---|---|---|---|---|')
   ranked.forEach((s, i) => console.log(row(s, `${i + 1}. ${s.model}`)))
   if (baseline) console.log(row(baseline, `${baseline.model} (baseline)`))
-  if (second) console.log('\nGrader disagreements on opus-5.5:', JSON.stringify(second))
+  if (second) console.log(`\nGrader disagreements (${grader} vs ${other}) on opus-5.5-api:`, JSON.stringify(second))
 }
 
 if (import.meta.main) {
-  const { values, positionals } = parseArgs({ options: { gold: { type: 'string' }, packets: { type: 'string' }, [CODEX_READS_FLAG.slice(2)]: { type: 'boolean' } }, allowPositionals: true })
+  const { values, positionals } = parseArgs({ options: { gold: { type: 'string' }, packets: { type: 'string' }, grader: { type: 'string', default: DEFAULT_GRADER } }, allowPositionals: true })
   if (!values.gold) throw new Error('--gold <dir> is required')
-  codexFileReads = values[CODEX_READS_FLAG.slice(2)] === true
+  if (!GRADERS[values.grader]) throw new Error(`unknown grader ${values.grader}; one of ${Object.keys(GRADERS).join(', ')}`)
   const [cmd, a, b] = positionals
   let run = readRun(values.gold)
   if (run && values.packets && values.packets !== run.packets_dir) throw new Error(`results/ was made on ${run.packets_dir}; move it aside to run on ${values.packets}`)
@@ -542,7 +511,7 @@ if (import.meta.main) {
   if (cmd === 'write' && a) await write(gold, a)
   else if (cmd === 'pin') console.log(`results/ is on ${run.packets_dir}, packet version ${run.packet_version}`)
   else if (cmd === 'grade' && a && b) await grade(gold, a, b)
-  else if (cmd === 'sample') sample(gold)
-  else if (cmd === 'summary') summary(gold, run)
+  else if (cmd === 'sample') sample(gold, values.grader)
+  else if (cmd === 'summary') summary(gold, run, values.grader)
   else throw new Error('usage: write <candidate> | pin | grade <grader> <candidate> | sample | summary')
 }

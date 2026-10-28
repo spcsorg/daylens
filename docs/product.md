@@ -153,7 +153,7 @@ Daylens speaks to the user as "you", in plain words and short sentences.
 | Screen and audio recording, off unless turned on in Settings | |
 | Menu bar and tray menu, morning and evening notifications | |
 | Assistants over MCP | |
-| AI choice: Daylens AI, your own key, a CLI on the machine, or none | |
+| AI choice: Daylens AI, your own key, or none | |
 | Plans and payments by card and mobile money | |
 | The browser extension for Chrome, Edge and Firefox | |
 | Onboarding | |

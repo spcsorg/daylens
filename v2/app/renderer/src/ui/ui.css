@@ -117,11 +117,6 @@
   box-shadow: var(--shadow-pop);
 }
 
-.segmented button:disabled {
-  color: var(--text-3);
-  opacity: 0.6;
-}
-
 /* Toggle */
 .toggle {
   width: 36px;

@@ -4,12 +4,13 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path'
 import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
-import { ask, AskError, type AskLog, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
-import { claudeCli } from '../../retrieval/claudeCli.ts'
+import { ask, AskError, type AskLog, completeStatements, daysIn, searchWords, SYSTEM_PROMPT, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
+import { anthropicApi } from '../../retrieval/anthropicApi.ts'
 import { Reader } from '../../retrieval/reader.ts'
 import { app, focus, line } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0, tmpDir } from '../storage/support.ts'
 import { day, page } from './support.ts'
+import { fakeAnthropic } from '../support/fakeAnthropic.ts'
 
 process.env.TZ = 'Etc/GMT+5'
 const LIMITS = { maxHours: 5, maxSources: 10, perGroup: 5 }
@@ -79,6 +80,77 @@ test('an answer keeps only statements that cite what the AI was given, and each 
   assert.deepEqual(s.usage(), [{ kind: 'answer', provider: 'fake', model: 'fake-1', input_tokens: 1200, output_tokens: 80, ref: `read:${s.reads()[0]!.id}` }])
 
   assert.equal(seen[0]!.system, SYSTEM_PROMPT)
+  s.close()
+})
+
+test('statements are read from the answer as it streams, each once it is complete, braces and quotes in its text included', () => {
+  const full = JSON.stringify({ answerable: true, statements: [{ text: 'You wrote "a {b}" \\ c.', sources: ['s1'] }, { text: 'Then lunch.', sources: ['h1'] }], missing: 'x' })
+  const seen = new Set<number>()
+  for (let n = 0; n <= full.length; n++) seen.add(completeStatements(full.slice(0, n)).length)
+  assert.deepEqual([...seen], [0, 1, 2], 'never more than what has fully arrived, and never fewer once it has')
+  assert.deepEqual(completeStatements(full), JSON.parse(full).statements)
+  assert.deepEqual(completeStatements('{"answerable":false,"statements":[]}'), [])
+  assert.deepEqual(completeStatements('{"answerable":tr'), [])
+})
+
+test('the provider gets only the excerpts the question selected: one request, the system prompt and the record built for it', async () => {
+  const s = setup()
+  const notes = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 - 2 * 24 * HOUR))
+  s.r.feed(focus(notes, 'Dentist on Thursday', T0 - 2 * 24 * HOUR + MIN, 'app_changed'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 - 2 * 24 * HOUR + 20 * MIN))
+  s.r.store.flush()
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: [JSON.stringify({ answerable: false, statements: [], missing: 'x' })] }))
+  try {
+    const sent: AskRequest[] = []
+    const real = anthropicApi('claude-haiku-5-5', { apiKey: 'sk-test', baseURL: api.url, timeoutMs: 5000 })
+    const model: AskModel = { ...real, run: (req, onText) => (sent.push(req), real.run(req, onText)) }
+    await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+    assert.equal(api.seen.length, 1)
+    const body = api.seen[0]!.body
+    assert.deepEqual(Object.keys(body).sort(), ['max_tokens', 'messages', 'model', 'output_config', 'stream', 'system'])
+    assert.equal(body.system, SYSTEM_PROMPT)
+    assert.deepEqual(body.messages, [{ role: 'user', content: sent[0]!.prompt }], 'nothing but the record Ask built')
+    const text = JSON.stringify(body)
+    assert.ok(text.includes('Budget review'), 'what the question is about is sent')
+    assert.ok(!text.includes('Dentist'), 'another day the question did not ask about is not')
+    assert.ok(!text.includes('Went through Q4 numbers'), 'Daylens’s own hour text is not sent')
+  } finally {
+    await api.close()
+    s.close()
+  }
+})
+
+test('a streamed answer shows each statement that passes the checks as it arrives, and the result is the same answer', async () => {
+  const s = setup()
+  const shown: { text: string; at: number }[] = []
+  let chunks = 0
+  const model: AskModel = {
+    name: 'Fake',
+    provider: 'fake',
+    async run(req, onText) {
+      const rec = JSON.parse(req.prompt) as { hours: { id: string }[]; sources: { id: string; address?: string }[] }
+      const page = rec.sources.find((x) => x.address)!.id
+      const answer = JSON.stringify({
+        answerable: true,
+        statements: [
+          { text: 'You reviewed the Q4 budget.', sources: [rec.hours[0]!.id, page] },
+          { text: 'You also emailed the bank.', sources: ['s99'] },
+          { text: 'You read the budget doc.', sources: [page] },
+        ],
+      })
+      for (let i = 0; i < answer.length; i += 7) {
+        chunks++
+        onText?.(answer.slice(i, i + 7))
+      }
+      return { output: JSON.parse(answer), model: 'fake-1', input_tokens: 1, output_tokens: 1, cost_micro_usd: 0 }
+    },
+  }
+  const res = await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY, onStatement: (st) => shown.push({ text: st.text, at: chunks }) }, LIMITS)
+  assert.deepEqual(shown.map((x) => x.text), ['You reviewed the Q4 budget.', 'You read the budget doc.'], 'a statement that fails the checks is never shown')
+  assert.ok(shown[0]!.at < shown[1]!.at && shown[1]!.at < chunks, 'each is shown as it completes, before the answer ends')
+  assert.equal(res.kind, 'answer')
+  if (res.kind === 'answer') assert.deepEqual(res.statements.map((x) => x.text), shown.map((x) => x.text))
   s.close()
 })
 
@@ -520,6 +592,68 @@ test('a failed AI call is reported, not swallowed, and nothing is charged', asyn
   s.close()
 })
 
+test('a refused or cut-off answer is reported as a failure, and what the provider billed for it is still recorded', async () => {
+  const s = setup()
+  const stops = ['refusal', 'max_tokens'] as const
+  let call = 0
+  const api = await fakeAnthropic(() => ({ kind: 'text', chunks: ['{"answerable":true,'], stop: stops[call++]! }))
+  try {
+    const model = anthropicApi('claude-sonnet-5-5', { apiKey: 'sk-test', baseURL: api.url, timeoutMs: 5000 })
+    await assert.rejects(ask('budget yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS), (e: AskError) => e.reason === 'ai_failed' && /declined to answer/.test(e.message))
+    await assert.rejects(ask('budget yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS), (e: AskError) => e.reason === 'ai_failed' && /cut off/.test(e.message))
+    const reads = s.reads()
+    assert.deepEqual(s.usage(), reads.map((r) => ({ kind: 'answer', provider: 'anthropic', model: 'claude-sonnet-5-5', input_tokens: 1200, output_tokens: 300, ref: `read:${r.id}` })))
+    assert.equal(reads.length, 2)
+  } finally {
+    await api.close()
+    s.close()
+  }
+})
+
+test('an hour’s start and end hold for anything seen in that hour, still seen together; a day inside a cited title is not a claim', async () => {
+  const s = setup()
+  const errand = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 2 * HOUR + 10 * MIN))
+  s.r.feed(focus(errand, 'Order list for Saturday', T0 + 2 * HOUR + 10 * MIN, 'app_changed'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 2 * HOUR + 20 * MIN))
+  s.r.store.flush()
+  const model = fakeModel((req) => {
+    const r = JSON.parse(req.prompt) as { hours: { id: string; start: string }[]; sources: { id: string; title: string }[] }
+    const h1 = r.hours.find((h) => h.start.endsWith('01:00'))!.id
+    const h3 = r.hours.find((h) => h.start.endsWith('03:00'))!.id
+    const budget = r.sources.find((x) => x.title === 'q4-budget.xlsx - Editor')!.id
+    const order = r.sources.find((x) => x.title === 'Order list for Saturday')!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
+        { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome.', sources: [h1, budget] },
+        { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
+        { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
+        { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
+      ],
+    }
+  })
+  const res = await ask('budget and order list today', { reader: s.reader, model, log: s.log, now: () => T0 + 5 * HOUR }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['From 1 to 2 AM you edited q4-budget.xlsx in Editor.', 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.'])
+  s.close()
+})
+
+test('a question that names no day and nothing to search for is about today', async () => {
+  const s = setup()
+  const seen: AskRequest[] = []
+  await ask('what did I do this morning?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  await ask('what was I doing?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  await ask('What took most of my time?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  for (const req of seen) {
+    const record = JSON.parse(req.prompt) as { days_asked: string[]; hours: unknown[] }
+    assert.equal(record.days_asked.length, 1)
+    assert.ok(record.hours.length > 0, 'today’s hours are sent')
+  }
+  assert.equal(seen.length, 3)
+  s.close()
+})
+
 test('days named in a question resolve to local days; the rest of the question is what search looks for', () => {
   const now = new Date(2030, 9, 23, 15, 0).getTime() // a Wednesday
   const day = (y: number, m: number, d: number) => new Date(y, m - 1, d).getTime()
@@ -531,53 +665,7 @@ test('days named in a question resolve to local days; the rest of the question i
   assert.deepEqual(daysIn('16th of oct', now).map(([s]) => s), [day(2030, 10, 16)])
   assert.deepEqual(daysIn('december 3', now).map(([s]) => s), [day(2029, 12, 3)], 'a date still ahead this year means last year')
   assert.equal(searchWords('What was the doc about the marmalade order I saw on Monday, October 21st?'), 'doc marmalade order')
-})
-
-test('Claude Code runs with no tools, no MCP servers and no session on disk, in an empty folder, with the record on stdin', async () => {
-  const dir = tmpDir()
-  const fake = path.join(dir, 'claude')
-  const log = path.join(dir, 'call.json')
-  writeFileSync(
-    fake,
-    `#!/usr/bin/env node
-const fs = require('node:fs')
-let input = ''
-process.stdin.on('data', (c) => (input += c)).on('end', () => {
-  fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), files: fs.readdirSync(process.cwd()), input }))
-  if (input === 'slow') return setTimeout(() => {}, 10000)
-  // As Claude Code prints a failed run: its message comes after several hundred characters of usage fields.
-  const failed = (exitCode, text) => {
-    console.log(JSON.stringify({ duration_api_ms: 0, session_id: 'x'.repeat(36), usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 0 }, padding: 'p'.repeat(300) }, is_error: true, subtype: 'success', result: text }))
-    process.exitCode = exitCode
-  }
-  if (input === 'limit') return failed(1, 'Usage limit reached, resets at 6pm')
-  if (input === 'error') return failed(0, 'Not signed in')
-  if (input === 'tool') return console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash' }], structured_output: {} }))
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], structured_output: { answerable: false, statements: [] },
-    usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 500, output_tokens: 40 }, modelUsage: { 'claude-test': {} } }))
-})
-`,
-  )
-  chmodSync(fake, 0o755)
-  const model = claudeCli({ timeoutMs: 5000, command: fake })
-  const reply = await model.run({ system: 'sys', prompt: '{"record":1}', schema: { type: 'object' } })
-  assert.deepEqual(reply, { output: { answerable: false, statements: [] }, model: 'claude-test', input_tokens: 1502, output_tokens: 40, cost_micro_usd: 0 })
-  const call = JSON.parse(readFileSync(log, 'utf8')) as { argv: string[]; cwd: string; files: string[]; input: string }
-  const flag = (f: string) => call.argv[call.argv.indexOf(f) + 1]
-  assert.equal(flag('--tools'), '')
-  assert.equal(flag('--json-schema'), '{"type":"object"}')
-  assert.equal(flag('--system-prompt'), 'sys')
-  for (const f of ['-p', '--strict-mcp-config', '--safe-mode', '--no-session-persistence', '--disable-slash-commands']) assert.ok(call.argv.includes(f), f)
-  assert.equal(call.input, '{"record":1}')
-  assert.ok(!call.argv.includes('{"record":1}'), 'the record is never on the command line')
-  assert.deepEqual(call.files, [])
-  assert.equal(existsSync(call.cwd), false, 'the folder it ran in is removed')
-
-  await assert.rejects(model.run({ system: 's', prompt: 'tool', schema: {} }), /tried to use a tool/)
-  await assert.rejects(model.run({ system: 's', prompt: 'limit', schema: {} }), /exited with 1: Usage limit reached, resets at 6pm$/, 'Claude Code’s own message is shown, not the start of its JSON')
-  await assert.rejects(model.run({ system: 's', prompt: 'error', schema: {} }), /reported an error: Not signed in$/)
-  await assert.rejects(claudeCli({ timeoutMs: 300, command: fake }).run({ system: 's', prompt: 'slow', schema: {} }), /no answer within 300 ms/)
-  await assert.rejects(claudeCli({ timeoutMs: 5000, command: path.join(dir, 'missing') }).run({ system: 's', prompt: 'x', schema: {} }), /ENOENT/)
-  assert.throws(() => claudeCli({ timeoutMs: 0 }), RangeError)
-  assert.ok(readdirSync(dir).length >= 2)
+  assert.deepEqual(daysIn('what did I do this morning?', now).map(([s]) => s), [day(2030, 10, 23)])
+  assert.deepEqual(daysIn('and tonight', now).map(([s]) => s), [day(2030, 10, 23)])
+  assert.deepEqual(daysIn('what was I reading last night', now).map(([s]) => s), [day(2030, 10, 22)])
 })

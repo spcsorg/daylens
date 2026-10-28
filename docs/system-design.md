@@ -214,8 +214,7 @@ A read-only MCP server lets any MCP app read days, hours, search results and sou
 | Choice | How it works |
 |---|---|
 | Daylens AI | The billing service checks the plan and issues a short-lived token scoped to one request and its cost; the app calls the model provider directly with it, so the hour's content never passes through Daylens servers. Usage is metered from the token's spend. Default. |
-| Your own key | The app calls the provider directly. The key is stored in the platform's secure storage: Keychain on macOS, Credential Manager on Windows (user-scoped DPAPI for larger records), the Secret Service on Linux. The interface never receives a stored secret. |
-| A CLI on the machine | The app runs Claude Code or Codex headlessly, billed to the user's own subscription. |
+| Your own key | The main process keeps the key and hands it to the reader, which answers Ask, and to the capture service, which writes hours; each calls the provider's API directly, streaming, with no tools. The key is encrypted with Electron's `safeStorage`, as VS Code and other Electron apps keep secrets: its encryption key lives in the Keychain on macOS, user-scoped DPAPI on Windows, and the Secret Service or KWallet on Linux. On Linux with no keyring running, `safeStorage` falls back to a fixed password, so Daylens refuses to save the key and says why. The interface never receives a stored secret. |
 | None | Hours stay as facts. Ask searches instead of answering. |
 
 The model used to write hours is chosen by evaluation, not preference. See [Engine](engine.md).

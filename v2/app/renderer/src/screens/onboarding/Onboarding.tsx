@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { AiStatus } from '../../../../shared/ai.ts'
 import type { ShellState } from '../../../../shared/types.ts'
 import { act, bridge, useQuery } from '../../lib/api.ts'
 import { dateKey, factsTitle, hourLabel, longDay } from '../../lib/format.ts'
-import { Button, Segmented } from '../../ui/controls.tsx'
+import { Button } from '../../ui/controls.tsx'
 import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { AppIcon } from '../../ui/records.tsx'
 import { errorText } from '../../ui/status.tsx'
+import { KeyForm } from '../settings/AiTab.tsx'
 import './onboarding.css'
 
 function StatusIcon({ state }: { state: 'waiting' | 'allowed' | 'off' }) {
@@ -104,6 +106,8 @@ function Morning({ onBack, onDone }: { onBack?: () => void; onDone: () => void }
   const today = dateKey(new Date())
   const { data } = useQuery({ q: 'day', date: today }, { live: true })
   const hours = data?.hours ?? []
+  const [keySaved, setKeySaved] = useState(false)
+  useEffect(() => void act({ a: 'ai_status' }).then((r) => r.ok && setKeySaved((r.result as AiStatus).saved)), [])
   return (
     <div className="onboarding">
       <div className="onboarding-col">
@@ -139,21 +143,15 @@ function Morning({ onBack, onDone }: { onBack?: () => void; onDone: () => void }
         </p>
         <div className="ob-card">
           <div className="ob-row ob-stack">
-            <span className="ob-label">
-              Name these hours with
-            </span>
-            <Segmented
-              label="Name these hours with"
-              value="none"
-              options={[
-                { value: 'daylens', label: 'Daylens AI', disabled: true },
-                { value: 'key', label: 'Your own key', disabled: true },
-                { value: 'local', label: 'On this computer', disabled: true },
-                { value: 'none', label: 'No AI' },
-              ]}
-              onChange={() => {}}
-            />
-            <span className="ob-detail">Hours show what Daylens recorded. Naming them with AI comes in a later update.</span>
+            <span className="ob-label">Write these hours with Claude</span>
+            {keySaved ? (
+              <span className="ob-detail">Saved. Claude writes each hour a few minutes after it ends, and answers Ask.</span>
+            ) : (
+              <>
+                <span className="ob-detail">Add your Anthropic API key, or skip it: hours then show what Daylens recorded, and nothing is sent.</span>
+                <KeyForm onSaved={() => setKeySaved(true)} />
+              </>
+            )}
           </div>
         </div>
         <div>
