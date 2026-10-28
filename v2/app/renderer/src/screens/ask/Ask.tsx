@@ -39,6 +39,12 @@ function update(id: number, f: (t: Turn) => Turn): void {
   for (const s of subs) s()
 }
 
+// Asked again (after a failure, or once a key is saved): the new answer takes the old one's place.
+function again(t: Turn): void {
+  turns = turns.filter((x) => x.id !== t.id)
+  void send(t.question)
+}
+
 async function send(question: string): Promise<void> {
   const id = nextId++
   turns = [...turns, { id, question, streamed: [], result: null, error: null }]
@@ -134,7 +140,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
         ) : (
           <div className="ask-thread">
             {thread.map((t) => (
-              <Exchange key={t.id} turn={t} onOpenHour={onOpenHour} onRetry={() => ask(t.question)} />
+              <Exchange key={t.id} turn={t} onOpenHour={onOpenHour} onRetry={() => ((pinned.current = true), again(t))} />
             ))}
           </div>
         )}

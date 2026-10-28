@@ -77,7 +77,14 @@ export function AiTab() {
     })
   useEffect(load, [])
 
-  if (problem) return <p className="settings-problem">{problem}</p>
+  // A saved key that can't be read is entered again here.
+  if (problem)
+    return (
+      <div className="settings-row settings-key">
+        <p className="settings-problem">{problem}</p>
+        <KeyForm onSaved={() => (setProblem(null), load())} />
+      </div>
+    )
   if (!status) return null
   return (
     <div className="settings-group">

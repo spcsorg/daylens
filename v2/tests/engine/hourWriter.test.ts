@@ -103,3 +103,18 @@ test('an hour the person corrected is left as they wrote it', async () => {
   assert.equal(seen.length, 0)
   assert.equal(s.r.storage.hourAt(T0)!.title, 'Planning with Sam')
 })
+
+test('an hour whose key is removed while it is being written is not stored, though what it cost is recorded', async () => {
+  const s = setup()
+  const hours = s.hours(T0 + HOUR + WRITE_DELAY_MS)
+  const seen: Packet[] = []
+  const inner = writer(seen)
+  hours.setWriter({ name: inner.name, write: async (p) => {
+    const r = await inner.write(p)
+    hours.setWriter(null)
+    return r
+  } })
+  await hours.run()
+  assert.equal(s.r.storage.hourAt(T0), null)
+  assert.equal(s.usage().length, 1)
+})

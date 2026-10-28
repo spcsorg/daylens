@@ -120,6 +120,8 @@ export class HourWriting {
       const rate = ANTHROPIC_RATES[model] ?? ANTHROPIC_RATES[HOUR_MODEL]!
       this.storage.recordUsage({ kind: 'hour', provider: 'anthropic', model, input_tokens: r.usage.input, output_tokens: r.usage.output, cost_micro_usd: Math.round(r.usage.input * rate.input + r.usage.output * rate.output), ref: `hour:${start}` })
     }
+    // The key was removed or changed while this hour was being written: what came back is not stored.
+    if (writer !== this.writer) return 'failed'
     if (r.quota) {
       this.o.log('hour write stopped: usage limit')
       return 'limit'
