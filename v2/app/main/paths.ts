@@ -23,6 +23,7 @@ export function dataDir(): string {
 export const paths = {
   shellName: `${DATA_NAME} Shell`,
   service: path.join(V2, 'capture', `service${EXT}`),
+  mcpServer: path.join(V2, 'mcp', `main${EXT}`),
   reader: path.join(V2, 'app', 'reader', `main${EXT}`),
   preload: path.join(V2, 'app', 'preload', 'preload.cjs'),
   renderer: path.join(V2, 'app', 'renderer', 'dist', 'index.html'),

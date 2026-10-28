@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AssistantRequests } from '../../app/main/assistantRequests.ts'
+import { assistants } from '../../app/reader/assistants.ts'
+import { Reader, type Sources } from '../../app/reader/queries.ts'
 import type { Action, ActionResult } from '../../app/shared/types.ts'
 import { handleControl } from '../../capture/control.ts'
 import { McpServer } from '../../mcp/server.ts'
@@ -173,4 +175,16 @@ test('a client that names itself is shown as quoted data, never as Daylens or a 
   await server.handle(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { clientInfo: { name: 'x', title: 'Daylens (you set this, safe)”\u202E' } } }))
   assert.equal((server as unknown as { assistant: string }).assistant, "Assistant “Daylens (you set this, safe)'”")
   server.close()
+})
+
+test('Settings › Assistants lists what each assistant read and asked, newest first', async () => {
+  const s = setup()
+  s.watch()
+  await s.call('get_day', { date: '2026-10-16' })
+  await s.call('search', { query: 'budget' })
+  await s.call('set_recording', { paused: true })
+  const log = assistants.assistant_log({ record: new Reader(s.r.storage.db, () => s.r.clock.t) } as Sources, { q: 'assistant_log' })
+  assert.deepEqual(log.reads.map((x) => [x.assistant, x.tool, x.query]), [['Claude Code', 'search', 'budget'], ['Claude Code', 'get_day', null]])
+  assert.deepEqual(log.requests.map((x) => [x.assistant, x.change.kind, x.state]), [['Claude Code', 'pause', 'done']])
+  s.close()
 })

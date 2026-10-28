@@ -111,7 +111,7 @@ export const stripMarks = (t: string) => t.replace(/[\u0000-\u001f\u007f-\u009f\
 /** Text an assistant chose, as plain characters: no marks, and no quotes to break out of ours. */
 export const plain = (t: string) => stripMarks(t).replace(/["«»“”„‟″〝〞〟＂]/g, "'")
 // Names and text come from the assistant, which may have read them off a page: always quoted, never phrasing.
-const quoted = (t: string, max = 120) => `“${plain(t.length > max ? `${t.slice(0, max - 1)}…` : t)}”`
+export const quoted = (t: string, max = 120) => `“${plain(t.length > max ? `${t.slice(0, max - 1)}…` : t)}”`
 const span = (w: { from_wall_ms?: number; to_wall_ms?: number }) => (w.from_wall_ms !== undefined && w.to_wall_ms !== undefined ? ` from ${when(w.from_wall_ms)} to ${when(w.to_wall_ms)}` : ', on every day')
 
 /** The request in one sentence, built from its fields alone, as the card, the notification and the assistant see it. */
