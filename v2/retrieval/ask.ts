@@ -695,7 +695,7 @@ export async function ask(
     statements.splice(0, statements.length, ...byTime.map((x) => x.st))
     // The answer's first link is the moment it names: the hour its newest source was last seen in, when that was sent.
     const lead = byTime[0]
-    const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? sources[Number(id.slice(1)) - 1]!.seen.map(moment) : []))) : -Infinity
+    const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? sources[Number(id.slice(1)) - 1]!.sightings.map(moment) : []))) : -Infinity
     const at = hours.findIndex((h) => h.start_wall_ms <= t && t < h.end_wall_ms)
     if (lead && at >= 0 && !gone.has(`h${at + 1}`)) lead.st.cites = [byId.get(`h${at + 1}`)!, ...lead.st.cites.filter((c) => c !== byId.get(`h${at + 1}`))]
   }
