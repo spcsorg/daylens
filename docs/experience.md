@@ -37,7 +37,7 @@ Examples, on an invented day:
 | What did I work on yesterday afternoon? | Mostly invoices and the pricing page. You sent the October invoices, then spent the rest of the afternoon on the pricing page fixes from the design sync. |
 | Did I reply to the supplier about the new prices? | I can't tell from your record whether a reply went out. I can see you had their email open twice yesterday and added "reply to supplier" to your reminders. |
 
-Answers that fail these rules don't ship. Ask has an evaluation that checks them.
+Answers that fail these rules don't ship. Ask has an evaluation that checks them: `node tools/eval/ask.ts` in `v2/` asks questions about the invented seed day, each twice, and prints each answer with a pass or fail per rule; it exits non-zero on any failure.
 
 ## Navigation
 
@@ -90,31 +90,6 @@ Ask answers questions about any day from the same record.
 - Example questions lead with finding things and picking up work, then summaries and time.
 - With no AI, or at the free limit, Ask still searches and shows matching results.
 - The usage counter appears only when the user is close to their limit.
-
-### How Ask answers
-
-Ask answers the way the person would describe their day to their boss in the evening.
-
-- **Lead with the answer.** A summary opens with the gist of the work. A question about when opens with the time, about whether with yes, no or "can't tell", about how long with the amount.
-- **The work, not the windows.** Answers name the projects, what moved, what got finished and what is still open, grouped by piece of work. A window title, page or file name appears only when it is the answer or what the person would open.
-- **Never by clock hour.** No "from 10 to 11 you…, from 11 to 12 you…", and never one sentence per hour or per app. A time appears only where it helps: "just after lunch", "around 1:45 PM".
-- **Short.** A summary is two to four sentences, grouped into two or three themes. Anything else is one or two.
-- **Plain.** No hedging ("likely", "it appears", "only shows"). What the record can't show is said once, briefly, and only when the question needs it.
-- **Finished means shown.** Something is done only when the record shows it, like a sent email. Otherwise it was worked on.
-- **The same question gets the same answer.** Asked again with nothing new recorded, Ask gives the answer it gave before.
-- **One message.** The answer arrives as one bubble, a sentence at a time. Visuals made for the answer (a timeline, a breakdown, page cards) come after the prose, built from fixed Daylens components.
-- **Every sentence is checked.** Each one cites the hours and sources it rests on, and code drops a sentence that names a time, day, app, file or site those don't support.
-
-Four questions on an invented day at a bakery, and answers that meet the bar:
-
-| Question | A good answer |
-|---|---|
-| What did I do this morning? | This morning was mostly weekend orders, supplier prices and the autumn menu. You lined up the weekend cake orders and the delivery week, checked Mill Lane's wholesale flour prices against a supplier's price change, and worked on the autumn menu draft and its proof. Before noon you got back to the website's order form. |
-| When did I last open the order form? | You last had the order form open at 12 PM today, in the Order form checklist, right after updating the order-form notes. |
-| Did I reply to the wholesale enquiry? | Can't tell: you had the wholesale enquiry open around 4 PM, but nothing shows a reply going out. |
-| What did I work on yesterday afternoon? | Yesterday afternoon was mostly the admin: you sent the October invoice to Corner Café just after lunch, worked through the pickups and the wholesale follow-ups, and reworked the packaging label wording. You finished by planning tomorrow's bakes. |
-
-Ask's evaluation (`v2/tools/eval/ask.ts`) asks 18 questions about that day, each twice, and fails any answer organised by clock hour, any that lists windows instead of the work, any that doesn't lead with the answer, and any that changes between the two runs. Changes to Ask merge only when it passes.
 
 ## Apps
 

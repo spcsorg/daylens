@@ -1,15 +1,17 @@
 // Ask's evaluation: questions about the invented seed day, each asked twice through the real pipeline, every answer
 // graded for how a person would want to hear it. Ask changes merge only when every question passes.
-// Usage: DAYLENS_TEST_ANTHROPIC_API_KEY=… node tools/eval/ask.ts [--out <dir>] [--only <question number>] [--model <id>] [--effort <level>]
+// Usage: DAYLENS_TEST_ANTHROPIC_API_KEY=… node tools/eval/ask.ts [--seed <dir> --now <ISO time>] [--only <question number>]
+//   [--model <id>] [--effort <level>]
+// Prints JSON (every answer, what it cites, a pass or fail per rule) and exits non-zero on any failure.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { DB_FILE } from '../../capture/store.ts'
 import { anthropicClient, type ApiOptions } from '../../engine/backends.ts'
 import { anthropicApi, ASK_EFFORT, ASK_MODEL } from '../../retrieval/anthropicApi.ts'
-import { ask, type AskResult } from '../../retrieval/ask.ts'
+import { ask, type AskResult, type Citation } from '../../retrieval/ask.ts'
 import { openReadOnly, Reader } from '../../retrieval/reader.ts'
 
 const LIMITS = { maxHours: 12, maxSources: 40, perGroup: 8 }
@@ -34,14 +36,13 @@ export const QUESTIONS: { q: string; kind: Kind; expect: string }[] = [
   { q: 'Did I look at the website yesterday?', kind: 'whether', expect: 'Yes: the brightside-site project (its dev server) in Terminal around 11 AM; the Mill Lane Flour page around 9:20 and the Corner Café page around 4:10 in Chrome count too. The git log at noon was today only, since yesterday 12 to 1 was lunch.' },
   { q: 'How long did I spend on invoices today?', kind: 'amount', expect: 'About an hour, roughly 1 to 2 PM: the Corner Café invoice, the invoices-to-send list and the sent invoice.' },
   { q: 'What took most of my time today?', kind: 'amount', expect: 'Grouped by work, the website and its order form took the most, about 80 minutes (the dev server, the order-form notes and checklist, the git log); the rest took about an hour each. Saying that, or that time was spread fairly evenly, is right; the two answers must agree.' },
-  { q: 'Which supplier was I looking at this morning?', kind: 'whether', expect: 'Mill Lane Flour, its wholesale prices, around 9:20 AM, alongside a supplier price change email.' },
+  { q: 'Which supplier was I looking at this morning?', kind: 'whether', expect: 'Mill Lane Flour, its wholesale prices, on screen from about 9:20 to 9:35 AM, alongside a supplier price change email.' },
   { q: 'What was I working on before the pickup schedule today?', kind: 'summary', expect: 'October invoicing, from 1 to 2 PM: the Corner Café invoice and sending the October invoice. Calling it just after lunch is fine.' },
   { q: 'What did I do on the order form?', kind: 'summary', expect: 'Late morning today and yesterday: the order-form notes (about 25 minutes) and its checklist (about 10 minutes), about 35 minutes a day and 70 in all, alongside the website’s dev server. Nothing shows it finished.' },
   { q: 'What did I plan for tomorrow?', kind: 'summary', expect: 'Around 5 PM: Tomorrow’s bakes in Notes and Thursday in Calendar.' },
 ]
 
 export interface Grade {
-  pass: boolean
   by_clock_hour: boolean
   lists_windows: boolean
   leads_with_answer: boolean
@@ -73,16 +74,18 @@ The seed day repeats: yesterday had the same work at the same times, 8 AM to 6 P
 Judge each field strictly, true or false:
 - by_clock_hour: an answer is organised by clock hour: a run of "From 8 to 9 AM…, from 9 to 10…" chunks, or one statement per hour. Times used only where they help ("just after lunch", "around 4") are fine.
 - lists_windows: an answer's substance is window titles, file names or tabs ("the Order list for Saturday tab was active") instead of the work they stand for. A title or file name that is itself the answer, or names what to open, is fine.
-- leads_with_answer: the first sentence answers the question: for when, the time; for whether, yes, no or that the record can't tell; for how long or how much, the amount; for a summary, the gist of the work.
+- leads_with_answer: the first sentence answers the question: for when, the time; for whether, yes, no or that the record can't tell; for how long or how much, the amount; for a summary, the gist of the work, which for a question about what got done is what was finished, then what moved.
 - correct: both answers agree with expect and claim nothing it contradicts. Leaving out minor items is fine; inventing or misdating work is not.
 - consistent: the two answers say the same thing in substance (the same time, the same yes or no, the same main pieces of work). Wording may differ.
 - sounds_like_a_person: plain, warm and brief, like a colleague who saw the day; not a log, a list of apps, or hedging.
 reason: one or two sentences on any field that failed, quoting the answer. Empty when all pass.`
 
-function text(r: AskResult): string {
-  if (r.kind === 'answer') return r.statements.map((s) => s.text).join(' ')
-  if (r.kind === 'no_answer') return r.missing ?? 'Your record doesn’t show that.'
-  return `(${r.kind})`
+// One run of a question as the eval reports it: what the person would read, and what each sentence cites.
+function run(r: AskResult): { text: string; sources: string[][] } {
+  const cite = (c: Citation) => (c.kind === 'hour' ? `hour ${new Date(c.start_wall_ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })}` : `${c.kind} ${c.title ?? c.file ?? c.url}`)
+  if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)) }
+  if (r.kind === 'no_answer') return { text: r.missing ?? 'Your record doesn’t show that.', sources: [] }
+  return { text: `(${r.kind})`, sources: [] }
 }
 
 // A past 6 PM, so the seeded today runs 8 AM to 6 PM in full and nothing is in the future.
@@ -94,12 +97,15 @@ function evalNow(): number {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { out: { type: 'string' }, only: { type: 'string' }, effort: { type: 'string', default: ASK_EFFORT }, model: { type: 'string', default: ASK_MODEL } } })
+  const { values } = parseArgs({
+    options: { seed: { type: 'string' }, now: { type: 'string' }, only: { type: 'string' }, effort: { type: 'string', default: ASK_EFFORT }, model: { type: 'string', default: ASK_MODEL } },
+  })
   const apiKey = process.env.DAYLENS_TEST_ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('set DAYLENS_TEST_ANTHROPIC_API_KEY')
-  const now = evalNow()
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-ask-eval-'))
-  execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', new Date(now).toISOString()], { stdio: 'ignore' })
+  if (values.seed && !values.now) throw new Error('--seed needs --now, the time it was seeded as')
+  const now = values.now ? Date.parse(values.now) : evalNow()
+  const dir = values.seed ?? mkdtempSync(path.join(os.tmpdir(), 'daylens-ask-eval-'))
+  if (!values.seed) execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', new Date(now).toISOString()], { stdio: 'ignore' })
   const reader = new Reader(openReadOnly(path.join(dir, DB_FILE)))
   const effort = values.effort as ApiOptions['effort']
   const model = anthropicApi(values.model, { apiKey, timeoutMs: 60_000, effort })
@@ -109,25 +115,18 @@ async function main(): Promise<void> {
 
   const results = await Promise.all(
     picked.map(async (item) => {
-      const answers: string[] = []
-      for (let i = 0; i < REPEATS; i++) answers.push(text(await ask(item.q, { reader, model, log, now: () => now }, LIMITS).catch((e: Error) => ({ kind: 'search_only', results: null, error: e.message }) as never)))
-      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ question: item.q, kind: item.kind, expect: item.expect, answers }), schema: GRADE_SCHEMA })
-      const g = JSON.parse(r.text ?? '{}') as Omit<Grade, 'pass'>
-      const grade: Grade = { ...g, pass: !g.by_clock_hour && !g.lists_windows && g.leads_with_answer && g.correct && g.consistent && g.sounds_like_a_person }
-      return { ...item, answers, grade, grader_error: r.error }
+      const runs: ReturnType<typeof run>[] = []
+      for (let i = 0; i < REPEATS; i++) runs.push(await ask(item.q, { reader, model, log, now: () => now }, LIMITS).then(run, (e: Error) => ({ text: `(error: ${e.message})`, sources: [] })))
+      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ question: item.q, kind: item.kind, expect: item.expect, answers: runs.map((x) => x.text) }), schema: GRADE_SCHEMA })
+      const g = JSON.parse(r.text ?? '{}') as Grade
+      const pass = r.error === null && !g.by_clock_hour && !g.lists_windows && g.leads_with_answer && g.correct && g.consistent && g.sounds_like_a_person
+      return { question: item.q, kind: item.kind, runs, pass, rules: g, grader_error: r.error }
     }),
   )
-  const passed = results.filter((r) => r.grade.pass).length
-  for (const [i, r] of results.entries()) {
-    console.log(`${r.grade.pass ? 'PASS' : 'FAIL'} ${i + 1}. ${r.q}`)
-    for (const a of r.answers) console.log(`    › ${a}`)
-    if (!r.grade.pass) console.log(`    ✗ ${r.grade.reason || r.grader_error}`)
-  }
-  console.log(`\n${passed}/${results.length} pass (${values.model} at ${effort} effort, graded by ${GRADER})`)
-  if (values.out) {
-    mkdirSync(values.out, { recursive: true })
-    writeFileSync(path.join(values.out, 'ask-eval.json'), JSON.stringify({ now: new Date(now).toISOString(), results }, null, 1))
-  }
+  const passed = results.filter((r) => r.pass).length
+  for (const r of results) process.stderr.write(`${r.pass ? 'PASS' : 'FAIL'} ${r.question}${r.pass ? '' : `\n    ${r.rules.reason || r.grader_error}`}\n`)
+  process.stderr.write(`${passed}/${results.length} pass (${values.model} at ${effort} effort, graded by ${GRADER})\n`)
+  process.stdout.write(JSON.stringify({ now: new Date(now).toISOString(), model: values.model, effort, grader: GRADER, passed, total: results.length, results }, null, 1) + '\n')
   process.exitCode = passed === results.length ? 0 : 1
 }
 
