@@ -35,8 +35,8 @@ export const QUESTIONS: { q: string; kind: Kind; expect: string }[] = [
   { q: 'How long did I spend on invoices today?', kind: 'amount', expect: 'About an hour, roughly 1 to 2 PM: the Corner Café invoice, the invoices-to-send list and the sent invoice.' },
   { q: 'What took most of my time today?', kind: 'amount', expect: 'Grouped by work, the website and its order form took the most, about 80 minutes (the dev server, the order-form notes and checklist, the git log); the rest took about an hour each. Saying that, or that time was spread fairly evenly, is right; the two answers must agree.' },
   { q: 'Which supplier was I looking at this morning?', kind: 'whether', expect: 'Mill Lane Flour, its wholesale prices, around 9:20 AM, alongside a supplier price change email.' },
-  { q: 'What was I working on before the pickup schedule today?', kind: 'summary', expect: 'October invoicing, just before 2 PM: the Corner Café invoice and sending the October invoice.' },
-  { q: 'What did I do on the order form?', kind: 'summary', expect: 'Around 11 AM to noon (today and yesterday): notes in TextEdit and a checklist in Notes, alongside the website’s dev server. Nothing shows it finished.' },
+  { q: 'What was I working on before the pickup schedule today?', kind: 'summary', expect: 'October invoicing, from 1 to 2 PM: the Corner Café invoice and sending the October invoice. Calling it just after lunch is fine.' },
+  { q: 'What did I do on the order form?', kind: 'summary', expect: 'Late morning today and yesterday: the order-form notes (about 25 minutes) and its checklist (about 10 minutes), about 35 minutes a day and 70 in all, alongside the website’s dev server. Nothing shows it finished.' },
   { q: 'What did I plan for tomorrow?', kind: 'summary', expect: 'Around 5 PM: Tomorrow’s bakes in Notes and Thursday in Calendar.' },
 ]
 
