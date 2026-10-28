@@ -96,6 +96,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
 
   // Follow the newest message as it grows, unless the person has scrolled up to read.
   const pinned = useRef(true)
+  const lastTop = useRef(0)
   const started = thread.length > 0
   useEffect(() => {
     const el = scroller.current
@@ -111,12 +112,12 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
       <div
         className="scroll ask-scroll"
         ref={scroller}
-        onWheel={(e) => {
-          if (e.deltaY < 0) pinned.current = false
-        }}
         onScroll={(e) => {
+          // Following only ever scrolls down, so a move up is the person reading back, by wheel, keys or scrollbar.
           const el = e.currentTarget
           if (el.scrollHeight - el.scrollTop - el.clientHeight < 48) pinned.current = true
+          else if (el.scrollTop < lastTop.current) pinned.current = false
+          lastTop.current = el.scrollTop
         }}
       >
         {thread.length === 0 ? (
