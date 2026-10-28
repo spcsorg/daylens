@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import "../_film/film.css";
 import { ASSISTANT_ICONS } from "../_film/assistants";
-import { CUTS } from "../_film/cuts";
+import { CUTS, STAGES } from "../_film/cuts";
 import { Film, filmLength, type Ratio } from "../_film/Film";
 import { serif } from "../_film/fonts";
 import { asset } from "../../../_v2/base";
@@ -24,8 +24,8 @@ export default function Recorder() {
     const q = new URLSearchParams(location.search);
     const ratio = (q.get("ratio") === "4x5" ? "4x5" : "16x9") as Ratio;
     const cut = q.get("cut") ?? "duet";
-    if (!CUTS[cut]) throw new Error(`no cut named ${cut}`);
-    const length = filmLength(CUTS[cut]);
+    if (!CUTS[cut] && !STAGES[cut]) throw new Error(`no cut named ${cut}`);
+    const length = STAGES[cut]?.length ?? filmLength(CUTS[cut]);
     const hold = q.get("t");
     setState({ ratio, t: Number(hold ?? 0), cut });
     // Every image is decoded before the first frame, so no frame catches an icon half loaded.
@@ -45,10 +45,11 @@ export default function Recorder() {
   }, []);
 
   if (!state) return null;
+  const stage = STAGES[state.cut];
   return (
     <div className={serif.variable}>
       <style>{"body{margin:0}nextjs-portal{display:none}"}</style>
-      <Film t={state.t} ratio={state.ratio} beats={CUTS[state.cut]} />
+      {stage ? stage.render(state.t, state.ratio) : <Film t={state.t} ratio={state.ratio} beats={CUTS[state.cut]} />}
     </div>
   );
 }
