@@ -9,6 +9,8 @@ import { tmp } from './fixtures.ts'
 
 const HELPER = fileURLToPath(new URL('../../native/macos/.build/release/daylens-capture-macos', import.meta.url))
 const noHelper = process.platform !== 'darwin' || !existsSync(HELPER) ? 'real macOS helper not built' : false
+// The service traces sessions to their apps on macOS only (capture/service.ts), through the helper and ps.
+const notMac = process.platform === 'win32' ? 'session hosts are traced on macOS only' : false
 
 test('only the clients that name an app give a session its app; a CLI or an editor extension does not', () => {
   assert.equal(clientApp('claude_code', 'claude-desktop', 'darwin')?.app_id, 'com.anthropic.claudefordesktop')
@@ -20,7 +22,7 @@ test('only the clients that name an app give a session its app; a CLI or an edit
   assert.ok(isKnownAgentHost('com.mitchellh.ghostty') && isKnownAgentHost('com.jetbrains.intellij') && !isKnownAgentHost('com.microsoft.excel'))
 })
 
-test("the helper's answers are read strictly; anything else is ignored", async () => {
+test("the helper's answers are read strictly; anything else is ignored", { skip: notMac }, async () => {
   const dir = tmp()
   const fake = path.join(dir, 'helper.sh')
   writeFileSync(fake, `#!/bin/sh
@@ -37,7 +39,7 @@ echo 'not json'
   assert.equal((await readHostOf(path.join(dir, 'missing'), [], [10])).size, 0, 'no helper, no answer')
 })
 
-test("a running Claude Code session is traced to its process only if that process started when its file says", async () => {
+test("a running Claude Code session is traced to its process only if that process started when its file says", { skip: notMac }, async () => {
   const dir = tmp()
   mkdirSync(path.join(dir, 'sessions'))
   const started = Date.now() - process.uptime() * 1000

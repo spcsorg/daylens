@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { Normalizer, Privacy } from '../capture/normalize.ts'
 import { assertNotV1, DB_FILE, Store, type StoreHealth } from '../capture/store.ts'
@@ -251,7 +252,7 @@ test('a database file linked to another database is refused and the target is un
 
 test('two processes starting at the same instant: exactly one gets the writer lock, every time', async () => {
   const { spawn } = await import('node:child_process')
-  const racer = new URL('./support/lockRacer.ts', import.meta.url).pathname
+  const racer = fileURLToPath(new URL('./support/lockRacer.ts', import.meta.url))
   for (let round = 0; round < 8; round++) {
     const dir = tmp()
     const go = path.join(dir, 'go')
@@ -259,14 +260,15 @@ test('two processes starting at the same instant: exactly one gets the writer lo
     const racers = [0, 1, 2].map(() => {
       const p = spawn(process.execPath, [racer, dir, go, release], { stdio: ['ignore', 'pipe', 'inherit'] })
       const lines: string[] = []
-      const said = (n: number) => new Promise<void>((resolve) => {
+      const exited = new Promise<void>((resolve) => p.on('exit', () => resolve()))
+      // A racer that exits early has said all it will.
+      const said = (n: number) => Promise.race([exited, new Promise<void>((resolve) => {
         const check = () => { if (lines.length >= n) resolve() }
         p.stdout!.on('data', check)
-        p.on('exit', resolve)
         check()
-      })
+      })])
       p.stdout!.setEncoding('utf8').on('data', (c: string) => lines.push(...c.split('\n').filter(Boolean)))
-      return { lines, said, exited: new Promise((resolve) => p.on('exit', resolve)) }
+      return { lines, said, exited }
     })
     await Promise.all(racers.map((r) => r.said(1)))
     writeFileSync(go, '')
@@ -282,7 +284,7 @@ test('two processes starting at the same instant: exactly one gets the writer lo
 test('a writer that dies without cleaning up does not block the next one', async () => {
   const { spawnSync } = await import('node:child_process')
   const dir = tmp()
-  const code = `import { Store } from ${JSON.stringify(new URL('../capture/store.ts', import.meta.url).pathname)}; new Store(${JSON.stringify(dir)}); process.kill(process.pid, 'SIGKILL')`
+  const code = `import { Store } from ${JSON.stringify(new URL('../capture/store.ts', import.meta.url).href)}; new Store(${JSON.stringify(dir)}); process.kill(process.pid, 'SIGKILL')`
   spawnSync(process.execPath, ['--input-type=module', '-e', code])
   const s = new Store(dir)
   s.close()

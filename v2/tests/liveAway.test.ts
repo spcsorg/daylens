@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events'
 import { ABORTED_EXIT, AWAY_IDLE_S, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, onAbort, stopReason, watch, type Signals } from '../browser/tools/away.ts'
 import { runQueue, splitArgs } from '../browser/tools/queue.ts'
 
-const live = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'browser', 'tools', 'live.ts'), 'utf8')
+const live = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'browser', 'tools', 'live.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 function fake(over: Partial<{ marker: boolean; locked: boolean; idle: number }> = {}): Signals {
   const v = { marker: true, locked: false, idle: 0, ...over }

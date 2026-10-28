@@ -35,7 +35,7 @@ function startService(dataDir: string, work: string, env: Record<string, string>
   let log = ''
   const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--hang-after-s', '1.5', '--tick-ms', '100', ...args], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof'), ...env },
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: [WIN ? 'pipe' : 'ignore', 'ignore', 'pipe'],
   })
   proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
   return { proc, log: () => log }
@@ -55,10 +55,14 @@ function gaps(dataDir: string): Gap[] {
   }
 }
 
+const WIN = process.platform === 'win32'
+
 async function stopService(proc: ChildProcess): Promise<void> {
   if (proc.exitCode !== null) return
   const exited = new Promise((r) => proc.once('exit', r))
-  proc.kill('SIGTERM')
+  // Windows has no SIGTERM (kill ends the process at once); the service stops cleanly when its stdin closes.
+  if (WIN && proc.stdin) proc.stdin.end()
+  else proc.kill('SIGTERM')
   await exited
 }
 
@@ -71,7 +75,7 @@ test('the service tells the app its capture health on stdout', async () => {
   const { work, dataDir } = setup()
   const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--deletion-stall-ms', 'Infinity', '--heartbeat-s', '1', '--tick-ms', '100'], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof') },
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: [WIN ? 'pipe' : 'ignore', 'pipe', 'ignore'],
   })
   let out = ''
   proc.stdout!.setEncoding('utf8').on('data', (c: string) => (out += c))
@@ -90,7 +94,7 @@ test('the service runs without being given a deletion stall time', async () => {
   const { work, dataDir } = setup()
   const proc = spawn(process.execPath, [SERVICE, '--helper', process.execPath, '--helper-arg', FAKE, '--data-dir', dataDir, '--heartbeat-s', '1', '--tick-ms', '100'], {
     env: { ...process.env, FAKE_HB_MS: '100', FAKE_PIDFILE: path.join(work, 'pids'), FAKE_EOF_FILE: path.join(work, 'eof') },
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: [WIN ? 'pipe' : 'ignore', 'pipe', 'ignore'],
   })
   let out = ''
   proc.stdout!.setEncoding('utf8').on('data', (c: string) => (out += c))
@@ -102,7 +106,10 @@ test('the service runs without being given a deletion stall time', async () => {
   }
 })
 
-test('a whole-machine pause (service and helper suspended together) is not a hang', async () => {
+// Sleep is simulated by suspending processes with SIGSTOP, which Windows does not have.
+const noStop = process.platform === 'win32' ? 'no SIGSTOP on Windows' : false
+
+test('a whole-machine pause (service and helper suspended together) is not a hang', { skip: noStop }, async () => {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work)
   await waitFor(() => svc.log().includes('helper hello'))
@@ -123,7 +130,7 @@ test('a whole-machine pause (service and helper suspended together) is not a han
   assert.deepEqual(gaps(dataDir).map((g) => g.reason), ['service_starting'], 'sleep reported by the helper leaves no capture gap')
 })
 
-test('the same pause with no sleep reported is recorded as an unexplained helper stall', async () => {
+test('the same pause with no sleep reported is recorded as an unexplained helper stall', { skip: noStop }, async () => {
   const { work, dataDir } = setup()
   const svc = startService(dataDir, work)
   await waitFor(() => svc.log().includes('helper hello'))
@@ -149,9 +156,19 @@ test('killing the service stops the helper and the next start records an unclean
   await sleep(1500)
   const killedAt = Date.now()
   svc.proc.kill('SIGKILL')
-  await waitFor(() => existsSync(path.join(work, 'eof')), 3000)
-  const eofAt = Number(readFileSync(path.join(work, 'eof'), 'utf8'))
-  assert.ok(eofAt - killedAt < 1000, `helper exited ${eofAt - killedAt} ms after the service died`)
+  const [helper] = helperPids(work)
+  const alive = () => {
+    try {
+      process.kill(helper!, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // On Windows the helper can die writing to the broken pipe before it reads the end of its input.
+  await waitFor(() => existsSync(path.join(work, 'eof')) || !alive(), 3000)
+  const stoppedAt = existsSync(path.join(work, 'eof')) ? Number(readFileSync(path.join(work, 'eof'), 'utf8')) : Date.now()
+  assert.ok(stoppedAt - killedAt < 1000, `helper exited ${stoppedAt - killedAt} ms after the service died`)
   await sleep(1000)
   const svc2 = startService(dataDir, work)
   await waitFor(() => svc2.log().includes('helper hello'))
@@ -416,7 +433,7 @@ test('started the way the app starts it, the service records agent sessions from
   mkdirSync(project, { recursive: true })
   const at = Date.now() - 60_000
   writeFileSync(path.join(project, `${c.session}.jsonl`), [claude.prompt(c, at, 'hi'), claude.assistant(c, at + 1000, 'end_turn')].map((l) => l + '\n').join(''))
-  const env = { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') }
+  const env = { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') }
   const svc = startService(dataDir, work, env, [...APP_CAPTURE_FLAGS])
   const turns = () => {
     const db = new Database(path.join(dataDir, DB_FILE), { readonly: true })

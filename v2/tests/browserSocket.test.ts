@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -64,10 +65,13 @@ test('host lines over the socket become page rows; storage pauses reach the host
   let socket: BrowserSocket
   storage.bus.on((c) => { if (c.kind === 'pause') socket.broadcast(statusMsg(pause.state())) })
   const logs: string[] = []
-  socket = new BrowserSocket(pages, pause, { path: path.join(dir, 'b', 'browser.sock'), log: (m) => logs.push(m) })
+  const win = process.platform === 'win32'
+  socket = new BrowserSocket(pages, pause, { path: win ? `\\\\.\\pipe\\daylens-test-${randomUUID()}` : path.join(dir, 'b', 'browser.sock'), log: (m) => logs.push(m) })
   assert.ok(await socket.start())
-  assert.equal(statSync(path.join(dir, 'b')).mode & 0o777, 0o700)
-  assert.equal(statSync(socket.path).mode & 0o777, 0o600)
+  if (!win) {
+    assert.equal(statSync(path.join(dir, 'b')).mode & 0o777, 0o700)
+    assert.equal(statSync(socket.path).mode & 0o777, 0o600)
+  }
 
   const second = new BrowserSocket(pages, pause, { path: socket.path, log: (m) => logs.push(m) })
   assert.equal(await second.start(), false, 'a running listener is never stolen')

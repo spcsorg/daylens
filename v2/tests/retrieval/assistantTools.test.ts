@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import Database from 'better-sqlite3'
 import { AgentStore } from '../../capture/agents/store.ts'
 import type { AgentRecord } from '../../capture/agents/types.ts'
@@ -162,7 +163,7 @@ test('a read-log entry is seen whole or not at all, even by a process killed as 
   const v2 = path.resolve(import.meta.dirname, '../..')
   // Killed the moment its first write transaction commits, before anything after it runs.
   const child = `
-    import { AssistantStore } from ${JSON.stringify(path.join(v2, 'retrieval/assistantStore.ts'))}
+    import { AssistantStore } from ${JSON.stringify(pathToFileURL(path.join(v2, 'retrieval/assistantStore.ts')).href)}
     const store = AssistantStore.open(${JSON.stringify(file)})
     const transaction = store.db.transaction.bind(store.db)
     store.db.transaction = (fn) => {
@@ -173,7 +174,9 @@ test('a read-log entry is seen whole or not at all, even by a process killed as 
     store.recordRead({ assistant: 'Claude Code', tool: 'get_day', from_wall_ms: 0, to_wall_ms: 1, sources: Array.from({ length: 1200 }, (_, i) => ({ site: 'site' + i + '.example.com' })) }, 0)
   `
   const run = spawnSync(process.execPath, ['--input-type=module', '-e', child], { encoding: 'utf8' })
-  assert.equal(run.signal, 'SIGKILL', run.stderr)
+  // Windows ends a process that kills itself with exit code 1 and no signal.
+  if (process.platform === 'win32') assert.deepEqual([run.status, run.stderr], [1, ''])
+  else assert.equal(run.signal, 'SIGKILL', run.stderr)
   const counts = s.r.q<{ n: number }>('SELECT count(i.read_id) AS n FROM assistant_reads a LEFT JOIN assistant_read_items i ON i.read_id = a.id GROUP BY a.id').map((x) => x.n)
   assert.deepEqual(counts, [1200], 'the entry, with every item')
   s.close()
