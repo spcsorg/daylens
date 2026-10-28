@@ -228,7 +228,7 @@ function when(ms: number): string {
   return seenAt(ms)
 }
 
-/** The hours and pages the answer cites, once each: an hour opens in Today, a page in the browser. */
+/** The hours and pages the answer cites, once each, in the order it cites them: an hour opens in Today, a page in the browser. */
 function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHour: (start: number) => void }) {
   const toast = useToast()
   const hours = new Map<number, Extract<Citation, { kind: 'hour' }>>()
@@ -240,14 +240,12 @@ function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHo
   if (hours.size === 0 && pages.size === 0) return null
   return (
     <div className="ask-sources">
-      {[...hours.values()]
-        .sort((a, b) => a.start_wall_ms - b.start_wall_ms)
-        .map((c) => (
-          <button type="button" key={c.start_wall_ms} className="ask-chip" title={c.title ?? undefined} onClick={() => onOpenHour(c.start_wall_ms)}>
-            <Icon name="today" size={14} />
-            <span>{when(c.start_wall_ms)}</span>
-          </button>
-        ))}
+      {[...hours.values()].map((c) => (
+        <button type="button" key={c.start_wall_ms} className="ask-chip" title={c.title ?? undefined} onClick={() => onOpenHour(c.start_wall_ms)}>
+          <Icon name="today" size={14} />
+          <span>{when(c.start_wall_ms)}</span>
+        </button>
+      ))}
       {[...pages.values()].map((c) => (
         <button
           type="button"
