@@ -1,0 +1,8 @@
+{
+  "name": "daylens",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "npm --prefix v2 run app"
+  }
+}

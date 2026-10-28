@@ -1,0 +1,887 @@
+[
+ {
+  "name": "mac_hello",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "hello",
+   "obs": {
+    "awake_us": 612345000000,
+    "helper": "daylens-capture-macos",
+    "boot_identity": "kernel",
+    "version": "2.0.0-dev",
+    "pid": 4242,
+    "os": "macOS 27.0.1",
+    "permissions": {
+     "accessibility": "granted"
+    },
+    "config": {
+     "heartbeat_s": 15,
+     "idle_threshold_s": 120,
+     "reconcile_s": 60
+    }
+   }
+  }
+ },
+ {
+  "name": "mac_heartbeat",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "heartbeat",
+   "obs": {
+    "awake_us": 612345678901,
+    "permissions": {
+     "accessibility": "granted"
+    },
+    "registrations": {
+     "focus": true,
+     "session": true,
+     "power": true
+    },
+    "titles": "ok",
+    "stall_ms": 0,
+    "dropped": 0
+   }
+  }
+ },
+ {
+  "name": "mac_focus_app",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 2,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "nsworkspace",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": "com.apple.Terminal",
+     "name": "Terminal",
+     "path": "/System/Applications/Utilities/Terminal.app",
+     "pid": 501,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": null
+    },
+    "window": {
+     "window": "w-1",
+     "title": "daylens — zsh — 80×24",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "mac_focus_title",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 3,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "ax_observer",
+   "kind": "focus",
+   "obs": {
+    "trigger": "title_changed",
+    "app": {
+     "app_id": "com.apple.Terminal",
+     "name": "Terminal",
+     "path": "/System/Applications/Utilities/Terminal.app",
+     "pid": 501,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": null
+    },
+    "window": {
+     "window": "w-1",
+     "title": "✳ Fix capture",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "mac_focus_no_permission",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 4,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "nsworkspace",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": "com.apple.Terminal",
+     "name": "Terminal",
+     "path": "/System/Applications/Utilities/Terminal.app",
+     "pid": 501,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": null
+    },
+    "window": {
+     "window": null,
+     "title": null,
+     "title_state": "no_permission"
+    }
+   }
+  }
+ },
+ {
+  "name": "mac_input_idle",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 5,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "idle_timer",
+   "kind": "input",
+   "obs": {
+    "state": "idle",
+    "last_input_wall_ms": 1792130292345,
+    "threshold_s": 120,
+    "snapshot": false
+   }
+  }
+ },
+ {
+  "name": "mac_session_locked",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 6,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "distributed_notification",
+   "kind": "session",
+   "obs": {
+    "state": "locked",
+    "snapshot": false
+   }
+  }
+ },
+ {
+  "name": "mac_power_sleep",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 7,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "nsworkspace",
+   "kind": "power",
+   "obs": {
+    "state": "sleep"
+   }
+  }
+ },
+ {
+  "name": "mac_power_display_snapshot",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 7,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "cg_display",
+   "kind": "power",
+   "obs": {
+    "state": "display_off",
+    "snapshot": true
+   }
+  }
+ },
+ {
+  "name": "mac_clock",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 8,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "notification",
+   "kind": "clock",
+   "obs": {
+    "change": "timezone_changed"
+   }
+  }
+ },
+ {
+  "name": "mac_bye",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 9,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "bye",
+   "obs": {
+    "reason": "shutdown"
+   }
+  }
+ },
+ {
+  "name": "win_hello",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "hello",
+   "obs": {
+    "awake_us": 612345000000,
+    "helper": "daylens-capture-windows",
+    "boot_identity": "kernel",
+    "version": "2.0.0-dev",
+    "pid": 7000,
+    "os": "Windows 10.0.26100",
+    "permissions": {
+     "accessibility": "not_applicable"
+    },
+    "config": {
+     "heartbeat_s": 15,
+     "idle_threshold_s": 120,
+     "reconcile_s": 60
+    }
+   }
+  }
+ },
+ {
+  "name": "win_heartbeat",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "heartbeat",
+   "obs": {
+    "awake_us": 612345678901,
+    "permissions": {
+     "accessibility": "not_applicable"
+    },
+    "registrations": {
+     "focus": true,
+     "session": true,
+     "power": true
+    },
+    "titles": "ok",
+    "stall_ms": 0,
+    "dropped": 3
+   }
+  }
+ },
+ {
+  "name": "win_focus_store",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 10,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+     "name": "Calculator",
+     "path": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe",
+     "pid": 9120,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": {
+      "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+      "package": "Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe"
+     }
+    },
+    "window": {
+     "window": "0x1A2B3C",
+     "title": "Calculator",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_focus_access_denied",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 11,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": null,
+     "name": null,
+     "path": null,
+     "pid": 4,
+     "registered_browser": false,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "access_denied",
+     "store": null
+    },
+    "window": {
+     "window": "0x2B",
+     "title": "Administrator: Task Manager",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_focus_unicode",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 12,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "focus",
+   "obs": {
+    "trigger": "title_changed",
+    "app": {
+     "app_id": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+     "name": "Calculator",
+     "path": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe",
+     "pid": 9120,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": {
+      "aumid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+      "package": "Microsoft.WindowsCalculator_11.2405.2.0_x64__8wekyb3d8bbwe"
+     }
+    },
+    "window": {
+     "window": "0x1A2B3C",
+     "title": "Ünïcödé \"quoted\" \\ path ⠋ 日本語",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_power_resume",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 13,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "power",
+   "kind": "power",
+   "obs": {
+    "state": "resume"
+   }
+  }
+ },
+ {
+  "name": "win_power_resume_user",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 14,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "power",
+   "kind": "power",
+   "obs": {
+    "state": "resume_user"
+   }
+  }
+ },
+ {
+  "name": "win_power_display_snapshot",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 14,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "power",
+   "kind": "power",
+   "obs": {
+    "state": "display_on",
+    "snapshot": true
+   }
+  }
+ },
+ {
+  "name": "win_session_snapshot",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 15,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "wts",
+   "kind": "session",
+   "obs": {
+    "state": "unlocked",
+    "snapshot": true
+   }
+  }
+ },
+ {
+  "name": "win_input_active",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 16,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "idle_timer",
+   "kind": "input",
+   "obs": {
+    "state": "active",
+    "last_input_wall_ms": 1792130412000,
+    "threshold_s": 120,
+    "snapshot": true
+   }
+  }
+ },
+ {
+  "name": "win_heartbeat_session_unregistered",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 17,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "heartbeat",
+   "obs": {
+    "awake_us": 612345678901,
+    "permissions": {
+     "accessibility": "not_applicable"
+    },
+    "registrations": {
+     "focus": true,
+     "session": false,
+     "power": true
+    },
+    "titles": "ok",
+    "stall_ms": 0,
+    "dropped": 0
+   }
+  }
+ },
+ {
+  "name": "win_focus_unresolved_host",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 18,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "win_event",
+   "kind": "focus",
+   "obs": {
+    "trigger": "app_changed",
+    "app": {
+     "app_id": null,
+     "name": null,
+     "path": null,
+     "pid": 7712,
+     "registered_browser": false,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "unresolved",
+     "store": null
+    },
+    "window": {
+     "window": "0x3C4D",
+     "title": "Some hosted window",
+     "title_state": "ok"
+    }
+   }
+  }
+ },
+ {
+  "name": "win_loss",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 19,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "helper",
+   "kind": "loss",
+   "obs": {
+    "channel": "focus",
+    "count": 12,
+    "from_wall_ms": 1792130410000,
+    "to_wall_ms": 1792130412000
+   }
+  }
+ },
+ {
+  "name": "mac_loss",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 20,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "helper",
+   "kind": "loss",
+   "obs": {
+    "channel": "focus",
+    "count": 3,
+    "from_wall_ms": 1792130410000,
+    "to_wall_ms": 1792130411000
+   }
+  }
+ },
+ {
+  "name": "host_mac_tab_page",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "activated",
+    "state": "page",
+    "reason": null,
+    "browser": {
+     "app_id": "company.thebrowser.dia",
+     "name": "Dia",
+     "path": "/Applications/Dia.app",
+     "pid": 812,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": "1785",
+    "tab": "1790",
+    "url": "https://example.com/search?q=budget",
+    "title": "Budget — “Q4” 日本語"
+   }
+  }
+ },
+ {
+  "name": "host_mac_tab_unknown",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "focus",
+    "state": "unknown",
+    "reason": "no_focused_window",
+    "browser": {
+     "app_id": "company.thebrowser.dia",
+     "name": "Dia",
+     "path": "/Applications/Dia.app",
+     "pid": 812,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": null,
+    "tab": null,
+    "url": null,
+    "title": null
+   }
+  }
+ },
+ {
+  "name": "host_win_tab_page",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 0,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "updated",
+    "state": "page",
+    "reason": null,
+    "browser": {
+     "app_id": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+     "name": "Google Chrome",
+     "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+     "pid": 9120,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "abcdefghijklmnopabcdefghijklmnop",
+    "window": "2",
+    "tab": "7",
+    "url": "https://docs.example.com/d/1AbC/edit",
+    "title": "Plan"
+   }
+  }
+ },
+ {
+  "name": "host_win_tab_unknown_firefox",
+  "line": {
+   "v": 1,
+   "run": "run-0002",
+   "seq": 1,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "windows",
+   "source": "browser_ext",
+   "kind": "tab",
+   "obs": {
+    "trigger": "focus",
+    "state": "unknown",
+    "reason": "not_normal",
+    "browser": {
+     "app_id": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+     "name": "Firefox",
+     "path": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+     "pid": 4410,
+     "registered_browser": true,
+     "identity_state": "ok",
+     "store": null,
+     "engine": "unknown",
+     "signer": null,
+     "version_info": null
+    },
+    "extension": "browser@daylens.app",
+    "window": null,
+    "tab": null,
+    "url": null,
+    "title": null
+   }
+  }
+ }
+]

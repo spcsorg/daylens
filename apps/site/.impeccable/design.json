@@ -1,0 +1,1051 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T12:36:39+00:00",
+  "title": "Design System: Daylens V2",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#f5f5f4",
+        "tonalRamp": [
+          "oklch(15.0% 0.001 106.4)",
+          "oklch(26.4% 0.001 106.4)",
+          "oklch(37.9% 0.001 106.4)",
+          "oklch(49.3% 0.001 106.4)",
+          "oklch(60.7% 0.001 106.4)",
+          "oklch(72.1% 0.001 106.4)",
+          "oklch(83.6% 0.001 106.4)",
+          "oklch(95.0% 0.001 106.4)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Field Ink",
+        "canonical": "#181d16",
+        "tonalRamp": [
+          "oklch(15.0% 0.015 136.8)",
+          "oklch(26.4% 0.015 136.8)",
+          "oklch(37.9% 0.015 136.8)",
+          "oklch(49.3% 0.015 136.8)",
+          "oklch(60.7% 0.015 136.8)",
+          "oklch(72.1% 0.015 136.8)",
+          "oklch(83.6% 0.015 136.8)",
+          "oklch(95.0% 0.015 136.8)"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Field Ink Soft",
+        "canonical": "#4b5147",
+        "tonalRamp": [
+          "oklch(15.0% 0.018 132.7)",
+          "oklch(26.4% 0.018 132.7)",
+          "oklch(37.9% 0.018 132.7)",
+          "oklch(49.3% 0.018 132.7)",
+          "oklch(60.7% 0.018 132.7)",
+          "oklch(72.1% 0.018 132.7)",
+          "oklch(83.6% 0.018 132.7)",
+          "oklch(95.0% 0.018 132.7)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Moss Grey",
+        "canonical": "#686d64",
+        "tonalRamp": [
+          "oklch(15.0% 0.015 130.9)",
+          "oklch(26.4% 0.015 130.9)",
+          "oklch(37.9% 0.015 130.9)",
+          "oklch(49.3% 0.015 130.9)",
+          "oklch(60.7% 0.015 130.9)",
+          "oklch(72.1% 0.015 130.9)",
+          "oklch(83.6% 0.015 130.9)",
+          "oklch(95.0% 0.015 130.9)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Pencil Rule",
+        "canonical": "#181d161f",
+        "tonalRamp": [
+          "oklch(15.0% 0.015 136.8)",
+          "oklch(26.4% 0.015 136.8)",
+          "oklch(37.9% 0.015 136.8)",
+          "oklch(49.3% 0.015 136.8)",
+          "oklch(60.7% 0.015 136.8)",
+          "oklch(72.1% 0.015 136.8)",
+          "oklch(83.6% 0.015 136.8)",
+          "oklch(95.0% 0.015 136.8)"
+        ],
+        "note": "Alpha 0.12 over the surface below."
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Ember Orange",
+        "canonical": "#e8643c",
+        "tonalRamp": [
+          "oklch(15.0% 0.124 37.3)",
+          "oklch(26.4% 0.144 37.3)",
+          "oklch(37.9% 0.163 37.3)",
+          "oklch(49.3% 0.173 37.3)",
+          "oklch(60.7% 0.173 37.3)",
+          "oklch(72.1% 0.163 37.3)",
+          "oklch(83.6% 0.144 37.3)",
+          "oklch(95.0% 0.124 37.3)"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Ember Wash",
+        "canonical": "#fd937133",
+        "tonalRamp": [
+          "oklch(15.0% 0.102 38.5)",
+          "oklch(26.4% 0.118 38.5)",
+          "oklch(37.9% 0.133 38.5)",
+          "oklch(49.3% 0.137 38.5)",
+          "oklch(60.7% 0.137 38.5)",
+          "oklch(72.1% 0.133 38.5)",
+          "oklch(83.6% 0.118 38.5)",
+          "oklch(95.0% 0.102 38.5)"
+        ],
+        "note": "Alpha 0.20 over the surface below."
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Card White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.4% 0.000 89.9)",
+          "oklch(37.9% 0.000 89.9)",
+          "oklch(49.3% 0.000 89.9)",
+          "oklch(60.7% 0.000 89.9)",
+          "oklch(72.1% 0.000 89.9)",
+          "oklch(83.6% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "error": {
+        "role": "neutral",
+        "displayName": "Kiln Red",
+        "canonical": "#c2412d",
+        "tonalRamp": [
+          "oklch(15.0% 0.121 31.5)",
+          "oklch(26.4% 0.140 31.5)",
+          "oklch(37.9% 0.160 31.5)",
+          "oklch(49.3% 0.168 31.5)",
+          "oklch(60.7% 0.168 31.5)",
+          "oklch(72.1% 0.160 31.5)",
+          "oklch(83.6% 0.140 31.5)",
+          "oklch(95.0% 0.121 31.5)"
+        ]
+      },
+      "app-bg": {
+        "role": "neutral",
+        "displayName": "Log Cream",
+        "canonical": "#fafaf7",
+        "tonalRamp": [
+          "oklch(15.0% 0.004 106.5)",
+          "oklch(26.4% 0.004 106.5)",
+          "oklch(37.9% 0.004 106.5)",
+          "oklch(49.3% 0.004 106.5)",
+          "oklch(60.7% 0.004 106.5)",
+          "oklch(72.1% 0.004 106.5)",
+          "oklch(83.6% 0.004 106.5)",
+          "oklch(95.0% 0.004 106.5)"
+        ]
+      },
+      "app-bar": {
+        "role": "neutral",
+        "displayName": "Title Bar Linen",
+        "canonical": "#f1f0eb",
+        "tonalRamp": [
+          "oklch(15.0% 0.007 97.4)",
+          "oklch(26.4% 0.007 97.4)",
+          "oklch(37.9% 0.007 97.4)",
+          "oklch(49.3% 0.007 97.4)",
+          "oklch(60.7% 0.007 97.4)",
+          "oklch(72.1% 0.007 97.4)",
+          "oklch(83.6% 0.007 97.4)",
+          "oklch(95.0% 0.007 97.4)"
+        ]
+      },
+      "app-ink": {
+        "role": "neutral",
+        "displayName": "Log Navy",
+        "canonical": "#14213d",
+        "tonalRamp": [
+          "oklch(15.0% 0.054 264.0)",
+          "oklch(26.4% 0.056 264.0)",
+          "oklch(37.9% 0.056 264.0)",
+          "oklch(49.3% 0.056 264.0)",
+          "oklch(60.7% 0.056 264.0)",
+          "oklch(72.1% 0.056 264.0)",
+          "oklch(83.6% 0.056 264.0)",
+          "oklch(95.0% 0.054 264.0)"
+        ]
+      },
+      "app-ink-2": {
+        "role": "neutral",
+        "displayName": "Navy Soft",
+        "canonical": "#4e5871",
+        "tonalRamp": [
+          "oklch(15.0% 0.043 267.7)",
+          "oklch(26.4% 0.043 267.7)",
+          "oklch(37.9% 0.043 267.7)",
+          "oklch(49.3% 0.043 267.7)",
+          "oklch(60.7% 0.043 267.7)",
+          "oklch(72.1% 0.043 267.7)",
+          "oklch(83.6% 0.043 267.7)",
+          "oklch(95.0% 0.043 267.7)"
+        ]
+      },
+      "app-ink-3": {
+        "role": "neutral",
+        "displayName": "Navy Faint",
+        "canonical": "#6b7287",
+        "tonalRamp": [
+          "oklch(15.0% 0.034 270.7)",
+          "oklch(26.4% 0.034 270.7)",
+          "oklch(37.9% 0.034 270.7)",
+          "oklch(49.3% 0.034 270.7)",
+          "oklch(60.7% 0.034 270.7)",
+          "oklch(72.1% 0.034 270.7)",
+          "oklch(83.6% 0.034 270.7)",
+          "oklch(95.0% 0.034 270.7)"
+        ]
+      },
+      "app-line": {
+        "role": "neutral",
+        "displayName": "Ledger Line",
+        "canonical": "#e4e2db",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 93.6)",
+          "oklch(26.4% 0.010 93.6)",
+          "oklch(37.9% 0.010 93.6)",
+          "oklch(49.3% 0.010 93.6)",
+          "oklch(60.7% 0.010 93.6)",
+          "oklch(72.1% 0.010 93.6)",
+          "oklch(83.6% 0.010 93.6)",
+          "oklch(95.0% 0.010 93.6)"
+        ]
+      },
+      "app-block": {
+        "role": "neutral",
+        "displayName": "Block Blue",
+        "canonical": "#e9eefb",
+        "tonalRamp": [
+          "oklch(15.0% 0.018 269.1)",
+          "oklch(26.4% 0.018 269.1)",
+          "oklch(37.9% 0.018 269.1)",
+          "oklch(49.3% 0.018 269.1)",
+          "oklch(60.7% 0.018 269.1)",
+          "oklch(72.1% 0.018 269.1)",
+          "oklch(83.6% 0.018 269.1)",
+          "oklch(95.0% 0.018 269.1)"
+        ]
+      },
+      "app-block-line": {
+        "role": "neutral",
+        "displayName": "Block Edge",
+        "canonical": "#c9d5f4",
+        "tonalRamp": [
+          "oklch(15.0% 0.045 268.7)",
+          "oklch(26.4% 0.045 268.7)",
+          "oklch(37.9% 0.045 268.7)",
+          "oklch(49.3% 0.045 268.7)",
+          "oklch(60.7% 0.045 268.7)",
+          "oklch(72.1% 0.045 268.7)",
+          "oklch(83.6% 0.045 268.7)",
+          "oklch(95.0% 0.045 268.7)"
+        ]
+      },
+      "app-event": {
+        "role": "neutral",
+        "displayName": "Event Sand",
+        "canonical": "#f3f1ea",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 93.6)",
+          "oklch(26.4% 0.010 93.6)",
+          "oklch(37.9% 0.010 93.6)",
+          "oklch(49.3% 0.010 93.6)",
+          "oklch(60.7% 0.010 93.6)",
+          "oklch(72.1% 0.010 93.6)",
+          "oklch(83.6% 0.010 93.6)",
+          "oklch(95.0% 0.010 93.6)"
+        ]
+      },
+      "app-event-line": {
+        "role": "neutral",
+        "displayName": "Event Edge",
+        "canonical": "#dcd8cc",
+        "tonalRamp": [
+          "oklch(15.0% 0.017 91.6)",
+          "oklch(26.4% 0.017 91.6)",
+          "oklch(37.9% 0.017 91.6)",
+          "oklch(49.3% 0.017 91.6)",
+          "oklch(60.7% 0.017 91.6)",
+          "oklch(72.1% 0.017 91.6)",
+          "oklch(83.6% 0.017 91.6)",
+          "oklch(95.0% 0.017 91.6)"
+        ]
+      },
+      "shot": {
+        "role": "secondary",
+        "displayName": "Beam Blue",
+        "canonical": "#3559c4",
+        "tonalRamp": [
+          "oklch(15.0% 0.123 266.2)",
+          "oklch(26.4% 0.143 266.2)",
+          "oklch(37.9% 0.163 266.2)",
+          "oklch(49.3% 0.172 266.2)",
+          "oklch(60.7% 0.172 266.2)",
+          "oklch(72.1% 0.163 266.2)",
+          "oklch(83.6% 0.143 266.2)",
+          "oklch(95.0% 0.123 266.2)"
+        ]
+      },
+      "shot-mid": {
+        "role": "secondary",
+        "displayName": "Beam Light",
+        "canonical": "rgb(160 190 245)",
+        "tonalRamp": [
+          "oklch(15.0% 0.071 262.3)",
+          "oklch(26.4% 0.081 262.3)",
+          "oklch(37.9% 0.085 262.3)",
+          "oklch(49.3% 0.085 262.3)",
+          "oklch(60.7% 0.085 262.3)",
+          "oklch(72.1% 0.085 262.3)",
+          "oklch(83.6% 0.081 262.3)",
+          "oklch(95.0% 0.071 262.3)"
+        ]
+      },
+      "traffic-close": {
+        "role": "neutral",
+        "displayName": "Traffic Close",
+        "canonical": "#ff5f57",
+        "tonalRamp": [
+          "oklch(15.0% 0.138 26.4)",
+          "oklch(26.4% 0.160 26.4)",
+          "oklch(37.9% 0.183 26.4)",
+          "oklch(49.3% 0.196 26.4)",
+          "oklch(60.7% 0.196 26.4)",
+          "oklch(72.1% 0.183 26.4)",
+          "oklch(83.6% 0.160 26.4)",
+          "oklch(95.0% 0.138 26.4)"
+        ]
+      },
+      "traffic-minimize": {
+        "role": "neutral",
+        "displayName": "Traffic Minimize",
+        "canonical": "#febc2e",
+        "tonalRamp": [
+          "oklch(15.0% 0.117 80.9)",
+          "oklch(26.4% 0.135 80.9)",
+          "oklch(37.9% 0.154 80.9)",
+          "oklch(49.3% 0.161 80.9)",
+          "oklch(60.7% 0.161 80.9)",
+          "oklch(72.1% 0.154 80.9)",
+          "oklch(83.6% 0.135 80.9)",
+          "oklch(95.0% 0.117 80.9)"
+        ]
+      },
+      "traffic-zoom": {
+        "role": "neutral",
+        "displayName": "Traffic Zoom",
+        "canonical": "#28c840",
+        "tonalRamp": [
+          "oklch(15.0% 0.150 144.7)",
+          "oklch(26.4% 0.175 144.7)",
+          "oklch(37.9% 0.200 144.7)",
+          "oklch(49.3% 0.217 144.7)",
+          "oklch(60.7% 0.217 144.7)",
+          "oklch(72.1% 0.200 144.7)",
+          "oklch(83.6% 0.175 144.7)",
+          "oklch(95.0% 0.150 144.7)"
+        ]
+      },
+      "paper-dark": {
+        "role": "neutral",
+        "displayName": "Warm Paper (dark)",
+        "canonical": "#10120f",
+        "tonalRamp": [
+          "oklch(15.0% 0.007 135.0)",
+          "oklch(26.4% 0.007 135.0)",
+          "oklch(37.9% 0.007 135.0)",
+          "oklch(49.3% 0.007 135.0)",
+          "oklch(60.7% 0.007 135.0)",
+          "oklch(72.1% 0.007 135.0)",
+          "oklch(83.6% 0.007 135.0)",
+          "oklch(95.0% 0.007 135.0)"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Field Ink (dark)",
+        "canonical": "#ececea",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 106.5)",
+          "oklch(26.4% 0.003 106.5)",
+          "oklch(37.9% 0.003 106.5)",
+          "oklch(49.3% 0.003 106.5)",
+          "oklch(60.7% 0.003 106.5)",
+          "oklch(72.1% 0.003 106.5)",
+          "oklch(83.6% 0.003 106.5)",
+          "oklch(95.0% 0.003 106.5)"
+        ]
+      },
+      "ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Field Ink Soft (dark)",
+        "canonical": "#b9bdb4",
+        "tonalRamp": [
+          "oklch(15.0% 0.013 126.4)",
+          "oklch(26.4% 0.013 126.4)",
+          "oklch(37.9% 0.013 126.4)",
+          "oklch(49.3% 0.013 126.4)",
+          "oklch(60.7% 0.013 126.4)",
+          "oklch(72.1% 0.013 126.4)",
+          "oklch(83.6% 0.013 126.4)",
+          "oklch(95.0% 0.013 126.4)"
+        ]
+      },
+      "muted-dark": {
+        "role": "neutral",
+        "displayName": "Moss Grey (dark)",
+        "canonical": "#8a9086",
+        "tonalRamp": [
+          "oklch(15.0% 0.016 132.5)",
+          "oklch(26.4% 0.016 132.5)",
+          "oklch(37.9% 0.016 132.5)",
+          "oklch(49.3% 0.016 132.5)",
+          "oklch(60.7% 0.016 132.5)",
+          "oklch(72.1% 0.016 132.5)",
+          "oklch(83.6% 0.016 132.5)",
+          "oklch(95.0% 0.016 132.5)"
+        ]
+      },
+      "rule-dark": {
+        "role": "neutral",
+        "displayName": "Pencil Rule (dark)",
+        "canonical": "#ececea24",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 106.5)",
+          "oklch(26.4% 0.003 106.5)",
+          "oklch(37.9% 0.003 106.5)",
+          "oklch(49.3% 0.003 106.5)",
+          "oklch(60.7% 0.003 106.5)",
+          "oklch(72.1% 0.003 106.5)",
+          "oklch(83.6% 0.003 106.5)",
+          "oklch(95.0% 0.003 106.5)"
+        ],
+        "note": "Alpha 0.14 over the surface below."
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Ember Orange (dark)",
+        "canonical": "#ff8a62",
+        "tonalRamp": [
+          "oklch(15.0% 0.111 39.4)",
+          "oklch(26.4% 0.129 39.4)",
+          "oklch(37.9% 0.146 39.4)",
+          "oklch(49.3% 0.152 39.4)",
+          "oklch(60.7% 0.152 39.4)",
+          "oklch(72.1% 0.146 39.4)",
+          "oklch(83.6% 0.129 39.4)",
+          "oklch(95.0% 0.111 39.4)"
+        ]
+      },
+      "accent-soft-dark": {
+        "role": "primary",
+        "displayName": "Ember Wash (dark)",
+        "canonical": "#ff8a6233",
+        "tonalRamp": [
+          "oklch(15.0% 0.111 39.4)",
+          "oklch(26.4% 0.129 39.4)",
+          "oklch(37.9% 0.146 39.4)",
+          "oklch(49.3% 0.152 39.4)",
+          "oklch(60.7% 0.152 39.4)",
+          "oklch(72.1% 0.146 39.4)",
+          "oklch(83.6% 0.129 39.4)",
+          "oklch(95.0% 0.111 39.4)"
+        ],
+        "note": "Alpha 0.20 over the surface below."
+      },
+      "card-dark": {
+        "role": "neutral",
+        "displayName": "Card White (dark)",
+        "canonical": "#181b20",
+        "tonalRamp": [
+          "oklch(15.0% 0.011 260.7)",
+          "oklch(26.4% 0.011 260.7)",
+          "oklch(37.9% 0.011 260.7)",
+          "oklch(49.3% 0.011 260.7)",
+          "oklch(60.7% 0.011 260.7)",
+          "oklch(72.1% 0.011 260.7)",
+          "oklch(83.6% 0.011 260.7)",
+          "oklch(95.0% 0.011 260.7)"
+        ]
+      },
+      "error-dark": {
+        "role": "neutral",
+        "displayName": "Kiln Red (dark)",
+        "canonical": "#ff8f7a",
+        "tonalRamp": [
+          "oklch(15.0% 0.104 31.7)",
+          "oklch(26.4% 0.120 31.7)",
+          "oklch(37.9% 0.136 31.7)",
+          "oklch(49.3% 0.140 31.7)",
+          "oklch(60.7% 0.140 31.7)",
+          "oklch(72.1% 0.136 31.7)",
+          "oklch(83.6% 0.120 31.7)",
+          "oklch(95.0% 0.104 31.7)"
+        ]
+      },
+      "field-dark": {
+        "role": "neutral",
+        "displayName": "Field Surface (dark)",
+        "canonical": "#1a1d18",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 132.7)",
+          "oklch(26.4% 0.010 132.7)",
+          "oklch(37.9% 0.010 132.7)",
+          "oklch(49.3% 0.010 132.7)",
+          "oklch(60.7% 0.010 132.7)",
+          "oklch(72.1% 0.010 132.7)",
+          "oklch(83.6% 0.010 132.7)",
+          "oklch(95.0% 0.010 132.7)"
+        ]
+      },
+      "app-bg-dark": {
+        "role": "neutral",
+        "displayName": "Log Cream (dark)",
+        "canonical": "#17191e",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 268.2)",
+          "oklch(26.4% 0.010 268.2)",
+          "oklch(37.9% 0.010 268.2)",
+          "oklch(49.3% 0.010 268.2)",
+          "oklch(60.7% 0.010 268.2)",
+          "oklch(72.1% 0.010 268.2)",
+          "oklch(83.6% 0.010 268.2)",
+          "oklch(95.0% 0.010 268.2)"
+        ]
+      },
+      "app-bar-dark": {
+        "role": "neutral",
+        "displayName": "Title Bar Linen (dark)",
+        "canonical": "#1e2127",
+        "tonalRamp": [
+          "oklch(15.0% 0.012 264.3)",
+          "oklch(26.4% 0.012 264.3)",
+          "oklch(37.9% 0.012 264.3)",
+          "oklch(49.3% 0.012 264.3)",
+          "oklch(60.7% 0.012 264.3)",
+          "oklch(72.1% 0.012 264.3)",
+          "oklch(83.6% 0.012 264.3)",
+          "oklch(95.0% 0.012 264.3)"
+        ]
+      },
+      "app-ink-dark": {
+        "role": "neutral",
+        "displayName": "Log Navy (dark)",
+        "canonical": "#e8ebf2",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 267.4)",
+          "oklch(26.4% 0.010 267.4)",
+          "oklch(37.9% 0.010 267.4)",
+          "oklch(49.3% 0.010 267.4)",
+          "oklch(60.7% 0.010 267.4)",
+          "oklch(72.1% 0.010 267.4)",
+          "oklch(83.6% 0.010 267.4)",
+          "oklch(95.0% 0.010 267.4)"
+        ]
+      },
+      "app-ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Navy Soft (dark)",
+        "canonical": "#aab1c2",
+        "tonalRamp": [
+          "oklch(15.0% 0.026 267.9)",
+          "oklch(26.4% 0.026 267.9)",
+          "oklch(37.9% 0.026 267.9)",
+          "oklch(49.3% 0.026 267.9)",
+          "oklch(60.7% 0.026 267.9)",
+          "oklch(72.1% 0.026 267.9)",
+          "oklch(83.6% 0.026 267.9)",
+          "oklch(95.0% 0.026 267.9)"
+        ]
+      },
+      "app-ink-3-dark": {
+        "role": "neutral",
+        "displayName": "Navy Faint (dark)",
+        "canonical": "#8c93a5",
+        "tonalRamp": [
+          "oklch(15.0% 0.028 268.7)",
+          "oklch(26.4% 0.028 268.7)",
+          "oklch(37.9% 0.028 268.7)",
+          "oklch(49.3% 0.028 268.7)",
+          "oklch(60.7% 0.028 268.7)",
+          "oklch(72.1% 0.028 268.7)",
+          "oklch(83.6% 0.028 268.7)",
+          "oklch(95.0% 0.028 268.7)"
+        ]
+      },
+      "app-line-dark": {
+        "role": "neutral",
+        "displayName": "Ledger Line (dark)",
+        "canonical": "#2b2f37",
+        "tonalRamp": [
+          "oklch(15.0% 0.016 264.3)",
+          "oklch(26.4% 0.016 264.3)",
+          "oklch(37.9% 0.016 264.3)",
+          "oklch(49.3% 0.016 264.3)",
+          "oklch(60.7% 0.016 264.3)",
+          "oklch(72.1% 0.016 264.3)",
+          "oklch(83.6% 0.016 264.3)",
+          "oklch(95.0% 0.016 264.3)"
+        ]
+      },
+      "app-block-dark": {
+        "role": "neutral",
+        "displayName": "Block Blue (dark)",
+        "canonical": "#22304f",
+        "tonalRamp": [
+          "oklch(15.0% 0.055 264.8)",
+          "oklch(26.4% 0.059 264.8)",
+          "oklch(37.9% 0.059 264.8)",
+          "oklch(49.3% 0.059 264.8)",
+          "oklch(60.7% 0.059 264.8)",
+          "oklch(72.1% 0.059 264.8)",
+          "oklch(83.6% 0.059 264.8)",
+          "oklch(95.0% 0.055 264.8)"
+        ]
+      },
+      "app-block-line-dark": {
+        "role": "neutral",
+        "displayName": "Block Edge (dark)",
+        "canonical": "#34477a",
+        "tonalRamp": [
+          "oklch(15.0% 0.073 267.0)",
+          "oklch(26.4% 0.084 267.0)",
+          "oklch(37.9% 0.089 267.0)",
+          "oklch(49.3% 0.089 267.0)",
+          "oklch(60.7% 0.089 267.0)",
+          "oklch(72.1% 0.089 267.0)",
+          "oklch(83.6% 0.084 267.0)",
+          "oklch(95.0% 0.073 267.0)"
+        ]
+      },
+      "app-event-dark": {
+        "role": "neutral",
+        "displayName": "Event Sand (dark)",
+        "canonical": "#23252b",
+        "tonalRamp": [
+          "oklch(15.0% 0.012 271.0)",
+          "oklch(26.4% 0.012 271.0)",
+          "oklch(37.9% 0.012 271.0)",
+          "oklch(49.3% 0.012 271.0)",
+          "oklch(60.7% 0.012 271.0)",
+          "oklch(72.1% 0.012 271.0)",
+          "oklch(83.6% 0.012 271.0)",
+          "oklch(95.0% 0.012 271.0)"
+        ]
+      },
+      "app-event-line-dark": {
+        "role": "neutral",
+        "displayName": "Event Edge (dark)",
+        "canonical": "#383b43",
+        "tonalRamp": [
+          "oklch(15.0% 0.014 269.3)",
+          "oklch(26.4% 0.014 269.3)",
+          "oklch(37.9% 0.014 269.3)",
+          "oklch(49.3% 0.014 269.3)",
+          "oklch(60.7% 0.014 269.3)",
+          "oklch(72.1% 0.014 269.3)",
+          "oklch(83.6% 0.014 269.3)",
+          "oklch(95.0% 0.014 269.3)"
+        ]
+      },
+      "shot-dark": {
+        "role": "secondary",
+        "displayName": "Beam Blue (dark)",
+        "canonical": "#2a4896",
+        "tonalRamp": [
+          "oklch(15.0% 0.100 265.3)",
+          "oklch(26.4% 0.115 265.3)",
+          "oklch(37.9% 0.130 265.3)",
+          "oklch(49.3% 0.133 265.3)",
+          "oklch(60.7% 0.133 265.3)",
+          "oklch(72.1% 0.130 265.3)",
+          "oklch(83.6% 0.115 265.3)",
+          "oklch(95.0% 0.100 265.3)"
+        ]
+      },
+      "shot-mid-dark": {
+        "role": "secondary",
+        "displayName": "Beam Light (dark)",
+        "canonical": "rgb(60 98 186)",
+        "tonalRamp": [
+          "oklch(15.0% 0.107 264.3)",
+          "oklch(26.4% 0.124 264.3)",
+          "oklch(37.9% 0.140 264.3)",
+          "oklch(49.3% 0.145 264.3)",
+          "oklch(60.7% 0.145 264.3)",
+          "oklch(72.1% 0.140 264.3)",
+          "oklch(83.6% 0.124 264.3)",
+          "oklch(95.0% 0.107 264.3)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero headline only, max 17ch."
+      },
+      "display-closing": {
+        "displayName": "Display Closing",
+        "purpose": "Closing line above the second signup."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Card titles."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Step caption at the top of the app window."
+      },
+      "essay": {
+        "displayName": "Essay",
+        "purpose": "Long reading on paper, max 40rem."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Line under the hero headline."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Card lists, closing sub-line, success message."
+      },
+      "ui": {
+        "displayName": "Ui",
+        "purpose": "Buttons."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Date, footer, search, answer."
+      },
+      "logo": {
+        "displayName": "Logo",
+        "purpose": "Wordmark only."
+      },
+      "app-block": {
+        "displayName": "App Block",
+        "purpose": "Calendar block titles."
+      },
+      "app-event": {
+        "displayName": "App Event",
+        "purpose": "Calendar event titles."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "In-app column headers and assistant questions."
+      },
+      "hour": {
+        "displayName": "Hour",
+        "purpose": "Hour labels on the calendar axis."
+      },
+      "raw": {
+        "displayName": "Raw",
+        "purpose": "Geist Mono. Raw timestamps and window or page titles only."
+      }
+    },
+    "shadows": [
+      {
+        "name": "window-float",
+        "value": "0 30px 80px -30px rgb(20 33 61 / 0.35), 0 2px 6px rgb(20 33 61 / 0.06)",
+        "purpose": "The app window."
+      },
+      {
+        "name": "field-lift",
+        "value": "0 6px 24px -12px rgb(24 29 22 / 0.25)",
+        "purpose": "The email field on paper; the only shadow on paper."
+      },
+      {
+        "name": "search-float",
+        "value": "0 8px 24px -14px rgb(20 33 61 / 0.4)",
+        "purpose": "In-app search field."
+      },
+      {
+        "name": "answer-float",
+        "value": "0 16px 40px -20px rgb(20 33 61 / 0.45)",
+        "purpose": "Answer panel under search."
+      },
+      {
+        "name": "assistants-float",
+        "value": "0 20px 50px -24px rgb(20 33 61 / 0.45)",
+        "purpose": "Assistants panel."
+      },
+      {
+        "name": "match-ring",
+        "value": "0 0 0 3px var(--accent-soft)",
+        "purpose": "Calendar block that answers the search."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Every CSS transition."
+      },
+      {
+        "name": "scroll-follow",
+        "value": "current += (target - current) * (1 - exp(-9 * dt)), dt <= 0.1s",
+        "purpose": "Stage progress eases toward scroll position."
+      },
+      {
+        "name": "stage-height",
+        "value": "380svh track, 100svh sticky viewport",
+        "purpose": "The one pinned scroll stage."
+      },
+      {
+        "name": "phases",
+        "value": "grow 0-0.08; morph 0.10-0.28; calendar 0.36-0.44; search 0.52-0.62; assistants 0.72-0.80",
+        "purpose": "Fractions of pinned distance; gaps hold the finished state."
+      },
+      {
+        "name": "caption-switch",
+        "value": "0.21, 0.41, 0.58, 0.77",
+        "purpose": "Captions change at about 60% of their phase."
+      },
+      {
+        "name": "caption-transition",
+        "value": "opacity 0.35s, transform 0.45s (8px rise)",
+        "purpose": "Step caption swap."
+      },
+      {
+        "name": "raw-stagger",
+        "value": "0.035 per line",
+        "purpose": "Raw log lines travelling into blocks."
+      },
+      {
+        "name": "assistant-stagger",
+        "value": "0.18 per row",
+        "purpose": "Assistant rows sliding in."
+      },
+      {
+        "name": "button",
+        "value": "opacity 0.2s",
+        "purpose": "Button hover and field border."
+      },
+      {
+        "name": "nav",
+        "value": "background-color, border-color 0.25s",
+        "purpose": "Nav fills once past the stage."
+      },
+      {
+        "name": "caret",
+        "value": "1s steps(1) infinite",
+        "purpose": "Search caret blink."
+      },
+      {
+        "name": "sand-travel",
+        "value": "1.09s cubic ease-out, up to 0.35s delay; fade-in 0.6s",
+        "purpose": "Sand grains regathering."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "static stage, finished window 760px (640px phones)",
+        "purpose": "prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "max-width: 767px"
+      },
+      {
+        "name": "tablet",
+        "value": "min-width: 768px"
+      },
+      {
+        "name": "desktop",
+        "value": "min-width: 1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Pill Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Nav join link. Solid ink pill; the only button style on paper.",
+      "html": "<a class=\"ds-btn-pill\" href=\"#join\">Join the waitlist</a>",
+      "css": ".ds-btn-pill { display: inline-block; font-family: Geist, -apple-system, sans-serif; font-size: 15px; font-weight: 500; text-decoration: none; padding: 8px 14px; border-radius: 999px; background: var(--ink, #181d16); color: var(--paper, #f5f5f4); transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn-pill:hover { opacity: 0.85; } .ds-btn-pill:focus-visible { outline: 2px solid var(--accent, #e8643c); outline-offset: 3px; }"
+    },
+    {
+      "name": "Email Field",
+      "kind": "input",
+      "refersTo": "email-field",
+      "description": "One capsule holding the email input and its join button. Used in the hero and the close.",
+      "html": "<form class=\"ds-field\"><input type=\"email\" placeholder=\"What's your email?\" aria-label=\"What's your email?\"><button type=\"submit\">Join the waitlist</button></form>",
+      "css": ".ds-field { display: flex; gap: 6px; width: min(100%, 440px); padding: 5px; border: 1px solid var(--rule, #181d161f); border-radius: 14px; background: color-mix(in srgb, var(--paper, #f5f5f4) 88%, white); box-shadow: 0 6px 24px -12px rgb(24 29 22 / 0.25); transition: border-color 0.2s cubic-bezier(0.22, 1, 0.36, 1); font-family: Geist, -apple-system, sans-serif; } .ds-field:focus-within { border-color: var(--ink, #181d16); } .ds-field input { flex: 1; min-width: 0; padding: 0 12px; border: 0; background: transparent; color: var(--ink, #181d16); font: inherit; font-size: 16px; outline: none; } .ds-field input::placeholder { color: var(--muted, #686d64); } .ds-field button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: var(--ink, #181d16); color: var(--paper, #f5f5f4); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1); } .ds-field button:hover { opacity: 0.88; } .ds-field button:focus-visible { outline: 2px solid var(--accent, #e8643c); outline-offset: 3px; }"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "button-primary",
+      "description": "Fixed 64px bar: wordmark left, join pill right. Fills with paper once past the stage.",
+      "html": "<header class=\"ds-nav\"><a class=\"ds-logo\" href=\"#top\"><span class=\"ds-logo-mark\"><svg viewBox=\"0 0 64 64\" width=\"28\" height=\"28\"><rect width=\"64\" height=\"64\" rx=\"14\" fill=\"#6aa7f5\"/><rect x=\"15\" y=\"17\" width=\"34\" height=\"30\" rx=\"4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"3\"/><path d=\"M15 25h34\" stroke=\"#fff\" stroke-width=\"3\"/></svg></span>Daylens</a><a class=\"ds-nav-join\" href=\"#join\">Join the waitlist</a></header>",
+      "css": ".ds-nav { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 clamp(16px, 4vw, 40px); background: var(--paper, #f5f5f4); border-bottom: 1px solid var(--rule, #181d161f); font-family: Geist, -apple-system, sans-serif; color: var(--ink, #181d16); } .ds-logo { display: inline-flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; text-decoration: none; color: inherit; } .ds-logo-mark svg { display: block; border-radius: 7px; } .ds-nav-join { font-size: 15px; font-weight: 500; text-decoration: none; padding: 8px 14px; border-radius: 999px; background: var(--ink, #181d16); color: var(--paper, #f5f5f4); transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1); } .ds-nav-join:hover { opacity: 0.85; } .ds-nav a:focus-visible { outline: 2px solid var(--accent, #e8643c); outline-offset: 3px; }"
+    },
+    {
+      "name": "App Window",
+      "kind": "custom",
+      "refersTo": "app-window",
+      "description": "The Daylens app built in HTML: the page's only container. Title bar with traffic lights, caption, date.",
+      "html": "<div class=\"ds-window\"><div class=\"ds-bar\"><i></i><i></i><i></i></div><div class=\"ds-head\"><p class=\"ds-caption\">Daylens turns it into a calendar of what you actually did.</p><p class=\"ds-date\">Wednesday, 3 June</p></div></div>",
+      "css": ".ds-window { width: 100%; max-width: 640px; overflow: hidden; border: 1px solid var(--app-line, #e4e2db); border-radius: 20px; background: var(--app-bg, #fafaf7); color: var(--app-ink, #14213d); box-shadow: 0 30px 80px -30px rgb(20 33 61 / 0.35), 0 2px 6px rgb(20 33 61 / 0.06); font-family: Geist, -apple-system, sans-serif; } .ds-bar { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; background: var(--app-bar, #f1f0eb); border-bottom: 1px solid var(--app-line, #e4e2db); } .ds-bar i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .ds-bar i:nth-child(2) { background: #febc2e; } .ds-bar i:nth-child(3) { background: #28c840; } .ds-head { padding: 24px 28px 28px; } .ds-caption { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 500; letter-spacing: -0.02em; } .ds-date { margin: 6px 0 0; font-size: 14px; color: var(--app-ink-3, #6b7287); }"
+    },
+    {
+      "name": "Calendar Block",
+      "kind": "card",
+      "refersTo": "calendar-block",
+      "description": "A block of what you did, with its app icons. The match state answers a search.",
+      "html": "<div class=\"ds-blocks\"><div class=\"ds-block\"><p>Published the autumn menu on the website and Instagram</p><span class=\"ds-icons\"><i></i><i></i></span></div><div class=\"ds-block is-match\"><p>Built the order form for the bakery site</p><span class=\"ds-icons\"><i></i></span></div></div>",
+      "css": ".ds-blocks { display: grid; gap: 8px; width: 420px; padding: 16px; background: var(--app-bg, #fafaf7); font-family: Geist, -apple-system, sans-serif; } .ds-block { display: flex; flex-direction: column; gap: 6px; min-height: 64px; justify-content: space-between; padding: 8px 12px; border: 1px solid var(--app-block-line, #c9d5f4); border-radius: 10px; background: var(--app-block, #e9eefb); color: var(--app-ink, #14213d); transition: box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1); } .ds-block p { margin: 0; font-size: 14px; line-height: 1.3; font-weight: 500; } .ds-icons { display: flex; gap: 4px; } .ds-icons i { width: 16px; height: 16px; border-radius: 4px; background: var(--app-ink-3, #6b7287); opacity: 0.4; } .ds-block.is-match, .ds-block:hover { border-color: var(--accent, #e8643c); box-shadow: 0 0 0 3px var(--accent-soft, #fd937133); }"
+    },
+    {
+      "name": "Calendar Event",
+      "kind": "chip",
+      "refersTo": "calendar-event",
+      "description": "What the calendar said you would do, in the column beside the blocks.",
+      "html": "<div class=\"ds-event\"><p>Payment provider call</p></div>",
+      "css": ".ds-event { width: 220px; padding: 7px 10px; border: 1px solid var(--app-event-line, #dcd8cc); border-radius: 10px; background: var(--app-event, #f3f1ea); font-family: Geist, -apple-system, sans-serif; } .ds-event p { margin: 0; font-size: 14px; line-height: 1.3; color: var(--app-ink-2, #4e5871); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+    },
+    {
+      "name": "Raw Activity Line",
+      "kind": "custom",
+      "refersTo": "raw-line",
+      "description": "One line the computer reported, verbatim. The only Geist Mono in the system.",
+      "html": "<div class=\"ds-raw\"><span class=\"ds-raw-at\">12:01</span><i></i><span class=\"ds-raw-text\">order-form.tsx · brightside-site</span></div>",
+      "css": ".ds-raw { display: flex; align-items: center; gap: 12px; width: 420px; height: 40px; padding: 0 10px; border-bottom: 1px solid var(--app-line, #e4e2db); background: var(--app-bg, #fafaf7); font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; white-space: nowrap; overflow: hidden; } .ds-raw-at { color: var(--app-ink-3, #6b7287); } .ds-raw i { flex-shrink: 0; width: 16px; height: 16px; border-radius: 4px; background: var(--app-ink-3, #6b7287); opacity: 0.4; } .ds-raw-text { overflow: hidden; text-overflow: ellipsis; color: var(--app-ink-2, #4e5871); }"
+    },
+    {
+      "name": "Search and Answer",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "In-app search typed in lowercase with an ember caret, and the answer panel citing where it came from.",
+      "html": "<div class=\"ds-ask\"><div class=\"ds-search\"><svg viewBox=\"0 0 20 20\"><path d=\"m14 14 4 4M15.5 9a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z\"/></svg><span>where did i leave the order form</span><span class=\"ds-caret\"></span></div><p class=\"ds-answer\">In checkout.ts in Cursor at 1:12 PM. You tested cards in the payments docs at 2:40, then called the payment provider at 3.</p></div>",
+      "css": ".ds-ask { display: grid; gap: 6px; width: 420px; font-family: Geist, -apple-system, sans-serif; color: var(--app-ink, #14213d); } .ds-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px solid var(--app-line, #e4e2db); border-radius: 10px; background: var(--app-bg, #fafaf7); box-shadow: 0 8px 24px -14px rgb(20 33 61 / 0.4); font-size: 14px; } .ds-search svg { width: 16px; height: 16px; fill: none; stroke: var(--app-ink-3, #6b7287); stroke-width: 1.6; stroke-linecap: round; } .ds-caret { width: 1.5px; height: 16px; margin-left: -6px; background: var(--accent, #e8643c); animation: ds-blink 1s steps(1) infinite; } @keyframes ds-blink { 50% { opacity: 0; } } @media (prefers-reduced-motion: reduce) { .ds-caret { animation: none; } } .ds-answer { margin: 0; padding: 12px 14px; border: 1px solid var(--app-line, #e4e2db); border-radius: 12px; background: var(--app-bg, #fafaf7); box-shadow: 0 16px 40px -20px rgb(20 33 61 / 0.45); font-size: 14px; line-height: 1.45; }"
+    },
+    {
+      "name": "Assistants Panel",
+      "kind": "custom",
+      "refersTo": "assistants-panel",
+      "description": "Claude, Codex and Cursor reading the same day, each with the question it asks.",
+      "html": "<div class=\"ds-assist\"><div class=\"ds-assist-row\"><i></i><span class=\"ds-assist-name\">Claude</span><span class=\"ds-assist-read\">What did I finish today?</span></div><div class=\"ds-assist-row\"><i></i><span class=\"ds-assist-name\">Codex</span><span class=\"ds-assist-read\">Where is the order form code?</span></div><div class=\"ds-assist-row\"><i></i><span class=\"ds-assist-name\">Cursor</span><span class=\"ds-assist-read\">What was I doing at noon?</span></div></div>",
+      "css": ".ds-assist { display: grid; gap: 6px; width: 300px; padding: 10px; border: 1px solid var(--app-line, #e4e2db); border-radius: 14px; background: var(--app-bg, #fafaf7); box-shadow: 0 20px 50px -24px rgb(20 33 61 / 0.45); font-family: Geist, -apple-system, sans-serif; color: var(--app-ink, #14213d); } .ds-assist-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; } .ds-assist-row i { width: 22px; height: 22px; border-radius: 6px; background: var(--app-ink-3, #6b7287); opacity: 0.35; } .ds-assist-name { font-size: 14px; font-weight: 500; } .ds-assist-read { margin-left: auto; font-size: 12px; color: var(--app-ink-3, #6b7287); }"
+    },
+    {
+      "name": "Records Card Pair",
+      "kind": "card",
+      "refersTo": "card-records",
+      "description": "The one Beam-blue card (what it records) beside the white card (what it never records).",
+      "html": "<div class=\"ds-cards\"><article class=\"ds-card ds-card--records\"><h2>What it records</h2><ul><li><svg viewBox=\"0 0 20 20\"><path d=\"M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5v-9ZM3 7.5h14\"/></svg>The apps you use and their window titles</li></ul></article><article class=\"ds-card ds-card--never\"><h2>What it never records</h2><ul><li><svg viewBox=\"0 0 20 20\" class=\"is-never\"><path d=\"M5.5 3h6L15 6.5V16a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM11 3v4h4\"/><path d=\"M3 17 17 3\" class=\"ds-strike\"/></svg>File contents</li></ul></article></div>",
+      "css": ".ds-cards { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; max-width: 760px; font-family: Geist, -apple-system, sans-serif; } .ds-card { padding: clamp(24px, 3vw, 40px); border-radius: 28px; } .ds-card h2 { margin: 0; font-size: 26px; line-height: 1.15; font-weight: 500; letter-spacing: -0.025em; } .ds-card ul { display: grid; gap: 14px; margin: 28px 0 0; padding: 0; list-style: none; font-size: 17px; line-height: 1.4; } .ds-card li { display: flex; align-items: flex-start; gap: 12px; } .ds-card svg { width: 22px; height: 22px; flex-shrink: 0; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; } .ds-card--records { color: #fff; background: radial-gradient(80% 70% at 100% 110%, rgb(160 190 245 / 0.55), rgb(160 190 245 / 0) 70%), var(--shot, #3559c4); } .ds-card--never { background: var(--card, #fff); border: 1px solid var(--rule, #181d161f); color: var(--ink, #181d16); } .ds-card--never ul { color: var(--ink-2, #4b5147); } .ds-card svg.is-never { color: var(--muted, #686d64); } .ds-strike { stroke: var(--accent, #e8643c); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Logbook on Paper",
+    "overview": "**Creative North Star: \"The Logbook on Paper\"**\n\nThe page is a sheet of warm paper with dark ink on it, and the only object on that sheet is the Daylens app. Everything Daylens claims is shown inside one app window that behaves like the real product: a raw log of what the computer reported, turning into a calendar of what you did, next to what your calendar said, then searched and read by assistants. Outside the window the page is quiet reading: one headline, one line, an email field, a short essay, two cards, a closing line.\n\nTwo material worlds meet and never blend. The page uses greenish-neutral paper and ink with one warm orange accent. The window uses the Daylens app's own Ship's log tokens from the Daylens-V2 Figma file (navy ink, soft cream surfaces, pale blue blocks). A page never borrows app tokens for its own chrome, and the window never borrows page tokens, except the accent, which marks a search hit inside the app.\n\nDensity is low on paper and true-to-product inside the window. Behind the hero, a field of sand grains settles into slow patterns and reorganises as the mouse moves between screen quadrants; it is texture, not content, and it is masked clear of the headline.\n\nThis file describes the launch page (`app/(launch)/`) and the sand backdrop it imports (`app/(ramp)/_ramp/Backdrop.tsx`, `field.ts`). The other route groups under `app/` ((abc), (beam), (chatgpt), (ramp), (rize), (superlogical), (toggl), (update)) are reference templates, not the system.",
+    "keyCharacteristics": [
+      "Paper and ink outside, Ship's log inside one app window.",
+      "One warm accent, used for focus, selection, the typing caret, the never-records strike, and search hits. Never for buttons or text.",
+      "Geist for every word; Geist Mono only for raw lines the computer reported verbatim.",
+      "Product shown as live HTML, never as screenshot images.",
+      "One pinned scroll stage per page at most; everything else is static reading.",
+      "Light and dark follow the operating system."
+    ],
+    "rules": [
+      {
+        "name": "The Two Inks Rule",
+        "body": "Page text is Field Ink; window text is Log Navy. A surface is either paper or app, never a mix.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ember Is a Signal Rule",
+        "body": "The accent marks focus, selection, typing, exclusion, and a search hit. It is never a fill for buttons, links, headings, or backgrounds.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Blue Card Rule",
+        "body": "Beam Blue fills one card per page, the one that states what Daylens does. Its partner card is Card White with a Pencil Rule border.",
+        "section": "colors"
+      },
+      {
+        "name": "The Verbatim Mono Rule",
+        "body": "Geist Mono is only for text the computer reported verbatim: a timestamp and a window or page title in the raw log. Never for labels, numbers in prose, code-flavoured decoration, or headings.",
+        "section": "typography"
+      },
+      {
+        "name": "The Medium Headline Rule",
+        "body": "Headings are Geist 500 with negative tracking. Nothing on the page uses 700.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Container Rule",
+        "body": "The app window is the only framed container in the stage. No feature grids, no three windows side by side, no device mockups.",
+        "section": "layout"
+      },
+      {
+        "name": "The Rising Window Rule",
+        "body": "On the first view, the window's top edge is visible at the bottom of the viewport. The story starts on scroll, not on load.",
+        "section": "layout"
+      },
+      {
+        "name": "The Navy Shadow Rule",
+        "body": "Every shadow inside the window is tinted Log Navy (rgb 20 33 61), never neutral black. Shadows only hang under things that float above the calendar.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat Paper Rule",
+        "body": "Nothing on paper has a shadow except the email field. No glass, no blur, no backdrop-filter anywhere.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One Stage Rule",
+        "body": "A page gets at most one pinned scroll stage, and only the app window performs in it. Everything after the stage is still.",
+        "section": "motion"
+      },
+      {
+        "name": "The Finished State Rule",
+        "body": "Every frame between phases is a complete, readable screen of the app. Reduced motion shows the finished day, not a blank or a first frame.",
+        "section": "motion"
+      }
+    ],
+    "dos": [
+      "Do show the product as live HTML built from the in-window tokens, inside one app window with traffic lights and a 38px title bar.",
+      "Do keep page tokens (paper, ink, rule, accent) outside the window and Ship's log tokens inside it.",
+      "Do set every heading in Geist 500 with negative tracking; reserve 600 for the wordmark.",
+      "Do use Geist Mono only for raw timestamps and window or page titles the computer reported.",
+      "Do keep the accent to focus, selection, the caret, the never-strike, and search hits.",
+      "Do give every scroll phase a rest after it, and switch its caption at about 60% of the phase.",
+      "Do ship a reduced-motion version that shows the finished state, and dark pairs for every new token.",
+      "Do keep inputs at 16px and buttons at 44px tall on phones.",
+      "Do present the illustrative day (a bakery owner's Wednesday, 3 June) as the app's content, unlabelled."
+    ],
+    "donts": [
+      "Don't use gradient text, glass, blur panels, or backdrop-filter.",
+      "Don't put a small label or kicker above a heading. Headings stand alone.",
+      "Don't use em dashes anywhere in copy.",
+      "Don't label the product or its data as an \"example\", \"demo\", or \"sample\".",
+      "Don't show the product as screenshots or exported images. Rebuild what is needed in HTML.",
+      "Don't put more than one app window, device frame, or feature grid on a page.",
+      "Don't fill buttons, links, or headings with Ember Orange or Beam Blue.",
+      "Don't use neutral black shadows inside the window, or shadows on paper beyond the email field.",
+      "Don't add a second pinned stage, or any motion that ignores reduced-motion."
+    ]
+  }
+}

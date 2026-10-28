@@ -1,0 +1,7 @@
+.next*/
+next-env.d.ts
+.env*.local
+.env
+*.tsbuildinfo
+.vercel
+.impeccable/review/

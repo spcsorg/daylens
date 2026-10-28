@@ -1,0 +1,39 @@
+{
+  "name": "daylens-v2-capture",
+  "private": true,
+  "version": "2.0.0-beta.1",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "test:large": "node --test --test-concurrency=1 \"tests/large/*.large.ts\"",
+    "test:gold": "node --test --test-concurrency=1 \"tests/gold/*.gold.ts\"",
+    "typecheck": "tsc --noEmit -p .",
+    "capture": "node capture/service.ts",
+    "build:js": "tsc -p tsconfig.build.json",
+    "build:sqlite": "node tools/buildSqlite.ts",
+    "eval:search": "node tools/evalSearch.ts",
+    "app:build": "vite build --config app/vite.config.ts",
+    "app": "npm run app:build && electron app/main/main.ts",
+    "app:typecheck": "tsc --noEmit -p app",
+    "app:package": "node app/package/build.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "electron-updater": "6.8.11",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.6.5",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "electron": "44.5.1",
+    "electron-builder": "26.18.0",
+    "typescript": "7.0.2",
+    "vite": "6.4.3"
+  }
+}

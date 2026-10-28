@@ -1,0 +1,75 @@
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Icon } from './Icon.tsx'
+
+export function Dialog({ children, onClose, label }: { children: ReactNode; onClose: () => void; label: string }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label={label}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/** A popover anchored under its trigger, closed by Escape or a click outside. */
+export function Popover({ open, onClose, children, align = 'right', className = '' }: { open: boolean; onClose: () => void; children: ReactNode; align?: 'left' | 'right'; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
+  if (!open) return null
+  return (
+    <div ref={ref} className={`popover ${className}`} style={{ top: 'calc(100% + 4px)', [align]: 0 }}>
+      {children}
+    </div>
+  )
+}
+
+interface ToastMsg {
+  text: string
+  error?: boolean
+}
+
+const ToastContext = createContext<(t: ToastMsg) => void>(() => {})
+
+export function ToastHost({ children }: { children: ReactNode }) {
+  const [toast, setToast] = useState<(ToastMsg & { n: number }) | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const show = useCallback((t: ToastMsg) => {
+    setToast((prev) => ({ ...t, n: (prev?.n ?? 0) + 1 }))
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setToast(null), t.error ? 6000 : 4000)
+  }, [])
+  return (
+    <ToastContext.Provider value={show}>
+      {children}
+      {toast && (
+        <div key={toast.n} className={`toast${toast.error ? ' error' : ''}`} role="status">
+          <Icon name={toast.error ? 'alert' : 'check'} />
+          {toast.text}
+        </div>
+      )}
+    </ToastContext.Provider>
+  )
+}
+
+export const useToast = () => useContext(ToastContext)

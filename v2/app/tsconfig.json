@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": ["main/**/*.ts", "reader/**/*.ts", "shared/**/*.ts", "renderer/src/**/*.ts", "renderer/src/**/*.tsx", "tools/**/*.ts", "package/**/*.ts", "vite.config.ts"]
+}

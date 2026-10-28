@@ -1,0 +1,55 @@
+/* Search: an overlay over the whole window, opened from the sidebar or Cmd+K. */
+.search-panel {
+  margin-top: 72px;
+  width: 640px;
+  max-width: calc(100% - 64px);
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-window);
+  overflow: hidden;
+  animation: rise var(--reveal) var(--ease);
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  height: 56px;
+  padding: 0 var(--space-20);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-3);
+}
+
+.search-field input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: var(--body-large);
+  color: var(--text);
+}
+
+.search-results {
+  max-height: min(520px, calc(100vh - 220px));
+  overflow-y: auto;
+  padding: var(--space-8);
+}
+
+.search-group {
+  padding: var(--space-4) 0 var(--space-8);
+}
+
+.search-group .section-label {
+  padding: var(--space-8) var(--space-12) 0;
+  margin-bottom: var(--space-4);
+}
+
+.search-note {
+  font: var(--caption);
+  color: var(--text-2);
+  padding: var(--space-8) var(--space-12);
+}
+
+.search-more {
+  margin: var(--space-4) 0 0 var(--space-4);
+}

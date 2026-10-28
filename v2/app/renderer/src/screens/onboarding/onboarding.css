@@ -1,0 +1,141 @@
+/* Onboarding: window titles, then the day so far. */
+.onboarding {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-col {
+  width: 480px;
+  max-width: calc(100% - 64px);
+  padding: 72px 0 var(--space-48);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.onboarding-col > * {
+  flex: none;
+}
+
+.onboarding h1 {
+  font: var(--display);
+  letter-spacing: -0.8px;
+}
+
+.lead {
+  font: var(--body-large);
+  color: var(--text-2);
+  margin-bottom: var(--space-8);
+}
+
+.ob-date {
+  font: var(--label-regular);
+  color: var(--text-2);
+  margin-top: var(--space-4);
+}
+
+.ob-back {
+  align-self: flex-start;
+  margin-left: calc(-1 * var(--space-16));
+}
+
+.ob-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.ob-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-16) var(--space-20);
+}
+
+.ob-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.ob-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ob-label {
+  font: var(--body-strong);
+}
+
+.ob-detail {
+  font: var(--caption);
+  color: var(--text-2);
+}
+
+.ob-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.ob-icons {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.status-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.morning-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  border-bottom: 1px solid var(--line);
+  font: var(--label-regular);
+}
+
+.morning-row:first-child {
+  border-top: 1px solid var(--line);
+}
+
+.morning-row .time {
+  width: 48px;
+  font: var(--caption-strong);
+  color: var(--text-3);
+  flex: none;
+}
+
+.morning-row .names {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drag-tile {
+  position: fixed;
+  right: var(--space-40);
+  bottom: var(--space-40);
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: 14px var(--space-16);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  z-index: 25;
+  -webkit-user-drag: element;
+  animation: rise var(--reveal) var(--ease);
+}

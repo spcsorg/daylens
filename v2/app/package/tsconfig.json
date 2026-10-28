@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "../../build/app",
+    "rootDir": "../..",
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": false
+  },
+  "include": ["../main/**/*.ts", "../reader/**/*.ts", "../shared/**/*.ts", "../../capture/service.ts", "../../capture/agents/backfillMain.ts", "../../storage/deletionWorker.ts"]
+}

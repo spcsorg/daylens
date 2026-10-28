@@ -1,0 +1,107 @@
+[
+ {
+  "name": "not_json",
+  "reason": "not_json",
+  "raw": "{\"v\":1,"
+ },
+ {
+  "name": "version_2",
+  "reason": "unsupported_version",
+  "raw": "{\"v\": 2, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "unknown_kind",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"keystroke\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "negative_seq",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": -1, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "float_wall_ms",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1.5, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "mono_as_string",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": \"881234567890\", \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "title_without_ok",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"no_permission\"}}}"
+ },
+ {
+  "name": "ok_without_title",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": null, \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "focus_without_app",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "bad_platform",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"beos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "bad_source",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"Bad Source\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "tz_offset_out_of_range",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": 2000}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"✳ Fix capture\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "title_too_long",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"title_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"identity_state\": \"ok\", \"store\": null, \"engine\": \"none\", \"signer\": null, \"version_info\": null}, \"window\": {\"window\": \"w-1\", \"title\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"title_state\": \"ok\"}}}"
+ },
+ {
+  "name": "array_line",
+  "reason": "malformed",
+  "raw": "[1,2,3]"
+ },
+ {
+  "name": "loss_backwards",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 19, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"windows\", \"source\": \"helper\", \"kind\": \"loss\", \"obs\": {\"channel\": \"focus\", \"count\": 12, \"from_wall_ms\": 1792130412000, \"to_wall_ms\": 1792130410000}}"
+ },
+ {
+  "name": "tab_page_without_url",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_with_title",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": \"no_tab\", \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_without_reason",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": null}}"
+ },
+ {
+  "name": "tab_bad_extension_id",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"chrome-extension://x/\", \"window\": \"1\", \"tab\": \"2\", \"url\": \"https://example.com/\", \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_url_too_long",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"page\", \"reason\": null, \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": \"https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"title\": \"x\"}}"
+ },
+ {
+  "name": "tab_unknown_reason",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": \"private_window\", \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": null}}"
+ }
+]

@@ -1,0 +1,128 @@
+import XCTest
+@testable import CaptureCore
+
+final class NativeMessagingTests: XCTestCase {
+  let time = EventTime(wallMs: 1_792_130_412_345, monoUs: 881_234_567_890, tz: "Example/Town", tzOffsetMin: -300)
+  let dia = AppInfo(appId: "company.thebrowser.dia", name: "Dia", path: "/Applications/Dia.app", pid: 812, registeredBrowser: true, identityState: .ok)
+  let devId = "abcdefghijklmnopabcdefghijklmnop"
+
+  func fixture(_ name: String) throws -> NSDictionary {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../protocol/fixtures/valid.json").standardized
+    let list = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [[String: Any]]
+    return list.first { $0["name"] as? String == name }!["line"] as! NSDictionary
+  }
+
+  func encode(_ msg: String, seq: Int64) throws -> NSDictionary {
+    guard case .tab(let r) = ExtensionMessage.parse(Array(msg.utf8))! else { throw XCTSkip("not a tab") }
+    let line = envelope(run: "run-0002", seq: seq, boot: "boot-0001", time: time, platform: "macos", source: "browser_ext", kind: "tab",
+                        obs: Obs.tab(r, browser: dia, extensionId: devId)).serialized()
+    return try JSONSerialization.jsonObject(with: Data(line.utf8)) as! NSDictionary
+  }
+
+  func testTabLinesMatchGoldenFixtures() throws {
+    let page = #"{"t":"tab","state":"page","trigger":"activated","window":"1785","tab":"1790","url":"https://example.com/search?q=budget","title":"Budget — “Q4” 日本語"}"#
+    XCTAssertEqual(try encode(page, seq: 0), try fixture("host_mac_tab_page"))
+    let unknown = #"{"t":"tab","state":"unknown","trigger":"focus","reason":"no_focused_window"}"#
+    XCTAssertEqual(try encode(unknown, seq: 1), try fixture("host_mac_tab_unknown"))
+  }
+
+  func testLaunchDetection() {
+    XCTAssertEqual(HostLaunch.detect(["/x/host", "chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg/"]), .chromium(extensionId: "dgidcofcmgnlicmmepgomalcdcbgjjjg"))
+    XCTAssertEqual(HostLaunch.detect(["/x/host", "chrome-extension://dgidcofcmgnlicmmepgomalcdcbgjjjg/", "--parent-window=0"]), .chromium(extensionId: "dgidcofcmgnlicmmepgomalcdcbgjjjg"))
+    XCTAssertEqual(HostLaunch.detect(["/x/host", "/Users/a/Library/Application Support/Mozilla/NativeMessagingHosts/app.daylens.browser.json", "browser@daylens.app"]), .firefox(extensionId: "browser@daylens.app"))
+    XCTAssertNil(HostLaunch.detect(["/x/host"]))
+    XCTAssertNil(HostLaunch.detect(["/x/host", "--heartbeat-s", "15"]), "the capture helper's own launch is never host mode")
+    XCTAssertNil(HostLaunch.detect(["/x/host", "chrome-extension://NOTANID/"]))
+    XCTAssertNil(HostLaunch.detect(["/x/host", "a.json", "no-at-sign"]))
+  }
+
+  func testOnlyKnownExtensionsAreAllowed() {
+    XCTAssertTrue(allowedExtensionIds.contains("dgidcofcmgnlicmmepgomalcdcbgjjjg"))
+    XCTAssertFalse(allowedExtensionIds.contains(devId))
+  }
+
+  func testFramesSplitAcrossReadsAndOversizedFramesAreSkippedInStep() {
+    let a = NativeFrame.encode(#"{"t":"status"}"#)!
+    var big = [UInt8](repeating: 0, count: 4)
+    var n = UInt32(NativeFrame.maxInbound + 10)
+    withUnsafeBytes(of: &n) { for (i, b) in $0.enumerated() { big[i] = b } }
+    big += [UInt8](repeating: 0x41, count: NativeFrame.maxInbound + 10)
+    let b = NativeFrame.encode(#"{"t":"open"}"#)!
+    let stream = a + big + b
+    var r = FrameReader()
+    var items: [FrameReader.Item] = []
+    var i = 0
+    while i < stream.count {
+      let end = min(stream.count, i + 7_001)
+      items += r.feed(Array(stream[i..<end]))
+      i = end
+    }
+    XCTAssertEqual(items, [.message(Array(#"{"t":"status"}"#.utf8)), .oversized(NativeFrame.maxInbound + 10), .message(Array(#"{"t":"open"}"#.utf8))])
+  }
+
+  func testOnlyWellFormedMessagesPass() {
+    func p(_ s: String) -> ExtensionMessage? { ExtensionMessage.parse(Array(s.utf8)) }
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":1792134000000}"#), .pause(untilWallMs: 1_792_134_000_000))
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":null}"#), .pause(untilWallMs: nil))
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":null,"profile":"p-1"}"#), .pause(untilWallMs: nil, profile: "p-1"), "a pause is held by the profile that sent it")
+    XCTAssertEqual(p(#"{"t":"resume","profile":"p-1"}"#), .resume(profile: "p-1"))
+    XCTAssertEqual(p(#"{"t":"resume","profile":"\#(String(repeating: "a", count: 65))"}"#), .resume(profile: nil), "an id longer than 64 characters names no profile")
+    XCTAssertNil(p(#"{"t":"pause","for":"hour"}"#), "a pause says until when, or null")
+    XCTAssertNil(p(#"{"t":"pause","until_wall_ms":"tomorrow"}"#))
+    XCTAssertNil(p(#"{"t":"tab","state":"page","trigger":"focus","window":"1"}"#), "a page needs an address")
+    XCTAssertNil(p(#"{"t":"tab","state":"unknown","trigger":"focus","reason":"private_window"}"#))
+    XCTAssertNil(p(#"{"t":"tab","state":"page","trigger":"keylogger","window":"1","url":"https://x"}"#))
+    XCTAssertNil(p(#"{"t":"tab","state":"page","trigger":"focus","window":"1","url":"https://x/\#(String(repeating: "a", count: 2048))"}"#))
+    XCTAssertNil(p("not json"))
+    XCTAssertNil(p(#"{"t":"exec","cmd":"rm"}"#))
+    guard case .tab(let r)? = p(#"{"t":"tab","state":"unknown","trigger":"focus","reason":"no_tab","url":"https://leak","title":"leak"}"#) else { return XCTFail() }
+    XCTAssertNil(r.url, "unknown never carries an address, even if one is sent")
+    XCTAssertNil(r.title)
+    guard case .tab(let long)? = p(#"{"t":"tab","state":"page","trigger":"focus","window":"1","url":"https://x","title":"\#(String(repeating: "a", count: 1023))🌘🌘"}"#) else { return XCTFail() }
+    XCTAssertEqual(long.title?.utf16.count, 1023)
+  }
+
+  func testServiceLinesBecomeExtensionStatus() {
+    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":1792130412345}"#),
+                   #"{"t":"status","daylens":"connected","capture":"paused","until_wall_ms":1792130412345}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot"}"#), #"{"t":"snapshot"}"#)
+    XCTAssertNil(HostReply.fromService(#"{"op":"status","capture":"exfiltrate"}"#))
+    XCTAssertNil(HostReply.fromService("garbage"))
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause"}"#), #"{"t":"error","for":"pause"}"#, "a pause Daylens could not record reaches the extension")
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_resume"}"#), #"{"t":"error","for":"resume"}"#)
+    XCTAssertNil(HostReply.fromService(#"{"op":"error","for":"exec"}"#))
+    let pause = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.pause(untilWallMs: nil), browser: dia)!.utf8)) as! NSDictionary
+    XCTAssertEqual(pause["op"] as? String, "browser_pause")
+    XCTAssertTrue(pause["until_wall_ms"] is NSNull)
+    XCTAssertEqual((pause["browser"] as? NSDictionary)?["app_id"] as? String, "company.thebrowser.dia")
+    let resume = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.resume(profile: "p-1"), browser: dia)!.utf8)) as! NSDictionary
+    XCTAssertEqual(resume["op"] as? String, "browser_resume")
+    XCTAssertEqual(resume["profile"] as? String, "p-1", "the service hears which profile resumes")
+  }
+
+  func testTheReplyToAPauseOrResumeCarriesItsIdBothWays() {
+    let p = { (s: String) in ExtensionMessage.parse(Array(s.utf8)) }
+    XCTAssertEqual(p(#"{"t":"pause","until_wall_ms":null,"profile":"p-1","req":"7"}"#), .pause(untilWallMs: nil, profile: "p-1", req: "7"))
+    XCTAssertEqual(p(#"{"t":"resume","req":"8"}"#), .resume(profile: nil, req: "8"))
+    XCTAssertEqual(p(#"{"t":"resume","req":"8\n"}"#), .resume(profile: nil, req: nil), "an id with anything but letters, digits, - or _ is none")
+    let control = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.pause(untilWallMs: nil, profile: "p-1", req: "7"), browser: dia)!.utf8)) as! NSDictionary
+    XCTAssertEqual(control["req"] as? String, "7")
+    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":null,"req":"7"}"#),
+                   #"{"t":"status","daylens":"connected","capture":"paused","until_wall_ms":null,"req":"7"}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause","req":"7"}"#), #"{"t":"error","for":"pause","req":"7"}"#)
+  }
+
+  func testTheFocusEpochTravelsBothWays() {
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":12}"#), #"{"t":"snapshot","epoch":12}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":null}"#), #"{"t":"snapshot"}"#, "the service sends a null epoch at resume")
+    guard case .tab(let unnamed)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":null}"#.utf8)) else { return XCTFail() }
+    XCTAssertNil(unnamed.epoch)
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":true}"#))
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":-1}"#))
+    guard case .tab(let r)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"page","trigger":"snapshot","window":"1","url":"https://x","epoch":12}"#.utf8)) else { return XCTFail() }
+    XCTAssertEqual(r.epoch, 12)
+    XCTAssertTrue(Obs.tab(r, browser: dia, extensionId: devId).serialized().hasSuffix(#""epoch":12}"#))
+    XCTAssertNil(ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":1.5}"#.utf8)))
+    XCTAssertNil(ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":false}"#.utf8)))
+  }
+}

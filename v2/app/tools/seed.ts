@@ -1,0 +1,108 @@
+// Fills a data folder with two invented days through the engine's own normalizer and storage, so the interface can be
+// shown and measured without anyone's real record. Times are relative to now: yesterday 8 AM to 6 PM, and today from
+// 8 AM to the current minute.
+// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45]  (--switch-s: a busier day, a new window title that often)
+import { existsSync, mkdirSync } from 'node:fs'
+import { parseArgs } from 'node:util'
+import { Normalizer, Privacy } from '../../capture/normalize.ts'
+import type { AppIdentity, Kind, Line, ObsByKind } from '../../capture/protocol.ts'
+import { Store } from '../../capture/store.ts'
+import { Storage } from '../../storage/index.ts'
+
+const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' } } })
+const dir = values['data-dir']
+if (!dir) {
+  process.stderr.write('usage: seed.ts --data-dir <dir>\n')
+  process.exit(64)
+}
+if (existsSync(`${dir}/daylens-v2.sqlite`)) {
+  process.stderr.write('refusing to seed a folder that already has a database\n')
+  process.exit(1)
+}
+mkdirSync(dir, { recursive: true })
+
+const MIN = 60_000
+const tzOffset = -new Date().getTimezoneOffset()
+let seq = 0
+function line<K extends Kind>(kind: K, obs: ObsByKind[K], wallMs: number): Line {
+  return {
+    v: 1,
+    run: 'run-seed',
+    seq: seq++,
+    boot: 'boot-seed',
+    t: { wall_ms: wallMs, mono_us: wallMs * 1000, tz: 'Example/Town', tz_offset_min: tzOffset },
+    platform: 'macos',
+    source: 'seed',
+    kind,
+    obs,
+  } as Line
+}
+
+function app(appId: string, name: string, path: string): AppIdentity {
+  return { app_id: appId, name, path, pid: 100, registered_browser: false, engine: 'none', signer: null, version_info: null, identity_state: 'ok', store: null }
+}
+
+const notes = app('com.apple.Notes', 'Notes', '/System/Applications/Notes.app')
+const mail = app('com.apple.mail', 'Mail', '/System/Applications/Mail.app')
+const calendar = app('com.apple.iCal', 'Calendar', '/System/Applications/Calendar.app')
+const preview = app('com.apple.Preview', 'Preview', '/System/Applications/Preview.app')
+const textedit = app('com.apple.TextEdit', 'TextEdit', '/System/Applications/TextEdit.app')
+const numbers = app('com.apple.reminders', 'Reminders', '/System/Applications/Reminders.app')
+const terminal = app('com.apple.Terminal', 'Terminal', '/System/Applications/Utilities/Terminal.app')
+
+// [minutes into the hour, app, window title], one hour's worth of focus changes.
+const HOURS: [number, AppIdentity, string][][] = [
+  [[0, mail, 'Weekend cake orders'], [18, notes, 'Order list for Saturday'], [40, calendar, 'Week of deliveries']],
+  [[0, numbers, 'Flour and butter costs'], [35, mail, 'Re: Supplier price change']],
+  [[0, textedit, 'Autumn menu draft.rtf'], [30, preview, 'Autumn menu proof.pdf']],
+  [[0, terminal, 'brightside-site — npm run dev'], [25, textedit, 'order-form notes.txt'], [50, notes, 'Order form checklist']],
+  [[0, terminal, 'brightside-site — git log'], [20, notes, 'Card payment questions']],
+  [[0, mail, 'Corner Café invoice for October'], [15, numbers, 'Invoices to send'], [45, mail, 'Sent: October invoice']],
+  [[0, calendar, 'Pickup schedule'], [30, notes, 'Pickup reminders']],
+  [[0, preview, 'Packaging labels.pdf'], [40, textedit, 'Label wording.rtf']],
+  [[0, mail, 'Wholesale enquiry'], [20, numbers, 'Wholesale follow-ups']],
+  [[0, notes, 'Tomorrow’s bakes'], [30, calendar, 'Thursday']],
+]
+
+const now = Date.now()
+const store = new Store(dir)
+const storage = new Storage(store, dir, { deletionStallMs: Infinity })
+const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
+storage.attachCapture({ interrupt: () => normalizer.interrupt({ wall_ms: Date.now(), mono_us: null, boot: null }), setPrivacy: (p) => normalizer.setPrivacy(p) })
+
+function seedDay(dayStart: number, until: number): void {
+  for (let h = 0; h < HOURS.length; h++) {
+    const hourStart = dayStart + (8 + h) * 60 * MIN
+    // Lunch: the computer sleeps from 12 to 1 on the first day seeded.
+    if (h === 4 && until !== now) {
+      normalizer.handle(line('power', { state: 'sleep' }, hourStart))
+      normalizer.handle(line('power', { state: 'resume_user' }, hourStart + 60 * MIN - 1000))
+      continue
+    }
+    for (const [i, [m, a, title]] of HOURS[h]!.entries()) {
+      const t = hourStart + m * MIN
+      if (t >= until) return
+      const next = HOURS[h]![i + 1]?.[0] ?? 60
+      normalizer.handle(line('focus', { trigger: 'app_changed', app: a, window: { window: `w${h}${i}`, title, title_state: 'ok' } }, t))
+      const step = switchMs ?? 60_000
+      for (let s = t + step, n = 1; s < Math.min(hourStart + next * MIN, until); s += step, n++) {
+        const shown = switchMs ? `${title} (${n})` : title
+        normalizer.handle(line('focus', { trigger: switchMs ? 'title_changed' : 'reconcile', app: a, window: { window: `w${h}${i}`, title: shown, title_state: 'ok' } }, s))
+      }
+    }
+  }
+}
+
+const days = Number(values.days)
+const switchMs = values['switch-s'] ? Number(values['switch-s']) * 1000 : null
+const today = new Date(now)
+for (let d = days - 1; d >= 0; d--) {
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - d).getTime()
+  seedDay(start, d === 0 ? now : start + 24 * 60 * MIN)
+}
+store.flush(true)
+storage.start()
+await storage.derivationSettled()
+storage.stop()
+store.close()
+process.stdout.write(`seeded ${dir}\n`)

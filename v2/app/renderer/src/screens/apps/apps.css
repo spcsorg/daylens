@@ -1,0 +1,112 @@
+/* Apps: time by app, and one app's windows or pages. */
+.apps-steps {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.apps-picker {
+  position: relative;
+}
+
+.apps-layout {
+  display: flex;
+  gap: var(--space-24);
+  align-items: flex-start;
+}
+
+.apps-list {
+  width: 280px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.app-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.app-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.app-head .grow {
+  min-width: 240px;
+}
+
+.app-name {
+  font: var(--heading);
+  letter-spacing: -0.085px;
+}
+
+.app-line {
+  font: var(--caption);
+  color: var(--text-2);
+}
+
+.apps-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+}
+
+.apps-filter:focus-within {
+  border-color: var(--text);
+}
+
+.apps-filter input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-12);
+  align-items: end;
+  height: 96px;
+  margin: var(--space-4) 0 var(--space-24);
+  max-width: 640px;
+}
+
+.bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: var(--space-4);
+  font: var(--caption);
+  color: var(--text-2);
+}
+
+.bar .fill {
+  width: 24px;
+  border-radius: var(--space-4);
+  background: var(--primary);
+}
+
+.bar .none {
+  width: 16px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.bar .day {
+  color: var(--text-3);
+}
