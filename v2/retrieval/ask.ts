@@ -691,6 +691,11 @@ export async function ask(
       .sort((a, b) => b.t - a.t)
     dropped += statements.length - byTime.length
     statements.splice(0, statements.length, ...byTime.map((x) => x.st))
+    // The answer's first link is the moment it names: the hour its newest source was last seen in, when that was sent.
+    const lead = byTime[0]
+    const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? [sources[Number(id.slice(1)) - 1]!.last_wall_ms] : []))) : -Infinity
+    const at = hours.findIndex((h) => h.start_wall_ms <= t - 1 && t - 1 < h.end_wall_ms)
+    if (lead && at >= 0 && !gone.has(`h${at + 1}`)) lead.st.cites = [byId.get(`h${at + 1}`)!, ...lead.st.cites.filter((c) => c !== byId.get(`h${at + 1}`))]
   }
   if (statements.length === 0 && withdrawn > 0) return { kind: 'withdrawn', withdrawn, results }
   // What the AI says the record lacks can name what was deleted.

@@ -653,6 +653,7 @@ test('a claim of only, first, last or never stands only when the whole of the da
   const last = await ask('which ledger xlsx did I open last', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.', 'You last opened the newest ledger at 11:05 AM, after the one before it.'])
   assert.deepEqual(last.kind === 'answer' && last.statements[1]!.cites.map((c) => c.kind !== 'hour' && c.file), ['ledger-10.xlsx'], 'what led up to the last time is not cited for it')
+  assert.deepEqual(last.kind === 'answer' && last.statements[0]!.cites.map((c) => (c.kind === 'hour' ? c.start_wall_ms : c.file)), [T0 + 10 * HOUR, 'ledger-10.xlsx'], 'the first link is the hour of the moment the answer names')
   const lastYesterday = await ask('which ledger xlsx did I open last yesterday', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.deepEqual(lastYesterday.kind === 'answer' && lastYesterday.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.', 'You last opened the newest ledger at 11:05 AM, after the one before it.'], 'a whole day sent does not let an older ledger be the last')
   const olderOnly = fakeModel((req) => {
