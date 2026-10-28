@@ -644,12 +644,13 @@ test('a question that names no day and nothing to search for is about today', as
   const seen: AskRequest[] = []
   await ask('what did I do this morning?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
   await ask('what was I doing?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
+  await ask('What took most of my time?', { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [] }), seen), log: s.log, now: () => T0 + 3 * HOUR }, LIMITS)
   for (const req of seen) {
     const record = JSON.parse(req.prompt) as { days_asked: string[]; hours: unknown[] }
     assert.equal(record.days_asked.length, 1)
     assert.ok(record.hours.length > 0, 'today’s hours are sent')
   }
-  assert.equal(seen.length, 2)
+  assert.equal(seen.length, 3)
   s.close()
 })
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { AiStatus } from '../../../../shared/ai.ts'
 import type { ShellState } from '../../../../shared/types.ts'
 import { act, bridge, useQuery } from '../../lib/api.ts'
 import { dateKey, factsTitle, hourLabel, longDay } from '../../lib/format.ts'
@@ -106,6 +107,7 @@ function Morning({ onBack, onDone }: { onBack?: () => void; onDone: () => void }
   const { data } = useQuery({ q: 'day', date: today }, { live: true })
   const hours = data?.hours ?? []
   const [keySaved, setKeySaved] = useState(false)
+  useEffect(() => void act({ a: 'ai_status' }).then((r) => r.ok && setKeySaved((r.result as AiStatus).saved)), [])
   return (
     <div className="onboarding">
       <div className="onboarding-col">

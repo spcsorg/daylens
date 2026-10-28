@@ -1,6 +1,6 @@
 // Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; each
 // statement of the answer arrives on the left as it streams, one at a time.
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AskResult, Citation, Statement } from '../../../../shared/ai.ts'
 import { act, bridge, query } from '../../lib/api.ts'
 import { addDays, dateKey, hourLabel, seenAt } from '../../lib/format.ts'
@@ -27,6 +27,13 @@ let turns: Turn[] = []
 let nextId = 1
 const subs = new Set<() => void>()
 const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f))
+// An answer can show what was then deleted, so a deletion clears the thread, and an answer still on its way lands nowhere.
+const ERASING = new Set(['deletion', 'retention', 'reset'])
+bridge.onReader((e) => {
+  if (e.e !== 'changed' || !e.kinds.some((k) => ERASING.has(k))) return
+  turns = []
+  for (const s of subs) s()
+})
 function update(id: number, f: (t: Turn) => Turn): void {
   turns = turns.map((t) => (t.id === id ? f(t) : t))
   for (const s of subs) s()
@@ -83,24 +90,33 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
     const question = q.trim()
     if (!question) return
     setText('')
+    pinned.current = true
     void send(question)
   }
 
-  // Follow the newest message unless the person has scrolled up to read.
+  // Follow the newest message as it grows, unless the person has scrolled up to read.
   const pinned = useRef(true)
-  useLayoutEffect(() => {
+  const started = thread.length > 0
+  useEffect(() => {
     const el = scroller.current
-    if (el && pinned.current) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  })
+    const content = el?.firstElementChild
+    if (!el || !content) return
+    const follow = new ResizeObserver(() => pinned.current && el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }))
+    follow.observe(content)
+    return () => follow.disconnect()
+  }, [started])
 
   return (
     <div className="ask">
       <div
         className="scroll ask-scroll"
         ref={scroller}
+        onWheel={(e) => {
+          if (e.deltaY < 0) pinned.current = false
+        }}
         onScroll={(e) => {
           const el = e.currentTarget
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 48) pinned.current = true
         }}
       >
         {thread.length === 0 ? (

@@ -118,7 +118,8 @@ const STOPWORDS = new Set(
   ('a about after again all am an and any are as at be been before being both but by can could did do does doing done during each few for from had has have having ' +
     'how i if in into is it its just me more most my myself no nor not of off on once only or other our out over own same she should so some such than that the their ' +
     'them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your ' +
-    'last ago day days today yesterday week morning afternoon evening night tell show find give spend spent work worked working look looked looking see saw use used using')
+    'last ago day days today yesterday week morning afternoon evening night tell show find give spend spent work worked working look looked looking see saw use used using ' +
+    'take took taking time times most mostly')
     .split(' '),
 )
 
