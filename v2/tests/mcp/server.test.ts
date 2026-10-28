@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { symlinkSync } from 'node:fs'
@@ -12,6 +12,9 @@ import { day } from '../retrieval/support.ts'
 
 process.env.TZ = 'Etc/GMT+5'
 const MAIN = path.resolve(import.meta.dirname, '../../mcp/main.ts')
+// A failed assertion must not leave a server holding the test process open.
+const started: ChildProcess[] = []
+after(() => started.forEach((c) => c.kill('SIGKILL')))
 
 function seeded() {
   const r = rig()
@@ -23,6 +26,7 @@ function seeded() {
 
 /** The server as a client starts it, with a way to send a request and wait for its reply. */
 function start(dataDir: string, child: ChildProcess = spawn(process.execPath, [MAIN, '--data-dir', dataDir], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, TZ: 'Etc/GMT+5' } })) {
+  started.push(child)
   const waiting = new Map<number, (m: Record<string, unknown>) => void>()
   const stdout: string[] = []
   let stderr = ''
@@ -56,7 +60,7 @@ test('a client lists the tools, reads a day, and the read is logged under its na
   const tools = await s.request('tools/list')
   assert.deepEqual(
     tools.result.tools.map((t: { name: string }) => t.name),
-    ['list_days', 'get_day', 'get_hour', 'search', 'get_agent_work'],
+    ['list_days', 'get_day', 'get_hour', 'search', 'get_agent_work', 'get_apps', 'get_status'],
   )
   assert.ok(tools.result.tools.every((t: { annotations: { readOnlyHint: boolean } }) => t.annotations.readOnlyHint))
   const got = await s.request('tools/call', { name: 'get_day', arguments: { date: '2026-10-16' } })
