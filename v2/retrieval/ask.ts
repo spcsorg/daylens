@@ -617,6 +617,7 @@ export async function ask(
   }
   const statements: Statement[] = []
   const when: number[] = []
+  const citedIds: string[][] = []
   // When a statement's thing was last seen: its sources' own times, or its hours' ends when it cites no source.
   const latest = (ids: string[]) => {
     const seen = ids.flatMap((id) => (id.startsWith('s') ? [sources[Number(id.slice(1)) - 1]?.last_wall_ms ?? 0] : []))
@@ -637,9 +638,18 @@ export async function ask(
     }
     statements.push(ok)
     when.push(latest(ids))
+    citedIds.push(ids)
   }
   if (latestFirst) {
-    const byTime = statements.map((st, i) => ({ st, t: when[i]! })).sort((a, b) => b.t - a.t)
+    // An answer to "when did I last…" leads with what it cites, so one that never cites the newest best match can't put
+    // an older match first, whether or not it says "last".
+    const olderMatch = (ids: string[]) => ids.some((id) => id !== newestId && id.startsWith('s') && matchCount(sources[Number(id.slice(1)) - 1]!) === best)
+    const answered = newestId !== null && citedIds.some((ids) => ids.includes(newestId))
+    const byTime = statements
+      .map((st, i) => ({ st, t: when[i]!, ids: citedIds[i]! }))
+      .filter((x) => answered || best === 0 || !olderMatch(x.ids))
+      .sort((a, b) => b.t - a.t)
+    dropped += statements.length - byTime.length
     statements.splice(0, statements.length, ...byTime.map((x) => x.st))
   }
   if (statements.length === 0 && withdrawn > 0) return { kind: 'withdrawn', withdrawn, results }

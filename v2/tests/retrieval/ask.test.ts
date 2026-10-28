@@ -600,6 +600,12 @@ test('a claim of only, first, last or never stands only when the whole of the da
   assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.'])
   const lastYesterday = await ask('which ledger xlsx did I open last yesterday', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.deepEqual(lastYesterday.kind === 'answer' && lastYesterday.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.'], 'a whole day sent does not let an older ledger be the last')
+  const olderOnly = fakeModel((req) => {
+    const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
+    return { answerable: true, statements: [{ text: 'ledger-3.xlsx at 4:05 AM yesterday.', sources: [files.find((x) => x.file === 'ledger-3.xlsx')!.id] }] }
+  })
+  const older = await ask('which ledger xlsx did I open last yesterday', { reader: s.reader, model: olderOnly, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.notEqual(older.kind, 'answer', 'an answer that never cites the newest match cannot lead with an older one, though it never says "last"')
   const day = await ask('which ledger xlsx yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.equal((JSON.parse(seen[2]!.prompt) as { incomplete: boolean }).incomplete, false)
   const dayFile = (JSON.parse(seen[2]!.prompt) as { sources: { file?: string }[] }).sources.find((x) => x.file?.startsWith('ledger-'))!.file!
