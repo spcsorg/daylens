@@ -166,13 +166,15 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
       },
     },
     dmg: {
-      background: path.join(ROOT, 'build', 'dmg-background.png'),
+      // dmg-background@2x.png beside it is picked up for Retina, and the window takes the image's size; rebuild both
+      // with dmg-background.cjs.
+      background: path.join(PKG, 'dmg-background.png'),
       icon: path.join(ROOT, 'build', 'icon.icns'),
       iconSize: 128,
-      window: { width: 660, height: 480 },
+      title: 'Daylens ${version}',
       contents: [
-        { x: 180, y: 225, type: 'file' },
-        { x: 480, y: 225, type: 'link', path: '/Applications' },
+        { x: 180, y: 205, type: 'file' },
+        { x: 480, y: 205, type: 'link', path: '/Applications' },
       ],
     },
     // Signed and checked before the DMG and ZIP are made from it.
