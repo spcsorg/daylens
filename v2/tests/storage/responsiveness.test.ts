@@ -43,7 +43,7 @@ test('a deletion responds at once and never stalls capture, however much it remo
     assert.ok(responded < 100, `the call returned in ${responded.toFixed(1)} ms`)
     assert.ok(flushes.length > 0, 'capture ran while deletion was in progress')
     // Windows CI disks stall single writes by up to a second; the budget is held where the runner can measure it.
-    if (process.platform !== 'win32') assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(1)} ms`)
+    if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true') assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(1)} ms`)
     assert.equal(result.observations, 20_000)
     assert.deepEqual(r.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
     assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
