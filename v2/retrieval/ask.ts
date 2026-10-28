@@ -256,8 +256,9 @@ const mentions = (text: string, n: string, caseSensitive = true) =>
 const names = (text: string, list: readonly string[], caseSensitive: boolean) => list.filter((n) => mentions(text, n, caseSensitive))
 
 // A dotted name with a letter in its last part: a file, a site or an app id (not 2.5 or v2.0).
-// A stretch of time: "From 10 to 11 AM", "between 2 and 3 PM".
-const RANGE = /\b(from|between)\b[^.;]*\b(to|and|until)\b/i
+// A stretch of time named by its two ends: "From 10 to 11 AM", "between 2 and 3 PM", "from 11 AM to noon".
+const T = String.raw`(\d{1,2}(?::\d\d)?\s*(?:[ap]\.?m\.?)?|noon|midnight)`
+const RANGE = new RegExp(String.raw`\b(?:from|between)\s+${T}\s+(?:to|and|until)\s+${T}`, 'gi')
 
 const DOTTED = /(?<![\p{L}\p{N}_@+.-])[\p{L}\p{N}_@+-]+(?:\.[\p{L}\p{N}_@+-]+)*\.[\p{L}\p{N}_-]*\p{L}[\p{L}\p{N}_-]*/gu
 
@@ -289,10 +290,20 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
   const inHour = ([a, b]: [number, number]) => (s: Seen) => s.to >= a && s.from < b
   const sumsUp = hours.some(([a, b]) => {
     const seen = pool.filter(inHour([a, b]))
+    const [start, end] = [minuteOfDay(a), minuteOfDay(b)]
+    // The range's two ends, read with the suffix of the later one ("10 to 11 AM"): they must be the hour's start and end.
+    const spans = [...text.matchAll(RANGE)].some((m) => {
+      const ends = [m[1]!, m[2]!].map((x) => x.toLowerCase().trim())
+      const suffix = /([ap])\.?m\.?$/.exec(ends[1]!)?.[0] ?? ''
+      const at = (x: string, sfx: string) => (x === 'noon' ? [720] : x === 'midnight' ? [0] : (timesIn(/[ap]\.?m/.test(x) ? x : `${x} ${sfx}`)[0] ?? timesIn(x.includes(':') ? x : `${x}:00`)[0] ?? []))
+      const from = at(ends[0]!, suffix)
+      const to = at(ends[1]!, suffix)
+      return (from.includes(start) || (suffix && at(ends[0]!, suffix === 'am' || suffix === 'a.m.' ? 'pm' : 'am').includes(start))) && to.includes(end)
+    })
     return (
-      RANGE.test(text) &&
+      spans &&
       times.length > 0 &&
-      times.every((o) => o.some((m) => m === minuteOfDay(a) || m === minuteOfDay(b))) &&
+      times.every((o) => o.some((m) => m === start || m === end)) &&
       appIn.every((has) => seen.some(has)) &&
       dottedIn.every((has) => seen.some((s) => has(s) && (apps.length === 0 || apps.some((n) => s.apps.includes(n)))))
     )

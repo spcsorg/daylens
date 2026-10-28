@@ -631,6 +631,7 @@ test('a statement about a whole hour may sum it up, each file with an app it was
         { text: 'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome and Notes.', sources: [h1, budget] },
         { text: 'At 1 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
+        { text: 'At 1 AM you switched from Editor to Chrome while working on q4-budget.xlsx.', sources: [h1, budget] },
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },

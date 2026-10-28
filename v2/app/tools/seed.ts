@@ -1,7 +1,8 @@
 // Fills a data folder with two invented days through the engine's own normalizer and storage, so the interface can be
 // shown and measured without anyone's real record. Times are relative to now: yesterday 8 AM to 6 PM, and today from
 // 8 AM to the current minute.
-// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45]  (--switch-s: a busier day, a new window title that often)
+// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45] [--now <ISO time>]  (--switch-s: a busier day, a new
+// window title that often; --now: seed as of that moment, so an evaluation always sees the same day)
 import { existsSync, mkdirSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from '../../capture/normalize.ts'
@@ -9,7 +10,7 @@ import type { AppIdentity, Kind, Line, LineOf, ObsByKind } from '../../capture/p
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
 
-const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' } } })
+const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' }, now: { type: 'string' } } })
 const dir = values['data-dir']
 if (!dir) {
   process.stderr.write('usage: seed.ts --data-dir <dir>\n')
@@ -67,7 +68,8 @@ const HOURS: [number, AppIdentity, string][][] = [
   [[0, notes, 'Tomorrow’s bakes'], [30, calendar, 'Thursday']],
 ]
 
-const now = Date.now()
+const now = values.now ? Date.parse(values.now) : Date.now()
+if (!Number.isFinite(now)) throw new Error('--now must be a time')
 const store = new Store(dir)
 const storage = new Storage(store, dir, { deletionStallMs: Infinity })
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
