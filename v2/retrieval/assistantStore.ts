@@ -3,7 +3,7 @@
 // it, and keeps every transaction short. A write a pending deletion would cover is refused, as storage refuses it.
 import Database from 'better-sqlite3'
 import path from 'node:path'
-import { fileRequest, recentRequests, request, settleRequest, type AssistantRequest, type RequestChange } from '../storage/assistantRequests.ts'
+import { fileRequest, request, settleRequest, type AssistantRequest, type RequestChange } from '../storage/assistantRequests.ts'
 import { ChangeBus } from '../storage/changes.ts'
 import { fencedBy, pendingTombstones } from '../storage/rules.ts'
 import { pendingVerdict, sourceMatches, type HourSource } from '../storage/hours.ts'
@@ -78,10 +78,6 @@ export class AssistantStore {
   /** Expires a request still pending; false when the app has already taken it up. */
   expireRequest(id: number): boolean {
     return settleRequest(this.db, this.bus, id, 'expired', null, this.now())
-  }
-
-  recentRequests(): AssistantRequest[] {
-    return recentRequests(this.db, this.now())
   }
 
   private refuseFenced(hourIds: readonly number[], sources: readonly HourSource[], span: { from_wall_ms: number; to_wall_ms: number }): void {

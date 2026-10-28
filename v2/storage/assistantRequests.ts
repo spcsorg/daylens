@@ -105,10 +105,12 @@ export function settleRequest(db: Database.Database, bus: ChangeBus, id: number,
 }
 
 const when = (ms: number) => new Date(ms).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+/** Without control or direction marks, which could reorder or hide what the person reads. */
+export const stripMarks = (t: string) => t.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, ' ')
+
+/** Text an assistant chose, as plain characters: no marks, and no quotes to break out of ours. */
+export const plain = (t: string) => stripMarks(t).replace(/["«»“”„‟″〝〞〟＂]/g, "'")
 // Names and text come from the assistant, which may have read them off a page: always quoted, never phrasing.
-/** Text an assistant chose, as plain characters: no control or direction marks, and no quotes to break out of ours. */
-export const plain = (t: string) =>
-  t.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, ' ').replace(/["«»“”„‟″〝〞〟＂]/g, "'")
 const quoted = (t: string, max = 120) => `“${plain(t.length > max ? `${t.slice(0, max - 1)}…` : t)}”`
 const span = (w: { from_wall_ms?: number; to_wall_ms?: number }) => (w.from_wall_ms !== undefined && w.to_wall_ms !== undefined ? ` from ${when(w.from_wall_ms)} to ${when(w.to_wall_ms)}` : ', on every day')
 

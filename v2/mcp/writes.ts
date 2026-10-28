@@ -1,7 +1,7 @@
 // What an assistant may ask Daylens to change. A tool here never changes the record: it files a request, which the app
 // carries out at once when it only records less (pause, a new exclusion), and otherwise only after the person says yes
 // in Daylens. Captured text can steer an assistant, so the yes has to come from Daylens's own window.
-import { describeRequest, runsWithoutAsking, type AssistantRequest, type RequestChange } from '../storage/assistantRequests.ts'
+import { describeRequest, runsWithoutAsking, stripMarks, type AssistantRequest, type RequestChange } from '../storage/assistantRequests.ts'
 import type { AssistantStore } from '../retrieval/assistantStore.ts'
 import { localIso, ToolInputError } from '../retrieval/assistantTools.ts'
 import type { Reader } from '../retrieval/reader.ts'
@@ -37,10 +37,12 @@ function localTime(v: unknown, name: string): number {
   return t.getTime()
 }
 
+/** Text an assistant gave, without control or direction marks, which could hide or reorder what the person reads. */
 function text(v: unknown, name: string, max: number): string {
-  if (typeof v !== 'string' || v.trim() === '') throw new ToolInputError(`${name} must be text`)
-  if (v.length > max) throw new ToolInputError(`${name} is longer than ${max} characters`)
-  return v.trim()
+  const t = typeof v === 'string' ? stripMarks(v).trim() : ''
+  if (t === '') throw new ToolInputError(`${name} must be text`)
+  if (t.length > max) throw new ToolInputError(`${name} is longer than ${max} characters`)
+  return t
 }
 
 /** A site as exclusions match it: the host, without a scheme, www or path. */

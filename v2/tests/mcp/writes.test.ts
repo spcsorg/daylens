@@ -117,6 +117,14 @@ test('a correction, once confirmed, replaces the hour’s title everywhere', asy
   assert.equal((await asked).text, 'Change the Fri, Oct 16, 1:00 AM hour’s title to “Planned the bakery budget”: Done.')
   assert.equal(s.r.storage.hour(hourId)!.title, 'Planned the bakery budget')
   assert.deepEqual(s.r.storage.hour(hourId)!.corrected, ['title'])
+  // A direction mark never reaches the record, where the title shows without the card's quotes.
+  const marked = s.call('correct_hour', { date: '2026-10-16', hour: 1, title: 'Planned\u202E the budget' })
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  const [m] = await s.pending()
+  assert.equal((m!.change as { title: string }).title, 'Planned  the budget')
+  await s.app.decide(m!.id, false)
+  await marked
+  assert.equal((await s.call('correct_hour', { date: '2026-10-16', hour: 1, title: '\u202E\u200B' })).error, true, 'a title of marks alone is refused')
   const facts = await s.call('correct_hour', { date: '2026-10-16', hour: 5, title: 'x' })
   assert.deepEqual([facts.error, facts.text], [true, "Daylens hasn't written the hour at 2026-10-16T05:00:00-05:00 yet, so it can't be corrected"])
   s.close()
