@@ -64,17 +64,17 @@ export const handson: Beat[] = [
   },
   {
     kind: "shot",
-    shot: { ...trust, dur: 5.2 },
+    shot: { ...trust, dur: 5.0 },
     sky: SKY.afternoon,
     shift: ROOM,
-    steps: [{ at: 0.3, to: 5.3, n: 7, label: "Remove a page, or pause" }],
+    steps: [{ at: 0.3, to: 5.1, n: 7, label: "Remove a page, or pause" }],
   },
   {
     kind: "shot",
-    shot: privacy,
+    shot: { ...privacy, dur: 4.8 },
     sky: SKY.dusk,
     shift: ROOM,
-    steps: [{ at: 0.3, to: privacy.dur + 0.1, label: "You choose what AI sees" }],
+    steps: [{ at: 0.3, to: 4.9, label: "You choose what AI sees" }],
   },
-  { kind: "end", dur: 3.2, sky: SKY.dusk },
+  { kind: "end", dur: 3.0, sky: SKY.dusk },
 ];
