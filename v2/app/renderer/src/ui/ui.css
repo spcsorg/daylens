@@ -1,7 +1,8 @@
 /* V4 components (Daylens-V2 Figma, V4 · Design system). Screens lay them out in their own stylesheets. */
 
-/* Button */
+/* Button: hover darkens, press darkens further and sinks a little, loading swaps the label for a spinner at the same width. */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -10,7 +11,15 @@
   font: var(--body-strong);
   white-space: nowrap;
   flex: none;
-  transition: background-color var(--quick) var(--ease);
+  transition:
+    background-color var(--quick) var(--ease),
+    color var(--quick) var(--ease),
+    transform 160ms var(--ease);
+}
+
+.btn:active:not(:disabled, [aria-busy='true']) {
+  transform: scale(0.98);
+  transition-duration: var(--press);
 }
 
 .btn.regular {
@@ -24,22 +33,54 @@
   font: var(--label);
 }
 
+.btn.large {
+  height: 48px;
+  padding: 0 var(--space-24);
+  border-radius: var(--radius-lg);
+  font: 500 15px/20px var(--sans);
+}
+
 .btn.primary {
-  background: var(--primary);
+  background: var(--btn-primary);
   color: var(--on-primary);
 }
 
 .btn.primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--btn-primary-hover);
+}
+
+.btn.primary:active:not(:disabled) {
+  background: var(--btn-primary-press);
+}
+
+/* A primary keeps its weight while it waits, so nothing flashes when it enables. */
+.btn.primary:disabled {
+  color: var(--btn-label-dim);
+}
+
+.btn.primary[aria-busy='true'] {
+  color: var(--on-primary);
 }
 
 .btn.secondary {
-  background: var(--bg-hover);
+  background: var(--btn-secondary);
   color: var(--text);
 }
 
+.btn.secondary.large {
+  color: var(--text-2);
+}
+
 .btn.secondary:hover:not(:disabled) {
-  background: var(--sel);
+  background: var(--btn-secondary-hover);
+}
+
+.btn.secondary:active:not(:disabled) {
+  background: var(--btn-secondary-press);
+}
+
+.btn.secondary:disabled {
+  color: var(--text-3);
 }
 
 .btn.quiet {
@@ -48,6 +89,10 @@
 
 .btn.quiet:hover:not(:disabled) {
   background: var(--bg-hover);
+}
+
+.btn.quiet:active:not(:disabled) {
+  background: var(--sel);
 }
 
 .btn.danger {
@@ -59,13 +104,42 @@
   filter: brightness(0.94);
 }
 
-.btn:disabled {
+.btn.danger:active:not(:disabled) {
+  filter: brightness(0.86);
+}
+
+.btn.danger:disabled {
   background: var(--disabled);
   color: var(--text-3);
 }
 
-.btn.quiet:disabled {
-  background: none;
+.btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  transition: opacity var(--quick) linear;
+}
+
+.btn[aria-busy='true'] .btn-label {
+  opacity: 0;
+}
+
+.btn-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade var(--quick) linear;
+}
+
+.btn-enter {
+  opacity: 0.55;
+  transition: transform var(--press) var(--ease);
+}
+
+.btn:active .btn-enter {
+  transform: translateX(-2px);
 }
 
 /* Icon button */
@@ -78,19 +152,28 @@
   justify-content: center;
   color: var(--text-2);
   flex: none;
-  transition: background-color var(--quick) var(--ease);
+  transition:
+    background-color var(--quick) var(--ease),
+    transform 160ms var(--ease);
 }
 
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
+.icon-btn:active:not(:disabled) {
+  background: var(--sel);
+  transform: scale(0.94);
+  transition-duration: var(--press);
+}
+
 .icon-btn:disabled {
   color: var(--line-strong);
 }
 
-/* Segmented */
+/* Segmented: one thumb slides to the chosen option. */
 .segmented {
+  position: relative;
   display: flex;
   gap: var(--space-2);
   padding: var(--space-2);
@@ -99,22 +182,39 @@
   flex: none;
 }
 
+.segmented-thumb {
+  position: absolute;
+  top: var(--space-2);
+  left: 0;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lift);
+}
+
+.segmented-thumb.slides {
+  transition:
+    transform 220ms var(--ease),
+    width 220ms var(--ease);
+}
+
 .segmented button {
+  position: relative;
   height: 26px;
   padding: 0 var(--space-12);
   border-radius: var(--radius-sm);
   font: var(--label);
   color: var(--text-2);
   white-space: nowrap;
-  transition:
-    background-color var(--quick) var(--ease),
-    color var(--quick) var(--ease);
+  transition: color var(--quick) var(--ease);
+}
+
+.segmented button:hover {
+  color: var(--text);
 }
 
 .segmented button[aria-pressed='true'] {
-  background: var(--bg-raised);
   color: var(--text);
-  box-shadow: var(--shadow-pop);
 }
 
 /* Toggle */
@@ -138,7 +238,14 @@
   border-radius: 50%;
   background: var(--bg-raised);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
-  transition: transform var(--reveal) var(--ease);
+  transition:
+    transform var(--settle) var(--ease-stamp),
+    width var(--reveal) var(--ease);
+}
+
+/* A held knob stretches toward where it's going. */
+.toggle:active::after {
+  width: 22px;
 }
 
 .toggle[aria-checked='true'] {
@@ -147,6 +254,10 @@
 
 .toggle[aria-checked='true']::after {
   transform: translateX(14px);
+}
+
+.toggle[aria-checked='true']:active::after {
+  transform: translateX(10px);
 }
 
 /* Checkbox */
@@ -173,15 +284,27 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: transparent;
+  color: var(--on-primary);
   flex: none;
-  transition: background-color var(--quick) var(--ease);
+  transition:
+    background-color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+/* The check draws itself. */
+.checkbox .box path {
+  stroke-dasharray: 13;
+  stroke-dashoffset: 13;
+  transition: stroke-dashoffset 160ms var(--ease) 40ms;
 }
 
 .checkbox input:checked + .box {
   background: var(--primary);
   border-color: var(--primary);
-  color: var(--on-primary);
+}
+
+.checkbox input:checked + .box path {
+  stroke-dashoffset: 0;
 }
 
 .checkbox input:focus-visible + .box {
@@ -214,7 +337,11 @@
   padding: 0 var(--space-16);
   border-radius: var(--radius-md);
   font: var(--label-regular);
-  background: var(--accent-soft);
+  background: var(--bg-hover);
+}
+
+.notice.paused > svg {
+  color: var(--paused);
 }
 
 .notice.problem {
@@ -259,8 +386,7 @@
   height: 36px;
   padding: 0 var(--space-16);
   border-radius: var(--radius-pill);
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+  background: var(--bg-float);
   box-shadow: var(--shadow-pop);
   font: var(--label);
   white-space: nowrap;
@@ -284,6 +410,7 @@
   position: fixed;
   inset: 0;
   background: var(--scrim);
+  backdrop-filter: blur(var(--scrim-blur));
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -297,14 +424,22 @@
   margin-top: 140px;
   width: 420px;
   max-width: calc(100% - 64px);
-  background: var(--bg-raised);
-  border-radius: var(--radius-lg);
+  background: var(--bg-float);
+  border-radius: 16px;
   box-shadow: var(--shadow-window);
   padding: var(--space-24);
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
-  animation: rise var(--reveal) var(--ease);
+  animation: float-in var(--reveal) var(--ease);
+}
+
+/* A floating layer arrives from slightly above and smaller, as if set down on the page. */
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
 }
 
 .dialog h2 {
@@ -320,12 +455,12 @@
 .popover {
   position: absolute;
   z-index: 30;
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+  background: var(--bg-float);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
   padding: var(--space-4);
-  animation: rise var(--quick) var(--ease);
+  transform-origin: top;
+  animation: float-in var(--quick) var(--ease);
 }
 
 .menu-item {
@@ -343,6 +478,10 @@
 .menu-item:hover,
 .menu-item[aria-current='true'] {
   background: var(--bg-hover);
+}
+
+.menu-item:active {
+  background: var(--sel);
 }
 
 .menu-item.danger {
@@ -412,6 +551,7 @@
 }
 
 .hour-title {
+  position: relative;
   font: var(--heading);
   letter-spacing: -0.085px;
   overflow: hidden;
@@ -454,6 +594,95 @@ button.hour:hover .hour-title {
   color: var(--text-3);
 }
 
+/* The day being written: new words reveal left to right behind an amber caret. */
+.write {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.write-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  mask-image: linear-gradient(90deg, #000 45%, transparent 55%);
+  mask-size: 220% 100%;
+  mask-repeat: no-repeat;
+  animation: write var(--write) var(--ease) both;
+}
+
+.write::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  animation:
+    write-caret var(--write) var(--ease) both,
+    write-caret-fade var(--write) linear both;
+}
+
+@keyframes write {
+  from {
+    mask-position: 100% 0;
+  }
+  to {
+    mask-position: 0 0;
+  }
+}
+
+/* The caret rides the mask's edge, which runs from -10% to 110% of the text; it fades before it passes the last letter. */
+@keyframes write-caret {
+  from {
+    left: -10%;
+  }
+  to {
+    left: 110%;
+  }
+}
+
+@keyframes write-caret-fade {
+  from {
+    opacity: 0;
+  }
+  8%,
+  34% {
+    opacity: 1;
+  }
+  46%,
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes write {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes float-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  .write::after {
+    display: none;
+  }
+}
+
 /* Week block */
 .week-block {
   display: block;
@@ -493,6 +722,10 @@ button.hour:hover .hour-title {
 
 .app-row:hover {
   background: var(--bg-hover);
+}
+
+.app-row:active {
+  background: var(--sel);
 }
 
 .app-row[aria-current='true'] {

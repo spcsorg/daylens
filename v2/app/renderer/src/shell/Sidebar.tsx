@@ -6,7 +6,7 @@ export type Screen = 'today' | 'apps' | 'ask' | 'settings'
 function Item({ icon, label, current, onClick }: { icon: IconName; label: string; current: boolean; onClick: () => void }) {
   return (
     <button type="button" className="nav" aria-current={current ? 'page' : undefined} onClick={onClick}>
-      <Icon name={icon} />
+      <Icon name={icon} filled={current} />
       {label}
     </button>
   )

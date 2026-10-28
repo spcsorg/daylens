@@ -1,5 +1,5 @@
 // The V4 rows that show the record: an hour, a week block, an app, a search result, a window or page.
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { AppTime, DeleteWhat, Source } from '../../../shared/types.ts'
 import { act } from '../lib/api.ts'
 import { addDays, clock, dayMonth, duration, hourLabel, parseKey, span } from '../lib/format.ts'
@@ -11,6 +11,17 @@ export function AppIcon({ id, size = 20 }: { id: string | null; size?: number })
   const [failed, setFailed] = useState(false)
   if (!id || failed) return <span className="app-icon blank" style={{ width: size, height: size }} />
   return <img className="app-icon" width={size} height={size} src={`daylens-icon://app/${encodeURIComponent(id)}`} alt="" onError={() => setFailed(true)} />
+}
+
+/** Text that writes itself in when it changes after it first appeared, as when an hour goes from facts to written. */
+function Written({ text }: { text: string }) {
+  const first = useRef(text)
+  if (text === first.current) return text
+  return (
+    <span className="write" key={text}>
+      <span className="write-text">{text}</span>
+    </span>
+  )
 }
 
 export type HourKind = 'written' | 'facts' | 'current' | 'gap' | 'filled'
@@ -28,7 +39,9 @@ export function Hour({ start, kind, title, summary, apps = [], note, open, onTog
     <button type="button" className={`hour ${kind}`} data-hour={start} data-current={kind === 'current'} aria-expanded={open} onClick={onToggle}>
       <span className="hour-time">{hourLabel(start)}</span>
       <span className="hour-body">
-        <span className="hour-title">{title}</span>
+        <span className="hour-title">
+          <Written text={title} />
+        </span>
         {summary && <span className="hour-summary">{summary}</span>}
         {apps.length > 0 && (
           <span className="hour-apps">
