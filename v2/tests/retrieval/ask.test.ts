@@ -645,13 +645,15 @@ test('a claim of only, first, last or never stands only when the whole of the da
         { text: 'You last opened ledger-3.xlsx at 4:05 AM.', sources: [of('ledger-3.xlsx')] },
         { text: 'You last opened ledger-10.xlsx at 9 AM.', sources: [of('ledger-10.xlsx')] },
         { text: 'You last opened ledger-3.xlsx, and ledger-10.xlsx at 11:05 AM.', sources: [of('ledger-3.xlsx'), of('ledger-10.xlsx')] },
+        { text: 'You last opened the newest ledger at 11:05 AM, after the one before it.', sources: [of('ledger-10.xlsx'), of('ledger-9.xlsx')] },
       ],
     }
   })
   const last = await ask('which ledger xlsx did I open last', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
-  assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.'])
+  assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.', 'You last opened the newest ledger at 11:05 AM, after the one before it.'])
+  assert.deepEqual(last.kind === 'answer' && last.statements[1]!.cites.map((c) => c.kind !== 'hour' && c.file), ['ledger-10.xlsx'], 'what led up to the last time is not cited for it')
   const lastYesterday = await ask('which ledger xlsx did I open last yesterday', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
-  assert.deepEqual(lastYesterday.kind === 'answer' && lastYesterday.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.'], 'a whole day sent does not let an older ledger be the last')
+  assert.deepEqual(lastYesterday.kind === 'answer' && lastYesterday.statements.map((x) => x.text), ['You last opened ledger-10.xlsx at 11:05 AM.', 'You last opened the newest ledger at 11:05 AM, after the one before it.'], 'a whole day sent does not let an older ledger be the last')
   const olderOnly = fakeModel((req) => {
     const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
     return { answerable: true, statements: [{ text: 'ledger-3.xlsx at 4:05 AM yesterday.', sources: [files.find((x) => x.file === 'ledger-3.xlsx')!.id] }] }
