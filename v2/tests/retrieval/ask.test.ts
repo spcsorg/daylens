@@ -595,6 +595,23 @@ test('a claim of only, first, last or never stands only when the whole of the da
   s.close()
 })
 
+test('"most recently" stands when it names when the cited thing was last seen, and not otherwise', async () => {
+  const s = setup()
+  const model = fakeModel((req) => {
+    const file = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources.find((x) => x.file === 'q4-budget.xlsx')!.id
+    return {
+      answerable: true,
+      statements: [
+        { text: 'You had q4-budget.xlsx open in Editor, most recently around 1:09 AM.', sources: [file] },
+        { text: 'You had q4-budget.xlsx open in Editor, most recently around 1:40 AM.', sources: [file] },
+      ],
+    }
+  })
+  const res = await ask('budget', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(res.kind === 'answer' && res.statements.map((x) => x.text), ['You had q4-budget.xlsx open in Editor, most recently around 1:09 AM.'])
+  s.close()
+})
+
 test('a failed AI call is reported, not swallowed, and nothing is charged', async () => {
   const s = setup()
   const failing: AskModel = { name: 'Fake', provider: 'fake', run: async () => Promise.reject(new Error('quota reached')) }
