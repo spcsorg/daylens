@@ -18,6 +18,27 @@ Windows, macOS and Linux share one design. These are the only differences, each 
 
 Everything else is identical: layout, type, color, motion, copy, features, and performance budgets. Copy never names a platform-specific mechanism ("Keychain", "Full Disk Access") on a shared screen; where a platform needs its own step, that step is drawn separately for that platform.
 
+## How Daylens talks
+
+Everything Daylens writes for someone, from Ask answers to hour titles and notes, sounds like a person who saw their day telling them what they got done. It describes the work, not the windows.
+
+- **Group by the work, never by clock hour.** Nobody works in one-hour blocks, so an answer never walks through the day as "From 9 to 10 AM… from 10 to 11 AM…". Times appear only where they help ("just after lunch", "at 4:10").
+- **Say what the work was.** Window titles and file names appear only when one is the answer or the thing to open, never as the summary itself.
+- **Lead with the answer.** A question with one answer gets that answer first, then a short supporting line and a link to the moment.
+- **Be consistent.** The same question about the same record gets the same answer.
+- **Be honest and plain.** When the record can't answer, say so in one sentence and say what it does show.
+
+Examples, on an invented day:
+
+| Question | Daylens says |
+|---|---|
+| What did I get done this morning? | You finished the spring pricing memo and sorted out the Q2 budget numbers. The design sync ran long, so the pricing page fixes moved to after lunch. |
+| When did I last open the pricing memo? | Yesterday at 4:10 PM, right after the design sync. [Open that moment] |
+| What did I work on yesterday afternoon? | Mostly invoices and the pricing page. You sent the October invoices, then spent the rest of the afternoon on the pricing page fixes from the design sync. |
+| Did I reply to the supplier about the new prices? | I can't tell from your record whether a reply went out. I can see you had their email open twice yesterday and added "reply to supplier" to your reminders. |
+
+Answers that fail these rules don't ship. Ask has an evaluation that checks them.
+
 ## Navigation
 
 A sidebar with Today, Apps and Ask, and Settings at the bottom. Search opens from anywhere with Ctrl+K or Cmd+K.
@@ -109,7 +130,7 @@ Onboarding is where Daylens wins or loses a user. It must feel effortless and po
 - Permissions are one step with one button. On macOS, the step opens System Settings with a small floating window to drag the Daylens icon into, and turns green on its own when access is granted. Browser access is part of the same step.
 - Privacy is one calm line with a link to the Terms and Privacy page.
 - Assistants on the machine are found automatically and connected with one button, plus setup for any other MCP app. When Claude Code or Codex is found, the same step has one toggle to read their session logs, on by default, with one line saying only times, project folders and branches are read, never what was said.
-- AI defaults to Daylens AI. Other choices are one click away.
+- AI: in the beta, the choice is the person's own API key or no AI. Daylens AI joins later as the default, with the other choices one click away.
 - Onboarding ends on the user's own morning, already filled in and named, then opens Today.
 - No pricing, no "what happens next" lists, no questions Daylens can answer by observing.
 

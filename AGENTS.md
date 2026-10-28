@@ -12,7 +12,8 @@ The app lives in `v2/`; work happens on `main`. Start at [`docs/README.md`](docs
 6. **Decide where the docs are silent.** Do what established products do, record the decision in the matching doc under `docs/`, and list it in the PR. Ask only when there is no common practice, or the step is irreversible or public.
 7. **Never fail silently.** If a person clicks something and it fails, the UI says so.
 8. **Comment only what the code can't say**: a constraint, workaround or gotcha, in one line. No narration, dates or names.
-9. **No personal data.** This repo is public. No real activity, window or page titles, names, file paths, dates of real days, or screenshots of a real day, in code, tests, fixtures, docs, commits or PRs. Use invented data.
+9. **Daylens talks like a person.** Everything Daylens writes for someone (Ask answers, hour titles and summaries, notes) reads the way you'd tell a colleague what you got done: grouped by the work, never by clock hour; no lists of window titles or file names unless one is the answer or the link; a "when did I…" question leads with the answer and a link to it; the same question gets the same answer. Rules and examples: [`docs/experience.md`](docs/experience.md#how-daylens-talks).
+10. **No personal data.** This repo is public. No real activity, window or page titles, names, file paths, dates of real days, or screenshots of a real day, in code, tests, fixtures, docs, commits or PRs. Use invented data.
 
 ## How to ship
 
