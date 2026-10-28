@@ -64,7 +64,7 @@ function HourRow({ h, style, children }: { h: Hour; style?: CSSProperties; child
 
 /* 1 · Welcome: the first screen of onboarding. */
 
-const PREVIEW = HOURS.slice(0, 4);
+const PREVIEW = [HOURS[0], HOURS[1], HOURS[2], HOURS[5]];
 
 const welcome: Shot = {
   id: "welcome",
@@ -96,7 +96,7 @@ const welcome: Shot = {
         </div>
         {PREVIEW.map((h, i) => {
           const k = prog(t, 0.55 + i * 0.13, 1.15 + i * 0.13, back);
-          return <HourRow key={h.at} h={h.at === "12 PM" ? { ...HOURS[5], at: "12 PM" } : h} style={{ opacity: clamp(k * 1.6), transform: `translateY(${(1 - k) * -18}px)` }} />;
+          return <HourRow key={h.at} h={h} style={{ opacity: clamp(k * 1.6), transform: `translateY(${(1 - k) * -18}px)` }} />;
         })}
       </div>
     </Window>

@@ -1,5 +1,5 @@
 // Records the launch film from /introducing-v2/film: seeks the stage one frame at a time and pipes each screenshot into ffmpeg,
-// so the video is frame-perfect however slow the machine is. Needs `next dev` running, ffmpeg, and a Chromium build.
+// so the video is frame-perfect however slow the machine is. Needs `next dev -p 3217` running, ffmpeg, and a Chromium build.
 // node scripts/film.mjs --cut duet --ratio 16x9 --out film.mp4 [--fps 60] [--scale 2] [--from 0 --to 12] [--stills dir --at 3,9.5]
 import { spawn } from "node:child_process";
 import { globSync, mkdirSync, writeFileSync } from "node:fs";
@@ -33,6 +33,7 @@ const chrome = a.chrome ?? globSync(join(homedir(), "Library/Caches/ms-playwrigh
 if (!chrome) throw new Error("no Chromium: pass --chrome or set CHROME");
 
 const browser = spawn(chrome, ["--headless", "--remote-debugging-port=0", "--hide-scrollbars", "--force-color-profile=srgb", "--font-render-hinting=none", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+process.on("exit", () => browser.kill());
 const wsUrl = await new Promise((resolve, reject) => {
   let err = "";
   browser.stderr.on("data", (d) => {
@@ -100,9 +101,11 @@ if (a.stills) {
     if (i % (fps * 5) === 0) console.error(`${(from + i / fps).toFixed(1)}s / ${to.toFixed(1)}s, ${((Date.now() - started) / 1000).toFixed(0)}s elapsed`);
   }
   ff.stdin.end();
-  await new Promise((r) => ff.on("exit", r));
+  const code = await new Promise((r) => ff.on("exit", r));
+  if (code !== 0) throw new Error(`ffmpeg exited with ${code}; ${a.out} is incomplete`);
   console.error(`wrote ${a.out}: ${frames} frames, ${(to - from).toFixed(2)}s`);
 }
 
 ws.close();
+
 browser.kill();
