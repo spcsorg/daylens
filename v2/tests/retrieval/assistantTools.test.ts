@@ -373,6 +373,12 @@ test('time per app over a span, and one app in detail, as the Apps screen shows 
   assert.deepEqual(s.items(read.id).map((i) => i.app_id ?? i.site), ['com.google.chrome', 'docs.example.com'])
 
   assert.throws(() => runReadTool('get_apps', { from: DATE, to: DATE, app: 'Spreadsheet' }, s.ctx), /^Error: no app named Spreadsheet was used then$/)
+  // Two apps with one name: neither is picked for the other.
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 32 * MIN))
+  s.r.feed(focus(app('com.example.editor-beta', { name: 'Editor' }), 'Draft - Editor', T0 + 32 * MIN))
+  s.r.feed(focus(app('com.example.editor-beta', { name: 'Editor' }), 'Draft - Editor', T0 + 35 * MIN, 'reconcile'))
+  s.r.store.flush()
+  assert.throws(() => runReadTool('get_apps', { from: DATE, to: DATE, app: 'Editor' }, s.ctx), /more than one app is named Editor/)
   s.close()
 })
 
@@ -399,6 +405,18 @@ test('status gives today, recording or paused, where the person left off, and wh
   db.close()
   const quit = runReadTool('get_status', {}, s.ctx) as Record<string, any>
   assert.deepEqual([quit.recording, quit.not_running_since], ['not running', '2026-10-16T01:50:00-05:00'])
+  // A crash while paused: no clean stop, and the heartbeat goes quiet.
+  s.r.storage.pause(null)
+  const crashed = new Database(path.join(s.r.dir, DB_FILE))
+  crashed.prepare(`DELETE FROM meta WHERE key = 'service_stopped_wall_ms'`).run()
+  crashed
+    .prepare(`INSERT INTO capture_runs (run, platform, helper, version, pid, os, boot, started_wall_ms, last_heartbeat_wall_ms, permissions, config) VALUES ('r', 'darwin', 'h', '1', 1, 'os', 'b', ?, ?, '{}', '{}')`)
+    .run(T0, T0 + 50 * MIN)
+  crashed.close()
+  s.r.clock.t = T0 + 55 * MIN
+  assert.equal((runReadTool('get_status', {}, s.ctx) as Record<string, any>).recording, 'paused')
+  s.r.clock.t = T0 + 61 * MIN
+  assert.deepEqual([(runReadTool('get_status', {}, s.ctx) as Record<string, any>).recording], ['not running'])
   s.close()
 })
 
@@ -428,5 +446,18 @@ test('the hour the retention cutoff falls in is not shown, since part of it is p
   assert.deepEqual((runReadTool('get_day', { date: DATE }, s.ctx) as { hours: unknown[] }).hours, [])
   assert.deepEqual((runReadTool('list_days', { from: DATE, to: DATE }, s.ctx) as { days: unknown[] }).days, [])
   assert.equal((runReadTool('get_hour', { date: DATE, hour: 1 }, s.ctx) as { recorded: boolean }).recorded, false)
+  // An agent turn that began before the cutoff is left out whole, not shown with its earlier start.
+  new AgentStore(s.r.store.database).apply('claude_code', [...turn('t1', 's1', T0 + 5 * MIN, T0 + 25 * MIN), ...turn('t2', 's1', T0 + 40 * MIN, T0 + 50 * MIN)])
+  const work = runReadTool('get_agent_work', { date: DATE }, s.ctx) as { sessions: { turns: { start: string }[] }[] }
+  assert.deepEqual(work.sessions.map((x) => x.turns.map((t) => t.start)), [['2026-10-16T01:40:00-05:00']])
+  // The same turn read through the next hour, which is inside the period.
+  new AgentStore(s.r.store.database).apply('claude_code', turn('t3', 's2', T0 + 8 * MIN, T0 + 70 * MIN, '/code/beta'))
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 62 * MIN))
+  s.r.feed(focus(app('com.example.editor', { name: 'Editor' }), 'Later - Editor', T0 + 62 * MIN))
+  s.r.feed(focus(app('com.example.editor', { name: 'Editor' }), 'Later - Editor', T0 + 68 * MIN, 'reconcile'))
+  s.r.store.flush()
+  const next = runReadTool('get_hour', { date: DATE, hour: 2 }, s.ctx) as { recorded: boolean; agent_work: { turns: unknown[] }[] }
+  assert.equal(next.recorded, true)
+  assert.deepEqual(next.agent_work, [])
   s.close()
 })

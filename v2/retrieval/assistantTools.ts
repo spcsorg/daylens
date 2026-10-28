@@ -103,12 +103,14 @@ function keptHours(ctx: ToolContext, from: number, to: number): HourView[] {
 /** The app an assistant named, by id or name, among those used in the span. */
 function appNamed(apps: readonly { id: string; name: string; ms: number }[], asked: string): { id: string; name: string } {
   const q = asked.trim().toLowerCase()
-  const exact = apps.find((a) => a.id.toLowerCase() === q || a.name.toLowerCase() === q)
-  if (exact) return exact
+  const exact = apps.find((a) => a.id.toLowerCase() === q) ?? apps.filter((a) => a.name.toLowerCase() === q)
+  if (!Array.isArray(exact)) return exact
+  if (exact.length === 1) return exact[0]!
+  if (exact.length > 1) throw new ToolInputError(`more than one app is named ${asked}; give its app id from get_apps`)
   const near = apps.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
   if (near.length === 1) return near[0]!
   // No app names here: an error isn't logged as a read, so it may show nothing.
-  throw new ToolInputError(near.length > 1 ? `more than one app matches ${asked}; call get_apps without app to see their names` : `no app named ${asked} was used then`)
+  throw new ToolInputError(near.length > 1 ? `more than one app matches ${asked}; give its app id from get_apps` : `no app named ${asked} was used then`)
 }
 
 /** What a read showed, for its log entry: the hours by id, and every app and site whose activity it showed. */
@@ -181,9 +183,11 @@ function threadsFor(reader: Reader, hourId: number): { id: number; title: string
   })()
 }
 
-function agentSessions(reader: Reader, from: number, to: number, shown: Shown) {
-  const work = reader.agentWork(from, to)
-  if (work === null) return null
+/** Agent sessions in [from, to); with `since`, only turns that started at or after it (the retention cutoff). */
+function agentSessions(reader: Reader, from: number, to: number, shown: Shown, since?: number) {
+  const all = reader.agentWork(from, to)
+  if (all === null) return null
+  const work = since === undefined ? all : all.map((s) => ({ ...s, turns: s.turns.filter((t) => t.start_wall_ms >= since), user_messages_wall_ms: s.user_messages_wall_ms.filter((t) => t >= since) })).filter((s) => s.turns.length > 0)
   return work.map((s) => {
     shown.app(s.app_id)
     return {
@@ -301,7 +305,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
           shown.page(s.url)
           return { kind: s.kind, app: s.app_name ?? s.app_id, title: s.title, url: s.url, file: s.file, minutes: minutes(s.ms), first_seen: localIso(s.first_wall_ms), last_seen: localIso(s.last_wall_ms) }
         }),
-        agent_work: agentSessions(ctx.reader, h.start_wall_ms, h.end_wall_ms, shown),
+        agent_work: agentSessions(ctx.reader, h.start_wall_ms, h.end_wall_ms, shown, cutoff ?? undefined),
         threads: h.hour ? threadsFor(ctx.reader, h.hour.id) : [],
         note: UNTRUSTED,
       }
@@ -378,7 +382,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       const cutoff = screens(ctx).cutoff()
       if (cutoff !== null) from = Math.max(from, cutoff)
       const shown = new Shown()
-      const sessions = from < to ? agentSessions(ctx.reader, from, to, shown) : []
+      const sessions = from < to ? agentSessions(ctx.reader, from, to, shown, cutoff ?? undefined) : []
       shown.logged(ctx, mark, 'get_agent_work', from, to)
       return sessions === null ? { sessions: [], note: 'Reading Claude Code and Codex sessions is off on this computer.' } : { sessions }
     },
@@ -442,8 +446,9 @@ export const READ_TOOLS: readonly ReadTool[] = [
         quit: ctx.reader.db.prepare(`SELECT value FROM meta WHERE key = 'service_stopped_wall_ms'`).get() as { value: string } | undefined,
         retention: sr.cutoff() === null ? null : Math.round((now - sr.cutoff()!) / 86_400_000),
       }))
-      // The server runs without the app: quit cleanly, or no heartbeat for a while (a crash, or asleep).
-      const quiet = !rec.pause && rec.stopped_since_ms === null && rec.last_heartbeat_ms !== null && now - rec.last_heartbeat_ms > NOT_RUNNING_AFTER_MS
+      // The server runs without the app: quit cleanly, or no heartbeat for a while (a crash, or asleep). The helper
+      // heartbeats through a pause too.
+      const quiet = rec.stopped_since_ms === null && rec.last_heartbeat_ms !== null && now - rec.last_heartbeat_ms > NOT_RUNNING_AFTER_MS
       const notRunning = quit ? Number(quit.value) : quiet ? rec.last_heartbeat_ms : null
       const problems = [
         ...(rec.titles && rec.titles !== 'ok' ? [`window titles can't be read (${rec.titles.replace('_', ' ')})`] : []),
@@ -456,7 +461,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         recording: notRunning !== null ? 'not running' : rec.stopped_since_ms !== null ? 'stopped' : rec.pause ? 'paused' : 'recording',
         ...(notRunning !== null ? { not_running_since: localIso(notRunning) } : rec.stopped_since_ms !== null ? { stopped_since: localIso(rec.stopped_since_ms) } : {}),
-        ...(rec.pause ? { paused_since: localIso(rec.pause.since_ms), paused_until: rec.pause.until_ms === null ? 'until resumed' : localIso(rec.pause.until_ms) } : {}),
+        ...(notRunning === null && rec.pause ? { paused_since: localIso(rec.pause.since_ms), paused_until: rec.pause.until_ms === null ? 'until resumed' : localIso(rec.pause.until_ms) } : {}),
         problems,
         first_day: rec.first_day,
         left_off: left.map((x) => {

@@ -191,7 +191,7 @@ Search runs on the local full-text index and works without AI. Results are group
 
 A read-only MCP server lets any MCP app read days, hours, search results and sources.
 
-- Known clients on the machine (Claude, Claude Code, Codex, Cursor, ChatGPT, VS Code and others) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet.
+- Known clients on the machine (Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet. ChatGPT's apps connect only to remote servers, so they can't use this one.
 - The server has no tools that change anything. Each tool says so to the client (`readOnlyHint`).
 - Every read is logged and shown in Settings, under the name the client gives itself when it connects.
 - Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting.
@@ -206,6 +206,7 @@ A read-only MCP server lets any MCP app read days, hours, search results and sou
 - **Where it reads.** `--data-dir`, else `DAYLENS_V2_DATA_DIR`, else the app's data folder: `~/Library/Application Support/Daylens V2` on macOS, `%APPDATA%\Daylens V2` on Windows, `~/.local/share/daylens-v2` on Linux (or `$XDG_DATA_HOME`). Runs from source use `Daylens V2 Dev` (`daylens-v2-dev`).
 - **Tools.** Seven reads, one per thing a person looks at in the app. `get_status`: today's date and zone, recording, paused, stopped or not running (Daylens quit, or no heartbeat for 10 minutes), where they left off, the built-in exclusions and how many the person added (never what they excluded), and retention. `list_days`: the week and month views (per day, time, top apps and each hour's title). `get_day`: one day, hour by hour, with each hour's longest windows, pages and files. `get_hour`: one hour in full. `get_apps`: the Apps screen, all apps or one in detail. `search`. `get_agent_work`: Claude Code and Codex sessions. Like every screen, none shows anything past the retention period, even before pruning removes it. The hour reads (`list_days`, `get_day`, `get_hour`) leave out the hour the cutoff falls in.
 - **Limits.** Search returns up to 10 results per group. A call that reads a span of days (`list_days`, `get_apps`, `get_agent_work`) takes at most 31; search covers every day unless given a span.
+- **Connecting.** `v2/mcp/clients.ts` finds Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI by the folder each makes when it first runs, and adds a `daylens` entry to each one's own config file, replacing an older Daylens entry and keeping everything else. A file that isn't plain JSON (comments, a typo) is reported and never rewritten. Any other app gets a snippet to paste. ChatGPT's desktop app only connects to remote servers, so it can't use this one. A check starts the server as a client would and lists its tools. From the command line: `node v2/mcp/connect.ts` (`--all`, `--app <id>`, `--remove <id>`, `--snippet`, `--check`, `--installed <Daylens.app or install folder>`).
 - **Protocol.** MCP 2025-06-18, 2025-03-26 and 2024-11-05; a client asking for another version gets the newest.
 
 ## AI access
