@@ -1,6 +1,6 @@
 /* Search: a floating layer over the whole window, opened with Cmd+K on macOS and Ctrl+K elsewhere. It sits clearly
    above the page: a darker scrim that softens what's behind, a solid panel with a deep shadow, and results right under
-   the field. */
+   the field. The values are the polish thread's elevation recipe (Figma: scrim, bg/float, V4/Shadow window). */
 .search-scrim {
   position: fixed;
   inset: 0;
@@ -8,7 +8,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  background: rgb(20 22 25 / 0.28);
+  background: rgb(20 22 25 / 0.24);
   backdrop-filter: blur(2px);
   animation: fade 160ms var(--ease);
   /* Drag regions ignore stacking: without this, a click over a header drags the window instead. */
@@ -23,8 +23,9 @@
   border-radius: 16px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.6),
-    0 32px 80px -16px rgb(20 22 25 / 0.35),
-    0 0 0 1px rgb(20 22 25 / 0.08);
+    0 0 0 1px rgb(20 22 25 / 0.08),
+    0 4px 12px -4px rgb(20 22 25 / 0.1),
+    0 32px 80px -16px rgb(20 22 25 / 0.36);
   overflow: hidden;
   animation: search-in 220ms var(--ease);
 }
@@ -100,6 +101,7 @@
   height: 32px;
   border-radius: 8px;
   background: var(--bg-raised);
+  color: var(--text-2);
   box-shadow:
     0 0 0 1px var(--line),
     0 1px 2px rgb(20 22 25 / 0.06);

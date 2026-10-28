@@ -4,7 +4,7 @@ import type { Source } from '../../../../shared/types.ts'
 import { act, query, useQuery } from '../../lib/api.ts'
 import { clock, hourLabel, seenAt } from '../../lib/format.ts'
 import { Button } from '../../ui/controls.tsx'
-import { Icon, Mark } from '../../ui/Icon.tsx'
+import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { AppIcon, SearchResult } from '../../ui/records.tsx'
 import { errorText } from '../../ui/status.tsx'
@@ -92,7 +92,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   const row = (r: Row, i: number) => {
     const [icon, name, sub] =
       'hour' in r
-        ? [tile(<Mark size={18} />), `${hourLabel(r.hour.start_wall_ms)} · ${r.hour.title ?? r.hour.summary ?? 'Hour'}`, `Hour · ${seenAt(r.hour.start_wall_ms).split(',')[0]}`]
+        ? [tile(<Icon name="today" />), `${hourLabel(r.hour.start_wall_ms)} · ${r.hour.title ?? r.hour.summary ?? 'Hour'}`, `Hour · ${seenAt(r.hour.start_wall_ms).split(',')[0]}`]
         : 'recent' in r
           ? [tile(<AppIcon id={r.recent.app.id} size={20} />), r.recent.title, `${r.recent.site ?? r.recent.app.name} · ${clock(r.recent.last_ms)}`]
           : [tile(<AppIcon id={r.item.app_id} size={20} />), r.item.title, `${KIND[r.item.kind]} in ${r.item.app_name ?? r.item.app_id} · ${seenAt(Math.max(r.item.last_wall_ms, ...r.item.seen_in.map((h) => h.hour_start_wall_ms)))}`]
