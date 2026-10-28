@@ -35,7 +35,7 @@ export const QUESTIONS: { q: string; kind: Kind; expect: string }[] = [
   { q: 'Did I work on the packaging labels today?', kind: 'whether', expect: 'Yes, from about 3 to 4 PM: the labels PDF in Preview and the label wording in TextEdit.' },
   { q: 'Did I look at the website yesterday?', kind: 'whether', expect: 'Yes: the brightside-site project (its dev server) in Terminal around 11 AM; the Mill Lane Flour page around 9:20 and the Corner Café page around 4:10 in Chrome count too. The git log at noon was today only, since yesterday 12 to 1 was lunch.' },
   { q: 'How long did I spend on invoices today?', kind: 'amount', expect: 'About an hour, roughly 1 to 2 PM: the Corner Café invoice, the invoices-to-send list and the sent invoice.' },
-  { q: 'What took most of my time today?', kind: 'amount', expect: 'Grouped by work, the website and its order form took the most, about 80 minutes (the dev server, the order-form notes and checklist, the git log); the rest took about an hour each. Saying that, or that time was spread fairly evenly, is right; the two answers must agree.' },
+  { q: 'What took most of my time today?', kind: 'amount', expect: 'Grouped by work, the website and its order form took the most: about 80 minutes (the dev server, the order-form notes and checklist, the git log), or about two hours counting the card payment questions as part of it; the rest took about an hour each. Saying that, or that time was spread fairly evenly, is right; the two answers must agree.' },
   { q: 'Which supplier was I looking at this morning?', kind: 'whether', expect: 'Mill Lane Flour, its wholesale prices, on screen from about 9:20 to 9:35 AM, alongside a supplier price change email.' },
   { q: 'What was I working on before the pickup schedule today?', kind: 'summary', expect: 'October invoicing, from 1 to 2 PM: the Corner Café invoice and sending the October invoice. Calling it just after lunch is fine.' },
   { q: 'What did I do on the order form?', kind: 'summary', expect: 'Late morning today and yesterday: the order-form notes (about 25 minutes) and its checklist (about 10 minutes), about 35 minutes a day and 70 in all, alongside the website’s dev server. Nothing shows it finished.' },
@@ -80,10 +80,11 @@ Judge each field strictly, true or false:
 - sounds_like_a_person: plain, warm and brief, like a colleague who saw the day; not a log, a list of apps, or hedging.
 reason: one or two sentences on any field that failed, quoting the answer. Empty when all pass.`
 
-// One run of a question as the eval reports it: what the person would read, and what each sentence cites.
-function run(r: AskResult): { text: string; sources: string[][] } {
+// One run of a question as the eval reports it: what the person would read, what each sentence cites, and how many
+// sentences the checks left out.
+function run(r: AskResult): { text: string; sources: string[][]; dropped?: number } {
   const cite = (c: Citation) => (c.kind === 'hour' ? `hour ${new Date(c.start_wall_ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })}` : `${c.kind} ${c.title ?? c.file ?? c.url}`)
-  if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)) }
+  if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)), dropped: r.dropped }
   if (r.kind === 'no_answer') return { text: r.missing ?? 'Your record doesn’t show that.', sources: [] }
   return { text: `(${r.kind})`, sources: [] }
 }

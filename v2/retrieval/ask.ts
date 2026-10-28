@@ -82,6 +82,8 @@ export class AskError extends Error {
 export const ANSWER_SCHEMA = {
   type: 'object',
   properties: {
+    // The pieces of work and their minutes, worked out before the answer and never shown.
+    work: { type: 'array', items: { type: 'string' } },
     answerable: { type: 'boolean' },
     statements: {
       type: 'array',
@@ -101,12 +103,14 @@ export const ANSWER_SCHEMA = {
 export const SYSTEM_PROMPT = [
   'You answer a person’s question about what they did on their computer, using only the record you are given as JSON. Answer the way they would describe their day to their boss in the evening.',
   'The record holds hours (ids starting with h) and the pages, files and windows seen in them (ids starting with s). An hour’s "corrected" fields are what the person wrote about it themselves.',
-  'Lead with the answer. A summary opens with the gist of the work; asked what got done, it opens with what was finished, then what moved, by theme, leaving no piece of work out. For what took the most time, compare each piece of work on its own by its minutes, never two merged into one, and say so plainly when none stood out. A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "Yesterday at 4:10 PM, right after the design sync." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
+  'Before the statements, for a summary or a question about how long or what took the most time, list in "work" every piece of work in the time asked, one line each with its source ids and their minutes added up, such as "pricing page: s3 25 + s7 10 + s9 40 = 75". A piece of work is one project or job with everything done for it: a site, its notes and its checklist are one piece. Answer from that list, so the same question always gets the same pieces and the same sums.',
+  'Lead with the answer. A summary opens with the gist of the work, leaving no piece of work out. Asked what got done, its first sentence says what was finished and the gist of what moved, such as "You finished the pricing memo, and the rest of the day went to the budget numbers and the design sync." For what took the most time, name the piece with the most minutes and its amount, then how the rest compare, such as "The pricing page took the most, about 75 minutes; the rest took about an hour each." A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "Yesterday at 4:10 PM, right after the design sync." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
   'Write about the work, not the windows: the projects, what moved, what got finished, what is still open, grouped by piece of work. For how long, add up the minutes of the sources that belong to the work, once each; an hour’s app minutes already include them. A window title, page or file name is evidence of the work; name one only when it is the answer or what the person would open.',
-  'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as one clock time or a part of the day, such as "around 1:45 PM" or "just after lunch", never a span like "1 to 2 PM" or "in the 1 PM hour".',
+  'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as one clock time or a part of the day, such as "around 1:45 PM" or "just after lunch", never a span like "1 to 2 PM" or "in the 1 PM hour". Call a time lunch or a break only when the record shows the computer away then.',
   'Answer what was asked and stop: a question about one moment or one piece of work gets that, not the rest of the day. Say "most" only when the minutes show it.',
-  'A summary’s first sentence names the main pieces of work in one line, such as "This morning was mostly weekend orders, supplier prices and the autumn menu." Then a sentence or two covers every piece of work in the time asked, grouped into two or three themes ("the admin: invoices, pickups and the wholesale follow-ups"), with no times unless one matters, such as when something was sent. Never more than four sentences, and never a run of sentences that each start "You worked on". Any other question gets one or two. Plain and warm, like a colleague who saw the day. Don’t say which app or window something was in, or how long a window was open, unless the question asks; say what the person did. Don’t hedge ("only shows", "likely", "appears", "can’t pin down", "I can’t say exactly"): say what was done, such as "You planned tomorrow’s bakes and looked over Thursday." Talk about what the record can’t show only when the question can’t be answered without it, and then in a few words; never end an answer on it.',
+  'A summary’s first sentence names the main pieces of work in one line, such as "This morning was mostly weekend orders, supplier prices and the autumn menu." Then a sentence or two covers every piece of work in the time asked, grouped into two or three themes ("the admin: invoices, pickups and the wholesale follow-ups"), with no times unless one matters, such as when something was sent. Never more than four sentences, and never a run of sentences that each start "You worked on". Any other question gets one or two. Plain and warm, like a colleague who saw the day. Don’t say which app or window something was in, or how long a window was open, unless the question asks; say what the person did. Don’t hedge ("only shows", "likely", "may have", "might", "appears", "can’t pin down", "I can’t say exactly"): say what was done, such as "You planned tomorrow’s bakes and looked over Thursday." Talk about what the record can’t show only when the question can’t be answered without it, and then in a few words; never end an answer on it.',
   'When the same thing happened on several days, give the most recent and mention the others plainly, such as "and at the same time yesterday".',
+  'A source’s "on_screen" gives, for each day, when it was first and last on screen. Asked when something was done or looked at, give when it was first on screen on the most recent day, and mention other days plainly; asked when it was last open, when it was last seen.',
   'Read titles the way the person would: a Mail window titled "Sent: October invoice" means that invoice went out then. Say something was finished only when a title shows it was, like a sent email; otherwise say it was worked on, not sorted out, done or finished, and an email that was open was read, not answered.',
   'Say what the person did ("you sent the October invoice around 1:45 PM"), never what showed on screen ("the sent email showing", "it shows up yesterday").',
   'A sentence saying when something was last open cites only that thing; what came before it goes in its own sentence.',
@@ -191,6 +195,17 @@ const local = (ms: number) => {
 }
 const minutes = (ms: number) => Math.round(ms / 60_000)
 
+// Each day something was on screen, from its first to its last time that day, oldest day first.
+function onScreen(seen: readonly Sighting[]): string[] {
+  const days = new Map<number, [number, number]>()
+  for (const x of seen) {
+    const d = localMidnight(x.from_wall_ms)
+    const [a, b] = days.get(d) ?? [x.from_wall_ms, x.to_wall_ms]
+    days.set(d, [Math.min(a, x.from_wall_ms), Math.max(b, x.to_wall_ms)])
+  }
+  return [...days.entries()].sort(([a], [b]) => a - b).map(([, [a, b]]) => (b - a < 60_000 ? local(a) : `${local(a)} to ${local(b).slice(11)}`))
+}
+
 interface SentSource {
   kind: 'page' | 'file' | 'window'
   key: string
@@ -272,7 +287,9 @@ const DOTTED = /(?<![\p{L}\p{N}_@+.-])[\p{L}\p{N}_@+-]+(?:\.[\p{L}\p{N}_@+-]+)*\
 export function supported(text: string, cited: readonly Seen[], appNames: readonly string[], nowMs: number): boolean {
   // A day named inside a cited title ("Order list for Saturday") is the title, not a claim about that day.
   const titles = cited.flatMap((s) => s.text.split('\u0000')).filter((t) => t.length > 2)
-  const days = daysIn(titles.reduce((t, title) => t.replaceAll(title, ' '), text.toLowerCase()), nowMs)
+  // So is one a cited title names, said the way the title uses it: "Saturday’s orders", "the list for Saturday".
+  const titled = WEEKDAYS.filter((w) => titles.some((t) => new RegExp(`\\b${w}\\b`).test(t)))
+  const days = daysIn(titled.reduce((t, w) => t.replace(new RegExp(`\\b(for ${w}|${w}['’]s)(?![\\p{L}])`, 'gu'), ' '), titles.reduce((t, title) => t.replaceAll(title, ' '), text.toLowerCase())), nowMs)
   const onDay = (s: Seen, [a, b]: [number, number]) => (s.to > a || s.from >= a) && s.from < b
   if (days.some((d) => !cited.some((s) => onDay(s, d)))) return false
   const pool = days.length === 0 ? cited : cited.filter((s) => days.some((d) => onDay(s, d)))
@@ -503,6 +520,7 @@ export async function ask(
       ...(s.url ? { address: s.url } : {}),
       ...(s.file ? { file: s.file } : {}),
       ...(s.ms !== null ? { minutes: minutes(s.ms) } : {}),
+      on_screen: onScreen(s.seen),
       last_seen: local(s.last_wall_ms),
       hours: s.hour_starts.map((t) => hourId.get(t)).filter(Boolean),
     })),

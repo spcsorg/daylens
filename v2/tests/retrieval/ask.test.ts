@@ -661,7 +661,7 @@ test('a refused or cut-off answer is reported as a failure, and what the provide
   }
 })
 
-test('a statement may name several things from what it cites, each file with an app it was in, and each time when something it names was seen; a day inside a cited title is not a claim; times are sent as 12-hour times', async () => {
+test('a statement may name several things from what it cites, each file with an app it was in, and each time when something it names was seen; a day inside a cited title, or said the way the title uses it, is not a claim; times are sent as 12-hour times', async () => {
   const s = setup()
   const errand = app('com.example.notes', { name: 'Notes' })
   s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 2 * HOUR + 10 * MIN))
@@ -687,6 +687,8 @@ test('a statement may name several things from what it cites, each file with an 
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
+        { text: 'You wrote up Saturday’s orders.', sources: [order] },
+        { text: 'You wrote up Saturday’s orders on Saturday.', sources: [order] },
       ],
     }
   })
@@ -696,6 +698,7 @@ test('a statement may name several things from what it cites, each file with an 
     'From 1 to 2 AM you edited q4-budget.xlsx in Editor.',
     'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.',
     'From 3 to 4 AM you wrote the Order list for Saturday in Notes.',
+    'You wrote up Saturday’s orders.',
   ])
   const record = JSON.parse(sent[0]!.prompt) as { now: string; hours: { start: string; end: string }[] }
   for (const t of [record.now, ...record.hours.flatMap((h) => [h.start, h.end])]) assert.match(t, /^\d{4}-\d\d-\d\d \d{1,2}(:\d\d)? [AP]M$/)
