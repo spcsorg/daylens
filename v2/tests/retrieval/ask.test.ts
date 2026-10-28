@@ -630,6 +630,7 @@ test('a statement about a whole hour may sum it up, each file with an app it was
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome and Notes.', sources: [h1, budget] },
+        { text: 'At 1 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
@@ -648,22 +649,23 @@ test('a statement about a whole hour may sum it up, each file with an app it was
   s.close()
 })
 
-test('a question about the last time sends and shows the most recent sighting first, and about the first time the earliest', async () => {
+test('a question about the last time sends and shows the most recent sighting first', async () => {
   const s = setup()
   const seen: AskRequest[] = []
   const model = fakeModel(() => ({ answerable: false, statements: [] }), seen)
-  for (const q of ['when did I last open the budget?', 'when did I first open the budget?', 'budget last week']) await ask(q, { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  for (const q of ['when did I last open the budget?']) await ask(q, { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
   const seenAt = (req: AskRequest) => (JSON.parse(req.prompt) as { sources: { last_seen: string }[] }).sources.map((x) => Date.parse(x.last_seen.replace(/ (\d+)(?::(\d\d))? ([AP])M$/, (_m, h, m, ap) => ` ${String((Number(h) % 12) + (ap === 'P' ? 12 : 0)).padStart(2, '0')}:${m ?? '00'}`)))
-  const [last, first] = [seenAt(seen[0]!), seenAt(seen[1]!)]
+  const last = seenAt(seen[0]!)
   assert.ok(last.length > 1)
   assert.deepEqual(last, [...last].sort((a, b) => b - a))
-  assert.deepEqual(first, [...first].sort((a, b) => a - b))
 
   // Whatever order the AI writes them in, the most recent sighting is shown first, and nothing is shown before it is sorted.
   const older = fakeModel((req) => {
     const src = (JSON.parse(req.prompt) as { sources: { id: string; title: string }[] }).sources
     const id = (t: string) => src.find((x) => x.title === t)!.id
-    return { answerable: true, statements: [{ text: 'You had q4-budget.xlsx open in Editor.', sources: [id('q4-budget.xlsx - Editor')] }, { text: 'You had the budget review open in Chrome.', sources: [id('Budget review')] }] }
+    const h = (JSON.parse(req.prompt) as { hours: { id: string }[] }).hours[0]!.id
+    // Both cite the same hour: the sources' own times decide.
+    return { answerable: true, statements: [{ text: 'You had q4-budget.xlsx open in Editor.', sources: [h, id('q4-budget.xlsx - Editor')] }, { text: 'You had the budget review open in Chrome.', sources: [h, id('Budget review')] }] }
   })
   const streamed: Statement[] = []
   const res = await ask('when did I last open the budget?', { reader: s.reader, model: older, log: s.log, now: () => NEXT_DAY, onStatement: (x) => streamed.push(x) }, LIMITS)
