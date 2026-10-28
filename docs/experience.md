@@ -95,8 +95,9 @@ Ask answers questions about any day from the same record.
 
 - Day and week views.
 - Each app shows its total time, the hours it appeared in, and the pages, documents or windows used in it. Each opens.
-- A breakdown bar is used only if each segment is labeled.
-- Removing an app's records for a day is one action in the app's detail view, not a menu on every row.
+- A breakdown bar is used only if each segment is labeled. Each app in the list shows its share of the day or week as a thin bar under its name, labeled "22% of the day".
+- The week's bars are labeled with each day's time; today's bar is ink, the others grey. Clicking a day's bar opens that day.
+- Removing an app's records for a day is one action in the app's detail view, not a menu on every row. It is a trash icon with a tooltip naming exactly what it removes ("Remove Notes from 28 October"), and it confirms first.
 
 ## Settings
 
@@ -105,7 +106,9 @@ Ask answers questions about any day from the same record.
 - **Assistants:** every MCP app found on the machine, connect and disconnect, a test, a log of what each one read and asked to change, and setup for any other MCP app.
 - **AI:** the current choice (Daylens AI, your own key, or none), usage this month split by naming hours and Ask, what each assistant read, and token spend when using your own key. Things you told Daylens, each removable.
 - **Plan:** current plan, usage, renewal or end date, payment method, cancel and resume.
-- **Data:** save each day as a note in a folder you choose, let coding agents read those notes, and export everything.
+- **Data:** save each day as a note in a folder you choose, let coding agents read those notes, and export everything. The tab appears when one of these ships; until then there is no Data tab, rather than a tab that says "later".
+
+Each tab groups its settings into a few titled cards (Recording, Never record, Privacy, History), as System Settings and Linear do, rather than one long list. The selected tab's underline slides to it. Appearance is three small pictures of the window (Light, Dark, Match system); the chosen one has a ring.
 
 ## Assistant requests
 

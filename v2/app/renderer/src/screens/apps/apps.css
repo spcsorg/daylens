@@ -33,8 +33,67 @@
 .app-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-12);
+}
+
+/* The app's icon on a raised tile: the picture of the thing this panel is about. */
+.app-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 1px 2px rgb(20 22 25 / 0.06),
+    0 6px 16px -6px rgb(20 22 25 / 0.18);
+}
+
+:root[data-theme='dark'] .app-tile {
+  background: var(--sel);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+/* Each app's share of the day or week, labeled under it. */
+.app-row-share {
+  display: block;
+  height: 4px;
+  margin: var(--space-4) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.app-row-share > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-3);
+  transform-origin: left;
+  animation: share-grow 400ms var(--ease) both;
+}
+
+.app-row[aria-current='true'] .app-row-share {
+  background: var(--line-strong);
+}
+
+.app-row[aria-current='true'] .app-row-share > span {
+  background: var(--text);
+}
+
+/* A fixed column for the time, so every share bar has the same track. */
+.apps-list .app-row-ms {
+  min-width: 56px;
+  text-align: right;
+}
+
+@keyframes share-grow {
+  from {
+    transform: scaleX(0);
+  }
 }
 
 .app-head .grow {
@@ -91,14 +150,42 @@
   justify-content: flex-end;
   height: 100%;
   gap: var(--space-4);
+  border-radius: var(--radius-md);
   font: var(--caption);
   color: var(--text-2);
+  transition: background-color var(--quick) var(--ease);
+}
+
+.bar:not(:disabled):hover {
+  background: var(--bg-hover);
 }
 
 .bar .fill {
   width: 24px;
   border-radius: var(--space-4);
-  background: var(--primary);
+  background: var(--line-strong);
+  transform-origin: bottom;
+  animation: bar-grow 400ms var(--ease) both;
+  transition: background-color var(--quick) var(--ease);
+}
+
+.bar:not(:disabled):hover .fill {
+  background: var(--text-2);
+}
+
+.bar.today .fill {
+  background: var(--text);
+}
+
+.bar.today .day {
+  color: var(--text);
+  font: var(--caption-strong);
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleY(0);
+  }
 }
 
 .bar .none {

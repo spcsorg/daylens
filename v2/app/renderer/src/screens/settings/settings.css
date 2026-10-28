@@ -6,19 +6,29 @@
 }
 
 .settings-tabs {
+  position: relative;
   display: flex;
   gap: var(--space-24);
+}
+
+/* One underline that slides to the chosen tab instead of jumping. */
+.settings-tab-line {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text);
+  transition:
+    transform 220ms var(--ease),
+    width 220ms var(--ease);
 }
 
 .settings-tabs button {
   height: 36px;
   font: var(--label-regular);
   color: var(--text-2);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition:
-    color var(--quick) var(--ease),
-    border-color var(--quick) var(--ease);
+  transition: color var(--quick) var(--ease);
 }
 
 .settings-tabs button:hover {
@@ -27,8 +37,6 @@
 
 .settings-tabs button[aria-selected='true'] {
   color: var(--text);
-  font: var(--label);
-  border-bottom-color: var(--text);
 }
 
 .settings-stack {
@@ -39,9 +47,23 @@
 }
 
 .settings-heading {
-  font: var(--heading);
-  letter-spacing: -0.085px;
-  margin-bottom: var(--space-12);
+  font: var(--label);
+  color: var(--text-2);
+  margin: 0 0 var(--space-8) var(--space-4);
+}
+
+/* Settings that belong together sit on one card, so a tab reads as a few things, not a wall of rows. */
+.settings-group,
+.settings-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 var(--space-20);
+}
+
+.settings-group > .settings-row:last-child,
+.settings-card > .settings-row:last-of-type {
+  border-bottom: 0;
 }
 
 .settings-row {
@@ -68,16 +90,6 @@
 .settings-row-detail {
   font: var(--caption);
   color: var(--text-2);
-}
-
-.settings-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4) var(--space-20);
-}
-
-.settings-card .settings-row:last-of-type {
-  border-bottom: 0;
 }
 
 .settings-anchor {
@@ -152,4 +164,115 @@
   background: var(--bg-raised);
   padding: 0 var(--space-6);
   font: var(--label-regular);
+}
+
+/* Appearance: a small picture of the window in each look. */
+.appearance {
+  display: flex;
+  gap: var(--space-16);
+  padding: var(--space-16) 0;
+}
+
+.appearance-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  font: var(--label-regular);
+  color: var(--text-2);
+}
+
+.appearance-option[aria-checked='true'] {
+  color: var(--text);
+  font: var(--label);
+}
+
+.appearance-thumb {
+  position: relative;
+  width: 120px;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow var(--quick) var(--ease);
+}
+
+.appearance-option:hover .appearance-thumb {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.appearance-option[aria-checked='true'] .appearance-thumb {
+  box-shadow:
+    0 0 0 3px var(--bg-subtle),
+    0 0 0 5px var(--text);
+}
+
+.mini {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+/* In Match system the dark window covers the right half, cut on a slant. */
+.mini + .mini {
+  clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%);
+}
+
+.mini-sidebar {
+  width: 30%;
+}
+
+.mini-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 10px;
+}
+
+.mini-main > span {
+  height: 6px;
+  border-radius: 3px;
+}
+
+.mini-main > span:first-child {
+  width: 70%;
+  height: 9px;
+}
+
+.mini-main > span:nth-child(3) {
+  width: 55%;
+}
+
+/* Fixed colours: each picture shows its own look, whatever the window is in now. */
+.mini.light {
+  background: #ffffff;
+}
+
+.mini.light .mini-sidebar {
+  background: #f4f5f7;
+}
+
+.mini.light .mini-main > span {
+  background: #e4e6e9;
+}
+
+.mini.light .mini-main > span:first-child {
+  background: #141619;
+}
+
+.mini.dark {
+  background: #141619;
+}
+
+.mini.dark .mini-sidebar {
+  background: #1c1f23;
+}
+
+.mini.dark .mini-main > span {
+  background: #2a2e33;
+}
+
+.mini.dark .mini-main > span:first-child {
+  background: #eceef0;
 }
