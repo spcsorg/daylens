@@ -152,7 +152,13 @@ function update(def: ClientDef, w: Where, spec: ServerSpec | null): void {
     return
   }
   // A file that isn't plain JSON (comments, a typo) is never rewritten: what it holds isn't ours to lose.
-  const json = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>
+  let json: Record<string, unknown>
+  try {
+    json = text.trim() === '' ? {} : (JSON.parse(text) as Record<string, unknown>)
+  } catch {
+    // JSON.parse's message quotes the file, which can hold keys.
+    throw new Error(`${def.name}'s settings file isn't plain JSON, so Daylens won't rewrite it. Add Daylens by hand with Copy setup.`)
+  }
   const key = container(def.format)
   const servers = { ...((json[key] as Record<string, unknown> | undefined) ?? {}) }
   if (spec) servers[SERVER_NAME] = entry(spec, def.format)

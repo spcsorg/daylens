@@ -74,7 +74,7 @@ test('a config that is not plain JSON is reported and never rewritten', () => {
   const text = '{\n  // my servers\n  "mcpServers": {}\n}\n'
   put(file, text)
   assert.equal(detect(SPEC, w)[0]!.state, 'unreadable')
-  assert.throws(() => connect('cursor', SPEC, w), SyntaxError)
+  assert.throws(() => connect('cursor', SPEC, w), (e: Error) => e.message === "Cursor's settings file isn't plain JSON, so Daylens won't rewrite it. Add Daylens by hand with Copy setup." && !e.message.includes('my servers'))
   assert.equal(read(file), text)
 })
 
