@@ -81,13 +81,14 @@ const duration = await run("window.__film.duration");
 
 async function frame(t) {
   await run(`window.__film.seek(${t}); new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
-  const { data } = await page("Page.captureScreenshot", { format: "png", optimizeForSpeed: true });
+  // PNG capture hangs headless Chrome on some large soft-gradient frames at 2x; JPEG at 95 is invisible after the downscale.
+  const { data } = await page("Page.captureScreenshot", { format: "jpeg", quality: 95 });
   return Buffer.from(data, "base64");
 }
 
 if (a.stills) {
   mkdirSync(a.stills, { recursive: true });
-  for (const t of (a.at ?? "0").split(",").map(Number)) writeFileSync(join(a.stills, `${a.ratio}-${t.toFixed(2)}.png`), await frame(t));
+  for (const t of (a.at ?? "0").split(",").map(Number)) writeFileSync(join(a.stills, `${a.ratio}-${t.toFixed(2)}.jpg`), await frame(t));
 } else {
   const fps = Number(a.fps);
   const from = Number(a.from ?? 0);
