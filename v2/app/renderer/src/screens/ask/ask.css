@@ -92,11 +92,14 @@
   background: var(--danger-soft);
 }
 
-.bubble-aside {
-  display: block;
-  margin-top: var(--space-4);
-  font: var(--body);
-  color: var(--text-2);
+.ask-sentence {
+  animation: sentence-in var(--settle) var(--ease) both;
+}
+
+@keyframes sentence-in {
+  from {
+    opacity: 0;
+  }
 }
 
 @keyframes bubble-in {
@@ -246,6 +249,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bubble,
+  .ask-sentence,
   .ask-sources,
   .typing span {
     animation: none;

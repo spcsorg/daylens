@@ -195,14 +195,15 @@ test('Daylens’s own hour text is not sent as evidence, the person’s correcti
   assert.deepEqual(res.statements.map((x) => x.text), [
     'At 1:05 you had q4-budget.xlsx open in Editor.',
     'You went through the Q4 numbers.',
+    'Yesterday from 1:00 to 1:31 you were in Editor, Chrome and Notes.',
     'Yesterday from 1:00 to 2:00 you were in Editor, Chrome and Notes.',
     'Between 01:00 and 02:00 you were in Editor.',
     'You read the Budget review page on docs.example.com in Chrome.',
   ], 'what names nothing code can check passes; a time outside what was seen, or a day, app, site or file the citations do not have, does not')
-  assert.equal(res.dropped, 10, 'the screen locked at 1:31, so nothing was seen at 1:45, and the three apps were never on screen together at 1:31')
+  assert.equal(res.dropped, 9, 'the screen locked at 1:31, so nothing was seen at 1:45')
   const sent = JSON.parse(seen[0]!.prompt) as Rec
   assert.deepEqual([sent.hours[0]!.title, sent.hours[0]!.summary, sent.hours[0]!.corrected], [undefined, undefined, undefined], 'the written hour is not evidence')
-  assert.match(seen[0]!.system, /must cite an hour or source from that time, that day, that app, that site or that file/)
+  assert.match(seen[0]!.system, /names a time, a day, an app, a site or a file cites an hour or source from it/)
 
   s.r.storage.correct(hourId, 'summary', 'Cut the travel line.')
   await ask('what did I do on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
@@ -540,7 +541,7 @@ test('when the limits leave part of the record out, the AI is told how much, and
   assert.deepEqual(sent.map((r) => [r.hours.length, r.hours_not_sent]), [[3, 5], [3, 5], [8, 0]])
   assert.ok(sent[0]!.sources_not_sent > 0 && sent[1]!.sources_not_sent > 0)
   assert.equal(sent[2]!.sources_not_sent, 0)
-  assert.match(seen[0]!.system, /only, first, last, every time or never only when "days_asked" is not empty and "incomplete" is false/)
+  assert.match(seen[0]!.system, /only, first, every time or never only when "days_asked" is not empty and "incomplete" is false/)
   s.close()
 })
 
@@ -576,7 +577,18 @@ test('a claim of only, first, last or never stands only when the whole of the da
 
   const found = await ask('which ledger xlsx', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.equal((JSON.parse(seen[1]!.prompt) as { incomplete: boolean }).incomplete, false)
-  assert.equal(found.kind === 'answer' && found.statements.length, 1, 'everything search found was sent, but search finds by words, so the record is not whole')
+  const cited = (JSON.parse(seen[1]!.prompt) as { sources: { file?: string }[] }).sources.find((x) => x.file?.startsWith('ledger-'))!.file!
+  const expected = cited === 'ledger-10.xlsx' ? [`You opened ${cited} last.`, `You opened ${cited}.`] : [`You opened ${cited}.`]
+  assert.deepEqual(found.kind === 'answer' && found.statements.map((x) => x.text), expected, 'search finds by words, so "only" never stands; "last" does only for the newest match')
+
+  // "Last" may name the newest of what best matches the question, when search found every match; never an older one.
+  const lastModel = fakeModel((req) => {
+    const files = (JSON.parse(req.prompt) as { sources: { id: string; file?: string }[] }).sources
+    const of = (f: string) => files.find((x) => x.file === f)!.id
+    return { answerable: true, statements: [{ text: 'You opened ledger-10.xlsx last.', sources: [of('ledger-10.xlsx')] }, { text: 'You opened ledger-3.xlsx last.', sources: [of('ledger-3.xlsx')] }] }
+  })
+  const last = await ask('which ledger xlsx did I open last', { reader: s.reader, model: lastModel, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
+  assert.deepEqual(last.kind === 'answer' && last.statements.map((x) => x.text), ['You opened ledger-10.xlsx last.'])
   const day = await ask('which ledger xlsx yesterday', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 50, perGroup: 20 })
   assert.equal((JSON.parse(seen[2]!.prompt) as { incomplete: boolean }).incomplete, false)
   assert.equal(day.kind === 'answer' && day.statements.length, 3, 'with the whole day sent, the claim about it stands')
@@ -610,7 +622,7 @@ test('a refused or cut-off answer is reported as a failure, and what the provide
   }
 })
 
-test('a statement about a whole hour may sum it up, each file with an app it was in; a day inside a cited title is not a claim; times are sent as 12-hour times', async () => {
+test('a statement may name several things from what it cites, each file with an app it was in, and each time when something it names was seen; a day inside a cited title is not a claim; times are sent as 12-hour times', async () => {
   const s = setup()
   const errand = app('com.example.notes', { name: 'Notes' })
   s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 2 * HOUR + 10 * MIN))
@@ -630,8 +642,7 @@ test('a statement about a whole hour may sum it up, each file with an app it was
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
         { text: 'From 1 to 2 AM you edited q4-budget.xlsx in Chrome and Notes.', sources: [h1, budget] },
-        { text: 'At 1 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.', sources: [h1, budget] },
-        { text: 'At 1 AM you switched from Editor to Chrome while working on q4-budget.xlsx.', sources: [h1, budget] },
+        { text: 'At 2:30 AM you edited q4-budget.xlsx in Editor.', sources: [h1, budget] },
         { text: 'From 3 to 4 AM you edited q4-budget.xlsx in Editor.', sources: [h3, budget] },
         { text: 'From 3 to 4 AM you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },

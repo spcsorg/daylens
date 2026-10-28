@@ -1,5 +1,5 @@
-// Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; each
-// statement of the answer arrives on the left as it streams, one at a time.
+// Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; the
+// answer arrives on the left as one message, a sentence at a time as it streams.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AskResult, Citation, Statement } from '../../../../shared/ai.ts'
 import { act, bridge, query } from '../../lib/api.ts'
@@ -174,12 +174,16 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
   return (
     <div className="ask-exchange">
       <div className="bubble mine">{turn.question}</div>
-      {statements.slice(0, shown).map((s, i) => (
-        <div className="bubble theirs" key={i}>
-          {s.text}
+      {shown > 0 && (
+        <div className="bubble theirs">
+          {statements.slice(0, shown).map((s, i) => (
+            <span className="ask-sentence" key={i}>
+              {s.text}{' '}
+            </span>
+          ))}
         </div>
-      ))}
-      {!settled && <Typing />}
+      )}
+      {shown === 0 && !settled && <Typing />}
       {settled && turn.error && (
         <div className="bubble theirs problem" role="alert">
           {turn.error}{' '}
@@ -188,12 +192,7 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
           </button>
         </div>
       )}
-      {settled && r?.kind === 'no_answer' && (
-        <div className="bubble theirs">
-          Your record doesn’t show that.
-          {r.missing && <span className="bubble-aside">{r.missing}</span>}
-        </div>
-      )}
+      {settled && r?.kind === 'no_answer' && <div className="bubble theirs">{r.missing ?? 'Your record doesn’t show that.'}</div>}
       {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
       {settled && r?.kind === 'search_only' && <NoKey onSaved={onRetry} />}
       {settled && r?.kind === 'answer' && <Sources statements={r.statements} onOpenHour={onOpenHour} />}

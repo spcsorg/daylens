@@ -68,6 +68,12 @@ const HOURS: [number, AppIdentity, string][][] = [
   [[0, notes, 'Tomorrow’s bakes'], [30, calendar, 'Thursday']],
 ]
 
+// What the browser extension reports for the pages open in Chrome; without it a browser window's title isn't kept.
+const PAGES: Record<string, string> = {
+  'Mill Lane Flour – wholesale prices': 'https://millaneflour.example/wholesale',
+  'Corner Café – menu and opening hours': 'https://cornercafe.example/menu',
+}
+
 const now = values.now ? Date.parse(values.now) : Date.now()
 if (!Number.isFinite(now)) throw new Error('--now must be a time')
 const store = new Store(dir)
@@ -89,6 +95,13 @@ function seedDay(dayStart: number, until: number): void {
       if (t >= until) return
       const next = HOURS[h]![i + 1]?.[0] ?? 60
       normalizer.handle(line('focus', { trigger: 'app_changed', app: a, window: { window: `w${h}${i}`, title, title_state: 'ok' } }, t))
+      const url = PAGES[title]
+      if (url) {
+        store.insertObservation({
+          run: 'run-seed-ext', seq: seq++, boot: 'boot-seed', platform: 'macos', source: 'browser_ext', kind: 'page', event_wall_ms: t, event_mono_us: t * 1000, tz: 'Example/Town',
+          tz_offset_min: tzOffset, app_id: a.app_id, app_name: a.name, app_path: a.path, pid: a.pid, window: 'ext:1', title, title_raw: null, title_state: 'ok', state: 'normal', detail: null, url,
+        })
+      }
       const step = switchMs ?? 60_000
       for (let s = t + step, n = 1; s < Math.min(hourStart + next * MIN, until); s += step, n++) {
         const shown = switchMs ? `${title} (${n})` : title
