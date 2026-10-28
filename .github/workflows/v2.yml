@@ -1,0 +1,44 @@
+name: V2
+
+on:
+  pull_request:
+    paths:
+      - "v2/**"
+      - ".github/workflows/v2.yml"
+  push:
+    branches: [main]
+    paths:
+      - "v2/**"
+      - ".github/workflows/v2.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  v2:
+    name: v2 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows joins once its known test failures are fixed.
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: v2
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm run build:sqlite
+      - run: npm run typecheck
+      - run: npm run app:typecheck
+      - run: npm test
