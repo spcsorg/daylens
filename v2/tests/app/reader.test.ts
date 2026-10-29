@@ -101,6 +101,24 @@ test('a window that comes to the front while nobody is at the computer adds no t
   r.close()
 })
 
+test('idle noticed after an hour ends still takes the windows after the last input out of that hour', async () => {
+  resetSeq()
+  const r = rig()
+  const nine = T0 + 9 * HOUR, ten = T0 + 10 * HOUR
+  work(r, nine, [[notes, 'Order list', 59]])
+  r.feed(focus(sheets, 'Flour costs', ten - 50_000))
+  r.feed(focus(app('com.example.mail', { name: 'Mail' }), 'Inbox', ten - 30_000))
+  r.feed(line('input', { state: 'idle', last_input_wall_ms: ten - 60_000, threshold_s: 120, snapshot: false }, ten + 60_000))
+  r.clock.t = ten + 30 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(reader.appTotals(reader.spans(nine, ten)).map((a) => a.name), ['Notes'])
+  assert.deepEqual(reader.day(DAY).hours[0]!.facts.apps.map((a) => a.name), ['Notes'])
+  db.close()
+  r.close()
+})
+
 test('a deletion hides what it covers from every screen while it is still being carried out', async () => {
   resetSeq()
   const r = rig(undefined, { holdDeletions: true })
