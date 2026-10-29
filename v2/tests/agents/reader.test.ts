@@ -413,6 +413,27 @@ test('renamed turn events are reported as degraded, never as a healthy quiet log
   r.store.close()
 })
 
+test('health counted by a read that a stop interrupts is still written before stop returns', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const renamed = (at: number, kind: string, turn: string) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: kind, turn_id: turn } })
+  writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), renamed(sec(1), 'turn_began', 't1'), codex.userItem(sec(1), 'go', ['user.text']), renamed(sec(9), 'turn_finished', 't1')))
+  const reader = r.reader()
+  const apply = r.agents.apply.bind(r.agents)
+  let stopping: Promise<void> | undefined
+  r.agents.apply = ((...args: Parameters<typeof apply>) => {
+    const out = apply(...args)
+    stopping ??= reader.stop()
+    return out
+  }) as typeof r.agents.apply
+  await reader.start()
+  assert.ok(stopping)
+  await stopping
+  const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
+  assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
+  r.store.close()
+})
+
 test('a renamed start with a recognized completion is reported as degraded', async () => {
   const r = rig()
   const c = codexCtx()

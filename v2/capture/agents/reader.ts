@@ -272,6 +272,8 @@ export class AgentReader {
     if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
     await this.draining
+    // What the last read counted is written now, while the store is open; a pass resuming later writes nothing.
+    for (const r of this.roots) this.recordHealth(r)
     for (const tail of this.tails.values()) tail.close()
     this.tails.clear()
   }
@@ -413,11 +415,11 @@ export class AgentReader {
         await this.readFile(r, file)
       }
     }
-    for (const r of this.roots) this.recordHealth(r)
+    if (!this.stopped) for (const r of this.roots) this.recordHealth(r)
   }
 
   private recordHealth(r: RootState): void {
-    if (!this.healthOn || this.stopped) return
+    if (!this.healthOn) return
     const c = r.counts
     if (r.unreadable) {
       this.store.setHealth(r.root.agent, r.root.dir, 'unreadable', 'file_unreadable', null)
