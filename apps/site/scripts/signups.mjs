@@ -32,7 +32,7 @@ const counts = {};
 for (const id of ids) {
   const contact = await get(`/contacts/${id}`);
   // Contacts from before Oct 30, 2026 have no source.
-  const source = contact.properties?.source || "none";
+  const source = contact.properties?.source?.value || "none";
   counts[source] = (counts[source] ?? 0) + 1;
   await wait(250);
 }
