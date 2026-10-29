@@ -202,7 +202,9 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       // not "most of the hour went to the editor before the screen was locked".
       const bounds = [...sentence.matchAll(/[,;()–—]|:(?!\d)|\b(?:and|but|before|after|until|then|while)\b/gi)].map((m) => m.index!)
       const clause = sentence.slice(Math.max(0, ...bounds.filter((b) => b < share.index)), Math.min(sentence.length, ...bounds.filter((b) => b > share.index)))
-      const awayClaim = /\b(?:away|locked|lock|asleep|sleep|idle|stepped out|left)\b/i.test(clause)
+      // A clause that also names an app or a title is about that work ("most of the hour in the editor with the screen locked").
+      const word = /\b(away|locked|lock|asleep|sleep|idle|stepped out|left)\b/i.exec(clause)?.[1]!.toLowerCase()
+      const awayClaim = !!word && !items.some((i) => says(i.title, clause) || says(i.app, clause)) && !packet.agents.some((a) => mentions(clause, a.agent.toLowerCase()))
       if (named.length + agents.length === 0 && !awayClaim) continue
       // The rest of the hour runs from the last time given before it.
       const since = share[1] ? clocks(sentence.slice(0, share.index)).flatMap(([, readings]) => readings).filter((t) => t >= from! && t < end).at(-1) : undefined
@@ -214,8 +216,10 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
         return a >= since ? i.min : i.times > 1 ? 0 : Math.min(i.min, Math.max(0, Math.min(b, end) - since))
       }
       // Windows and pages are in front one at a time, so theirs add up; an agent works alongside them, so it doesn't.
+      // Locked, asleep or idle counts only spans of that kind; away counts them all.
+      const kind = word && /lock/.test(word) ? /lock/ : word && /sleep/.test(word) ? /sleep/ : word === 'idle' ? /idle/ : /./
       const minutes = awayClaim
-        ? awaySpans.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, end) - Math.max(a, since ?? from!)), 0)
+        ? packet.away.filter((a) => kind.test(a.why)).map(span).reduce((n, [a, b]) => n + Math.max(0, Math.min(b, end) - Math.max(a, since ?? from!)), 0)
         : Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }

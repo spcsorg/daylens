@@ -91,7 +91,9 @@ async function writeCase(packet: Packet, write: (p: Packet) => Promise<{ text: s
 // A clock time written without AM or PM, or as 24-hour time: the app writes 12-hour times. A list may share one AM or
 // PM at its end ("4:21, 4:30 and 4:39 PM").
 const twelveHour = (text: string) =>
-  [...text.matchAll(/\b([01]?\d|2[0-3]):[0-5]\d\b(?!\s*(?:am|pm|a\.m\.|p\.m\.))/gi)].every((m) => Number(m[1]) >= 1 && Number(m[1]) <= 12 && !m[1]!.startsWith('0') && /^[^.!?;]*?\d\s*(?:am|pm|a\.m\.|p\.m\.)/i.test(text.slice(m.index! + m[0].length)))
+  [...text.matchAll(/\b(\d{1,2}):[0-5]\d\b(\s*(?:am|pm|a\.m\.|p\.m\.))?/gi)].every(
+    (m) => Number(m[1]) >= 1 && Number(m[1]) <= 12 && !m[1]!.startsWith('0') && (!!m[2] || /^[^.!?;]*?\d\s*(?:am|pm|a\.m\.|p\.m\.)/i.test(text.slice(m.index! + m[0].length))),
+  )
 
 // A past 6 PM, so the seeded today runs 8 AM to 6 PM in full.
 function evalNow(): number {

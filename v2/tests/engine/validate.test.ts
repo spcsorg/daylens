@@ -199,4 +199,9 @@ test('the rest of the hour away or locked holds when an away span runs to the en
   assert.deepEqual(at('The screen was locked for most of the hour.'), [], '42 minutes away')
   assert.deepEqual(at('From 10:18 PM you worked in the Editor for the rest of the hour.'), ['share_overstated'], 'away time backs only a claim about being away')
   assert.deepEqual(at('Most of the hour went to the Editor before the screen was locked.'), ['share_overstated'], 'the share is about the editor, not the lock')
+  assert.deepEqual(at('You spent most of the hour working in the Editor with the screen locked.'), ['share_overstated'], 'a clause that names the editor is about the editor')
+  const mixed = { ...late, away: [{ id: 'w1', from: '22:15', to: '22:35', why: 'screen locked' }, { id: 'w2', from: '22:35', to: '23:00', why: 'idle' }] }
+  const kinds = (detail: string) => validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1', 'w1'], outcome: null, detail }), mixed, refs).errors.map((e) => e.code)
+  assert.deepEqual(kinds('The screen was locked for most of the hour.'), ['share_overstated'], '20 minutes locked; the idle time was not')
+  assert.deepEqual(kinds('You were away for most of the hour.'), [], '45 minutes away, locked or idle')
 })
