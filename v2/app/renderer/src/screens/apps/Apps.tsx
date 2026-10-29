@@ -85,9 +85,9 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
   )
 }
 
-// "34%", or "<1%" for a sliver, so a share never reads as nothing.
+// "34%", "<1%" for a sliver and at most "99%" short of the whole, so a share never reads as nothing or everything.
 function percent(share: number): string {
-  return share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`
+  return share < 0.01 ? '<1%' : `${Math.min(share < 1 ? 99 : 100, Math.round(share * 100))}%`
 }
 
 /** Time recorded each day of the week, each bar labeled; a day with time opens that day. */

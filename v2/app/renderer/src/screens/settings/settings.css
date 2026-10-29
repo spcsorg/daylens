@@ -177,7 +177,7 @@
   color: var(--text-2);
 }
 
-.appearance-option[aria-checked='true'] {
+.appearance-option[aria-pressed='true'] {
   color: var(--text);
   font: var(--label);
 }
@@ -196,7 +196,7 @@
   box-shadow: 0 0 0 1px var(--line-strong);
 }
 
-.appearance-option[aria-checked='true'] .appearance-thumb {
+.appearance-option[aria-pressed='true'] .appearance-thumb {
   box-shadow:
     0 0 0 3px var(--bg-subtle),
     0 0 0 5px var(--text);

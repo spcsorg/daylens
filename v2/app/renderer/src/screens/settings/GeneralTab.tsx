@@ -24,13 +24,12 @@ export function GeneralTab({ shell }: { shell: ShellState | null }) {
         </Row>
       </Section>
       <Section title="Appearance">
-        <div className="appearance" role="radiogroup" aria-label="Appearance">
+        <div className="appearance" role="group" aria-label="Appearance">
           {APPEARANCE.map((o) => (
             <button
               type="button"
               key={o.value}
-              role="radio"
-              aria-checked={shell.appearance === o.value}
+              aria-pressed={shell.appearance === o.value}
               className="appearance-option"
               onClick={async () => {
                 const r = await act({ a: 'appearance', mode: o.value })
