@@ -39,7 +39,7 @@ const GRADE_SCHEMA = {
   },
 }
 
-export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false.
+export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false. When it has must, the hour has to convey that; leaving it out makes supported false.
 
 Judge each field strictly, true or false:
 - title_names_work: the title names the work in a few words, the way the person would put it in their calendar ("Weekend orders and Saturday's list"), not an app, a window title or a list of them.
@@ -52,7 +52,7 @@ reason: one or two sentences on any field that failed, quoting the hour. Empty w
 // Hours built by hand for what the seed day never shows, each a way writers went wrong on a real day.
 const item = (id: string, app: string, title: string, min: number, from: string, to: string, times = 1) => ({ id, app, title, min, from, to, times })
 const empty = { away: [], unknown: [], windows: [], pages: [], agents: [], commits: [], scheduled_events: [] }
-export const CASES: { name: string; packet: Packet; watch: string }[] = [
+export const CASES: { name: string; packet: Packet; watch: string; must?: string }[] = [
   {
     name: 'settings panes beside a new app',
     watch: 'that permissions were given or granted, that Voicely was set up, installed or configured, or that anything was added to release-plan.md',
@@ -71,6 +71,7 @@ export const CASES: { name: string; packet: Packet; watch: string }[] = [
   {
     name: 'a class on the calendar across the hour',
     watch: 'that the person attended, joined or checked in on the class, or that the class was a brief stop of a few minutes',
+    must: 'that the Statistics class was scheduled across the hour, alongside the work',
     packet: { ...empty, hour: '2026-10-27 13:00-14:00', tz: 'Example/Town', scheduled_events: [{ id: 'k1', title: 'Statistics class', from: '13:00', to: '15:00' }], pages: [item('p1', 'Chrome', 'Statistics class - Google Meet', 3, '13:02', '13:05'), item('p2', 'Chrome', 'pandas groupby - documentation', 12, '13:45', '13:57')], windows: [item('i1', 'Editor', 'analysis.py', 40, '13:05', '13:45')] },
   },
   {
@@ -133,8 +134,8 @@ async function main(): Promise<void> {
   hours.stop()
 
   const grader = anthropicClient(GRADER, { apiKey, timeoutMs: 120_000, effort: 'high' })
-  const grade = async (label: string, packet: Packet, written: Record<string, string | null>, watch?: string) => {
-    const r = await grader({ system: HOURS_GRADER_PROMPT, message: JSON.stringify({ packet, written, ...(watch ? { watch } : {}) }), schema: GRADE_SCHEMA })
+  const grade = async (label: string, packet: Packet, written: Record<string, string | null>, c?: { watch: string; must?: string }) => {
+    const r = await grader({ system: HOURS_GRADER_PROMPT, message: JSON.stringify({ packet, written, ...c }), schema: GRADE_SCHEMA })
     const g = JSON.parse(r.text ?? '{}') as Grade
     const twelve = Object.values(written).every((t) => !t || twelveHour(t))
     const pass = r.error === null && twelve && g.title_names_work && !g.lists_windows && !g.minute_by_minute && g.supported && g.sounds_like_a_person
@@ -162,7 +163,7 @@ async function main(): Promise<void> {
         const w = await writeCase(c.packet, (p) => writer.write(p))
         rejected.push(...w.rejected.map((x) => `${c.name}: ${x}`))
         if (!w.hour) return { hour: c.name, written: null, pass: false, rules: null, problem: 'not written: every try was rejected' }
-        return grade(c.name, c.packet, { title: w.hour.title, summary: w.hour.summary, detail: w.hour.detail, outcome: w.hour.outcome }, c.watch)
+        return grade(c.name, c.packet, { title: w.hour.title, summary: w.hour.summary, detail: w.hour.detail, outcome: w.hour.outcome }, { watch: c.watch, must: c.must })
       }),
     )),
   )

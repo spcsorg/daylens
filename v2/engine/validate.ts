@@ -191,8 +191,8 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       const titled: PacketItem[] = []
       let rest = sentence
       for (const i of [...items].sort((a, b) => (b.title?.length ?? 0) - (a.title?.length ?? 0))) {
-        // A window titled with its app's own name ("Cursor") names the app, not one window of it.
-        if (i.title && i.app && i.title.trim().toLowerCase() === i.app.trim().toLowerCase()) continue
+        // A title that is an app's name ("Cursor") names that app, not one window or page.
+        if (i.title && items.some((j) => j.app?.trim().toLowerCase() === i.title!.trim().toLowerCase())) continue
         const same = titled.some((j) => j.title!.trim().toLowerCase() === i.title?.trim().toLowerCase())
         if (!same && !says(i.title, rest)) continue
         titled.push(i)
