@@ -149,8 +149,10 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
   const kind = kindOf(h)
   const history = kind === 'filled' ? historyLines(h) : null
   const note = [history?.where, h.edited ? 'Edited' : null].filter(Boolean).join(' · ') || null
-  const row = (
-    <Hour
+  // Open, the hour and what's in it are one sheet pulled out of the day. The wrapper stays either way, so the hour keeps its focus.
+  return (
+    <div className={open ? 'hour-item hour-sheet' : 'hour-item'}>
+      <Hour
         start={h.start_ms}
         kind={kind}
         current={h.current}
@@ -161,13 +163,7 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
         open={open}
         onToggle={onToggle}
       />
-  )
-  if (!open) return row
-  // Open, the hour and what's in it are one sheet pulled out of the day.
-  return (
-    <div className="hour-sheet">
-      {row}
-      <HourOpen start={h.start_ms} day={day} history={h.from_history} onMark={onMark} />
+      {open && <HourOpen start={h.start_ms} day={day} history={h.from_history} onMark={onMark} />}
     </div>
   )
 }

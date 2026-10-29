@@ -24,12 +24,12 @@
 }
 
 /* Hovering an hour lifts it onto a soft plate; the hours stay a calendar, not cards. */
-.today-day > button.hour {
+.hour-item > button.hour {
   position: relative;
   isolation: isolate;
 }
 
-.today-day > button.hour::before {
+.hour-item > button.hour::before {
   content: '';
   position: absolute;
   inset: 4px -12px;
@@ -40,7 +40,7 @@
   transition: opacity var(--quick) var(--ease);
 }
 
-.today-day > button.hour:hover::before {
+.hour-item:not(.hour-sheet) > button.hour:hover::before {
   opacity: 1;
 }
 
@@ -59,17 +59,17 @@
   margin-left: -4px;
 }
 
-/* An open hour is a sheet pulled out of the day: the hour on top, what was in it below. */
+/* An open hour is a sheet pulled out of the day: the hour on top, what was in it below. No top margin and no movement
+   of its own, so the hour's text stays where it was; only what opens rises in. */
 .today-day > .hour-sheet {
   max-width: calc(680px + 24px);
-  margin: var(--space-8) -12px var(--space-12);
+  margin: 0 -12px var(--space-12);
   padding: 0 12px var(--space-8);
   background: var(--bg-raised);
   border-radius: 12px;
   box-shadow:
     0 0 0 1px var(--line),
     var(--shadow-lift);
-  animation: rise var(--reveal) var(--ease);
 }
 
 .hour-sheet > .hour {
@@ -81,6 +81,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
+  animation: rise var(--reveal) var(--ease);
 }
 
 .hour-open > p {
