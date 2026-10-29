@@ -149,6 +149,6 @@ export const ASK = {
 };
 
 export const PRIVACY =
-  "The record stays on this computer. With AI on, only the hour being written, or the excerpts a question needs, go to the AI provider you pick.";
+  "The record stays on this computer. With AI on, only the hour being written (with a little context from the hours around it), or the excerpts a question needs, go to the AI provider you pick.";
 
 export const WAITLIST_URL = "christian-tonny.dev/daylens";

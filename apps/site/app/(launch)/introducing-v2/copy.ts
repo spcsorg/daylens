@@ -9,8 +9,8 @@ export const POST = [
   "Today I’m announcing something I’ve been working on for a long time, and I’m proud to share it with you: Daylens V2.",
   "It’s a Mac app that writes down your day. It notes the apps, windows and pages you use and turns every hour into a line that says what you did, so by Friday you can still tell what Tuesday was.",
   "You can look back at any day, week or month, find a page the way you remember it, or just ask. When I can’t find the post about pricing I read on Tuesday, I ask Daylens, and it tells me which one it was and when I read it, with the pages and hours the answer came from.",
-  "The record stays on this computer. With AI on, only the hour being written, or the excerpts a question needs, go to the AI provider you pick. AI is your own key or none, and the beta sends no usage analytics.",
-  "The Mac beta comes out in early November, open source. Ask, AI-written hours and assistants are being finished for it now. If you want it, join the waitlist and I’ll email you when it’s out.",
+  "The record stays on this computer. With AI on, only the hour being written (with a little context from the hours around it), or the excerpts a question needs, go to the AI provider you pick. AI is your own key or none, and the beta sends no usage analytics.",
+  "The Mac beta comes out in early November, open source. If you want it, join the waitlist and I’ll email you when it’s out.",
 ];
 
 export const FEATURES = {
@@ -57,7 +57,7 @@ export const BETA = {
   title: "The beta",
   body: [
     "The beta comes out in early November as open source on GitHub, for Mac first. Windows and Linux follow.",
-    "Ask, AI-written hours and assistants are being finished for it now. The screens on this page show an invented Tuesday.",
+    "Ask, AI-written hours and assistants are all in it. The screens on this page show an invented Tuesday.",
   ],
 };
 
