@@ -84,11 +84,12 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
 /** The apps and their shares; the selection's highlight slides from row to row instead of jumping. */
 function AppList({ view, scope, selected, onSelect }: { view: AppsView; scope: AppsNav['scope']; selected: string | null; onSelect: (app: string) => void }) {
   const list = useRef<HTMLDivElement>(null)
-  const shown = useRef<string | null>(null)
+  const shown = useRef<{ selected: string | null; view: AppsView } | null>(null)
   const [mark, setMark] = useState<{ y: number; h: number; slides: boolean } | null>(null)
   useLayoutEffect(() => {
-    const slides = shown.current !== null && shown.current !== selected
-    shown.current = selected
+    // Only a new pick on the same list slides; a refresh or another day places the mark directly.
+    const slides = shown.current !== null && shown.current.view === view && shown.current.selected !== selected
+    shown.current = { selected, view }
     const on = list.current?.querySelector<HTMLElement>('[aria-current="true"]')
     setMark(on ? { y: on.offsetTop, h: on.offsetHeight, slides } : null)
   }, [selected, view])

@@ -32,7 +32,6 @@ export function GeneralTab({ shell }: { shell: ShellState | null }) {
               aria-pressed={shell.appearance === o.value}
               className="appearance-option"
               onClick={async () => {
-                recolour()
                 const r = await act({ a: 'appearance', mode: o.value })
                 if (!r.ok) toast({ text: errorText(r.error), error: true })
               }}
@@ -48,13 +47,6 @@ export function GeneralTab({ shell }: { shell: ShellState | null }) {
       </Section>
     </>
   )
-}
-
-// Lets the theme change ease across every surface at once; the class comes off once the new colours have landed.
-function recolour(): void {
-  const root = document.documentElement
-  root.classList.add('theme-changing')
-  window.setTimeout(() => root.classList.remove('theme-changing'), 400)
 }
 
 // A small picture of the window in each look, so the choice is seen, not read. Match system shows both, split.

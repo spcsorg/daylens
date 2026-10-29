@@ -48,16 +48,6 @@
   animation: fade 120ms var(--ease);
 }
 
-/* Choosing a look recolours the whole window together rather than element by element. */
-.theme-changing,
-.theme-changing * {
-  transition:
-    background-color 300ms var(--ease),
-    color 300ms var(--ease),
-    border-color 300ms var(--ease),
-    box-shadow 300ms var(--ease) !important;
-}
-
 .settings-heading {
   font: var(--label);
   color: var(--text-2);
