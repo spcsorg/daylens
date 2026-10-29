@@ -198,8 +198,11 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       }
       const named = items.filter((i) => titled.includes(i) || (says(i.app, rest) && !titled.some((j) => j.app === i.app)))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
-      // Being away or locked is time too: "the screen was locked for the rest of the hour".
-      const awayClaim = /\b(?:away|locked|lock|asleep|sleep|idle|stepped out|left)\b/i.test(sentence)
+      // Being away or locked is time too, when the share is about that: "the screen was locked for the rest of the hour",
+      // not "most of the hour went to the editor before the screen was locked".
+      const bounds = [...sentence.matchAll(/[,;()–—]|:(?!\d)|\b(?:and|but|before|after|until|then|while)\b/gi)].map((m) => m.index!)
+      const clause = sentence.slice(Math.max(0, ...bounds.filter((b) => b < share.index)), Math.min(sentence.length, ...bounds.filter((b) => b > share.index)))
+      const awayClaim = /\b(?:away|locked|lock|asleep|sleep|idle|stepped out|left)\b/i.test(clause)
       if (named.length + agents.length === 0 && !awayClaim) continue
       // The rest of the hour runs from the last time given before it.
       const since = share[1] ? clocks(sentence.slice(0, share.index)).flatMap(([, readings]) => readings).filter((t) => t >= from! && t < end).at(-1) : undefined
@@ -211,8 +214,9 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
         return a >= since ? i.min : i.times > 1 ? 0 : Math.min(i.min, Math.max(0, Math.min(b, end) - since))
       }
       // Windows and pages are in front one at a time, so theirs add up; an agent works alongside them, so it doesn't.
-      const away = awayClaim ? awaySpans.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, end) - Math.max(a, since ?? from!)), 0) : 0
-      const minutes = Math.max(named.reduce((n, i) => n + after(i), 0) + away, ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
+      const minutes = awayClaim
+        ? awaySpans.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, end) - Math.max(a, since ?? from!)), 0)
+        : Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }
   }
@@ -235,7 +239,7 @@ function clocks(text: string): [RegExpExecArray, number[]][] {
     const next = all.slice(k + 1).find((n) => n[3] && !/[.!?;]/.test(text.slice(m.index, n.index)))
     const am = (h % 12) * 60 + Number(m[5])
     if (next) return [m, [next[3]!.toLowerCase() === 'p' ? am + 12 * 60 : am]]
-    return [m, h === 12 ? [toMinute(m)] : [am, am + 12 * 60]]
+    return [m, [am, am + 12 * 60]]
   })
 }
 

@@ -88,8 +88,10 @@ async function writeCase(packet: Packet, write: (p: Packet) => Promise<{ text: s
   return { hour: null, rejected }
 }
 
-// A clock time written without AM or PM, or as 24-hour time: the app writes 12-hour times.
-const NOT_12_HOUR = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b(?!\s*(?:am|pm|a\.m\.|p\.m\.))/i
+// A clock time written without AM or PM, or as 24-hour time: the app writes 12-hour times. A list may share one AM or
+// PM at its end ("4:21, 4:30 and 4:39 PM").
+const twelveHour = (text: string) =>
+  [...text.matchAll(/\b([01]?\d|2[0-3]):[0-5]\d\b(?!\s*(?:am|pm|a\.m\.|p\.m\.))/gi)].every((m) => Number(m[1]) >= 1 && Number(m[1]) <= 12 && !m[1]!.startsWith('0') && /^[^.!?;]*?\d\s*(?:am|pm|a\.m\.|p\.m\.)/i.test(text.slice(m.index! + m[0].length)))
 
 // A past 6 PM, so the seeded today runs 8 AM to 6 PM in full.
 function evalNow(): number {
@@ -124,9 +126,9 @@ async function main(): Promise<void> {
   const grade = async (label: string, packet: Packet, written: Record<string, string | null>, watch?: string) => {
     const r = await grader({ system: HOURS_GRADER_PROMPT, message: JSON.stringify({ packet, written, ...(watch ? { watch } : {}) }), schema: GRADE_SCHEMA })
     const g = JSON.parse(r.text ?? '{}') as Grade
-    const twelveHour = !Object.values(written).some((t) => t && NOT_12_HOUR.test(t))
-    const pass = r.error === null && twelveHour && g.title_names_work && !g.lists_windows && !g.minute_by_minute && g.supported && g.sounds_like_a_person
-    return { hour: label, written, pass, rules: { ...g, twelve_hour: twelveHour }, problem: r.error }
+    const twelve = Object.values(written).every((t) => !t || twelveHour(t))
+    const pass = r.error === null && twelve && g.title_names_work && !g.lists_windows && !g.minute_by_minute && g.supported && g.sounds_like_a_person
+    return { hour: label, written, pass, rules: { ...g, twelve_hour: twelve }, problem: r.error }
   }
   const day = new Date(now)
   const starts = Array.from({ length: 10 }, (_, i) => new Date(day.getFullYear(), day.getMonth(), day.getDate(), 8 + i).getTime())

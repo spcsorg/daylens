@@ -188,6 +188,8 @@ test('a list of times shares the AM or PM written after it, and a bare time with
   assert.deepEqual(at('You came back to it at 9:21, 9:30 and 9:39 AM.'), ['time_outside_hour', 'time_outside_hour', 'time_outside_hour'])
   assert.deepEqual(at('You left at 4:21. At 9:30 AM it was quiet.'), ['time_outside_hour'], 'a sentence end stops the list')
   assert.deepEqual(codes({ detail: 'You came back to it at 4:21.' }), ['time_outside_hour'], 'in a morning hour neither reading fits')
+  const midnight = { ...afternoon, hour: '2026-03-02 00:00-01:00', windows: [{ ...afternoon.windows[0]!, from: '00:00', to: '00:45' }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1'], outcome: null, detail: 'You came back to it at 12:21.' }), midnight, refs).errors.map((e) => e.code), [], 'a bare 12:21 can be just after midnight')
 })
 
 test('the rest of the hour away or locked holds when an away span runs to the end of it', () => {
@@ -196,4 +198,5 @@ test('the rest of the hour away or locked holds when an away span runs to the en
   assert.deepEqual(at('After the Editor, the screen was locked from 10:18 PM for the rest of the hour.'), [])
   assert.deepEqual(at('The screen was locked for most of the hour.'), [], '42 minutes away')
   assert.deepEqual(at('From 10:18 PM you worked in the Editor for the rest of the hour.'), ['share_overstated'], 'away time backs only a claim about being away')
+  assert.deepEqual(at('Most of the hour went to the Editor before the screen was locked.'), ['share_overstated'], 'the share is about the editor, not the lock')
 })
