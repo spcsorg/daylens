@@ -94,7 +94,7 @@ function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start:
   const every = ticks.length > 9 ? 2 : 1
   const single = rows.length === 1
   return (
-    <figure className="ask-card ask-work" aria-label={`${when}: ${rows.map((r) => `${r.label}, ${duration(r.minutes * 60_000)}`).join('; ')}`}>
+    <figure className="ask-card ask-work" aria-label={`${when}: ${rows.map((r) => `${r.label}, ${duration(r.minutes * 60_000)}${days.length === 1 ? `, ${joined(r.stretches).map(([a, b]) => span(a, b)).join(', ')}` : ''}`).join('; ')}`}>
       <figcaption className="ask-work-head">
         <span className="ask-work-when">{single ? `${rows[0]!.label} · ${when}` : when}</span>
         <span className="ask-work-total">{duration(total * 60_000)}</span>
