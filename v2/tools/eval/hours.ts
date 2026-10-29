@@ -69,6 +69,11 @@ export const CASES: { name: string; packet: Packet; watch: string }[] = [
     packet: { ...empty, hour: '2026-10-27 16:00-17:00', tz: 'Example/Town', windows: [item('i1', 'Figma', 'Booth layout v3', 42, '16:00', '17:00', 4), item('i2', 'Mail', 'Re: Booth layout', 6, '16:21', '16:41', 3), item('i3', 'Slack', 'events-team', 12, '16:41', '16:53')] },
   },
   {
+    name: 'a class on the calendar across the hour',
+    watch: 'that the person attended, joined or checked in on the class, or that the class was a brief stop of a few minutes',
+    packet: { ...empty, hour: '2026-10-27 13:00-14:00', tz: 'Example/Town', scheduled_events: [{ id: 'k1', title: 'Statistics class', from: '13:00', to: '15:00' }], pages: [item('p1', 'Chrome', 'Statistics class - Google Meet', 3, '13:02', '13:05'), item('p2', 'Chrome', 'pandas groupby - documentation', 12, '13:45', '13:57')], windows: [item('i1', 'Editor', 'analysis.py', 40, '13:05', '13:45')] },
+  },
+  {
     name: 'locked for the rest of the hour',
     watch: 'any work after 10:18 PM, or that the person finished the chapter',
     packet: { ...empty, hour: '2026-10-27 22:00-23:00', tz: 'Example/Town', away: [{ id: 'w1', from: '22:18', to: '23:00', why: 'screen locked' }], windows: [item('i1', 'TextEdit', 'chapter-4.md', 18, '22:00', '22:18')] },
@@ -77,7 +82,10 @@ export const CASES: { name: string; packet: Packet; watch: string }[] = [
 
 // As the app does, a rejected hour is written again, twice; after that it stays as its facts.
 async function writeCase(packet: Packet, write: (p: Packet) => Promise<{ text: string | null }>): Promise<{ hour: ReturnType<typeof validateHour>['hour']; rejected: string[] }> {
-  const refs = Object.fromEntries([...packet.windows, ...packet.pages, ...packet.away].map((x, i): [string, Ref] => [x.id, 'why' in x ? { kind: 'away' } : { kind: 'observations', ids: [i + 1] }]))
+  const refs = Object.fromEntries([
+    ...[...packet.windows, ...packet.pages, ...packet.away].map((x, i): [string, Ref] => [x.id, 'why' in x ? { kind: 'away' } : { kind: 'observations', ids: [i + 1] }]),
+    ...packet.scheduled_events.map((e): [string, Ref] => [e.id, { kind: 'event', id: e.id }]),
+  ])
   const rejected: string[] = []
   for (let i = 0; i < 1 + RETRY_MS.length; i++) {
     const r = await write(packet)
