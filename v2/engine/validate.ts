@@ -188,7 +188,7 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       // app is looked for outside the titles named ("Notes" inside "Release notes" is no app).
       const says = (n: string | null | undefined, text = sentence) => !!n && n.trim().length >= 3 && mentions(text, n.trim().toLowerCase())
       const titled = items.filter((i) => says(i.title))
-      const rest = titled.reduce((t, i) => t.replace(new RegExp(i.title!.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu'), ' '), sentence)
+      const rest = titled.reduce((t, i) => t.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${i.title!.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`, 'giu'), '$1 '), sentence)
       const named = items.filter((i) => titled.includes(i) || (says(i.app, rest) && !titled.some((j) => j.app === i.app)))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
