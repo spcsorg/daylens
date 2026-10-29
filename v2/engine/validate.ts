@@ -1,5 +1,5 @@
 // Every written hour is checked in code before it is stored. Anything invalid is rejected and the hour stays as facts.
-import type { Packet, Ref } from './packet.ts'
+import type { Packet, PacketItem, Ref } from './packet.ts'
 
 export interface WrittenHour {
   title: string
@@ -43,8 +43,8 @@ const UNPROVEN = /\b(not|no|never|nothing|whether|unclear|unknown|cannot)\b|n['�
 // Where a denial stops reaching: "You finished the export, but not the cleanup" still claims the export.
 const CLAUSE = /[,;:()–—]|\b(?:but|yet|though|although|whereas|while)\b|\b(?:and|or)(?=\s+(?:then\s+)?you\b)/i
 const QUOTES = [['"', '"'], ['“', '”'], ["'", "'"], ['‘', '’'], ['«', '»']] as const
-// Finishing a stretch of time ("you finished the hour on the email") is not finishing any work.
-const SPAN_OF_TIME = /^\s+(?:the|your|this)\s+(?:hour|day|morning|afternoon|evening|week)\b/i
+// Finishing a stretch of time ("you finished the hour on the email") is not finishing any work; "the morning report" is.
+const SPAN_OF_TIME = /^\s+(?:the|your|this)\s+(?:hour|day|morning|afternoon|evening|week)(?=\s*$|\s*[,.;:!?]|\s+(?:on|with|in|at|by|over|reading|working|looking|going)\b)/i
 function claimsFinished(sentence: string): boolean {
   return sentence.split(CLAUSE).some((clause) => [...clause.matchAll(FINISHED)].some((m) => !UNPROVEN.test(clause.slice(0, m.index)) && !SPAN_OF_TIME.test(clause.slice(m.index + m[0].length))))
 }
@@ -187,8 +187,10 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       const named = items.filter((i) => [i.title, i.app].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
-      const minutes = named.reduce((n, i) => n + i.min, 0) + agents.reduce((n, a) => n + a.with_you_min, 0)
       const since = share[1] ? [...sentence.matchAll(CLOCK)].map((m) => toMinute(m)).find((t) => t >= from! && t < end) : undefined
+      // From a time, only what was in front after it counts.
+      const after = (i: PacketItem) => (since === undefined ? i.min : Math.min(i.min, Math.max(0, Math.min(span(i)[1], end) - Math.max(span(i)[0], since))))
+      const minutes = named.reduce((n, i) => n + after(i), 0) + agents.reduce((n, a) => n + a.with_you_min, 0)
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }
   }

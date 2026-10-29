@@ -96,6 +96,8 @@ test('nothing is finished without a cited commit, in the outcome, the title, the
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, summary: 'You didn’t finish the payroll export.' }), [])
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, suggestion: 'Publish the payroll export once it is checked.' }), [], 'a suggestion claims nothing was done')
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You finished the hour on the payroll export.' }), [], 'finishing the hour finishes no work')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You finished the morning report.' }), ['finished_without_proof'], 'a report named for the morning is work')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You published the morning newsletter.' }), ['finished_without_proof'])
   const fixedPage = { ...packet, pages: [{ id: 'p1', app: 'Dia', title: 'Fixed the login bug - Example Tracker', site: 'tracker.example.com', min: 3, from: '10:52', to: '10:55', times: 1 }] }
   const quoting = (detail: string) => validateHour(JSON.stringify({ ...good, sources: ['i1', 'p1'], outcome: null, detail }), fixedPage, refs).errors.map((e) => e.code)
   assert.deepEqual(quoting('You had “Fixed the login bug - Example Tracker” open in Dia.'), [], 'quoting a title claims nothing')
@@ -149,7 +151,11 @@ test('most of the hour, or the rest of it, holds only when what the sentence nam
   assert.deepEqual(codes({ summary: 'You spent most of the hour on the release notes in Dia.' }), ['share_overstated'], '3 minutes')
   assert.deepEqual(codes({ summary: 'Most of the time went to alpha — main.ts in the Editor.' }), [], '25 minutes of the editor and 20 with Codex on alpha')
   assert.deepEqual(codes({ summary: 'You spent most of the hour in the Editor.' }), ['share_overstated'], 'the editor alone is 25 minutes')
-  assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), [], '3 of the 5 minutes left')
+  assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), ['share_overstated'], 'they were on screen before then')
+  const late = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:52', to: '11:00', times: 1 }] }
+  const rest = (detail: string) => validateHour(JSON.stringify({ ...good, detail }), late, refs).errors.map((e) => e.code)
+  assert.deepEqual(rest('From 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], '7 of the 8 minutes left')
+  assert.deepEqual(rest('From 10:00 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), ['share_overstated'])
   assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
   assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })
