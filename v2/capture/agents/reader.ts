@@ -271,11 +271,14 @@ export class AgentReader {
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
     if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
-    await this.draining
-    // What the last read counted is written now, while the store is open; a pass resuming later writes nothing.
-    for (const r of this.roots) this.recordHealth(r)
-    for (const tail of this.tails.values()) tail.close()
-    this.tails.clear()
+    try {
+      await this.draining
+      // What the last read counted is written now, while the store is open; a pass resuming later writes nothing.
+      for (const r of this.roots) this.recordHealth(r)
+    } finally {
+      for (const tail of this.tails.values()) tail.close()
+      this.tails.clear()
+    }
   }
 
   // Resolves once every file event seen so far has been read and written.
