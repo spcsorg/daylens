@@ -14,45 +14,42 @@ export const RATIOS = {
 } as const;
 export type Ratio = keyof typeof RATIOS;
 
-// V4 sky tokens, dawn to dusk.
+// V4 sky tokens, dawn to dusk, for the page's single-shot loops.
 export const SKY = { dawn: "#f2d2c7", morning: "#f5dca2", noon: "#ccdfee", afternoon: "#f0c397", dusk: "#d7cde6" };
 
 // shift moves the app in the frame, in frame pixels, to clear room for step captions; camera replaces the shot's for one ratio.
 export type Beat =
-  | { kind: "shot"; shot: Shot; sky: string; steps?: Step[]; shift?: Partial<Record<Ratio, [number, number]>>; camera?: Partial<Record<Ratio, Key[]>> }
-  | { kind: "caption"; text: string; dur: number; sky: string; small?: string }
-  | { kind: "end"; dur: number; sky: string };
+  | { kind: "shot"; shot: Shot; steps?: Step[]; shift?: Partial<Record<Ratio, [number, number]>>; camera?: Partial<Record<Ratio, Key[]>> }
+  | { kind: "caption"; text: string; dur: number; small?: string }
+  | { kind: "end"; dur: number };
 
 const dur = (b: Beat) => (b.kind === "shot" ? b.shot.dur : b.dur);
 const starts = (beats: Beat[]) => beats.reduce<number[]>((a, b, i) => [...a, i ? a[i - 1] + dur(beats[i - 1]) : 0], []);
 export const filmLength = (beats: Beat[]) => beats.reduce((n, b) => n + dur(b), 0);
 export const startOf = (beats: Beat[], shot: Shot) => starts(beats)[beats.findIndex((b) => b.kind === "shot" && b.shot.id === shot.id)];
 
-function sky(beats: Beat[], at: number[], t: number) {
-  const i = Math.max(0, at.findLastIndex((s) => s <= t));
-  const prev = beats[Math.max(0, i - 1)].sky;
-  return mixHex(prev, beats[i].sky, prog(t, at[i] - 0.2, at[i] + 0.9, inOut));
-}
+// The Launch page's sky: its gradient, and its three blurred clouds drifting a little over the film. Cloud boxes are the Figma frames'.
+const CLOUDS = {
+  "16x9": [
+    { x: -192, y: 837, w: 2304, h: 378, o: 0.45, blur: 130, drift: 3 },
+    { x: 1104, y: 162, w: 1056, h: 238, o: 0.22, blur: 120, drift: -5 },
+    { x: -192, y: 43, w: 960, h: 216, o: 0.28, blur: 100, drift: 6 },
+  ],
+  "4x5": [
+    { x: -108, y: 1006, w: 1296, h: 473, o: 0.45, blur: 120, drift: 3 },
+    { x: 562, y: 270, w: 648, h: 270, o: 0.22, blur: 110, drift: -5 },
+    { x: -103, y: 95, w: 594, h: 243, o: 0.28, blur: 90, drift: 6 },
+  ],
+};
 
-// Mixed in OKLab so yellow to blue passes through light, not grey.
-function mixHex(a: string, b: string, k: number) {
-  const lab = (h: string) => {
-    const [r, g, bl] = [1, 3, 5].map((i) => {
-      const c = parseInt(h.slice(i, i + 2), 16) / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl);
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl);
-    const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl);
-    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * q, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * q, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * q];
-  };
-  const [x, y] = [lab(a), lab(b)];
-  const [L, A, B] = x.map((v, i) => mix(v, y[i], k));
-  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
-  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
-  const q = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-  const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * q, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * q, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * q];
-  return `rgb(${rgb.map((c) => Math.round(255 * clamp(c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055))).join(" ")})`;
+function Sky({ t, ratio }: { t: number; ratio: Ratio }) {
+  return (
+    <div className="f-sky">
+      {CLOUDS[ratio].map((c, i) => (
+        <i key={i} style={{ left: c.x, top: c.y, width: c.w, height: c.h, opacity: c.o, filter: `blur(${c.blur}px)`, transform: `translateX(${t * c.drift}px)` }} />
+      ))}
+    </div>
+  );
 }
 
 // Duet's caption: each word inks in from faint grey, the line drifts left the whole time.
@@ -85,12 +82,13 @@ function End({ t, size }: { t: number; size: number }) {
     <div className="f-end">
       <div className="f-lockup" style={{ transform: `scale(${mix(0.9, 1, mark)})`, opacity: clamp(mark * 1.4) }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={asset("/icons/daylens.svg")} alt="" width={size * 0.95} height={size * 0.95} />
+        <img src={asset("/icons/app-icon.png")} alt="" width={size * 0.95} height={size * 0.95} />
         <span style={{ fontSize: size * 1.1 }}>Daylens</span>
       </div>
-      <p style={{ fontSize: size * 0.34, opacity: prog(t, 0.6, 1.0) }}>Mac beta, early November</p>
-      <p className="f-url" style={{ fontSize: size * 0.34, opacity: prog(t, 0.9, 1.3) }}>
-        {WAITLIST_URL}
+      <p style={{ fontSize: size * 0.34, opacity: prog(t, 0.6, 1.0) }}>Beta available early November</p>
+      <p className="f-cta" style={{ fontSize: size * 0.3, opacity: prog(t, 0.95, 1.35) }}>
+        Sign up for the waitlist
+        <b>{WAITLIST_URL}</b>
       </p>
     </div>
   );
@@ -112,7 +110,7 @@ function ShotFrame({ shot, t, ratio, enter, exit, riseIn = true, riseOut = true,
 export function Film({ t, ratio, beats }: { t: number; ratio: Ratio; beats: Beat[] }) {
   const r = RATIOS[ratio];
   const at = starts(beats);
-  const layers: ReactNode[] = [];
+  const layers: ReactNode[] = [<Sky key="sky" t={t} ratio={ratio} />];
   beats.forEach((b, i) => {
     const a = at[i];
     const d = dur(b);
@@ -135,7 +133,7 @@ export function Film({ t, ratio, beats }: { t: number; ratio: Ratio; beats: Beat
     }
   });
   return (
-    <div className={`f-stage is-${ratio}`} style={{ width: r.w, height: r.h, background: sky(beats, at, t) }}>
+    <div className={`f-stage is-${ratio} is-sky`} style={{ width: r.w, height: r.h }}>
       {layers}
     </div>
   );

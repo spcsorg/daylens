@@ -58,7 +58,8 @@ export const HOURS: Hour[] = [
   },
 ];
 
-export const MORNING_SUMMARY = "Five hours since 9 AM, most of it on the spring pricing memo.";
+export const MORNING_SUMMARY =
+  "You answered the Thursday review notes and drafted most of the spring pricing memo. The design sync ran long, so the pricing page came after, then the invoice for Harbor Studio.";
 
 export const OPEN_HOUR = {
   range: "10 to 11 AM",

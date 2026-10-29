@@ -1,9 +1,9 @@
-import { cam, Caret, click, Ink, pt, type Shot } from "./shots";
-import { clamp, inOut, mix, prog, typed } from "./time";
+import { cam, Caret, click, pt, type Shot } from "./shots";
+import { clamp, inOut, prog, typed } from "./time";
 import { AppIcons, Glyph, Window } from "./ui";
-import { ASK_THREAD, PRIVACY } from "./world";
+import { ASK_THREAD } from "./world";
 
-// Shots made for the hands-on cut: Ask as a thread of three questions, and the privacy settings.
+// A shot made for the hands-on cut: Ask as a thread of three questions.
 
 /* Ask, three questions in one thread. Each answer replaces the last, with its page and hours. */
 
@@ -112,63 +112,4 @@ const askThread: Shot = {
   ],
 };
 
-/* Privacy: what stays on the Mac, what goes to the AI provider, and the switch for each. */
-
-const P_AI = 2.1;
-
-function Toggle({ on }: { on: number }) {
-  return (
-    <span className="f-toggle" style={{ background: `rgb(${mix(201, 20, on)} ${mix(205, 22, on)} ${mix(209, 25, on)})` }}>
-      <i style={{ transform: `translateX(${on * 16}px)` }} />
-    </span>
-  );
-}
-
-const privacy: Shot = {
-  id: "privacy",
-  dur: 5.0,
-  view: (t) => {
-    const ai = prog(t, P_AI, P_AI + 0.3, inOut);
-    return (
-      <Window>
-        <div className="f-settings">
-          <small className="f-meta">Settings</small>
-          <h1 className="f-title-serif">Privacy</h1>
-          <p className="f-pledge">
-            <Glyph name="lock" size={18} />
-            <span>
-              <Ink text={PRIVACY} t={t} start={0.3} step={0.035} dur={0.35} />
-            </span>
-          </p>
-          <div className="f-rows">
-            <div className="f-row">
-              <div>
-                <b>Record apps, windows and pages</b>
-                <small>Pause any time from the menu bar.</small>
-              </div>
-              <Toggle on={1} />
-            </div>
-            <div className="f-row">
-              <div>
-                <b>AI for hours and Ask</b>
-                <small>In the beta. Uses the provider you pick.</small>
-              </div>
-              <Toggle on={ai} />
-            </div>
-            <div className="f-row">
-              <div>
-                <b>Assistants</b>
-                <small>Claude Code, Codex and Cursor. Every read is listed.</small>
-              </div>
-              <span className="f-ghost">3 connected</span>
-            </div>
-          </div>
-        </div>
-      </Window>
-    );
-  },
-  camera: [cam(0, 1.3, 560, 250, 760), cam(1.6, 1.3, 560, 270, 760), cam(5.4, 1.2, 560, 330, 780)],
-  cursor: [pt(0.9, 980, 560), ...click(P_AI, 920, 414), pt(5.0, 944, 452)],
-};
-
-export const HANDSON_SHOTS = { askThread, privacy };
+export const HANDSON_SHOTS = { askThread };

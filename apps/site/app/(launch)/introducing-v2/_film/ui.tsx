@@ -17,6 +17,7 @@ const PATHS: Record<string, string> = {
   x: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   lock: "M4 7.5h8v6H4zM5.5 7.5V5.5a2.5 2.5 0 0 1 5 0v2",
   pause: "M6 4v8M10 4v8",
+  return: "M12.5 3.5v4a2 2 0 0 1-2 2h-7M6 6.5l-3 3 3 3",
 };
 
 export function Glyph({ name, size = 16, style }: { name: string; size?: number; style?: CSSProperties }) {
@@ -64,10 +65,6 @@ function Sidebar({ active }: { active: string }) {
     <aside className="f-sidebar">
       <div className="f-navs">{[item("search", "Search"), item("today", "Today"), item("apps", "Apps"), item("ask", "Ask")]}</div>
       <div className="f-navs is-foot">
-        <div className="f-nav">
-          <Glyph name="check" />
-          Getting started<span className="f-count">2 of 6</span>
-        </div>
         <div className="f-nav">
           <Glyph name="settings" />
           Settings

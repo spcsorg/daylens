@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
-import { back, clamp, inOut, keys, mix, prog, typed, type Key } from "./time";
+import { back, clamp, inOut, keys, mix, out, prog, typed, type Key } from "./time";
 import { ASSISTANTS_TIMING, AssistantsView } from "./assistants";
 import { AppIcons, Cursor, Glyph, Segmented, Window } from "./ui";
-import { ASK, DAY_TITLE, HOURS, LAST_WEEK, MONTH, MORNING_SUMMARY, OPEN_HOUR, PRIVACY, SEARCH, THIS_WEEK, type Hour } from "./world";
+import { ASK, DAY_TITLE, HOURS, LAST_WEEK, MONTH, MORNING_SUMMARY, OPEN_HOUR, SEARCH, THIS_WEEK, type Hour } from "./world";
 
 // A shot is one stretch of the app on screen. t runs from 0 to dur.
 // camera: s is zoom, x and y are the window point held at the frame's centre, w the width of what must stay in frame.
@@ -62,9 +62,15 @@ function HourRow({ h, style, children }: { h: Hour; style?: CSSProperties; child
   );
 }
 
-/* 1 · Welcome: the first screen of onboarding. */
+/* 1 · Welcome: the first screen of onboarding, as on the Figma Launch page (W1). */
 
 const PREVIEW = [HOURS[0], HOURS[1], HOURS[2], HOURS[5]];
+const PERKS = [
+  { icon: "search", text: "Find any page you saw, the way you remember it" },
+  { icon: "today", text: "See every hour with the apps, windows and pages behind it" },
+  { icon: "pause", text: "Pause it, keep apps out, or delete any hour" },
+];
+const W_CLICK = 2.68;
 
 const welcome: Shot = {
   id: "welcome",
@@ -72,7 +78,7 @@ const welcome: Shot = {
   view: (t) => (
     <Window>
       <div className="f-track">
-        <i style={{ width: `${mix(4, 26, prog(t, 2.9, 3.5))}%` }} />
+        <i style={{ width: `${mix(20, 34, prog(t, W_CLICK + 0.2, W_CLICK + 0.8, inOut))}%` }} />
       </div>
       <div className="f-welcome">
         <h1 className="f-display">
@@ -81,18 +87,28 @@ const welcome: Shot = {
         <p className="f-sub" style={{ opacity: prog(t, 0.5, 1.1) }}>
           Daylens notes the apps, windows and pages you use, and turns them into a calendar of your day.
         </p>
-        <p className="f-privacy" style={{ opacity: prog(t, 0.8, 1.4) }}>
-          <Glyph name="lock" size={12} />
-          {PRIVACY.replace("The record", "Your record")}
+        <div className="f-start-row" style={{ opacity: prog(t, 0.8, 1.3) }}>
+          <span className="f-button" style={{ transform: `scale(${1 - prog(t, W_CLICK - 0.06, W_CLICK) * 0.04 + prog(t, W_CLICK + 0.06, W_CLICK + 0.22) * 0.04})` }}>
+            Get started
+          </span>
+          <span>Takes about two minutes</span>
+        </div>
+        <hr style={{ opacity: prog(t, 0.95, 1.4) }} />
+        <p className="f-perks-head" style={{ opacity: prog(t, 1.0, 1.45) }}>
+          Once it’s set up:
         </p>
-        <span className="f-button f-start" style={{ opacity: prog(t, 0.9, 1.4), transform: `scale(${1 - prog(t, 2.62, 2.7) * 0.04 + prog(t, 2.74, 2.9) * 0.04})` }}>
-          Get started
-        </span>
+        {PERKS.map((p, i) => (
+          <div key={p.icon} className="f-perk" style={{ opacity: prog(t, 1.1 + i * 0.1, 1.5 + i * 0.1), transform: `translateY(${(1 - prog(t, 1.1 + i * 0.1, 1.6 + i * 0.1, out)) * 8}px)` }}>
+            <span>
+              <Glyph name={p.icon} />
+            </span>
+            {p.text}
+          </div>
+        ))}
       </div>
       <div className="f-preview">
         <div className="f-preview-head">
           <span className="f-title-serif">Tuesday</span>
-          <span className="f-chip">An invented Tuesday</span>
         </div>
         {PREVIEW.map((h, i) => {
           const k = prog(t, 0.55 + i * 0.13, 1.15 + i * 0.13, back);
@@ -101,14 +117,15 @@ const welcome: Shot = {
       </div>
     </Window>
   ),
-  camera: [cam(0, 1.08, 560, 380, 1120), cam(2.2, 1.12, 540, 400, 1120), cam(3.6, 1.22, 470, 470, 900)],
-  cursor: [pt(1.3, 760, 520), pt(2.4, 384, 640), ...click(2.68, 384, 642), pt(3.6, 400, 650)],
+  camera: [cam(0, 1.06, 560, 370, 1120), cam(2.2, 1.1, 556, 372, 1120), cam(3.6, 1.14, 552, 374, 1120)],
+  cursor: [pt(1.3, 760, 520), pt(2.4, 124, 346), ...click(W_CLICK, 118, 340), pt(3.6, 134, 352)],
 };
 
-/* 2 · Your morning: the day fills in, hour by hour. */
+/* 2 · Your morning: the day fills in, hour by hour (W6a). */
 
 const MORNING_START = 1.5;
 const EACH = 0.62;
+const M_OPEN = 7.05;
 
 const morning: Shot = {
   id: "morning",
@@ -117,13 +134,11 @@ const morning: Shot = {
     const scroll = keys([{ t: 0, y: 0 }, { t: 3.4, y: 0 }, { t: 5.2, y: 300 }], t).y;
     return (
       <Window>
+        <div className="f-top-fade" />
         <div className="f-morning" style={{ transform: `translateY(${-scroll}px)` }}>
           <h1 className="f-display-xl">
             <Ink text="Tuesday, so far" t={t} start={0.05} />
           </h1>
-          <p className="f-meta" style={{ opacity: prog(t, 0.4, 0.8) }}>
-            Tuesday · 2:10 PM
-          </p>
           <p className="f-lede">
             <Ink text={MORNING_SUMMARY} t={t} start={0.5} step={0.035} dur={0.35} />
           </p>
@@ -158,13 +173,16 @@ const morning: Shot = {
           </div>
         </div>
         <div className="f-bottom-bar">
-          <span className="f-button">Open Today</span>
+          <span className="f-button" style={{ opacity: prog(t, 5.0, 5.5), transform: `scale(${1 - prog(t, M_OPEN - 0.06, M_OPEN) * 0.04})` }}>
+            Open Today
+            <Glyph name="return" size={14} />
+          </span>
         </div>
       </Window>
     );
   },
-  camera: [cam(0, 1.42, 476, 230, 640), cam(2.0, 1.42, 476, 300, 640), cam(4.6, 1.32, 476, 420, 640), cam(6.2, 1.0, 590, 360, 800), cam(7.4, 1.0, 590, 360, 800)],
-  cursor: [pt(6.0, 900, 520), pt(6.8, 742, 678), ...click(7.05, 742, 680)],
+  camera: [cam(0, 1.3, 559, 230, 740), cam(2.0, 1.3, 559, 300, 740), cam(4.6, 1.24, 559, 420, 740), cam(6.2, 1.0, 575, 360, 800), cam(7.4, 1.0, 575, 360, 800)],
+  cursor: [pt(6.0, 940, 520), pt(6.8, 836, 674), ...click(M_OPEN, 836, 676)],
 };
 
 /* 3 · Today: day, then week, then month. */
@@ -569,8 +587,8 @@ const assistants: Shot = {
   id: "assistants",
   dur: ASSISTANTS_TIMING.dur,
   view: AssistantsView,
-  camera: [cam(0, 1.0, 560, 380, 1120), cam(2.4, 1.0, 560, 380, 1120), cam(3.2, 1.4, 800, 250, 600), cam(ASSISTANTS_TIMING.dur, 1.44, 800, 260, 600)],
-  cursor: [pt(0.4, 700, 300), pt(1.3, 380, 642), ...click(ASSISTANTS_TIMING.CONNECT, 380, 644), pt(2.6, 420, 600), pt(ASSISTANTS_TIMING.dur, 430, 600)],
+  camera: [cam(0, 1.0, 560, 380, 1120), cam(2.2, 1.0, 560, 380, 1120), cam(3.0, 1.34, 824, 388, 580), cam(ASSISTANTS_TIMING.dur, 1.38, 824, 392, 580)],
+  cursor: [pt(0.4, 700, 300), pt(1.3, 368, 664), ...click(ASSISTANTS_TIMING.CONNECT, 361, 658), pt(2.4, 400, 620), pt(ASSISTANTS_TIMING.dur, 410, 620)],
 };
 
 export const SHOTS = { welcome, morning, today, search, ask, assistants, trust };

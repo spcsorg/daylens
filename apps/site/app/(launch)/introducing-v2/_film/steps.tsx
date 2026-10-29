@@ -1,7 +1,7 @@
 import { back, clamp, inOut, prog } from "./time";
 
 // A step caption: a small numbered card over the app that names what the viewer is watching. at and to are shot times.
-export type Step = { at: number; to: number; n?: number; label: string; hint?: string; kicker?: string };
+export type Step = { at: number; to: number; n?: number; label: string; hint?: string };
 
 export function StepCaption({ step, t }: { step: Step; t: number }) {
   const { at, to } = step;
@@ -25,7 +25,6 @@ export function StepCaption({ step, t }: { step: Step; t: number }) {
         </span>
       ) : null}
       <div>
-        {step.kicker ? <small className="f-step-kicker" style={{ opacity: prog(t, at + 0.2, at + 0.6) }}>{step.kicker}</small> : null}
         <p>
           {words.map((w, i) => (
             <span key={i} style={{ opacity: 0.22 + 0.78 * prog(t, at + 0.12 + i * 0.07, at + 0.42 + i * 0.07) }}>
