@@ -424,6 +424,7 @@ export class AgentReader {
     if (r.unreadable) {
       this.store.setHealth(r.root.agent, r.root.dir, 'unreadable', 'file_unreadable', null)
       r.unreadable = false
+      r.counts = emptyCounts()
       return
     }
     if (c.lines === 0) return

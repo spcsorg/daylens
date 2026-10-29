@@ -129,6 +129,8 @@ test('a timed pass that resumes after stop records no health, though earlier rea
     await reader.start()
     await waitFor(() => calls > 1)
     await reader.stop()
+    const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
+    assert.deepEqual([h.state, h.reason], ['unreadable', 'file_unreadable'])
     r.store.close()
     release()
     await new Promise((res) => setTimeout(res, 200))
