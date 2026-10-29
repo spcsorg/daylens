@@ -178,3 +178,30 @@ test('most of the hour, or the rest of it, holds only when what the sentence nam
   assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
   assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })
+
+test('a list of times shares the AM or PM written after it, and a bare time with none can mean either', () => {
+  const afternoon = { ...packet, hour: '2026-03-02 16:00-17:00', away: [], windows: [{ id: 'i1', app: 'Editor', title: 'alpha — main.ts', min: 25, from: '16:00', to: '16:45', times: 3 }], pages: [], agents: [], commits: [], scheduled_events: [] }
+  const at = (detail: string) => validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1'], outcome: null, detail }), afternoon, refs).errors.map((e) => e.code)
+  assert.deepEqual(at('You came back to it at 4:21, 4:30 and 4:39 PM.'), [], 'one PM for the whole list')
+  assert.deepEqual(at('You came back to it at 4:21.'), [], 'a bare 4:21 can be the afternoon')
+  assert.deepEqual(at('You came back to it at 4:21 AM.'), ['time_outside_hour'])
+  assert.deepEqual(at('You came back to it at 9:21, 9:30 and 9:39 AM.'), ['time_outside_hour', 'time_outside_hour', 'time_outside_hour'])
+  assert.deepEqual(at('You left at 4:21. At 9:30 AM it was quiet.'), ['time_outside_hour'], 'a sentence end stops the list')
+  assert.deepEqual(codes({ detail: 'You came back to it at 4:21.' }), ['time_outside_hour'], 'in a morning hour neither reading fits')
+  const midnight = { ...afternoon, hour: '2026-03-02 00:00-01:00', windows: [{ ...afternoon.windows[0]!, from: '00:00', to: '00:45' }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1'], outcome: null, detail: 'You came back to it at 12:21.' }), midnight, refs).errors.map((e) => e.code), [], 'a bare 12:21 can be just after midnight')
+})
+
+test('the rest of the hour away or locked holds when an away span runs to the end of it', () => {
+  const late = { ...packet, hour: '2026-03-02 22:00-23:00', away: [{ id: 'w1', from: '22:18', to: '23:00', why: 'locked' }], windows: [{ id: 'i1', app: 'Editor', title: 'alpha — main.ts', min: 18, from: '22:00', to: '22:18', times: 1 }], pages: [], agents: [], commits: [], scheduled_events: [] }
+  const at = (detail: string) => validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1', 'w1'], outcome: null, detail }), late, refs).errors.map((e) => e.code)
+  assert.deepEqual(at('After the Editor, the screen was locked from 10:18 PM for the rest of the hour.'), [])
+  assert.deepEqual(at('The screen was locked for most of the hour.'), [], '42 minutes away')
+  assert.deepEqual(at('From 10:18 PM you worked in the Editor for the rest of the hour.'), ['share_overstated'], 'away time backs only a claim about being away')
+  assert.deepEqual(at('Most of the hour went to the Editor before the screen was locked.'), ['share_overstated'], 'the share is about the editor, not the lock')
+  assert.deepEqual(at('You spent most of the hour working in the Editor with the screen locked.'), ['share_overstated'], 'a clause that names the editor is about the editor')
+  const mixed = { ...late, away: [{ id: 'w1', from: '22:15', to: '22:35', why: 'screen locked' }, { id: 'w2', from: '22:35', to: '23:00', why: 'idle' }] }
+  const kinds = (detail: string) => validateHour(JSON.stringify({ ...good, summary: 'You worked on alpha.', apps: ['Editor'], sources: ['i1', 'w1'], outcome: null, detail }), mixed, refs).errors.map((e) => e.code)
+  assert.deepEqual(kinds('The screen was locked for most of the hour.'), ['share_overstated'], '20 minutes locked; the idle time was not')
+  assert.deepEqual(kinds('You were away for most of the hour.'), [], '45 minutes away, locked or idle')
+})

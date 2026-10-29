@@ -132,9 +132,8 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
   const [from, to] = packet.hour.slice(11).split('-').map((t) => toMinute(/(\d+):(\d+)/.exec(t)!))
   const end = to! === 0 ? 24 * 60 : to!
   for (const f of TEXT_FIELDS) {
-    for (const m of (h[f] ?? '').matchAll(CLOCK)) {
-      const t = toMinute(m)
-      if ((t < from! || t > end) && !packetTimes.has(t)) err('time_outside_hour', `${f}: ${m[0]}`)
+    for (const [m, readings] of clocks(h[f] ?? '')) {
+      if (readings.every((t) => (t < from! || t > end) && !packetTimes.has(t))) err('time_outside_hour', `${f}: ${m[0]}`)
     }
   }
 
@@ -169,7 +168,7 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
   for (const f of TEXT_FIELDS) {
     for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
       if (!/\byou\b/i.test(sentence)) continue
-      const times = [...sentence.matchAll(CLOCK)].map((m) => toMinute(m))
+      const times = clocks(sentence).flatMap(([, readings]) => readings)
       const insideAway = times.some((t) => awaySpans.some(([s, e]) => t > s && t < e))
       const awayCommit = awayCommits.some((c) => times.includes(toMinute(/(\d+):(\d+)/.exec(c.at)!))) || awaySubjects.some((x) => sentence.toLowerCase().includes(x))
       const named = awayNames.find((n) => mentions(sentence, n))
@@ -199,9 +198,16 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       }
       const named = items.filter((i) => titled.includes(i) || (says(i.app, rest) && !titled.some((j) => j.app === i.app)))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
-      if (named.length + agents.length === 0) continue
+      // Being away or locked is time too, when the share is about that: "the screen was locked for the rest of the hour",
+      // not "most of the hour went to the editor before the screen was locked".
+      const bounds = [...sentence.matchAll(/[,;()–—]|:(?!\d)|\b(?:and|but|before|after|until|then|while)\b/gi)].map((m) => m.index!)
+      const clause = sentence.slice(Math.max(0, ...bounds.filter((b) => b < share.index)), Math.min(sentence.length, ...bounds.filter((b) => b > share.index)))
+      // A clause that also names an app or a title is about that work ("most of the hour in the editor with the screen locked").
+      const word = /\b(away|locked|lock|asleep|sleep|idle|stepped out|left)\b/i.exec(clause)?.[1]!.toLowerCase()
+      const awayClaim = !!word && !items.some((i) => says(i.title, clause) || says(i.app, clause)) && !packet.agents.some((a) => mentions(clause, a.agent.toLowerCase()))
+      if (named.length + agents.length === 0 && !awayClaim) continue
       // The rest of the hour runs from the last time given before it.
-      const since = share[1] ? [...sentence.matchAll(CLOCK)].filter((m) => m.index! < share.index).map((m) => toMinute(m)).filter((t) => t >= from! && t < end).at(-1) : undefined
+      const since = share[1] ? clocks(sentence.slice(0, share.index)).flatMap(([, readings]) => readings).filter((t) => t >= from! && t < end).at(-1) : undefined
       // From a time, only what was in front after it counts: all of an item first seen after it, a single stretch's part
       // after it, nothing of several stretches that began before it. An agent's minutes carry no times, so they don't.
       const after = (i: PacketItem) => {
@@ -210,7 +216,11 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
         return a >= since ? i.min : i.times > 1 ? 0 : Math.min(i.min, Math.max(0, Math.min(b, end) - since))
       }
       // Windows and pages are in front one at a time, so theirs add up; an agent works alongside them, so it doesn't.
-      const minutes = Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
+      // Locked, asleep or idle counts only spans of that kind; away counts them all.
+      const kind = word && /lock/.test(word) ? /lock/ : word && /sleep/.test(word) ? /sleep/ : word === 'idle' ? /idle/ : /./
+      const minutes = awayClaim
+        ? packet.away.filter((a) => kind.test(a.why)).map(span).reduce((n, [a, b]) => n + Math.max(0, Math.min(b, end) - Math.max(a, since ?? from!)), 0)
+        : Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }
   }
@@ -218,6 +228,23 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
   v.hour = h
   v.ok = v.errors.length === 0
   return v
+}
+
+/**
+ * Each clock time in text with the minutes of the day it can mean. A time with AM or PM, or one only a 24-hour clock
+ * writes ("16:05", "09:20"), means one minute. A bare time takes the AM or PM written after it in the same sentence, as a
+ * list shares one ("4:21, 4:30 and 4:39 PM"); with none it can mean either.
+ */
+function clocks(text: string): [RegExpExecArray, number[]][] {
+  const all = [...text.matchAll(CLOCK)] as RegExpExecArray[]
+  return all.map((m, k) => {
+    const h = Number(m[4])
+    if (m[3] || m[4]!.startsWith('0') || h === 0 || h > 12) return [m, [toMinute(m)]]
+    const next = all.slice(k + 1).find((n) => n[3] && !/[.!?;]/.test(text.slice(m.index, n.index)))
+    const am = (h % 12) * 60 + Number(m[5])
+    if (next) return [m, [next[3]!.toLowerCase() === 'p' ? am + 12 * 60 : am]]
+    return [m, [am, am + 12 * 60]]
+  })
 }
 
 /** Minutes after midnight of a CLOCK match: 12-hour with AM or PM, else 24-hour. */
