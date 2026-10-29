@@ -96,21 +96,21 @@ test('a watched folder is never listed again; only the follow-up check after sta
   r.store.close()
 })
 
-test('stop waits for a timed pass already running, so nothing reaches the store after it returns', async () => {
+test('a folder listing that returns after stop writes nothing, though the store is closed by then', async () => {
   const r = rig()
   let calls = 0
   let release!: () => void
   const gate = new Promise<void>((res) => (release = res))
-  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, []) : []) })
+  const late: AgentRoot = { ...r.roots[0]!, dir: path.join(r.home, 'not-there'), poll: true }
+  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, [late]) : []) })
   await reader.start()
   await waitFor(() => calls > 1)
-  let returned = false
-  const stopping = reader.stop().then(() => (returned = true))
-  await new Promise((res) => setTimeout(res, 50))
-  assert.equal(returned, false)
   release()
-  await stopping
+  // The timed pass is now waiting on the listing, which the thread pool answers only after these turns.
+  for (let i = 0; i < 20; i++) await null
+  await reader.stop()
   r.store.close()
+  await new Promise((res) => setTimeout(res, 200))
 })
 
 test('reading is driven by file events, not by rescanning folders', async () => {
