@@ -28,13 +28,139 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
+  padding: var(--space-20) var(--space-20) var(--space-12);
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+/* Which hours of the day the app was in: filled cells on a labeled strip. */
+.app-strip {
+  display: flex;
+  gap: 3px;
+}
+
+.app-strip-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
+.app-strip-mark {
+  width: 100%;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.app-strip-cell.on {
+  color: var(--text-2);
+}
+
+.app-strip-cell.on .app-strip-mark {
+  background: var(--text-2);
+  animation: fade 200ms var(--ease) both;
+}
+
+/* The app's time on each day of the week. */
+.app-days {
+  display: flex;
+  gap: var(--space-6);
+  height: 76px;
+}
+
+.app-day {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
+.app-day-bar {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-day-bar > span {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--text-2);
+  transform-origin: bottom;
+  animation: bar-grow 400ms var(--ease) both;
 }
 
 .app-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-12);
+}
+
+/* The app's icon on a raised tile: the picture of the thing this panel is about. */
+.app-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--shadow-lift);
+}
+
+:root[data-theme='dark'] .app-tile {
+  background: var(--sel);
+}
+
+/* Each app's share of the day or week, labeled under it. */
+.app-row-share {
+  display: block;
+  height: 4px;
+  margin: var(--space-4) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.app-row-share > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-3);
+  transform-origin: left;
+  animation: share-grow 400ms var(--ease) both;
+}
+
+.app-row[aria-current='true'] .app-row-share {
+  background: var(--line-strong);
+}
+
+.app-row[aria-current='true'] .app-row-share > span {
+  background: var(--text);
+}
+
+/* A fixed column for the time, so every share bar has the same track. */
+.apps-list .app-row-ms {
+  min-width: 56px;
+  text-align: right;
+}
+
+@keyframes share-grow {
+  from {
+    transform: scaleX(0);
+  }
 }
 
 .app-head .grow {
@@ -91,14 +217,42 @@
   justify-content: flex-end;
   height: 100%;
   gap: var(--space-4);
+  border-radius: var(--radius-md);
   font: var(--caption);
   color: var(--text-2);
+  transition: background-color var(--quick) var(--ease);
+}
+
+.bar:not(:disabled):hover {
+  background: var(--bg-hover);
 }
 
 .bar .fill {
   width: 24px;
   border-radius: var(--space-4);
-  background: var(--primary);
+  background: var(--line-strong);
+  transform-origin: bottom;
+  animation: bar-grow 400ms var(--ease) both;
+  transition: background-color var(--quick) var(--ease);
+}
+
+.bar:not(:disabled):hover .fill {
+  background: var(--text-2);
+}
+
+.bar.today .fill {
+  background: var(--text);
+}
+
+.bar.today .day {
+  color: var(--text);
+  font: var(--caption-strong);
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleY(0);
+  }
 }
 
 .bar .none {

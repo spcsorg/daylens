@@ -13,7 +13,12 @@ export function Row({ label, detail, children }: { label: string; detail?: strin
   )
 }
 
-/** A tab whose controls come in a later update. */
-export function Later({ text }: { text: string }) {
-  return <p className="settings-later">{text}</p>
+/** A titled card of settings that belong together. */
+export function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h2 className="settings-heading">{title}</h2>
+      <div className="settings-group">{children}</div>
+    </section>
+  )
 }

@@ -66,12 +66,18 @@ export function WeekBlock({ title, current, onClick }: { title: string; current?
   )
 }
 
-export function AppRow({ app, detail, selected, onClick }: { app: AppTime; detail?: string; selected?: boolean; onClick: () => void }) {
+/** An app and its time; `share` (0 to 1) draws its part of the whole as a bar under the name, labeled by `detail`. */
+export function AppRow({ app, detail, share, selected, onClick }: { app: AppTime; detail?: string; share?: number; selected?: boolean; onClick: () => void }) {
   return (
     <button type="button" className="app-row" aria-current={selected} onClick={onClick}>
       <AppIcon id={app.id} size={24} />
       <span className="app-row-text">
         <span className="app-row-name">{app.name}</span>
+        {share !== undefined && (
+          <span className="app-row-share">
+            <span style={{ width: `${Math.max(2, share * 100)}%` }} />
+          </span>
+        )}
         {detail && <span className="app-row-detail">{detail}</span>}
       </span>
       <span className="app-row-ms">{duration(app.ms)}</span>

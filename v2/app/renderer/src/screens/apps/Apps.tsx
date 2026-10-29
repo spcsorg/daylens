@@ -3,7 +3,7 @@ import type { AppDetail, AppsView } from '../../../../shared/apps.ts'
 import { useQuery } from '../../lib/api.ts'
 import { addDays, dateKey, dayMonth, duration, hoursList, longDay, parseKey, plainDay, rangeTitle, shortDay, span, weekStart } from '../../lib/format.ts'
 import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
-import { Button, IconButton, Segmented } from '../../ui/controls.tsx'
+import { IconButton, Segmented } from '../../ui/controls.tsx'
 import { Icon } from '../../ui/Icon.tsx'
 import { Popover } from '../../ui/overlays.tsx'
 import { AppIcon, AppRow, RemoveDialog, SourceRow, type RemoveTarget } from '../../ui/records.tsx'
@@ -68,13 +68,13 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
         </div>
       </div>
       <div className="scroll">
-        {view && nav.scope === 'week' && <WeekBars view={view} />}
+        {view && nav.scope === 'week' && <WeekBars view={view} today={today} onDay={(date) => setNav({ ...nav, scope: 'day', date })} />}
         {view && view.apps.length === 0 && <EmptyState>{from === today ? 'Apps appear here as you use them.' : 'Nothing was recorded then.'}</EmptyState>}
         {view && view.apps.length > 0 && (
           <div className="apps-layout">
             <div className="apps-list">
               {view.apps.map((a) => (
-                <AppRow key={a.id} app={a} selected={a.id === selected} onClick={() => setNav({ ...nav, app: a.id })} />
+                <AppRow key={a.id} app={a} share={a.ms / view.total_ms} detail={`${percent(a.ms / view.total_ms)} of the ${nav.scope}`} selected={a.id === selected} onClick={() => setNav({ ...nav, app: a.id })} />
               ))}
             </div>
             {selected && <Detail id={selected} from={from} days={days} when={when} live={live} />}
@@ -85,22 +85,63 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
   )
 }
 
-function WeekBars({ view }: { view: AppsView }) {
+// "34%", "<1%" for a sliver and at most "99%" short of the whole, so a share never reads as nothing or everything.
+function percent(share: number): string {
+  return share < 0.01 ? '<1%' : `${Math.min(share < 1 ? 99 : 100, Math.round(share * 100))}%`
+}
+
+/** Time recorded each day of the week, each bar labeled; a day with time opens that day. */
+function WeekBars({ view, today, onDay }: { view: AppsView; today: string; onDay: (date: string) => void }) {
   const max = Math.max(1, ...view.per_day.map((d) => d.total_ms))
   return (
-    <div className="bars" role="img" aria-label="Time recorded each day">
-      {view.per_day.map((d) => (
-        <div className="bar" key={d.date}>
+    <div className="bars" aria-label="Time recorded each day">
+      {view.per_day.map((d, i) => (
+        <button type="button" className={`bar${d.date === today ? ' today' : ''}`} key={d.date} disabled={d.total_ms === 0} title={d.total_ms > 0 ? `Open ${longDay(d.date)}` : undefined} onClick={() => onDay(d.date)}>
           {d.total_ms > 0 ? (
             <>
               <span>{duration(d.total_ms)}</span>
-              <span className="fill" style={{ height: `${Math.max(4, (d.total_ms / max) * 60)}px` }} />
+              <span className="fill" style={{ height: `${Math.max(4, (d.total_ms / max) * 60)}px`, animationDelay: `${i * 30}ms` }} />
             </>
           ) : (
             <span className="none" />
           )}
           <span className="day">{shortDay(d.date).split(' ')[0]}</span>
-        </div>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** The hours of the day the app was used in, on a strip from morning to evening, each labeled. */
+function HourStrip({ hours }: { hours: number[] }) {
+  const on = new Set(hours.map((h) => new Date(h).getHours()))
+  const lo = Math.min(8, ...on)
+  const hi = Math.max(17, ...on)
+  return (
+    <div className="app-strip" aria-label={`Used in the ${hoursList(hours)} ${hours.length === 1 ? 'hour' : 'hours'}`}>
+      {Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map((h) => (
+        <span key={h} className={`app-strip-cell${on.has(h) ? ' on' : ''}`}>
+          <span className="app-strip-mark" />
+          {h % 12 || 12}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** The app's time on each day of the week, each bar labeled with its day. */
+function DayStrip({ from, perDay }: { from: string; perDay: AppDetail['per_day'] }) {
+  const ms = new Map(perDay.map((p) => [p.date, p.ms]))
+  const max = Math.max(1, ...perDay.map((p) => p.ms))
+  return (
+    <div className="app-days">
+      {Array.from({ length: 7 }, (_, i) => addDays(from, i)).map((date) => (
+        <span key={date} className="app-day" title={ms.get(date) ? `${duration(ms.get(date)!)} on ${plainDay(date)}` : undefined}>
+          <span className="app-day-bar">
+            <span style={{ height: `${ms.get(date) ? Math.max(6, (ms.get(date)! / max) * 100) : 0}%` }} />
+          </span>
+          {shortDay(date).slice(0, 1)}
+        </span>
       ))}
     </div>
   )
@@ -124,12 +165,16 @@ function Detail({ id, from, days, when, live }: { id: string; from: string; days
   return (
     <div className="app-detail">
       <div className="app-head">
-        <AppIcon id={d.app.id} size={28} />
+        <span className="app-tile">
+          <AppIcon id={d.app.id} size={32} />
+        </span>
         <div className="grow">
           <h2 className="app-name">{d.app.name}</h2>
           <p className="app-line">{line}</p>
         </div>
-        <Button
+        <IconButton
+          icon="trash"
+          label={`Remove ${d.app.name} from ${when}`}
           onClick={() =>
             setRemove({
               name: d.app.name,
@@ -138,10 +183,9 @@ function Detail({ id, from, days, when, live }: { id: string; from: string; days
               never: { match: 'app_id', value: d.app.id, label: d.app.name, text: `Never record ${d.app.name} again` },
             })
           }
-        >
-          Remove from {when}
-        </Button>
+        />
       </div>
+      {days === 1 ? <HourStrip hours={d.hours} /> : <DayStrip from={from} perDay={d.per_day} />}
       {d.browser && d.sources.length > 0 && (
         <label className="apps-filter">
           <Icon name="search" />

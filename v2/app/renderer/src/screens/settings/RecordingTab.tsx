@@ -8,7 +8,7 @@ import { Button } from '../../ui/controls.tsx'
 import { Dialog, Popover, useToast } from '../../ui/overlays.tsx'
 import { errorText, pauseText, recordingState } from '../../ui/status.tsx'
 import { WHAT_GOES_TO_AI } from './AiTab.tsx'
-import { Row } from './Row.tsx'
+import { Row, Section } from './Row.tsx'
 
 function names(list: string[]): string {
   return list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
@@ -54,7 +54,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
   }
   return (
     <>
-      <div className="settings-group">
+      <Section title="Recording">
         <Row
           label="Window titles"
           detail={
@@ -78,6 +78,26 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           )}
         </Row>
         <Row label="Browser history" detail={browsersText(rec)} />
+        {rec?.pause ? (
+          <Row label="Pause" detail={pauseText(rec.pause)}>
+            <Button onClick={() => void run(act({ a: 'resume' }), 'Recording again.')}>
+              Resume
+            </Button>
+          </Row>
+        ) : (
+          <Row label="Pause" detail="Also in the menu bar.">
+            <Button onClick={() => void run(act({ a: 'pause', until: 'hour' }))}>
+              Pause for 1 hour
+            </Button>
+          </Row>
+        )}
+      </Section>
+      <NeverRecord exclusions={privacy?.exclusions ?? []} seen={privacy?.seen_apps ?? []} platform={shell?.platform ?? ''} />
+      <Section title="Privacy">
+        <Row label="Private and incognito windows" detail="Never recorded, in every browser." />
+        <Row label="What goes to AI" detail={WHAT_GOES_TO_AI} />
+      </Section>
+      <Section title="History">
         <Row label="Keep history for" detail="Older days are deleted for good. Shortening this deletes them right away.">
           <div className="settings-anchor">
             <Button onClick={() => setKeepOpen((o) => !o)}>
@@ -101,30 +121,12 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
             </Popover>
           </div>
         </Row>
-        <Row label="What goes to AI" detail={WHAT_GOES_TO_AI} />
-        <Row label="Private and incognito windows" detail="Never recorded, in every browser." />
-      </div>
-      <NeverRecord exclusions={privacy?.exclusions ?? []} seen={privacy?.seen_apps ?? []} platform={shell?.platform ?? ''} />
-      <div className="settings-group">
-        {rec?.pause ? (
-          <Row label="Pause" detail={pauseText(rec.pause)}>
-            <Button onClick={() => void run(act({ a: 'resume' }), 'Recording again.')}>
-              Resume
-            </Button>
-          </Row>
-        ) : (
-          <Row label="Pause" detail="Also in the menu bar.">
-            <Button onClick={() => void run(act({ a: 'pause', until: 'hour' }))}>
-              Pause for 1 hour
-            </Button>
-          </Row>
-        )}
         <Row label="Delete history" detail="Choose a range: the last 10 minutes up to everything.">
           <Button onClick={() => setDeleting(true)}>
             Delete history…
           </Button>
         </Row>
-      </div>
+      </Section>
       {deleting && (
         <DeleteHistory
           firstDay={rec?.first_day ?? today}
