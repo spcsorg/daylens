@@ -3,18 +3,19 @@
 import { createElement, useCallback, useState, type FormEvent } from "react";
 import { asset } from "./base";
 import { FORM } from "./copy";
+import { currentSource } from "./source";
 
 export type WaitlistStatus = "idle" | "sending" | "done" | "error";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-async function post(email: string, source: string, platform: string): Promise<string | null> {
+async function post(email: string, platform: string): Promise<string | null> {
   let res: Response;
   try {
     res = await fetch(asset("/api/waitlist"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, source, platform, company: "" }),
+      body: JSON.stringify({ email, source: currentSource(), platform, company: "" }),
     });
   } catch {
     return FORM.errors.network;
@@ -26,7 +27,7 @@ async function post(email: string, source: string, platform: string): Promise<st
 }
 
 // The form must contain an input named "email" and <Honeypot />.
-export function useWaitlist(source: string) {
+export function useWaitlist() {
   const [status, setStatus] = useState<WaitlistStatus>("idle");
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function useWaitlist(source: string) {
       setEmail(value);
       setError(null);
       setStatus("sending");
-      const failure = await post(value, source, String(data.get("platform") ?? ""));
+      const failure = await post(value, String(data.get("platform") ?? ""));
       if (failure) {
         setError(failure);
         setStatus("error");
@@ -53,7 +54,7 @@ export function useWaitlist(source: string) {
         setStatus("done");
       }
     },
-    [source],
+    [],
   );
 
   const clearError = useCallback(() => {

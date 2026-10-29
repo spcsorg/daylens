@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { SOURCES } from "../../_v2/source";
 
 const RESEND = "https://api.resend.com";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "local";
   if (limited(ip)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
-  let input: { email?: unknown; company?: unknown; platform?: unknown };
+  let input: { email?: unknown; company?: unknown; platform?: unknown; source?: unknown };
   try {
     input = await req.json();
   } catch {
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
   if (email.length > 254 || !EMAIL.test(email)) return NextResponse.json({ error: "invalid_email" }, { status: 400 });
 
   const platform = typeof input.platform === "string" && PLATFORMS.has(input.platform) ? input.platform : null;
+  const source = typeof input.source === "string" && SOURCES.has(input.source) ? input.source : "direct";
 
   const key = process.env.RESEND_API_KEY;
   if (!key) {
@@ -74,7 +76,7 @@ export async function POST(req: Request) {
         email,
         unsubscribed: false,
         ...(segment ? { segments: [{ id: segment }] } : {}),
-        ...(platform ? { properties: { platform } } : {}),
+        properties: { source, ...(platform ? { platform } : {}) },
       }),
       cache: "no-store",
     });

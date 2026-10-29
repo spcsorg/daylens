@@ -62,7 +62,7 @@ export default function Page() {
         </div>
 
         <div className="iv-join iv-join--top">
-          <Signup id="iv-email-top" source="introducing-v2-top" />
+          <Signup id="iv-email-top" />
         </div>
 
         {POST.length ? (
@@ -137,7 +137,7 @@ export default function Page() {
 
         <section className="iv-closing" id="join" aria-labelledby="iv-closing">
           <h2 id="iv-closing">{CLOSING}</h2>
-          <Signup id="iv-email-closing" source="introducing-v2-closing" />
+          <Signup id="iv-email-closing" />
         </section>
 
         <Footer />
