@@ -61,9 +61,29 @@ export type Citation =
   | { kind: 'hour'; start_wall_ms: number; end_wall_ms: number; hour_id: number | null; title: string | null; open: OpenAction }
   | { kind: 'page' | 'file' | 'window'; title: string | null; url: string | null; file: string | null; app_name: string | null; open: OpenAction }
 
+/** A piece of work in an answer's time: its minutes as the record gives them, and when it was on screen. */
+export interface Piece {
+  label: string
+  minutes: number
+  stretches: { from_wall_ms: number; to_wall_ms: number }[]
+  // The hours it was seen in, oldest first.
+  hours: Citation[]
+}
+
+/** A page, file or window an answer is about, with its most recent day's first to last time on screen. */
+export interface Thing {
+  cite: Exclude<Citation, { kind: 'hour' }>
+  app_id: string | null
+  from_wall_ms: number
+  to_wall_ms: number
+}
+
+/** What an answer shows under its words, built by code from the record: never markup the model wrote. */
+export type Visual = { kind: 'work'; pieces: Piece[] } | { kind: 'thing'; thing: Thing }
+
 export type AskResult =
   // withdrawn: statements left out because what they cite was deleted while the AI was answering.
-  | { kind: 'answer'; statements: Statement[]; dropped: number; withdrawn: number; results: SearchResults }
+  | { kind: 'answer'; statements: Statement[]; visual: Visual | null; dropped: number; withdrawn: number; results: SearchResults }
   // The record does not answer the question; the search results are still shown.
   | { kind: 'no_answer'; missing: string | null; results: SearchResults }
   // Every statement cited something deleted while the AI was answering, so none is shown.
@@ -103,15 +123,15 @@ export const ANSWER_SCHEMA = {
 export const SYSTEM_PROMPT = [
   'You answer a person’s question about what they did on their computer, using only the record you are given as JSON. Answer the way they would describe their day to their boss in the evening.',
   'The record holds hours (ids starting with h) and the pages, files and windows seen in them (ids starting with s). An hour’s "corrected" fields are what the person wrote about it themselves.',
-  'Before the statements, for a summary or a question about how long or what took the most time, list in "work" every piece of work in the time asked, one line each with its source ids and their minutes added up, such as "pricing page: s3 25 + s7 10 + s9 40 = 75". A piece of work is one project or job with everything done for it, in whatever app: a report, the spreadsheet behind it and the email sending it are one piece. Asked about one thing, count only what was for that thing. Answer from that list, so the same question always gets the same pieces and the same sums.',
+  'Before the statements, for a summary or a question about how long or what took the most time, list in "work" every piece of work in the time asked, one line each with its name, its source ids and their minutes added up, such as "Pricing page: s3 25 + s7 10 + s9 40 = 75"; for any other question leave "work" empty. The names label a breakdown shown under the answer, so name each piece in two to four words, the way the person would. A piece of work is one project or job with everything done for it, in whatever app: a report, the spreadsheet behind it and the email sending it are one piece. Asked about one thing, count only what was for that thing. Answer from that list, so the same question always gets the same pieces and the same sums.',
   'Lead with the answer. A summary opens with the gist of the work, leaving no piece of work out. Asked what got done, its first sentence says what was finished and the gist of what moved, such as "You finished the pricing memo, and the rest of the day went to the budget numbers and the design sync." For what took the most time, name the piece with the most minutes and its amount, then how the rest compare, such as "The pricing page took the most, about 75 minutes; the rest took about an hour each." A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "Yesterday at 4:10 PM, right after the design sync." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
   'Write about the work, not the windows: the projects, what moved, what got finished, what is still open, grouped by piece of work. For how long, add up the minutes of the sources that belong to the work, once each; an hour’s app minutes already include them. A window title, page or file name is evidence of the work; name one only when it is the answer or what the person would open.',
   'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as one clock time from the record, such as "around 1:45 PM", never a span like "1 to 2 PM", "in the 1 PM hour" or "the first half of the morning", and never a loose one like "midday" or "late morning" for a single moment. Call a time lunch or a break only when the record shows the computer away then.',
   'Answer what was asked and stop: a question about one moment or one piece of work gets that, not the rest of the day. Say "most" only when the minutes show it.',
-  'A summary’s first sentence names the biggest pieces of work from "work", up to four; when several took about as long, the ones that came first, such as "This morning was mostly weekend orders, supplier prices and the autumn menu." Then a sentence or two covers every other piece of work, each once, in the time asked, grouped into two or three themes ("the admin: invoices, pickups and the wholesale follow-ups"), with no times unless one matters, such as when something was sent. Never more than four sentences, and never a run of sentences that each start "You worked on". Any other question gets one or two; one about the last time gets one sentence for that moment and at most one more for other days. Plain and warm, like a colleague who saw the day. Don’t say which app or window something was in, or how long a window was open, unless the question asks; say what the person did. Don’t hedge ("only shows", "likely", "may have", "might", "appears", "can’t pin down", "I can’t say exactly"): say what was done, such as "You planned tomorrow’s bakes and looked over Thursday." Talk about what the record can’t show only when the question can’t be answered without it, and then in a few words; never end an answer on it.',
+  'A summary’s first sentence names the biggest pieces of work from "work", up to four; when several took about as long, the ones that came first, such as "This morning went to weekend orders, supplier prices and the autumn menu." Then a sentence or two covers every other piece of work, each once, in the time asked, grouped into two or three themes ("the admin: invoices, pickups and the wholesale follow-ups"), with no times unless one matters, such as when something was sent. Never more than four sentences, and never a run of sentences that each start "You worked on". Any other question gets one or two; one about the last time gets one sentence for that moment and at most one more for other days. Plain and warm, like a colleague who saw the day. Don’t say which app or window something was in, or how long a window was open, unless the question asks; say what the person did. Don’t hedge ("only shows", "likely", "may have", "might", "appears", "can’t pin down", "I can’t say exactly"): say what was done, such as "You planned tomorrow’s bakes and looked over Thursday." Talk about what the record can’t show only when the question can’t be answered without it, and then in a few words; never end an answer on it.',
   'When the same thing happened on several days, give the most recent and mention the others plainly, such as "and at the same time yesterday".',
   'A source’s "on_screen" gives, for each day, when it was first and last on screen. Asked when something was done or looked at, give when it was first on screen on the most recent day, and mention other days plainly; asked when it was last open, when it was last seen.',
-  'Read titles the way the person would: a Mail window titled "Sent: October invoice" means that invoice went out then. Say something was finished only when a title shows it was, like a sent email; otherwise say it was worked on, not sorted out, done or finished, and an email that was open was read, not answered. Say who something was from or for only when its own title says so; two things seen near each other are not one.',
+  'Read titles the way the person would: a Mail window titled "Sent: October invoice" means that invoice went out then. Say something was finished only when a title shows it was, like a sent email; otherwise say it was worked on, not sorted out, done or finished, and an email that was open was read, not answered. Say who something was from or for only when its own title says so, and otherwise leave it out without remarking on titles; two things seen near each other are not one.',
   'Say what the person did ("you sent the October invoice around 1:45 PM"), never what showed on screen ("the sent email showing", "it shows up yesterday", "last seen at 11 AM"), and never the record’s own words such as "last seen", "on screen" or "this morning’s hour".',
   'A sentence saying when something was last open cites only that thing; what came before it goes in its own sentence.',
   'Every statement is one full sentence that stands alone, since any may be left out; never start one with "Also", "You also", "Just before that" or anything else that leans on another, and lists in "sources" the ids it rests on. Use only ids from the record. Make no statement the record does not support. A statement that names a time, a day, an app, a site or a file cites an hour or source from it.',
@@ -181,6 +201,15 @@ export function daysIn(question: string, nowMs: number): [number, number][] {
   return [...starts].sort((a, b) => a - b).map((s) => [s, shift(s, 1)])
 }
 
+/** The part of a day a question names, in local hours: the morning until noon, the afternoon until 6 PM, then the evening. */
+export function partOfDay(question: string): [number, number] | null {
+  const q = question.toLowerCase()
+  if (/\bmorning\b/.test(q)) return [0, 12]
+  if (/\bafternoon\b/.test(q)) return [12, 18]
+  if (/\b(evening|tonight|night)\b/.test(q)) return [18, 24]
+  return null
+}
+
 /** The words of a question worth searching for: no stopwords, no day or month names, no numbers of a date. */
 export function searchWords(question: string): string {
   const words = question.toLowerCase().normalize('NFC').match(/[\p{L}\p{N}\p{M}]+/gu) ?? []
@@ -233,6 +262,8 @@ interface SentSource {
   last_wall_ms: number
   // The sent hours it was seen in.
   hour_starts: number[]
+  // The stretches it was on screen in the hours sent.
+  stretches: Sighting[]
   // Every stretch it was seen, sent or not, with the app it was seen in, as search keeps them: an entry's first to its
   // last time in an hour, which can span time it was not on screen. Wide is safe for withdrawing after a deletion.
   sightings: Sighting[]
@@ -425,7 +456,10 @@ export async function ask(
   const words = searchWords(question)
   // A question that names no day and nothing to search for ("what did I just do?") is about today.
   const named = daysIn(question, now)
-  const days = named.length > 0 || words ? named : daysIn('today', now)
+  const part = partOfDay(question)
+  const clockOn = (day: number, h: number) => new Date(day).setHours(h, 0, 0, 0)
+  // "This morning" is the morning, so its pieces of work and their minutes are the morning's alone.
+  const days = (named.length > 0 || words ? named : daysIn('today', now)).map(([a, b]): [number, number] => (part ? [clockOn(a, part[0]), part[1] === 24 ? b : clockOn(a, part[1])] : [a, b]))
   // The days asked are searched as one, ranked together; the days between two named days are not searched.
   const find = (): SearchResults =>
     words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...(days.length > 0 ? { ranges: days } : {}) }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
@@ -463,7 +497,7 @@ export async function ask(
       continue
     }
     const seen = i.seen_in.map((s) => s.hour_start_wall_ms)
-    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), sightings: [...i.sightings], seen: [{ app_id: i.app_id, from_wall_ms: i.last_wall_ms, to_wall_ms: i.last_wall_ms }] })
+    sent.set(key, { kind: i.kind, key, app_id: i.app_id, app_name: i.app_name, title: i.title, url: i.url, file: i.file, ms: null, last_wall_ms: i.last_wall_ms, hour_starts: seen.filter((s) => hourStarts.has(s)), stretches: [], sightings: [...i.sightings], seen: [{ app_id: i.app_id, from_wall_ms: i.last_wall_ms, to_wall_ms: i.last_wall_ms }] })
   }
   const own = hours.flatMap((h) => h.sources.map((s) => ({ h, s }))).sort((a, b) => b.s.ms - a.s.ms)
   for (const { h, s } of own) {
@@ -472,6 +506,7 @@ export async function ask(
     if (prev) {
       if (!prev.hour_starts.includes(h.start_wall_ms)) prev.hour_starts.push(h.start_wall_ms)
       prev.sightings.push(...s.sightings)
+      prev.stretches.push(...s.sightings)
       prev.seen.push(...s.sightings)
       prev.ms = (prev.ms ?? 0) + s.ms
       // Last seen, with the title and the app it was last seen with.
@@ -487,7 +522,7 @@ export async function ask(
       notSent.add(key)
       continue
     }
-    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], sightings: [...s.sightings], seen: [...s.sightings] })
+    sent.set(key, { kind: s.kind, key, app_id: s.app_id, app_name: s.app_name, title: s.title, url: s.url, file: s.file, ms: s.ms, last_wall_ms: s.last_wall_ms, hour_starts: [h.start_wall_ms], stretches: [...s.sightings], sightings: [...s.sightings], seen: [...s.sightings] })
   }
   // Each day's first and last moment it was seen, in a sent hour or not, so "when did I…" gets that day's real times.
   for (const s of sent.values()) s.seen.push(...dayEnds(s.sightings))
@@ -688,6 +723,7 @@ export async function ask(
     when.push(latest(ids))
     citedIds.push(ids)
   }
+  let leadIds: string[] = []
   if (latestFirst) {
     // An answer to "when did I last…" leads with what it cites, so one that never cites the newest best match can't put
     // an older match first, whether or not it says "last".
@@ -699,6 +735,7 @@ export async function ask(
       .sort((a, b) => b.t - a.t)
     dropped += statements.length - byTime.length
     statements.splice(0, statements.length, ...byTime.map((x) => x.st))
+    leadIds = byTime[0]?.ids ?? []
     // The answer's first link is the moment it names: the hour its newest source was last seen in, when that was sent.
     const lead = byTime[0]
     const t = lead ? Math.max(...lead.ids.flatMap((id) => (id.startsWith('s') ? sources[Number(id.slice(1)) - 1]!.sightings.map(moment) : []))) : -Infinity
@@ -709,5 +746,45 @@ export async function ask(
   // What the AI says the record lacks can name what was deleted.
   const missing = gone.size === 0 && typeof out.missing === 'string' && out.missing.trim() ? out.missing : null
   if (!out.answerable || statements.length === 0) return { kind: 'no_answer', missing, results }
-  return { kind: 'answer', statements, dropped, withdrawn, results }
+
+  // The visual: the pieces of work the model added up before answering, else the thing the answer is about.
+  const kept = hours.filter((_, i) => !gone.has(`h${i + 1}`))
+  const hourOf = (t: number) => kept.find((h) => h.start_wall_ms <= t && t < h.end_wall_ms)
+  const used = new Set<string>()
+  const pieces: Piece[] = []
+  for (const line of Array.isArray((out as { work?: unknown }).work) ? ((out as { work: unknown[] }).work) : []) {
+    const m = typeof line === 'string' ? /^\s*([^:]+?)\s*:(.*)$/.exec(line) : null
+    if (!m) continue
+    // Each source counts once, for the first piece that names it, as the model is told to add them up.
+    const ids = [...new Set(m[2]!.match(/\bs\d+\b/g) ?? [])].filter((id) => byId.has(id) && !gone.has(id) && !used.has(id) && sources[Number(id.slice(1)) - 1]!.ms !== null)
+    if (ids.length === 0 || !supported(m[1]!, ids.flatMap((id) => evidence.get(id)!), appNames, now)) continue
+    ids.forEach((id) => used.add(id))
+    const stretches = ids
+      .flatMap((id) => sources[Number(id.slice(1)) - 1]!.stretches)
+      .filter((x) => hourOf(x.from_wall_ms))
+      .map((x) => ({ from_wall_ms: x.from_wall_ms, to_wall_ms: x.to_wall_ms }))
+      .sort((a, b) => a.from_wall_ms - b.from_wall_ms)
+    const minutesOf = ids.reduce((n, id) => n + minutes(sources[Number(id.slice(1)) - 1]!.ms!), 0)
+    if (minutesOf === 0 || stretches.length === 0) continue
+    const seenIn = [...new Set(stretches.map((x) => hourOf(x.from_wall_ms)!))]
+    pieces.push({ label: m[1]!, minutes: minutesOf, stretches, hours: seenIn.map((h) => byId.get(`h${hours.indexOf(h) + 1}`)!) })
+  }
+  // One piece of work is no breakdown, unless the question is how long it took. Ties go in the order of the day, so a
+  // piece keeps its colour whatever order the model listed them in.
+  let visual: Visual | null = pieces.length > 1 || (pieces.length === 1 && /\bhow (long|much time)\b/i.test(question)) ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes || a.stretches[0]!.from_wall_ms - b.stretches[0]!.from_wall_ms) } : null
+  if (!visual) {
+    // Else the one thing the answer is about: the first its first sentence cites, the newest for "when did I last…". What
+    // "before" or "after" in the question names is where the answer starts, not what it is about.
+    const anchor = (id: string) => /\b(before|after)\b/i.test(question) && best > 0 && matchCount(sources[Number(id.slice(1)) - 1]!) === best
+    const pick = (ids: string[]) => ids.filter((id) => id.startsWith('s') && !anchor(id))
+    const lead = pick(latestFirst ? leadIds : (citedIds[0] ?? []))
+    const id = latestFirst ? lead.sort((a, b) => sources[Number(b.slice(1)) - 1]!.last_wall_ms - sources[Number(a.slice(1)) - 1]!.last_wall_ms)[0] : (lead[0] ?? pick(citedIds.flat())[0])
+    if (id) {
+      const s = sources[Number(id.slice(1)) - 1]!
+      const last = localMidnight(Math.max(...s.seen.map(moment)))
+      const day = s.seen.filter((x) => localMidnight(x.from_wall_ms) === last)
+      visual = { kind: 'thing', thing: { cite: byId.get(id) as Thing['cite'], app_id: s.app_id, from_wall_ms: Math.min(...day.map((x) => x.from_wall_ms)), to_wall_ms: Math.max(...day.map((x) => x.to_wall_ms)) } }
+    }
+  }
+  return { kind: 'answer', statements, visual, dropped, withdrawn, results }
 }

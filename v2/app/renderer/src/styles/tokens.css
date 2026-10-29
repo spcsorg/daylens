@@ -63,6 +63,11 @@
   --sky-noon: #ccdfee;
   --sky-afternoon: #f0c397;
   --sky-dusk: #d7cde6;
+  /* Pieces of work in an Ask answer: three hues apart for every kind of colour vision, then grey for the rest. */
+  --work-1: #3466b3;
+  --work-2: #2aa98c;
+  --work-3: #9a7ad8;
+  --work-other: #c9cdd1;
   /* Buttons: the base sits a step above ink so hover and press have somewhere darker to go. */
   --btn-primary: #212429;
   --btn-primary-hover: #1c1f23;
@@ -155,6 +160,10 @@
   --sky-noon: #1f3447;
   --sky-afternoon: #47301f;
   --sky-dusk: #332b44;
+  --work-1: #3a6cc2;
+  --work-2: #1f9e7f;
+  --work-3: #9f80e2;
+  --work-other: #4b5158;
   --btn-primary: #eceef0;
   --btn-primary-hover: #ffffff;
   --btn-primary-press: #e4e6e9;

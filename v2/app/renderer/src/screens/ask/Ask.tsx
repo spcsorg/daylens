@@ -1,13 +1,15 @@
 // Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; the
 // answer arrives on the left as one message, a sentence at a time as it streams.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { AskResult, Citation, Statement } from '../../../../shared/ai.ts'
+import type { AskResult, Citation, Statement, Visual } from '../../../../shared/ai.ts'
 import { act, bridge, query } from '../../lib/api.ts'
-import { addDays, dateKey, hourLabel, seenAt } from '../../lib/format.ts'
+import { hourLabel, seenAt } from '../../lib/format.ts'
+import { IconButton } from '../../ui/controls.tsx'
 import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 import { KeyForm } from '../settings/AiTab.tsx'
+import { AnswerVisual, dayWord, opened } from './Visual.tsx'
 import './ask.css'
 
 const TRY = ['What did I do this morning?', 'What did I work on yesterday afternoon?', 'What took most of my time yesterday?']
@@ -195,7 +197,13 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
       {settled && r?.kind === 'no_answer' && <div className="bubble theirs">{r.missing ?? 'Your record doesn’t show that.'}</div>}
       {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
       {settled && r?.kind === 'search_only' && <NoKey onSaved={onRetry} />}
-      {settled && r?.kind === 'answer' && <Sources statements={r.statements} onOpenHour={onOpenHour} />}
+      {settled && r?.kind === 'answer' && (
+        <>
+          {r.visual && <AnswerVisual visual={r.visual} onOpenHour={onOpenHour} />}
+          <Sources statements={r.statements} visual={r.visual} onOpenHour={onOpenHour} />
+          <Copy text={r.statements.map((s) => s.text).join(' ')} />
+        </>
+      )}
     </div>
   )
 }
@@ -221,21 +229,40 @@ function NoKey({ onSaved }: { onSaved: () => void }) {
 
 /** An hour as a chip names it: "9 AM" today, "Yesterday 4 PM", else its day. */
 function when(ms: number): string {
-  const day = dateKey(new Date(ms))
-  const today = dateKey(new Date())
-  if (day === today) return hourLabel(ms)
-  if (day === addDays(today, -1)) return `Yesterday ${hourLabel(ms)}`
-  return seenAt(ms)
+  const day = dayWord(ms)
+  return day === 'Today' ? hourLabel(ms) : day === 'Yesterday' ? `Yesterday ${hourLabel(ms)}` : seenAt(ms)
 }
 
-/** The hours and pages the answer cites, once each, in the order it cites them: an hour opens in Today, a page in the browser. */
-function Sources({ statements, onOpenHour }: { statements: Statement[]; onOpenHour: (start: number) => void }) {
+function Copy({ text }: { text: string }) {
+  const toast = useToast()
+  return (
+    <div className="ask-actions">
+      <IconButton
+        icon="copy"
+        label="Copy"
+        onClick={() =>
+          void navigator.clipboard.writeText(text).then(
+            () => toast({ text: 'Copied' }),
+            () => toast({ text: 'Couldn’t copy the answer.', error: true }),
+          )
+        }
+      />
+    </div>
+  )
+}
+
+/**
+ * The hours and pages the answer cites, once each, in the order it cites them: an hour opens in Today, a page in the
+ * browser. What the visual already opens is left out.
+ */
+function Sources({ statements, visual, onOpenHour }: { statements: Statement[]; visual: Visual | null; onOpenHour: (start: number) => void }) {
   const toast = useToast()
   const hours = new Map<number, Extract<Citation, { kind: 'hour' }>>()
   const pages = new Map<string, Exclude<Citation, { kind: 'hour' }>>()
+  const shown = visual ? opened(visual) : new Set()
   for (const c of statements.flatMap((s) => s.cites)) {
-    if (c.kind === 'hour') hours.set(c.start_wall_ms, c)
-    else if (c.kind === 'page' && c.url) pages.set(c.url, c)
+    if (c.kind === 'hour' && !shown.has(c.start_wall_ms)) hours.set(c.start_wall_ms, c)
+    else if (c.kind === 'page' && c.url && !shown.has(c.url)) pages.set(c.url, c)
   }
   if (hours.size === 0 && pages.size === 0) return null
   return (

@@ -2,7 +2,7 @@
 // action ever returns it.
 import type { AskResult, Statement } from '../../retrieval/ask.ts'
 
-export type { AskResult, Citation, Statement } from '../../retrieval/ask.ts'
+export type { AskResult, Citation, Piece, Statement, Thing, Visual } from '../../retrieval/ask.ts'
 
 export type AskQuery = { q: 'ask'; ask_id: number; question: string }
 
