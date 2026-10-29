@@ -271,9 +271,14 @@ export class AgentReader {
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
     if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
-    await this.draining
-    for (const tail of this.tails.values()) tail.close()
-    this.tails.clear()
+    try {
+      await this.draining
+      // What the last read counted is written now, while the store is open; a pass resuming later writes nothing.
+      for (const r of this.roots) this.recordHealth(r)
+    } finally {
+      for (const tail of this.tails.values()) tail.close()
+      this.tails.clear()
+    }
   }
 
   // Resolves once every file event seen so far has been read and written.
@@ -303,6 +308,8 @@ export class AgentReader {
       names = (await readdir(root.dir, { recursive: root.layout !== 'codex_archive' })) as string[]
       this.stats.listings++
     } catch (err) {
+      // A stop() can come while the listing is awaited, and the store may be closed right after it: write nothing then.
+      if (this.stopped) return
       const code = errCode(err)
       r.present = false
       r.watcher?.close()
@@ -311,6 +318,7 @@ export class AgentReader {
       else this.store.setHealth(root.agent, root.dir, 'unreadable', code, null)
       return
     }
+    if (this.stopped) return
     const appeared = !r.present
     r.present = true
     // A folder that is back is readable again; a format problem stays reported until a clean read clears it.
@@ -410,7 +418,7 @@ export class AgentReader {
         await this.readFile(r, file)
       }
     }
-    for (const r of this.roots) this.recordHealth(r)
+    if (!this.stopped) for (const r of this.roots) this.recordHealth(r)
   }
 
   private recordHealth(r: RootState): void {
@@ -419,6 +427,7 @@ export class AgentReader {
     if (r.unreadable) {
       this.store.setHealth(r.root.agent, r.root.dir, 'unreadable', 'file_unreadable', null)
       r.unreadable = false
+      r.counts = emptyCounts()
       return
     }
     if (c.lines === 0) return

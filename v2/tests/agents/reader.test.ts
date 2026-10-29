@@ -96,6 +96,49 @@ test('a watched folder is never listed again; only the follow-up check after sta
   r.store.close()
 })
 
+test('a folder listing that returns after stop writes nothing, though the store is closed by then', async () => {
+  const r = rig()
+  let calls = 0
+  let release!: () => void
+  const gate = new Promise<void>((res) => (release = res))
+  const late: AgentRoot = { ...r.roots[0]!, dir: path.join(r.home, 'not-there'), poll: true }
+  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, [late]) : []) })
+  await reader.start()
+  await waitFor(() => calls > 1)
+  release()
+  // The timed pass is now waiting on the listing, which the thread pool answers only after these turns.
+  for (let i = 0; i < 20; i++) await null
+  await reader.stop()
+  r.store.close()
+  await new Promise((res) => setTimeout(res, 200))
+})
+
+test('a timed pass that resumes after stop records no health, though earlier reads left counts behind', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs file permissions' : false }, async () => {
+  const r = rig()
+  const c = codexCtx()
+  writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text'])))
+  const c2 = codexCtx()
+  const locked = codexFile(r.home, c2)
+  writeFileSync(locked, lines(codex.meta(c2, sec(0))))
+  chmodSync(locked, 0o000)
+  let calls = 0
+  let release!: () => void
+  const gate = new Promise<void>((res) => (release = res))
+  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, []) : []) })
+  try {
+    await reader.start()
+    await waitFor(() => calls > 1)
+    await reader.stop()
+    const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
+    assert.deepEqual([h.state, h.reason], ['unreadable', 'file_unreadable'])
+    r.store.close()
+    release()
+    await new Promise((res) => setTimeout(res, 200))
+  } finally {
+    chmodSync(locked, 0o644)
+  }
+})
+
 test('reading is driven by file events, not by rescanning folders', async () => {
   const r = rig()
   const c = codexCtx()
@@ -367,6 +410,27 @@ test('renamed turn events are reported as degraded, never as a healthy quiet log
   await reader.start()
   await reader.stop()
   assert.equal(r.count('SELECT count(*) AS n FROM agent_turns'), 0)
+  const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
+  assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
+  r.store.close()
+})
+
+test('health counted by a read that a stop interrupts is still written before stop returns', async () => {
+  const r = rig()
+  const c = codexCtx()
+  const renamed = (at: number, kind: string, turn: string) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: kind, turn_id: turn } })
+  writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), renamed(sec(1), 'turn_began', 't1'), codex.userItem(sec(1), 'go', ['user.text']), renamed(sec(9), 'turn_finished', 't1')))
+  const reader = r.reader()
+  const apply = r.agents.apply.bind(r.agents)
+  let stopping: Promise<void> | undefined
+  r.agents.apply = ((...args: Parameters<typeof apply>) => {
+    const out = apply(...args)
+    stopping ??= reader.stop()
+    return out
+  }) as typeof r.agents.apply
+  await reader.start()
+  assert.ok(stopping)
+  await stopping
   const h = r.agents.health().find((x) => x.agent === 'codex' && x.root.endsWith('sessions') && !x.root.endsWith('archived_sessions'))!
   assert.deepEqual([h.state, h.reason], ['degraded', 'turns_unrecognized'])
   r.store.close()
