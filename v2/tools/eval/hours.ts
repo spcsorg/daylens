@@ -75,6 +75,21 @@ export const CASES: { name: string; packet: Packet; watch: string; must?: string
     packet: { ...empty, hour: '2026-10-27 13:00-14:00', tz: 'Example/Town', scheduled_events: [{ id: 'k1', title: 'Statistics class', from: '13:00', to: '15:00' }], pages: [item('p1', 'Chrome', 'Statistics class - Google Meet', 3, '13:02', '13:05'), item('p2', 'Chrome', 'pandas groupby - documentation', 12, '13:45', '13:57')], windows: [item('i1', 'Editor', 'analysis.py', 40, '13:05', '13:45')] },
   },
   {
+    name: 'untitled chat windows beside an agent on a project',
+    watch: 'that the chat or mail windows were part of the harbor-site work, or that the person went back and forth with, talked to or asked the chat apps anything',
+    must: 'the minutes in Chatly and Mail, as time of their own, not part of the harbor-site work',
+    packet: {
+      ...empty, hour: '2026-10-27 21:00-22:00', tz: 'Example/Town',
+      windows: [item('i1', 'Editor', 'harbor-site — index.html', 30, '21:00', '21:30'), { id: 'i2', app: 'Chatly', title_note: 'title not recorded', min: 6, from: '21:30', to: '21:36', times: 2 }, { id: 'i3', app: 'Mail', title_note: 'title not recorded', min: 4, from: '21:36', to: '21:40', times: 1 }],
+      agents: [{ id: 'a1', agent: 'Claude Code', project: 'harbor-site', with_you_min: 25, while_away_min: 0, messages: ['21:05', '21:20'] }],
+    },
+  },
+  {
+    name: 'a short setup in a long hour of coding',
+    watch: 'that the hour went mostly to installing or signing in to the CLI, or a title or summary that leads with the setup',
+    packet: { ...empty, hour: '2026-10-27 12:00-13:00', tz: 'Example/Town', windows: [item('i1', 'Terminal', 'npm install -g harbor-cli', 5, '12:00', '12:05'), item('i2', 'Editor', 'harbor-site — checkout.ts', 40, '12:05', '12:45'), item('i3', 'Chrome', 'Harbor CLI – Sign in', 3, '12:45', '12:48')] },
+  },
+  {
     name: 'locked for the rest of the hour',
     watch: 'any work after 10:18 PM, or that the person finished the chapter',
     packet: { ...empty, hour: '2026-10-27 22:00-23:00', tz: 'Example/Town', away: [{ id: 'w1', from: '22:18', to: '23:00', why: 'screen locked' }], windows: [item('i1', 'TextEdit', 'chapter-4.md', 18, '22:00', '22:18')] },
@@ -84,6 +99,7 @@ export const CASES: { name: string; packet: Packet; watch: string; must?: string
 // As the app does, a rejected hour is written again, twice; after that it stays as its facts.
 async function writeCase(packet: Packet, write: (p: Packet) => Promise<{ text: string | null }>): Promise<{ hour: ReturnType<typeof validateHour>['hour']; rejected: string[] }> {
   const refs = Object.fromEntries([
+    ...packet.agents.map((a): [string, Ref] => [a.id, { kind: 'agent', agent: 'claude_code', session: a.id }]),
     ...[...packet.windows, ...packet.pages, ...packet.away].map((x, i): [string, Ref] => [x.id, 'why' in x ? { kind: 'away' } : { kind: 'observations', ids: [i + 1] }]),
     ...packet.scheduled_events.map((e): [string, Ref] => [e.id, { kind: 'event', id: e.id }]),
   ])
