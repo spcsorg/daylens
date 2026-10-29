@@ -1,5 +1,10 @@
 /* Search: a floating layer over the whole window, opened with Cmd+K on macOS and Ctrl+K elsewhere. It sits on the
    shared scrim (ui.css) as a solid panel with the window shadow, results right under the field. */
+/* Above dialogs (20) and popovers (30), so Search opened over either sits on top; under toasts (40). */
+.scrim.search-scrim {
+  z-index: 35;
+}
+
 .search-panel {
   margin-top: min(96px, 12vh);
   width: 640px;

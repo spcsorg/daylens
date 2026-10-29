@@ -106,7 +106,11 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
 
   // Escape closes; Tab cycles through the panel's own controls, so focus never slips behind it (a modal's contract).
   const onPanelKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') return close()
+    if (e.key === 'Escape') {
+      // Dialogs and popovers listen on window: unstopped, this Escape would also close (or answer "no" to) what is under Search.
+      e.stopPropagation()
+      return close()
+    }
     if (e.key !== 'Tab') return
     const stops = [...e.currentTarget.querySelectorAll<HTMLElement>('input, button')]
     const at = stops.indexOf(document.activeElement as HTMLElement)
@@ -128,7 +132,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   }
 
   return (
-    <div className={`scrim${closing ? ' closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div className={`scrim search-scrim${closing ? ' closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="search-panel" role="dialog" aria-modal="true" aria-label="Search" onKeyDown={onPanelKey}>
         <div className="search-field">
           <Icon name="search" size={20} />
