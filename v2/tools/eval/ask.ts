@@ -80,7 +80,7 @@ Judge each field strictly, true or false:
 - correct: both answers agree with expect and claim nothing it contradicts. Leaving out minor items is fine; inventing or misdating work is not.
 - consistent: the two answers say the same thing in substance (the same time, the same yes or no, the same main pieces of work). Wording may differ.
 - sounds_like_a_person: plain, warm and brief, like a colleague who saw the day; not a log, a list of apps, or hedging.
-- visual_agrees: each visual agrees with its answer and with expect: a work card's pieces are the work the words describe, with the minutes the words give (a piece the words leave out, or a few minutes' difference, is fine; a piece the words contradict, or work outside the time asked, is not); a card of things shows what the answer is about, at the time it gives. The two runs show the same kind of visual with the same main pieces or things. A summary of a stretch of time (a morning, an afternoon, a day) shows a work card; no visual is fine for a when or whether answer.
+- visual_agrees: each visual agrees with its answer and with expect: a work card's pieces are the work the words describe, with the minutes the words give (a piece the words leave out, or a few minutes' difference, is fine; a piece the words contradict, or work outside the time asked, is not); a card of things shows what the answer is about, at the time it gives. The two runs show the same kind of visual with the same main pieces or things. A summary of a stretch of time (a morning, an afternoon, a day, what came before or after something) shows a work card; a work card fits a whether answer about work; no visual is fine for a when or whether answer.
 reason: one or two sentences on any field that failed, quoting the answer. Empty when all pass.`
 
 // One run of a question as the eval reports it: what the person would read, what each sentence cites, and how many
@@ -97,9 +97,9 @@ function run(r: AskResult): { text: string; sources: string[][]; visual: string;
   return { text: `(${r.kind})`, sources: [], visual: 'none', visual_kind: null }
 }
 
-// An amount shows its work; a summary shows its work or what it is about; a when or whether answer never shows work.
+// An amount shows its work, a summary shows something, and a when answer never shows work; the grader judges the rest.
 const visualFits = (kind: Kind, runs: { visual_kind: Visual['kind'] | null }[]) =>
-  runs.every((x) => (kind === 'amount' ? x.visual_kind === 'work' : kind === 'summary' ? x.visual_kind !== null : x.visual_kind !== 'work'))
+  runs.every((x) => (kind === 'amount' ? x.visual_kind === 'work' : kind === 'summary' ? x.visual_kind !== null : kind === 'when' ? x.visual_kind !== 'work' : true))
 
 // A past 6 PM, so the seeded today runs 8 AM to 6 PM in full and nothing is in the future.
 function evalNow(): number {

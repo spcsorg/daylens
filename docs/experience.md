@@ -93,6 +93,8 @@ Search finds anything you saw, across every day.
 Ask answers questions about any day from the same record.
 
 - An answer cites the hours and sources it used, and each one opens.
+- Under the words, one card shows what the answer is about, built by code from the record, never drawn by the model. A summary or a question about time gets the work of the time asked: one timeline of when each piece of work was on screen (a share bar when it spans days), with each piece's minutes beside it, three colours and grey for the rest. Other answers get the pages, files or windows the first sentence is about, newest first for "when did I last". Every part opens the hour or the thing it came from, and the chips under the answer leave out what the card already opens. A copy button copies the answer's words.
+- "This morning" is until noon, "this afternoon" until 6 PM, "this evening" after; Ask reads only that part of the day.
 - Asking for a timesheet or a report ("my hours on the bank project this week") drafts it from the recorded hours, with time per piece of work and the hours it came from, ready to copy.
 - Example questions lead with finding things and picking up work, then summaries and time.
 - With no AI, or at the free limit, Ask still searches and shows matching results.

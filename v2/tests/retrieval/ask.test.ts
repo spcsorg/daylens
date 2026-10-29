@@ -919,7 +919,7 @@ test('the work the model added up becomes the visual: minutes from the record, e
   s.close()
 })
 
-test('with no work added up, the visual is what the answer’s first sentence is about, and a "when did I last" answer shows its newest first', async () => {
+test('with no work added up, the visual is what the answer’s first sentence is about, and a "when did I last" answer shows the newest of it alone', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
   const other = app('com.example.notes', { name: 'Notes' })
@@ -938,8 +938,8 @@ test('with no work added up, the visual is what the answer’s first sentence is
   if (res.kind !== 'answer' || res.visual?.kind !== 'things') return assert.fail('a things visual')
   assert.deepEqual(
     res.visual.things.map((t) => [t.cite.file, t.from_wall_ms, t.to_wall_ms]),
-    [['roadmap-old.md', T0 + 11 * HOUR, T0 + 11 * HOUR + 90_000], ['roadmap.md', T0 + 9 * HOUR + 30 * MIN, T0 + 9 * HOUR + 31 * MIN + 30_000]],
-    'only what the first sentence cites, newest first, with its day’s first to last time on screen',
+    [['roadmap-old.md', T0 + 11 * HOUR, T0 + 11 * HOUR + 90_000]],
+    'the newest of what the first sentence cites, with its day’s first to last time on screen',
   )
   s.close()
 })
