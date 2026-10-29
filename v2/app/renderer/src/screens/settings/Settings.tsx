@@ -49,7 +49,7 @@ export function Settings({ shell, rec }: { shell: ShellState | null; rec: Record
         </div>
       </div>
       <div className="scroll">
-        <div className="settings-stack">
+        <div className="settings-stack" key={done === null ? tab : 'done'}>
           {done !== null ? (
             <div className="settings-row">
               <span className="grow">{done}</span>
