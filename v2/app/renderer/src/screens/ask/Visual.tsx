@@ -65,12 +65,12 @@ function joined(stretches: [number, number][]): [number, number][] {
   return out
 }
 
-/** The hours and pages a visual opens, so the chips under the answer leave out only those. */
+/** The hours and pages a visual's buttons open, so the chips under the answer leave out only those. Stretches on the
+ * timeline are a mouse shortcut, so what only they open keeps its chip. */
 export function opened(visual: Visual): Set<number | string> {
   if (visual.kind === 'thing') return new Set([hourStart(visual.thing.to_wall_ms - 1), visual.thing.cite.url ?? ''])
   const rows = shown(visual.pieces)
-  const oneDay = new Set(rows.flatMap((r) => r.stretches.map((x) => dateKey(new Date(x[0]))))).size === 1
-  return new Set([...(oneDay ? rows.flatMap((r) => joined(r.stretches).map(([a]) => hourStart(a))) : []), ...(rows.length > 1 ? rows.map((r) => r.hours[0]!) : [])])
+  return new Set(rows.length > 1 ? rows.map((r) => r.hours[0]!) : [])
 }
 
 export function AnswerVisual({ visual, onOpenHour }: { visual: Visual; onOpenHour: (start: number) => void }) {
@@ -100,7 +100,7 @@ function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start:
         <span className="ask-work-total">{duration(total * 60_000)}</span>
       </figcaption>
       {days.length === 1 ? (
-        <div className="ask-timeline">
+        <div className="ask-timeline" aria-hidden="true">
           <div className="ask-track">
             {rows.flatMap((r, i) =>
               joined(r.stretches).map(([a, b]) => (
@@ -114,7 +114,7 @@ function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start:
               )),
             )}
           </div>
-          <div className="ask-ticks" aria-hidden="true">
+          <div className="ask-ticks">
             {ticks.map((t, i) => (
               <span key={t} style={{ left: `${at(t)}%` }}>
                 {i % every === 0 ? hourLabel(t) : ''}
@@ -124,7 +124,7 @@ function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start:
         </div>
       ) : (
         !single && (
-          <div className="ask-share">
+          <div className="ask-share" aria-hidden="true">
             {rows.map((r, i) => (
               <span key={i} className={`ask-stretch${hot === null ? '' : hot === i ? ' hot' : ' dim'}`} style={{ flexGrow: r.minutes, background: r.colour }} onClick={() => onOpenHour(r.hours[0]!)} />
             ))}
@@ -160,7 +160,7 @@ function ThingCard({ thing: t, onOpenHour }: { thing: Thing; onOpenHour: (start:
         <AppIcon id={t.app_id} size={20} />
         <span className="source-text">
           <span className="source-title">{c.title ?? c.file ?? c.url}</span>
-          <span className="source-where">{`${site ?? c.app_name ?? ''} · ${dayWord(t.to_wall_ms)}, ${span(t.from_wall_ms, t.to_wall_ms)}`}</span>
+          <span className="source-where">{`${site ?? c.app_name ?? ''} · ${dayWord(t.to_wall_ms - 1)}, ${span(t.from_wall_ms, t.to_wall_ms)}`}</span>
         </span>
       </button>
       <IconButton icon="today" label="Show this hour" onClick={() => onOpenHour(hourStart(t.to_wall_ms - 1))} />
