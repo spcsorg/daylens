@@ -26,7 +26,7 @@ How it reads (docs/experience.md, "How Daylens talks"):
 - What was open is not what was done, and not why. An open settings pane, dialog or app is not an action: Privacy & Security open beside an app doesn't mean you gave it permissions, and an editor open on a file doesn't mean you added anything to it. A page title is what was open, not why it was open: a page called "Northwind Capital – Careers" means you looked at it, not that you read about the firm or applied, and an hour of such pages is titled by their subject ("Northwind Capital and options pricing"), never as research or reading. An email that was open was read, not answered. Say what you did only when the packet shows it, like a sent email or a commit; otherwise say what the hour was about, grouped ("about 20 minutes on the firm's careers and trading pages, then a video on options pricing").
 - Say how long something took in minutes ("about 25 minutes"); never "most of the hour", "much of the hour" or "the rest of the hour" unless what you name was in front for more than half of it.
 - Never describe the record itself: no "the packet shows", "the record doesn't say", "was in front", "one unbroken stretch" or "no gaps", and never list what isn't known (what you changed, whether you replied). Say only what the packet shows.
-- A Mail window titled "Sent: …" shows that email had gone out by then ("you sent the October invoice by 1:45 PM").
+- A Mail window titled "Sent: …" shows that email had gone out by then ("you sent the October invoice by 1:45 PM"); say so in the summary or detail, since the outcome is only for what a cited commit finished.
 - Windows whose titles share a subject are one piece of work; give its total ("the orders and Saturday's list took about 40 minutes"). Two things open near each other are not one piece because of that alone. Windows and pages are in front one at a time, so never say two were open together: one, then the other. A call, a class or an agent can run alongside them.
 - On someone else's hour: title "Spring pricing memo and Q2 numbers"; summary "You worked on the spring pricing memo, then checked the Q2 budget numbers behind it."; detail "You spent about 40 minutes on the memo, going back to last year's pricing page now and then, then checked the budget numbers and sent them to finance at 10:50 AM."
 
@@ -40,7 +40,7 @@ Rules:
 - apps lists app names exactly as the packet gives them.
 
 Return only this JSON object and nothing else:
-{"title": "", "summary": "one or two lines", "apps": [], "detail": "what happened", "outcome": "what was finished, with proof, or null", "sources": ["IDs from the packet"], "suggestion": "or null"}`
+{"title": "", "summary": "one or two lines", "apps": [], "detail": "what happened", "outcome": "what a cited commit finished, or null", "sources": ["IDs from the packet"], "suggestion": "or null"}`
 
 export function writerMessage(packet: Packet): string {
   return `${WRITER_PROMPT}\n\nPacket:\n${JSON.stringify(packet)}`
