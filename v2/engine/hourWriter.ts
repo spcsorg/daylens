@@ -11,6 +11,9 @@ import { validateHour } from './validate.ts'
 export const HOUR_MODEL = 'claude-opus-5-5'
 // Late lines from capture and agent logs arrive by then.
 export const WRITE_DELAY_MS = 5 * 60_000
+// A turn running at the hour's end counts only to its last log record, and hours aren't rewritten: the hour waits
+// for the turn's next record, this long after it ends at most (a turn can end without a closing record).
+export const OPEN_TURN_WAIT_MS = 30 * 60_000
 // Hours further back are left as facts, so turning AI on doesn't send weeks of history.
 const LOOKBACK_MS = 24 * HOUR_MS
 // The gold day's packet settings.
@@ -90,6 +93,7 @@ export class HourWriting {
       const h = this.storage.hourAt(start)
       // Written, or corrected by the person: theirs stands. A deletion clears an hour's text and marks it for rewriting.
       if (h && (h.status === 'written' || h.corrected.length > 0)) continue
+      if (now < start + HOUR_MS + OPEN_TURN_WAIT_MS && this.storage.agentTurnOpen(start, start + HOUR_MS)) return
       let outcome: 'written' | 'empty' | 'failed' | 'limit'
       try {
         outcome = await this.write(start, writer)

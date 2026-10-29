@@ -668,6 +668,12 @@ export class Storage {
     return (this.db.prepare(`SELECT ${tables.map((t) => `(SELECT count(*) FROM ${t})`).join(` || '/' || `)} AS n`).get() as { n: string }).n
   }
 
+  /** Whether an agent turn active in [from, to) is still open with nothing on record from `to` on. */
+  agentTurnOpen(fromWallMs: number, toWallMs: number): boolean {
+    if (!this.agentTables()) return false
+    return this.db.prepare('SELECT 1 FROM agent_turns WHERE last_activity_wall_ms >= ? AND last_activity_wall_ms < ? AND end_state IS NULL AND replayed = 0 LIMIT 1').get(fromWallMs, toWallMs) !== undefined
+  }
+
   /**
    * What was recorded in [from, to) as one snapshot, captured lines flushed first. Refused while a deletion that
    * overlaps the span is still being carried out, so nothing it covers can be written into an hour.
