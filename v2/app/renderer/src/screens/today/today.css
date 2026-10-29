@@ -18,16 +18,66 @@
   max-width: 680px;
 }
 
-/* Inset under the hour's title, so it ends where the hour rows do. */
-.today-day > .hour-open {
-  max-width: calc(680px - 84px);
+/* A new day settles in rather than swapping. */
+.today-day {
+  animation: rise var(--reveal) var(--ease);
+}
+
+/* Hovering an hour lifts it onto a soft plate; the hours stay a calendar, not cards. */
+.hour-item > button.hour {
+  position: relative;
+  isolation: isolate;
+}
+
+.hour-item > button.hour::before {
+  content: '';
+  position: absolute;
+  inset: 4px -12px;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  opacity: 0;
+  transition: opacity var(--quick) var(--ease);
+}
+
+.hour-item:not(.hour-sheet) > button.hour:hover::before {
+  opacity: 1;
+}
+
+/* An hour's apps read as one set: icons overlap like avatars, each ringed in the window's colour. */
+.today-day .hour-apps {
+  gap: 0;
+}
+
+.today-day .hour-apps > span {
+  display: flex;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1.5px var(--bg-window);
+}
+
+.today-day .hour-apps > span + span {
+  margin-left: -4px;
+}
+
+/* An open hour is a sheet pulled out of the day: the hour on top, what was in it below. No top margin and no movement
+   of its own, so the hour's text stays where it was; only what opens rises in. */
+.today-day > .hour-sheet {
+  max-width: calc(680px + 24px);
+  margin: 0 -12px var(--space-12);
+  padding: 0 12px var(--space-8);
+  background: var(--bg-raised);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--shadow-lift);
+}
+
+.hour-sheet > .hour {
+  border-bottom: 0;
 }
 
 .hour-open {
-  margin: var(--space-4) 0 var(--space-12) 84px;
-  padding: var(--space-12) 10px;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-lg);
+  padding: 0 0 var(--space-8) 74px;
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
@@ -39,7 +89,7 @@
 }
 
 .hour-open > div:last-child {
-  padding: 0 10px var(--space-4);
+  padding: 0 10px;
 }
 
 /* An hour from browser history: its pages, then one quiet line saying where they came from. */
@@ -56,10 +106,14 @@
 }
 
 .left-off {
-  margin-top: var(--space-12);
+  margin-top: var(--space-16);
   padding: var(--space-16) 10px 10px;
-  background: var(--bg-subtle);
+  background: var(--bg-raised);
   border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--shadow-lift);
+  animation: rise var(--settle) var(--ease) both;
 }
 
 .left-off-title {

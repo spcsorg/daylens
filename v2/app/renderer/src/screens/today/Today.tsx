@@ -88,7 +88,7 @@ export function Today({ nav, setNav, shell, rec, onMark }: { nav: TodayNav; setN
       <div className="today-notice">
         <StatusNotice shell={shell} rec={rec} />
       </div>
-      {scope === 'day' && <DayList nav={nav} setNav={setNav} rec={rec} onMark={onMark} />}
+      {scope === 'day' && <DayList key={nav.date} nav={nav} setNav={setNav} rec={rec} onMark={onMark} />}
       {scope === 'week' && <WeekGrid start={ws} setNav={setNav} onMark={onMark} />}
       {scope === 'month' && <MonthGrid month={monthOf(date)} setNav={setNav} onMark={onMark} />}
     </>
@@ -149,8 +149,9 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
   const kind = kindOf(h)
   const history = kind === 'filled' ? historyLines(h) : null
   const note = [history?.where, h.edited ? 'Edited' : null].filter(Boolean).join(' · ') || null
+  // Open, the hour and what's in it are one sheet pulled out of the day. The wrapper stays either way, so the hour keeps its focus.
   return (
-    <>
+    <div className={open ? 'hour-item hour-sheet' : 'hour-item'}>
       <Hour
         start={h.start_ms}
         kind={kind}
@@ -163,7 +164,7 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
         onToggle={onToggle}
       />
       {open && <HourOpen start={h.start_ms} day={day} history={h.from_history} onMark={onMark} />}
-    </>
+    </div>
   )
 }
 
