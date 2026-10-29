@@ -39,7 +39,7 @@ const GRADE_SCHEMA = {
   },
 }
 
-export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false. When it has must, the hour has to convey that; leaving it out makes supported false.
+export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false. When it has must, the hour has to convey that; leaving it out makes supported false. An agent's messages in the packet are the person's own acts toward it ("19:20 answer" is the person answering the agent's question), never the agent's; one marked "(uncertain)" may not have been the person.
 
 Judge each field strictly, true or false:
 - title_names_work: the title names the work in a few words, the way the person would put it in their calendar ("Weekend orders and Saturday's list"), not an app, a window title or a list of them.
