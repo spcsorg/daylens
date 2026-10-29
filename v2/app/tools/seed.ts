@@ -1,8 +1,11 @@
 // Fills a data folder with two invented days through the engine's own normalizer and storage, so the interface can be
 // shown and measured without anyone's real record. Times are relative to now: yesterday 8 AM to 6 PM, and today from
 // 8 AM to the current minute.
-// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45] [--now <ISO time>]  (--switch-s: a busier day, a new
-// window title that often; --now: seed as of that moment, so an evaluation always sees the same day)
+// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45] [--now <ISO time>] [--history]
+//   --switch-s: a busier day, a new window title that often
+//   --now: seed as of that moment, so an evaluation always sees the same day
+//   --history: today also has a page read at 1 AM and an early morning known only from browser history, while Daylens
+//   wasn't running
 import { existsSync, mkdirSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from '../../capture/normalize.ts'
@@ -10,7 +13,7 @@ import type { AppIdentity, Kind, Line, LineOf, ObsByKind } from '../../capture/p
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
 
-const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' }, now: { type: 'string' } } })
+const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' }, now: { type: 'string' }, history: { type: 'boolean', default: false } } })
 const dir = values['data-dir']
 if (!dir) {
   process.stderr.write('usage: seed.ts --data-dir <dir>\n')
@@ -74,6 +77,25 @@ const PAGES: Record<string, string> = {
   'Corner Café – menu and opening hours': 'https://cornercafe.example/menu',
 }
 
+// [minutes after midnight, title, address]: pages the browser's own history holds from before Daylens started today.
+const HISTORY: [number, string, string][] = [
+  [100, 'Croissant lamination, step by step', 'https://recipes.example/croissant-lamination'],
+  [370, 'Saturday market forecast', 'https://weather.example/market'],
+  [395, 'Farmers’ market stall booking', 'https://market.example/stalls'],
+  [430, 'Sourdough starter feeding schedule', 'https://bakers.example/starter'],
+  [455, 'Mill Lane Flour – wholesale prices', 'https://millaneflour.example/wholesale'],
+]
+
+function seedHistory(dayStart: number): void {
+  const started = Math.min(dayStart + 8 * 60 * MIN, now)
+  store.writeGapNow({ reason: 'service_down', scope: 'all', run: null, start: { wall_ms: dayStart, mono_us: null, boot: null }, detail: { clean_stop: true } }, { wall_ms: started, mono_us: null, boot: null })
+  for (const [i, [m, title, url]] of HISTORY.entries()) {
+    const t = dayStart + m * MIN
+    if (t >= now) return
+    store.insertObservation({ run: 'history-seed', seq: i, boot: 'history', platform: 'macos', source: 'browser_history', kind: 'visit', event_wall_ms: t, event_mono_us: 0, tz: 'Example/Town', tz_offset_min: tzOffset, app_id: chrome.app_id, app_name: chrome.name, app_path: null, pid: null, window: null, title, title_raw: null, title_state: 'ok', state: null, detail: null, url })
+  }
+}
+
 const now = values.now !== undefined ? Date.parse(values.now) : Date.now()
 if (!Number.isFinite(now)) throw new Error('--now must be a time')
 const store = new Store(dir)
@@ -119,6 +141,7 @@ for (let d = days - 1; d >= 0; d--) {
   const until = d === 0 ? now : start + 24 * 60 * MIN
   run = `run-seed-${d}`
   store.startRun(line('hello', { awake_us: 0, helper: 'seed', boot_identity: 'kernel', version: '1', pid: 1, os: 'seed', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, start + 8 * 60 * MIN) as LineOf<'hello'>)
+  if (d === 0 && values.history) seedHistory(start)
   seedDay(start, until)
   store.recordHeartbeat(line('heartbeat', { awake_us: 0, permissions: { accessibility: 'granted' }, registrations: { focus: true, session: true, power: true }, titles: 'ok', stall_ms: 0, dropped: 0 }, Math.min(until, start + (8 + HOURS.length) * 60 * MIN)))
 }

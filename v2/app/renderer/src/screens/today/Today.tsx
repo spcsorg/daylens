@@ -2,13 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MonthView, WeekView } from '../../../../shared/today.ts'
 import type { DayView, GapReason, HourRow, RecordingView, ShellState } from '../../../../shared/types.ts'
 import { useQuery } from '../../lib/api.ts'
-import { addDays, addMonths, clock, dateKey, duration, factsTitle, hourLabel, longDay, monthOf, monthTitle, parseKey, rangeTitle, shortDay, weekStart } from '../../lib/format.ts'
+import { addDays, addMonths, clock, dateKey, duration, factsTitle, hourLabel, longDay, monthOf, monthTitle, parseKey, rangeTitle, shortDay, span, weekStart } from '../../lib/format.ts'
 import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
 import { Button, IconButton, Segmented } from '../../ui/controls.tsx'
 import { Popover } from '../../ui/overlays.tsx'
-import { AppIcon, Hour, SourceRow, WeekBlock, type HourKind } from '../../ui/records.tsx'
+import { AppIcon, Hour, SourceRow, WeekBlock } from '../../ui/records.tsx'
 import { EmptyState, StatusNotice } from '../../ui/status.tsx'
+import { dayRows, historyLines, kindOf } from './rows.ts'
 import './today.css'
+
+const HOUR_MS = 3_600_000
 
 export type Scope = 'day' | 'week' | 'month'
 
@@ -108,17 +111,22 @@ function DayList({ nav, setNav, rec, onMark }: { nav: TodayNav; setNav: (n: Toda
   return (
     <div className="scroll today-day" ref={scroller}>
       {day && day.hours.length === 0 && <EmptyState>{day.date === day.today ? 'Hours appear here as you work.' : 'Nothing was recorded on this day.'}</EmptyState>}
-      {day?.hours.map((h) => (
-        <HourItem
-          key={h.start_ms}
-          h={h}
-          day={day}
-          rec={rec}
-          open={nav.openHour === h.start_ms}
-          onToggle={() => setNav({ ...nav, openHour: nav.openHour === h.start_ms ? null : h.start_ms })}
-          onMark={onMark}
-        />
-      ))}
+      {day &&
+        dayRows(day.hours).map((r) =>
+          r.kind === 'gap' ? (
+            <Hour key={r.start_ms} start={r.start_ms} time={r.end_ms - r.start_ms <= HOUR_MS ? undefined : r.current ? `${hourLabel(r.start_ms)}–now` : span(r.start_ms, r.end_ms)} kind="gap" title={GAP_TEXT[r.reason]} />
+          ) : (
+            <HourItem
+              key={r.h.start_ms}
+              h={r.h}
+              day={day}
+              rec={rec}
+              open={nav.openHour === r.h.start_ms}
+              onToggle={() => setNav({ ...nav, openHour: nav.openHour === r.h.start_ms ? null : r.h.start_ms })}
+              onMark={onMark}
+            />
+          ),
+        )}
       {day && day.date === day.today && day.hours.length > 0 && <LeftOff date={day.date} />}
     </div>
   )
@@ -137,26 +145,29 @@ function LeftOff({ date }: { date: string }) {
   )
 }
 
-function kindOf(h: HourRow): HourKind {
-  if (h.gap) return 'gap'
-  if (h.current) return 'current'
-  if (h.from_history) return 'filled'
-  return h.title !== null ? 'written' : 'facts'
-}
-
 function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: DayView; rec: RecordingView | null; open: boolean; onToggle: () => void; onMark: (name: string) => void }) {
   const kind = kindOf(h)
-  if (kind === 'gap') return <Hour start={h.start_ms} kind="gap" title={GAP_TEXT[h.gap!]} />
-  const note = h.from_history ? 'From browser history, with less detail' : h.edited ? 'Edited' : null
+  const history = kind === 'filled' ? historyLines(h) : null
+  const note = [history?.where, h.edited ? 'Edited' : null].filter(Boolean).join(' · ') || null
   return (
     <>
-      <Hour start={h.start_ms} kind={kind} title={h.title ?? (factsTitle(h) || 'No apps recorded')} summary={h.summary ?? factsSummary(h, rec)} apps={h.facts.apps} note={note} open={open} onToggle={onToggle} />
-      {open && <HourOpen start={h.start_ms} day={day} onMark={onMark} />}
+      <Hour
+        start={h.start_ms}
+        kind={kind}
+        current={h.current}
+        title={h.title ?? history?.title ?? (factsTitle(h) || 'No apps recorded')}
+        summary={h.summary ?? (history ? history.summary : factsSummary(h, rec))}
+        apps={h.facts.apps}
+        note={note}
+        open={open}
+        onToggle={onToggle}
+      />
+      {open && <HourOpen start={h.start_ms} day={day} history={h.from_history} onMark={onMark} />}
     </>
   )
 }
 
-function HourOpen({ start, day, onMark }: { start: number; day: DayView; onMark: (name: string) => void }) {
+function HourOpen({ start, day, history, onMark }: { start: number; day: DayView; history: boolean; onMark: (name: string) => void }) {
   const { data } = useQuery({ q: 'hour', start_ms: start }, { live: true })
   const detail = data && data.start_ms === start ? data : null
   useLayoutEffect(() => {
@@ -165,6 +176,7 @@ function HourOpen({ start, day, onMark }: { start: number; day: DayView; onMark:
   if (!detail) return <div className="hour-open" />
   return (
     <div className="hour-open">
+      {history && <p className="hour-open-why">Daylens wasn’t recording then. These are the pages your browser remembers you opening, without how long each stayed open.</p>}
       {detail.detail && <p>{detail.detail}</p>}
       {detail.sources.length > 0 ? (
         <div>
