@@ -1,5 +1,5 @@
 // Every written hour is checked in code before it is stored. Anything invalid is rejected and the hour stays as facts.
-import type { Packet, Ref } from './packet.ts'
+import type { Packet, PacketItem, Ref } from './packet.ts'
 
 export interface WrittenHour {
   title: string
@@ -24,6 +24,7 @@ export type ValidationCode =
   | 'finished_without_proof'
   | 'time_outside_hour'
   | 'away_work_credited'
+  | 'share_overstated'
 
 export interface Validation {
   ok: boolean
@@ -42,11 +43,16 @@ const UNPROVEN = /\b(not|no|never|nothing|whether|unclear|unknown|cannot)\b|n['�
 // Where a denial stops reaching: "You finished the export, but not the cleanup" still claims the export.
 const CLAUSE = /[,;:()–—]|\b(?:but|yet|though|although|whereas|while)\b|\b(?:and|or)(?=\s+(?:then\s+)?you\b)/i
 const QUOTES = [['"', '"'], ['“', '”'], ["'", "'"], ['‘', '’'], ['«', '»']] as const
+// Finishing a stretch of time ("you finished the hour on the email") is not finishing any work; "the morning report" is.
+const SPAN_OF_TIME = /^\s+(?:the|your|this)\s+(?:hour|day|morning|afternoon|evening|week)(?=\s*$|\s*[,.;:!?]|\s+(?:on|with|in|at|by|over|reading|working|looking|going)\b)/i
 function claimsFinished(sentence: string): boolean {
-  return sentence.split(CLAUSE).some((clause) => [...clause.matchAll(FINISHED)].some((m) => !UNPROVEN.test(clause.slice(0, m.index))))
+  return sentence.split(CLAUSE).some((clause) => [...clause.matchAll(FINISHED)].some((m) => !UNPROVEN.test(clause.slice(0, m.index)) && !SPAN_OF_TIME.test(clause.slice(m.index + m[0].length))))
 }
 const ID_TOKEN = /\b[a-z]\d{1,4}\b/g
-const CLOCK = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g
+// A clock time as the writer gives it, "9:20 AM" or "2 PM", or as the packet gives it, "14:05".
+const CLOCK = /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])\.?m\b\.?|\b([01]?\d|2[0-3]):([0-5]\d)\b/gi
+// A claim about how much of the hour something took.
+const SHARE = /\b(?:most|much|the bulk) of the (?:hour|time)\b|\b(the rest of the hour)\b/i
 
 export function validateHour(raw: string, packet: Packet, refs: Record<string, Ref>): Validation {
   // Only the packet's own IDs: "constructor" or "__proto__" would otherwise be found on every object.
@@ -171,11 +177,51 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     }
   }
 
+  // "Most of the hour" holds only when what the sentence names was in front for more than half of it; "the rest of the
+  // hour" from a time, for more than half of what was left.
+  const items = [...packet.windows, ...packet.pages]
+  for (const f of TEXT_FIELDS) {
+    for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
+      const share = SHARE.exec(sentence)
+      if (!share) continue
+      // A title it names stands for that item alone; an app it names counts whole unless one of its titles is named.
+      // Titles are matched longest first and each is masked before the next is looked for, so "Notes" inside "Release
+      // notes" is neither another title nor the Notes app.
+      const says = (n: string | null | undefined, text: string) => !!n && n.trim().length >= 3 && mentions(text, n.trim().toLowerCase())
+      const mask = (text: string, n: string) => text.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${n.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`, 'giu'), '$1 ')
+      const titled: PacketItem[] = []
+      let rest = sentence
+      for (const i of [...items].sort((a, b) => (b.title?.length ?? 0) - (a.title?.length ?? 0))) {
+        const same = titled.some((j) => j.title!.trim().toLowerCase() === i.title?.trim().toLowerCase())
+        if (!same && !says(i.title, rest)) continue
+        titled.push(i)
+        if (!same) rest = mask(rest, i.title!)
+      }
+      const named = items.filter((i) => titled.includes(i) || (says(i.app, rest) && !titled.some((j) => j.app === i.app)))
+      const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
+      if (named.length + agents.length === 0) continue
+      // The rest of the hour runs from the last time given before it.
+      const since = share[1] ? [...sentence.matchAll(CLOCK)].filter((m) => m.index! < share.index).map((m) => toMinute(m)).filter((t) => t >= from! && t < end).at(-1) : undefined
+      // From a time, only what was in front after it counts: all of an item first seen after it, a single stretch's part
+      // after it, nothing of several stretches that began before it. An agent's minutes carry no times, so they don't.
+      const after = (i: PacketItem) => {
+        if (since === undefined) return i.min
+        const [a, b] = span(i)
+        return a >= since ? i.min : i.times > 1 ? 0 : Math.min(i.min, Math.max(0, Math.min(b, end) - since))
+      }
+      // Windows and pages are in front one at a time, so theirs add up; an agent works alongside them, so it doesn't.
+      const minutes = Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
+      if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
+    }
+  }
+
   v.hour = h
   v.ok = v.errors.length === 0
   return v
 }
 
+/** Minutes after midnight of a CLOCK match: 12-hour with AM or PM, else 24-hour. */
 function toMinute(m: RegExpMatchArray | RegExpExecArray): number {
-  return Number(m[1]) * 60 + Number(m[2])
+  if (m[3]) return ((Number(m[1]) % 12) + (m[3].toLowerCase() === 'p' ? 12 : 0)) * 60 + Number(m[2] ?? 0)
+  return Number(m[4] ?? m[1]) * 60 + Number(m[5] ?? m[2])
 }

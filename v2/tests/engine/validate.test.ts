@@ -95,6 +95,9 @@ test('nothing is finished without a cited commit, in the outcome, the title, the
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, summary: 'The record does not show whether you finished or published it.' }), [])
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, summary: 'You didn’t finish the payroll export.' }), [])
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, suggestion: 'Publish the payroll export once it is checked.' }), [], 'a suggestion claims nothing was done')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You finished the hour on the payroll export.' }), [], 'finishing the hour finishes no work')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You finished the morning report.' }), ['finished_without_proof'], 'a report named for the morning is work')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You published the morning newsletter.' }), ['finished_without_proof'])
   const fixedPage = { ...packet, pages: [{ id: 'p1', app: 'Dia', title: 'Fixed the login bug - Example Tracker', site: 'tracker.example.com', min: 3, from: '10:52', to: '10:55', times: 1 }] }
   const quoting = (detail: string) => validateHour(JSON.stringify({ ...good, sources: ['i1', 'p1'], outcome: null, detail }), fixedPage, refs).errors.map((e) => e.code)
   assert.deepEqual(quoting('You had “Fixed the login bug - Example Tracker” open in Dia.'), [], 'quoting a title claims nothing')
@@ -134,4 +137,44 @@ test('work the packet marks as done while away is never credited to the person, 
   const late = (detail: string) => validateHour(JSON.stringify({ ...good, title: 'Worked on alpha', summary: 'You worked on alpha in the editor.', apps: ['Editor'], sources: ['i1', 'w1'], outcome: null, detail }), lateHour, refs).errors.map((e) => e.code)
   assert.deepEqual(late('At 23:45 you reviewed the diff.'), ['away_work_credited'], 'an away span that ends at midnight')
   assert.deepEqual(late('At 23:15 you reviewed the diff.'), [])
+})
+
+test('times written as the app writes them, 9:20 AM or 2 PM, are checked like 24-hour ones', () => {
+  assert.deepEqual(codes({ detail: 'You came back to it at 11:30 AM.' }), ['time_outside_hour'])
+  assert.deepEqual(codes({ detail: 'You came back to it at 2 PM.' }), ['time_outside_hour'])
+  assert.deepEqual(codes({ detail: 'You worked on alpha until 10:29 a.m., and Standup was on the calendar from 9:30 AM.' }), [])
+  assert.deepEqual(codes({ detail: 'Codex committed a fix to uploads at 10:40 AM, while the screen was locked.' }), [], 'a time is read as the minute it names')
+  assert.deepEqual(codes({ summary: 'At 10:35 AM you checked the deploy log.' }), ['away_work_credited'], 'and inside an away span it is still away')
+})
+
+test('most of the hour, or the rest of it, holds only when what the sentence names was in front for more than half of it', () => {
+  assert.deepEqual(codes({ summary: 'You spent most of the hour on the release notes in Dia.' }), ['share_overstated'], '3 minutes')
+  assert.deepEqual(codes({ summary: 'Most of the time went to alpha — main.ts in the Editor.' }), ['share_overstated'], '25 minutes of the editor, and Codex worked alongside it, not after')
+  assert.deepEqual(codes({ summary: 'Most of the hour went to the Editor and the release notes in Dia.' }), ['share_overstated'], '25 and 3')
+  const twoPages = { ...packet, pages: [...packet.pages, { id: 'p2', app: 'Dia', title: 'Quarterly plan', site: 'example.com', min: 35, from: '10:10', to: '10:45', times: 1 }] }
+  const pages = (summary: string) => validateHour(JSON.stringify({ ...good, summary }), twoPages, refs).errors.map((e) => e.code)
+  assert.deepEqual(pages('Most of the hour went to the release notes in Dia.'), ['share_overstated'], 'the page it names, not every page in Dia')
+  assert.deepEqual(pages('Most of the hour went to Dia.'), [], 'the app as a whole')
+  const longEdit = { ...twoPages, windows: [{ ...packet.windows[0]!, min: 35 }, packet.windows[1]!] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, summary: 'Most of the hour went to the Editor and the release notes in Dia.' }), longEdit, refs).errors.map((e) => e.code), [], 'the editor whole, and the one page in Dia: 35 and 3')
+  const notes = { ...packet, windows: [{ id: 'i1', app: 'Notes', title: 'Shopping list', min: 35, from: '10:00', to: '10:35', times: 1 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, apps: ['Notes', 'Codex'], summary: 'Most of the hour went to the release notes.' }), notes, refs).errors.map((e) => e.code), ['share_overstated'], '"Notes" inside the title is not the Notes app')
+  const xcode = { ...packet, windows: [{ id: 'i1', app: 'Xcode', title: 'App.swift', min: 35, from: '10:00', to: '10:35', times: 1 }], pages: [{ id: 'p1', app: 'Dia', title: 'Code', site: 'example.com', min: 3, from: '10:52', to: '10:55', times: 1 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, apps: ['Xcode', 'Dia'], summary: 'Most of the hour went to Code in Dia and Xcode.' }), xcode, refs).errors.map((e) => e.code), [], 'a title is masked only as a whole word, not inside "Xcode"')
+  const nested = { ...packet, windows: [{ id: 'i1', app: 'Editor', title: 'Notes', min: 35, from: '10:00', to: '10:35', times: 1 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, apps: ['Editor', 'Codex'], summary: 'Most of the hour went to the release notes.' }), nested, refs).errors.map((e) => e.code), ['share_overstated'], 'a title inside a longer one named is not named itself')
+  const twice = { ...packet, windows: [], pages: [{ id: 'p1', app: 'Dia', title: 'Release notes', min: 20, from: '10:00', to: '10:20', times: 1 }, { id: 'p2', app: 'Chrome', title: 'Release notes', min: 20, from: '10:20', to: '10:40', times: 1 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, apps: ['Dia', 'Chrome', 'Codex'], summary: 'Most of the hour went to the release notes.' }), twice, refs).errors.map((e) => e.code), [], 'the same title in two apps counts both')
+  assert.deepEqual(codes({ summary: 'You spent most of the hour in the Editor.' }), ['share_overstated'], 'the editor alone is 25 minutes')
+  assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), ['share_overstated'], 'they were on screen before then')
+  const late = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:52', to: '11:00', times: 1 }] }
+  const rest = (detail: string) => validateHour(JSON.stringify({ ...good, detail }), late, refs).errors.map((e) => e.code)
+  assert.deepEqual(rest('From 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], '7 of the 8 minutes left')
+  assert.deepEqual(rest('From 10:00 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), ['share_overstated'])
+  assert.deepEqual(rest('From 10:52 AM you worked with Codex for the rest of the hour.'), ['share_overstated'], "an agent's minutes don't say when")
+  assert.deepEqual(rest('After the standup at 10:00 AM and from 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], 'the time given just before it')
+  const split = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:00', to: '10:59', times: 3 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, detail: 'From 10:55 AM you worked on the plan for tomorrow in Notes for the rest of the hour.' }), split, refs).errors.map((e) => e.code), ['share_overstated'], 'several stretches from before then say nothing of after')
+  assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
+  assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })
