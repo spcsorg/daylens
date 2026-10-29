@@ -79,7 +79,7 @@ export interface Thing {
 }
 
 /** What an answer shows under its words, built by code from the record: never markup the model wrote. */
-export type Visual = { kind: 'work'; pieces: Piece[] } | { kind: 'things'; things: Thing[] }
+export type Visual = { kind: 'work'; pieces: Piece[] } | { kind: 'thing'; thing: Thing }
 
 export type AskResult =
   // withdrawn: statements left out because what they cite was deleted while the AI was answering.
@@ -123,7 +123,7 @@ export const ANSWER_SCHEMA = {
 export const SYSTEM_PROMPT = [
   'You answer a person’s question about what they did on their computer, using only the record you are given as JSON. Answer the way they would describe their day to their boss in the evening.',
   'The record holds hours (ids starting with h) and the pages, files and windows seen in them (ids starting with s). An hour’s "corrected" fields are what the person wrote about it themselves.',
-  'Before the statements, for a summary, a question about what the person was doing or working on (such as "what was I working on before the call?"), or one about how long or what took the most time, list in "work" every piece of work in the time asked, one line each with its name, its source ids and their minutes added up, such as "Pricing page: s3 25 + s7 10 + s9 40 = 75"; for any other question leave "work" empty. The names label a breakdown shown under the answer, so name each piece in two to four words, the way the person would. A piece of work is one project or job with everything done for it, in whatever app: a report, the spreadsheet behind it and the email sending it are one piece. Asked about one thing, count only what was for that thing. Answer from that list, so the same question always gets the same pieces and the same sums.',
+  'Before the statements, for a summary or a question about how long or what took the most time, list in "work" every piece of work in the time asked, one line each with its name, its source ids and their minutes added up, such as "Pricing page: s3 25 + s7 10 + s9 40 = 75"; for any other question leave "work" empty. The names label a breakdown shown under the answer, so name each piece in two to four words, the way the person would. A piece of work is one project or job with everything done for it, in whatever app: a report, the spreadsheet behind it and the email sending it are one piece. Asked about one thing, count only what was for that thing. Answer from that list, so the same question always gets the same pieces and the same sums.',
   'Lead with the answer. A summary opens with the gist of the work, leaving no piece of work out. Asked what got done, its first sentence says what was finished and the gist of what moved, such as "You finished the pricing memo, and the rest of the day went to the budget numbers and the design sync." For what took the most time, name the piece with the most minutes and its amount, then how the rest compare, such as "The pricing page took the most, about 75 minutes; the rest took about an hour each." A question about when opens with the time; when it asks about the last time, the sources are listed newest first, so open with the first one that matches, such as "Yesterday at 4:10 PM, right after the design sync." A question about whether opens with yes, no, or that the record can’t tell. A question about how long opens with the amount.',
   'Write about the work, not the windows: the projects, what moved, what got finished, what is still open, grouped by piece of work. For how long, add up the minutes of the sources that belong to the work, once each; an hour’s app minutes already include them. A window title, page or file name is evidence of the work; name one only when it is the answer or what the person would open.',
   'Never organise an answer by clock hour, and never write one sentence per hour or per app. Give a time only where it helps, as one clock time from the record, such as "around 1:45 PM", never a span like "1 to 2 PM", "in the 1 PM hour" or "the first half of the morning", and never a loose one like "midday" or "late morning" for a single moment. Call a time lunch or a break only when the record shows the computer away then.',
@@ -747,7 +747,7 @@ export async function ask(
   const missing = gone.size === 0 && typeof out.missing === 'string' && out.missing.trim() ? out.missing : null
   if (!out.answerable || statements.length === 0) return { kind: 'no_answer', missing, results }
 
-  // The visual: the pieces of work the model added up before answering, else the pages, files and windows the answer cites.
+  // The visual: the pieces of work the model added up before answering, else the thing the answer is about.
   const kept = hours.filter((_, i) => !gone.has(`h${i + 1}`))
   const hourOf = (t: number) => kept.find((h) => h.start_wall_ms <= t && t < h.end_wall_ms)
   const used = new Set<string>()
@@ -769,17 +769,21 @@ export async function ask(
     const seenIn = [...new Set(stretches.map((x) => hourOf(x.from_wall_ms)!))]
     pieces.push({ label: m[1]!, minutes: minutesOf, stretches, hours: seenIn.map((h) => byId.get(`h${hours.indexOf(h) + 1}`)!) })
   }
-  let visual: Visual | null = pieces.length > 0 ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes) } : null
+  // One piece of work is no breakdown, unless the question is how long it took.
+  let visual: Visual | null = pieces.length > 1 || (pieces.length === 1 && /\bhow (long|much time)\b/i.test(question)) ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes) } : null
   if (!visual) {
-    // What the whole answer cites, in the order it cites it; "when did I last…" is about the moment its first sentence names.
-    const ids = [...new Set((latestFirst && leadIds.some((id) => id.startsWith('s')) ? leadIds : citedIds.flat()).filter((id) => id.startsWith('s')))]
-    const things = ids.slice(0, 3).map((id): Thing => {
+    // Else the one thing the answer is about: the first its first sentence cites, the newest for "when did I last…". What
+    // "before" or "after" in the question names is where the answer starts, not what it is about.
+    const anchor = (id: string) => /\b(before|after)\b/i.test(question) && best > 0 && matchCount(sources[Number(id.slice(1)) - 1]!) === best
+    const pick = (ids: string[]) => ids.filter((id) => id.startsWith('s') && !anchor(id))
+    const lead = pick(latestFirst ? leadIds : (citedIds[0] ?? []))
+    const id = latestFirst ? lead.sort((a, b) => sources[Number(b.slice(1)) - 1]!.last_wall_ms - sources[Number(a.slice(1)) - 1]!.last_wall_ms)[0] : (lead[0] ?? pick(citedIds.flat())[0])
+    if (id) {
       const s = sources[Number(id.slice(1)) - 1]!
       const last = localMidnight(Math.max(...s.seen.map(moment)))
       const day = s.seen.filter((x) => localMidnight(x.from_wall_ms) === last)
-      return { cite: byId.get(id) as Thing['cite'], app_id: s.app_id, from_wall_ms: Math.min(...day.map((x) => x.from_wall_ms)), to_wall_ms: Math.max(...day.map((x) => x.to_wall_ms)) }
-    })
-    if (things.length > 0) visual = { kind: 'things', things: latestFirst ? [things.sort((a, b) => b.to_wall_ms - a.to_wall_ms)[0]!] : things }
+      visual = { kind: 'thing', thing: { cite: byId.get(id) as Thing['cite'], app_id: s.app_id, from_wall_ms: Math.min(...day.map((x) => x.from_wall_ms)), to_wall_ms: Math.max(...day.map((x) => x.to_wall_ms)) } }
+    }
   }
   return { kind: 'answer', statements, visual, dropped, withdrawn, results }
 }

@@ -262,7 +262,7 @@ function Sources({ statements, visual, onOpenHour }: { statements: Statement[]; 
   const shown = new Set<number | string>(
     visual?.kind === 'work'
       ? visual.pieces.flatMap((p) => p.hours.flatMap((c) => (c.kind === 'hour' ? [c.start_wall_ms] : [])))
-      : (visual?.things ?? []).flatMap((t) => [new Date(t.to_wall_ms - 1).setMinutes(0, 0, 0), t.cite.url ?? '']),
+      : visual ? [new Date(visual.thing.to_wall_ms - 1).setMinutes(0, 0, 0), visual.thing.cite.url ?? ''] : [],
   )
   for (const c of statements.flatMap((s) => s.cites)) {
     if (c.kind === 'hour' && !shown.has(c.start_wall_ms)) hours.set(c.start_wall_ms, c)

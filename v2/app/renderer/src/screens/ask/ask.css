@@ -407,17 +407,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.ask-things {
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-4);
-}
-
 .ask-thing {
   display: flex;
   align-items: center;
-  padding-right: var(--space-4);
-  border-radius: 12px;
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-4);
   transition: background-color var(--quick) var(--ease);
 }
 

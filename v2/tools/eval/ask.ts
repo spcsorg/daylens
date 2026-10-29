@@ -69,7 +69,7 @@ const GRADE_SCHEMA = {
   },
 }
 
-export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has today’s date, the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs, each with the visual shown under it: a card of the pieces of work with their minutes, a card of the pages, files or windows the answer is about, or none.
+export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has today’s date, the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs, each with the visual shown under it: a card of the pieces of work with their minutes, a card of the page, file or window the answer is about, or none.
 
 The seed day repeats: yesterday had the same work at the same times, 8 AM to 6 PM, except that yesterday the computer was away for lunch from 12 to 1, while today 12 to 1 was the site's git log and card payment questions. Mentioning yesterday's matching work is correct, not invented.
 
@@ -80,7 +80,7 @@ Judge each field strictly, true or false:
 - correct: both answers agree with expect and claim nothing it contradicts. Leaving out minor items is fine; inventing or misdating work is not.
 - consistent: the two answers say the same thing in substance (the same time, the same yes or no, the same main pieces of work). Wording may differ.
 - sounds_like_a_person: plain, warm and brief, like a colleague who saw the day; not a log, a list of apps, or hedging.
-- visual_agrees: each visual agrees with its answer and with expect: a work card's pieces are the work the words describe, with the minutes the words give (a piece the words leave out, or a few minutes' difference, is fine; a piece the words contradict, or work outside the time asked, is not); a card of things shows what the answer is about, at the time it gives. The two runs show the same kind of visual with the same main pieces or things. A summary of a stretch of time (a morning, an afternoon, a day, what came before or after something) shows a work card; a work card fits a whether answer about work; no visual is fine for a when or whether answer.
+- visual_agrees: each visual agrees with its answer and with expect: a work card's pieces are the work the words describe, with the minutes the words give (a piece the words leave out, or a few minutes' difference, is fine; a piece the words contradict, or work outside the time asked, is not); a card of a thing shows what the answer is about, at the time it gives. The two runs show the same kind of visual with the same main pieces or thing. A summary of a stretch of time (a morning, an afternoon, a day) shows a work card; a summary of one piece of work, a when or a whether answer shows the thing it is about, a work card or nothing.
 reason: one or two sentences on any field that failed, quoting the answer. Empty when all pass.`
 
 // One run of a question as the eval reports it: what the person would read, what each sentence cites, and how many
@@ -91,7 +91,7 @@ function run(r: AskResult): { text: string; sources: string[][]; visual: string;
   const shown = (v: Visual | null) =>
     !v ? 'none'
     : v.kind === 'work' ? `work card: ${v.pieces.map((p) => `${p.label}, ${p.minutes} min, ${at(p.stretches[0]!.from_wall_ms)} to ${at(p.stretches.at(-1)!.to_wall_ms)}`).join('; ')}`
-    : `card of things: ${v.things.map((t) => `${t.cite.title ?? t.cite.file ?? t.cite.url} (${t.cite.app_name}), ${at(t.from_wall_ms)} to ${at(t.to_wall_ms)}`).join('; ')}`
+    : `card of the thing it is about: ${v.thing.cite.title ?? v.thing.cite.file ?? v.thing.cite.url} (${v.thing.cite.app_name}), ${at(v.thing.from_wall_ms)} to ${at(v.thing.to_wall_ms)}`
   if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)), visual: shown(r.visual), visual_kind: r.visual?.kind ?? null, dropped: r.dropped }
   if (r.kind === 'no_answer') return { text: r.missing ?? 'Your record doesn’t show that.', sources: [], visual: 'none', visual_kind: null }
   return { text: `(${r.kind})`, sources: [], visual: 'none', visual_kind: null }

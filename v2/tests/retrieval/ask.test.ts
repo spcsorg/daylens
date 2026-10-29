@@ -919,7 +919,7 @@ test('the work the model added up becomes the visual: minutes from the record, e
   s.close()
 })
 
-test('with no work added up, the visual is what the answer cites, and a "when did I last" answer shows the newest of what its first sentence cites', async () => {
+test('with no work added up, a "when did I last" answer shows the newest of what its first sentence cites', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
   const other = app('com.example.notes', { name: 'Notes' })
@@ -935,10 +935,11 @@ test('with no work added up, the visual is what the answer cites, and a "when di
     return { answerable: true, statements: [{ text: 'You had the roadmap open.', sources: [a, b] }, { text: 'You opened the roadmap at 1 AM.', sources: ['h1'] }] }
   })
   const res = await ask('when did I last open the roadmap', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 10, perGroup: 5 })
-  if (res.kind !== 'answer' || res.visual?.kind !== 'things') return assert.fail('a things visual')
+  if (res.kind !== 'answer' || res.visual?.kind !== 'thing') return assert.fail('a thing visual')
+  const t = res.visual.thing
   assert.deepEqual(
-    res.visual.things.map((t) => [t.cite.file, t.from_wall_ms, t.to_wall_ms]),
-    [['roadmap-old.md', T0 + 11 * HOUR, T0 + 11 * HOUR + 90_000]],
+    [t.cite.file, t.from_wall_ms, t.to_wall_ms],
+    ['roadmap-old.md', T0 + 11 * HOUR, T0 + 11 * HOUR + 90_000],
     'the newest of what the first sentence cites, with its day’s first to last time on screen',
   )
   s.close()
@@ -963,15 +964,22 @@ test('a question about the morning or the afternoon sends only that part of the 
   s.close()
 })
 
-test('a things visual shows what every sentence cites, once each, in the order the answer cites it', async () => {
+test('the thing shown is the first the first sentence cites, never what "before" or "after" in the question starts from; one piece of work is no breakdown unless the question is how long', async () => {
   const s = setup()
-  const model = fakeModel((req) => {
+  const reply = (work: (ids: Record<string, string>) => string[]) => fakeModel((req) => {
     const rec = JSON.parse(req.prompt) as { sources: { id: string; title: string | null; file?: string; address?: string }[] }
-    const [file, doc] = [rec.sources.find((x) => x.file === 'q4-budget.xlsx')!.id, rec.sources.find((x) => !!x.address)!.id]
-    return { answerable: true, statements: [{ text: 'Yes, you worked on the Q4 budget.', sources: [file] }, { text: 'You reviewed it with the doc.', sources: [doc, file] }] }
+    const ids = { file: rec.sources.find((x) => x.file === 'q4-budget.xlsx')!.id, doc: rec.sources.find((x) => !!x.address)!.id, scratch: rec.sources.find((x) => x.title === 'Scratch - Editor')!.id }
+    return { work: work(ids), answerable: true, statements: [{ text: 'You worked on the Q4 budget with the doc.', sources: [ids.file, ids.doc] }, { text: 'You kept notes.', sources: [ids.scratch] }] }
   })
-  const res = await ask('did I work on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
-  if (res.kind !== 'answer' || res.visual?.kind !== 'things') return assert.fail('a things visual')
-  assert.deepEqual(res.visual.things.map((t) => t.cite.file ?? t.cite.url), ['q4-budget.xlsx', 'https://docs.example.com/d/budget'])
+  const shown = async (question: string, work: (ids: Record<string, string>) => string[] = () => []) => {
+    const res = await ask(question, { reader: s.reader, model: reply(work), log: s.log, now: () => NEXT_DAY }, LIMITS)
+    if (res.kind !== 'answer') return assert.fail('an answer')
+    return res.visual?.kind === 'thing' ? (res.visual.thing.cite.file ?? res.visual.thing.cite.url) : res.visual?.kind === 'work' ? res.visual.pieces.map((p) => p.label) : null
+  }
+  assert.equal(await shown('did I work on the budget yesterday?'), 'q4-budget.xlsx')
+  assert.equal(await shown('what did I do after the q4 budget yesterday?'), 'https://docs.example.com/d/budget')
+  assert.equal(await shown('what did I do on the budget yesterday?', (i) => [`Budget: ${i.file} 10`]), 'q4-budget.xlsx')
+  assert.deepEqual(await shown('how long did I spend on the budget yesterday?', (i) => [`Budget: ${i.file} 10`]), ['Budget'])
+  assert.deepEqual(await shown('what did I do yesterday?', (i) => [`Budget: ${i.file} 10`, `Scratch: ${i.scratch} 10`]), ['Budget', 'Scratch'])
   s.close()
 })

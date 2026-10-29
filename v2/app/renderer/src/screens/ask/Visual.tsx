@@ -1,5 +1,5 @@
 // What an answer shows under its words, drawn from data code built from the record: the work of the time asked on one
-// timeline, or the pages, files and windows the answer is about. Each part opens the hour or the thing it came from.
+// timeline, or the page, file or window the answer is about. Each part opens the hour or the thing it came from.
 import { useState } from 'react'
 import type { Piece, Thing, Visual } from '../../../../shared/ai.ts'
 import { act } from '../../lib/api.ts'
@@ -66,7 +66,7 @@ function joined(stretches: [number, number][]): [number, number][] {
 }
 
 export function AnswerVisual({ visual, onOpenHour }: { visual: Visual; onOpenHour: (start: number) => void }) {
-  return visual.kind === 'work' ? <WorkCard pieces={visual.pieces} onOpenHour={onOpenHour} /> : <ThingsCard things={visual.things} onOpenHour={onOpenHour} />
+  return visual.kind === 'work' ? <WorkCard pieces={visual.pieces} onOpenHour={onOpenHour} /> : <ThingCard thing={visual.thing} onOpenHour={onOpenHour} />
 }
 
 function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start: number) => void }) {
@@ -138,30 +138,24 @@ function WorkCard({ pieces, onOpenHour }: { pieces: Piece[]; onOpenHour: (start:
   )
 }
 
-function ThingsCard({ things, onOpenHour }: { things: Thing[]; onOpenHour: (start: number) => void }) {
+function ThingCard({ thing: t, onOpenHour }: { thing: Thing; onOpenHour: (start: number) => void }) {
   const toast = useToast()
+  const c = t.cite
+  const site = c.url ? hostOf(c.url) : null
+  const open = async () => {
+    const r = c.url ? await act({ a: 'open_url', url: c.url }) : await act({ a: 'open_app', id: t.app_id ?? '' })
+    if (!r.ok) toast({ text: errorText(r.error), error: true })
+  }
   return (
-    <div className="ask-card ask-things">
-      {things.map((t) => {
-        const c = t.cite
-        const site = c.url ? hostOf(c.url) : null
-        const open = async () => {
-          const r = c.url ? await act({ a: 'open_url', url: c.url }) : await act({ a: 'open_app', id: t.app_id ?? '' })
-          if (!r.ok) toast({ text: errorText(r.error), error: true })
-        }
-        return (
-          <div className="ask-thing" key={`${c.url ?? c.file ?? ''}\u0000${c.title ?? ''}`}>
-            <button type="button" className="source-main" onClick={() => void open()}>
-              <AppIcon id={t.app_id} size={20} />
-              <span className="source-text">
-                <span className="source-title">{c.title ?? c.file ?? c.url}</span>
-                <span className="source-where">{`${site ?? c.app_name ?? ''} · ${dayWord(t.to_wall_ms)}, ${span(t.from_wall_ms, t.to_wall_ms)}`}</span>
-              </span>
-            </button>
-            <IconButton icon="today" label="Show this hour" onClick={() => onOpenHour(hourStart(t.to_wall_ms - 1))} />
-          </div>
-        )
-      })}
+    <div className="ask-card ask-thing">
+      <button type="button" className="source-main" onClick={() => void open()}>
+        <AppIcon id={t.app_id} size={20} />
+        <span className="source-text">
+          <span className="source-title">{c.title ?? c.file ?? c.url}</span>
+          <span className="source-where">{`${site ?? c.app_name ?? ''} · ${dayWord(t.to_wall_ms)}, ${span(t.from_wall_ms, t.to_wall_ms)}`}</span>
+        </span>
+      </button>
+      <IconButton icon="today" label="Show this hour" onClick={() => onOpenHour(hourStart(t.to_wall_ms - 1))} />
     </div>
   )
 }
