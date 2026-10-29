@@ -919,7 +919,7 @@ test('the work the model added up becomes the visual: minutes from the record, e
   s.close()
 })
 
-test('with no work added up, the visual is what the answer’s first sentence is about, and a "when did I last" answer shows the newest of it alone', async () => {
+test('with no work added up, the visual is what the answer cites, and a "when did I last" answer shows the newest of what its first sentence cites', async () => {
   const s = setup()
   const editor = app('com.example.editor', { name: 'Editor' })
   const other = app('com.example.notes', { name: 'Notes' })
@@ -960,5 +960,18 @@ test('a question about the morning or the afternoon sends only that part of the 
   assert.deepEqual(await sent('what did I do yesterday morning?'), ['1 AM'])
   assert.deepEqual(await sent('what did I do yesterday afternoon?'), ['2 PM'])
   assert.deepEqual(await sent('what did I do yesterday?'), ['1 AM', '2 PM'])
+  s.close()
+})
+
+test('a things visual shows what every sentence cites, once each, in the order the answer cites it', async () => {
+  const s = setup()
+  const model = fakeModel((req) => {
+    const rec = JSON.parse(req.prompt) as { sources: { id: string; title: string | null; file?: string; address?: string }[] }
+    const [file, doc] = [rec.sources.find((x) => x.file === 'q4-budget.xlsx')!.id, rec.sources.find((x) => !!x.address)!.id]
+    return { answerable: true, statements: [{ text: 'Yes, you worked on the Q4 budget.', sources: [file] }, { text: 'You reviewed it with the doc.', sources: [doc, file] }] }
+  })
+  const res = await ask('did I work on the budget yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  if (res.kind !== 'answer' || res.visual?.kind !== 'things') return assert.fail('a things visual')
+  assert.deepEqual(res.visual.things.map((t) => t.cite.file ?? t.cite.url), ['q4-budget.xlsx', 'https://docs.example.com/d/budget'])
   s.close()
 })

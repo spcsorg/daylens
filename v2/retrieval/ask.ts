@@ -747,7 +747,7 @@ export async function ask(
   const missing = gone.size === 0 && typeof out.missing === 'string' && out.missing.trim() ? out.missing : null
   if (!out.answerable || statements.length === 0) return { kind: 'no_answer', missing, results }
 
-  // The visual: the pieces of work the model added up before answering, else what the answer's first sentence is about.
+  // The visual: the pieces of work the model added up before answering, else the pages, files and windows the answer cites.
   const kept = hours.filter((_, i) => !gone.has(`h${i + 1}`))
   const hourOf = (t: number) => kept.find((h) => h.start_wall_ms <= t && t < h.end_wall_ms)
   const used = new Set<string>()
@@ -771,15 +771,14 @@ export async function ask(
   }
   let visual: Visual | null = pieces.length > 0 ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes) } : null
   if (!visual) {
-    const lead = latestFirst ? leadIds : citedIds[0]!
-    const ids = [...new Set((lead.some((id) => id.startsWith('s')) ? lead : citedIds.flat()).filter((id) => id.startsWith('s')))]
+    // What the whole answer cites, in the order it cites it; "when did I last…" is about the moment its first sentence names.
+    const ids = [...new Set((latestFirst && leadIds.some((id) => id.startsWith('s')) ? leadIds : citedIds.flat()).filter((id) => id.startsWith('s')))]
     const things = ids.slice(0, 3).map((id): Thing => {
       const s = sources[Number(id.slice(1)) - 1]!
       const last = localMidnight(Math.max(...s.seen.map(moment)))
       const day = s.seen.filter((x) => localMidnight(x.from_wall_ms) === last)
       return { cite: byId.get(id) as Thing['cite'], app_id: s.app_id, from_wall_ms: Math.min(...day.map((x) => x.from_wall_ms)), to_wall_ms: Math.max(...day.map((x) => x.to_wall_ms)) }
     })
-    // "When did I last…" is about one moment: the newest of what its first sentence cites.
     if (things.length > 0) visual = { kind: 'things', things: latestFirst ? [things.sort((a, b) => b.to_wall_ms - a.to_wall_ms)[0]!] : things }
   }
   return { kind: 'answer', statements, visual, dropped, withdrawn, results }
