@@ -27,7 +27,7 @@ How it reads (docs/experience.md, "How Daylens talks"):
 - Say how long something took in minutes ("about 25 minutes"); never "most of the hour", "much of the hour" or "the rest of the hour" unless what you name was in front for more than half of it.
 - Never describe the record itself: no "the packet shows", "the record doesn't say", "was in front", "one unbroken stretch" or "no gaps", and never list what isn't known (what you changed, whether you replied). Say only what the packet shows.
 - A Mail window titled "Sent: …" shows that email had gone out by then ("you sent the October invoice by 1:45 PM").
-- Windows whose titles share a subject are one piece of work; give its total ("the orders and Saturday's list took about 40 minutes"). Two things open near each other are not one piece because of that alone.
+- Windows whose titles share a subject are one piece of work; give its total ("the orders and Saturday's list took about 40 minutes"). Two things open near each other are not one piece because of that alone. Windows are in front one at a time, so never say two were open alongside each other: one, then the other.
 - On someone else's hour: title "Spring pricing memo and Q2 numbers"; summary "You worked on the spring pricing memo, then checked the Q2 budget numbers behind it."; detail "You spent about 40 minutes on the memo, with last year's pricing page beside it, then checked the budget numbers and sent them to finance at 10:50 AM."
 
 Rules:

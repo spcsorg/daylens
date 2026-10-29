@@ -149,7 +149,8 @@ test('times written as the app writes them, 9:20 AM or 2 PM, are checked like 24
 
 test('most of the hour, or the rest of it, holds only when what the sentence names was in front for more than half of it', () => {
   assert.deepEqual(codes({ summary: 'You spent most of the hour on the release notes in Dia.' }), ['share_overstated'], '3 minutes')
-  assert.deepEqual(codes({ summary: 'Most of the time went to alpha — main.ts in the Editor.' }), [], '25 minutes of the editor and 20 with Codex on alpha')
+  assert.deepEqual(codes({ summary: 'Most of the time went to alpha — main.ts in the Editor.' }), ['share_overstated'], '25 minutes of the editor, and Codex worked alongside it, not after')
+  assert.deepEqual(codes({ summary: 'Most of the hour went to the Editor and the release notes in Dia.' }), ['share_overstated'], '25 and 3')
   assert.deepEqual(codes({ summary: 'You spent most of the hour in the Editor.' }), ['share_overstated'], 'the editor alone is 25 minutes')
   assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), ['share_overstated'], 'they were on screen before then')
   const late = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:52', to: '11:00', times: 1 }] }
@@ -157,6 +158,9 @@ test('most of the hour, or the rest of it, holds only when what the sentence nam
   assert.deepEqual(rest('From 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], '7 of the 8 minutes left')
   assert.deepEqual(rest('From 10:00 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), ['share_overstated'])
   assert.deepEqual(rest('From 10:52 AM you worked with Codex for the rest of the hour.'), ['share_overstated'], "an agent's minutes don't say when")
+  assert.deepEqual(rest('After the standup at 10:00 AM and from 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], 'the time given just before it')
+  const split = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:00', to: '10:59', times: 3 }] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, detail: 'From 10:55 AM you worked on the plan for tomorrow in Notes for the rest of the hour.' }), split, refs).errors.map((e) => e.code), ['share_overstated'], 'several stretches from before then say nothing of after')
   assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
   assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })

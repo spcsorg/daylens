@@ -187,10 +187,17 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       const named = items.filter((i) => [i.title, i.app].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
-      const since = share[1] ? [...sentence.matchAll(CLOCK)].map((m) => toMinute(m)).find((t) => t >= from! && t < end) : undefined
-      // From a time, only what was in front after it counts; an agent's minutes carry no times, so they don't.
-      const after = (i: PacketItem) => (since === undefined ? i.min : Math.min(i.min, Math.max(0, Math.min(span(i)[1], end) - Math.max(span(i)[0], since))))
-      const minutes = named.reduce((n, i) => n + after(i), 0) + (since === undefined ? agents.reduce((n, a) => n + a.with_you_min, 0) : 0)
+      // The rest of the hour runs from the last time given before it.
+      const since = share[1] ? [...sentence.matchAll(CLOCK)].filter((m) => m.index! < share.index).map((m) => toMinute(m)).filter((t) => t >= from! && t < end).at(-1) : undefined
+      // From a time, only what was in front after it counts: all of an item first seen after it, a single stretch's part
+      // after it, nothing of several stretches that began before it. An agent's minutes carry no times, so they don't.
+      const after = (i: PacketItem) => {
+        if (since === undefined) return i.min
+        const [a, b] = span(i)
+        return a >= since ? i.min : i.times > 1 ? 0 : Math.min(i.min, Math.max(0, Math.min(b, end) - since))
+      }
+      // Windows and pages are in front one at a time, so theirs add up; an agent works alongside them, so it doesn't.
+      const minutes = Math.max(named.reduce((n, i) => n + after(i), 0), ...(since === undefined ? agents.map((a) => a.with_you_min) : []))
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }
   }
