@@ -95,7 +95,7 @@ export default function Stage() {
             {COPY.title}
           </h1>
           <p className="lx-sub">{COPY.sub}</p>
-          <Signup id="lx-email-hero" source="launch-hero" />
+          <Signup id="lx-email-hero" />
         </section>
 
         <div className="lx-window" role="img" aria-label={`${STEPS.join(" ")} ${DATE}.`}>

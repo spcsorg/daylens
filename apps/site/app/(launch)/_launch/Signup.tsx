@@ -3,8 +3,8 @@
 import { Honeypot, useWaitlist } from "../../_v2/useWaitlist";
 import { COPY } from "./content";
 
-export default function Signup({ id, source }: { id: string; source: string }) {
-  const { status, error, onSubmit, clearError, sending } = useWaitlist(source);
+export default function Signup({ id }: { id: string }) {
+  const { status, error, onSubmit, clearError, sending } = useWaitlist();
 
   if (status === "done") {
     return (

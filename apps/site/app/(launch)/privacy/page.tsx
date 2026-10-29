@@ -364,8 +364,9 @@ export default function PrivacyPage() {
             site.
           </p>
           <p>
-            If you join the waitlist, we store your email address, when you joined and, if you pick one, which computer you use, with Resend, the service we use
-            to send email. We use it only to invite you to the beta and to write to you about it. To stop abuse, the
+            If you join the waitlist, we store your email address, when you joined, which of our links brought you
+            (such as christian-tonny.dev/daylens/ig, or none) and, if you pick one, which computer you use, with Resend,
+            the service we use to send email. The page keeps that link in your browser tab until you close it. We use it only to invite you to the beta and to write to you about it. To stop abuse, the
             form counts sign-ups from each network address for one minute; those counts, which include the IP
             address, are kept only in the server&rsquo;s memory. We keep your waitlist email until you ask us to
             remove it.

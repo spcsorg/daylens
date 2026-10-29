@@ -68,7 +68,7 @@ export default function Page() {
           <section className="lx-closing" id="join" aria-labelledby="lx-closing-title">
             <h2 id="lx-closing-title">{COPY.closing}</h2>
             <p>{COPY.platforms}</p>
-            <Signup id="lx-email-closing" source="launch-closing" />
+            <Signup id="lx-email-closing" />
           </section>
 
           <Footer />
