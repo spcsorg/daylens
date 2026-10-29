@@ -37,6 +37,7 @@ The input has:
 - checklist: for this hour. must: what a right hour conveys. should: left out, each counts as missed work. must_not: saying any of these makes the hour wrong. only_you: things only the person could know. only_user true means the hour's main point is something only the person could know.
 - key: the person's own account of the hour, written after the day. Use it to judge whether the written hour names the right work. It includes things the computer could not record.
 - packet: what the computer recorded, which is all the writer saw. A claim is supported only if the packet shows it.
+- packet.agents[].messages are the person's own acts toward the agent, one per line with its time: prompt (they asked it something), answer (they answered the agent's question), approval, steer (they redirected it mid-turn), queued (a message left for it), command, shell, suggestion or interrupt (they stopped it). None is the agent's own answer or work. "(uncertain)" means it may not have been the person.
 - packet.previous_hour, when present, is the writer's own text for the hour before, given as context. Connecting this hour to it is fine; a fact about this hour that only previous_hour supports is unsupported.
 - written: the hour the AI wrote. Ignore its sources list and any IDs.
 
