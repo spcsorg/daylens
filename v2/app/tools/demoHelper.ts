@@ -30,6 +30,8 @@ const snapshot = () => {
   emit('input', { state: 'active', last_input_wall_ms: Date.now(), threshold_s: 120, snapshot: true })
 }
 emit('hello', { awake_us: t().mono_us, helper: 'demo', boot_identity: 'kernel', version: '0', pid: process.pid, os: 'demo', permissions: { accessibility }, config: { heartbeat_s: heartbeatS, idle_threshold_s: 120, reconcile_s: 60 } })
+// The lid opens as the stand-in starts: a seeded day may have ended with it closed.
+emit('power', { state: 'resume_user' })
 snapshot()
 setInterval(() => {
   emit('heartbeat', { awake_us: t().mono_us, permissions: { accessibility }, registrations: { focus: true, session: true, power: true }, titles: accessibility === 'granted' ? 'ok' : 'no_permission', stall_ms: 0, dropped: 0 })

@@ -33,11 +33,13 @@ Any other assistant, in its MCP config:
 ${readFileSync(mcp, 'utf8')}
 `)
 
-// HOME and the rest point every reader of this computer's own files (browser history, agent sessions, assistant
+// HOME, XDG and the rest point every reader of this computer's own files (browser history, agent sessions, assistant
 // configs) at an empty folder; the stand-in helper reports invented windows instead of the real ones.
 const env = {
   ...process.env,
   HOME: home,
+  XDG_CONFIG_HOME: path.join(home, '.config'),
+  XDG_DATA_HOME: path.join(home, '.local', 'share'),
   DAYLENS_V2_DATA_DIR: data,
   DAYLENS_SHELL_DIR: shell,
   DAYLENS_V2_HISTORY_HOME: home,
