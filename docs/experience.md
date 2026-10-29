@@ -37,7 +37,9 @@ Examples, on an invented day:
 | What did I work on yesterday afternoon? | Mostly invoices and the pricing page. You sent the October invoices, then spent the rest of the afternoon on the pricing page fixes from the design sync. |
 | Did I reply to the supplier about the new prices? | I can't tell from your record whether a reply went out. I can see you had their email open twice yesterday and added "reply to supplier" to your reminders. |
 
-Answers that fail these rules don't ship. Ask has an evaluation that checks them: `node tools/eval/ask.ts` in `v2/` asks questions about the invented seed day, each twice, and prints each answer with a pass or fail per rule; it exits non-zero on any failure.
+A written hour on the same day reads: **Spring pricing memo and Q2 numbers.** "You worked on the spring pricing memo, then checked the Q2 budget numbers behind it." Not "Google Docs · Sheets", and not "From 9:00 to 9:40 you had "Spring pricing memo" open in Google Docs."
+
+Answers that fail these rules don't ship. Ask has an evaluation that checks them: `node tools/eval/ask.ts` in `v2/` asks questions about the invented seed day, each twice, and prints each answer with a pass or fail per rule; it exits non-zero on any failure. Written hours have one too: `node tools/eval/hours.ts` writes the seed day's hours and grades each title, summary and detail against the same rules.
 
 ## Navigation
 
