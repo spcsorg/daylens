@@ -44,7 +44,8 @@ export const handson: Beat[] = [
   {
     kind: "shot",
     shot: askThread,
-    shift: room(250, -10),
+    shift: room(230, -10),
+    camera: { "16x9": [cam(0, 1.0, 590, 360, 740), cam(0.9, 1.18, 650, 362, 680), cam(askThread.dur, 1.2, 650, 358, 680)] },
     steps: [
       { at: 0.3, to: 7.2, n: 5, label: "Ask about any day", hint: "In plain words." },
       { at: 7.4, to: askThread.dur + 0.1, n: 5, label: "Every answer shows its pages and hours" },

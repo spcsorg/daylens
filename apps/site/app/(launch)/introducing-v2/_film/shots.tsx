@@ -131,7 +131,7 @@ const morning: Shot = {
   id: "morning",
   dur: 7.4,
   view: (t) => {
-    const scroll = keys([{ t: 0, y: 0 }, { t: 3.4, y: 0 }, { t: 5.2, y: 300 }], t).y;
+    const scroll = keys([{ t: 0, y: 0 }, { t: 3.4, y: 0 }, { t: 5.2, y: 318 }], t).y;
     return (
       <Window>
         <div className="f-top-fade" />

@@ -168,7 +168,7 @@ export const ASK_THREAD = [
     ],
   },
   {
-    question: "did Harbor Studio get their invoice?",
+    question: "did I send Harbor Studio their invoice?",
     reading: "Reading Tuesday",
     answer: "Yes. You sent invoice 1042 to Harbor Studio from Mail on Tuesday, just after lunch, then went back to the pricing memo.",
     page: { title: "Invoice 1042 – Mail", host: "Mail · to Harbor Studio", icon: APPS.mail },

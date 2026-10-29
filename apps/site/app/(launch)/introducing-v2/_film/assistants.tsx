@@ -21,7 +21,7 @@ const TYPE = 2.4;
 const ASKED = 3.35;
 const READ = 3.6;
 const ANSWERED = 4.2;
-const WPS = 14;
+const WPS = 16;
 
 function Terminal({ t }: { t: number }) {
   const draft = t < ASKED ? typed(QUESTION, t, TYPE, 36) : "";
@@ -110,7 +110,6 @@ export function AssistantsView(t: number) {
           </div>
         </div>
         <div className="f-assist-foot">
-          <p>Each assistant you connect can read your record. Every read is listed in Settings.</p>
           <div>
             <span className="f-button is-quiet">Not now</span>
             <span className="f-button" style={{ transform: `scale(${1 - press * 0.04})` }}>

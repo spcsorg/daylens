@@ -78,9 +78,10 @@
   text-wrap: balance;
 }
 
+/* Sits above centre, where the sky is deep enough for white text. */
 .f-end {
   position: absolute;
-  inset: 0;
+  inset: 0 0 18%;
   display: grid;
   place-content: center;
   justify-items: center;
@@ -103,7 +104,8 @@
 
 .f-end p {
   margin: 0;
-  color: rgb(255 255 255 / 0.86);
+  color: #fff;
+  text-shadow: 0 1px 14px rgb(16 44 110 / 0.3);
   letter-spacing: -0.01em;
 }
 
@@ -533,8 +535,8 @@
   position: absolute;
   inset: 0 0 auto;
   z-index: 2;
-  height: 56px;
-  background: linear-gradient(var(--w-bg) 60%, rgb(255 255 255 / 0));
+  height: 64px;
+  background: linear-gradient(var(--w-bg) 75%, rgb(255 255 255 / 0));
 }
 
 /* Open Today's right edge sits on the column's right edge. */
@@ -1139,11 +1141,6 @@
   bottom: 16px;
 }
 
-.f-assist-foot p {
-  margin: 0 0 14px;
-  font: 400 13px/19px var(--w-sans);
-  color: var(--w-text-3);
-}
 
 .f-assist-foot > div {
   display: grid;
