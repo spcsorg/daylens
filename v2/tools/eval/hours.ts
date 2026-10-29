@@ -39,7 +39,7 @@ const GRADE_SCHEMA = {
   },
 }
 
-export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false. When it has must, the hour has to convey that; leaving it out makes supported false.
+export const HOURS_GRADER_PROMPT = `You judge one hour that Daylens wrote for a person's day, from what their computer recorded. The bar: it reads the way the person would tell a colleague what they got done, about the work, not the windows. The input has the packet (all the writer saw) and the hour as written: its title, summary and detail. When it has watch, that names claims the packet can't support for this hour; any of them makes supported false. When it has must, the hour has to convey that; leaving it out makes supported false. An agent's messages in the packet are the person's own acts toward it ("19:20 answer" is the person answering the agent's question), never the agent's; one marked "(uncertain)" may not have been the person.
 
 Judge each field strictly, true or false:
 - title_names_work: the title names the work in a few words, the way the person would put it in their calendar ("Weekend orders and Saturday's list"), not an app, a window title or a list of them.
@@ -82,6 +82,15 @@ export const CASES: { name: string; packet: Packet; watch: string; must?: string
       ...empty, hour: '2026-10-27 21:00-22:00', tz: 'Example/Town',
       windows: [item('i1', 'Editor', 'harbor-site — index.html', 30, '21:00', '21:30'), { id: 'i2', app: 'Chatly', title_note: 'title not recorded', min: 6, from: '21:30', to: '21:36', times: 2 }, { id: 'i3', app: 'Mail', title_note: 'title not recorded', min: 4, from: '21:36', to: '21:40', times: 1 }],
       agents: [{ id: 'a1', agent: 'Claude Code', project: 'harbor-site', with_you_min: 25, while_away_min: 0, messages: ['21:05', '21:20'] }],
+    },
+  },
+  {
+    name: 'an agent message that may not have been the person',
+    watch: 'that the person sent, prompted, asked or messaged the agent at 7:43 PM, or anything said as done at 7:43 PM by the person',
+    packet: {
+      ...empty, hour: '2026-10-27 19:00-20:00', tz: 'Example/Town',
+      windows: [item('i1', 'Terminal', 'harbor-site — claude', 35, '19:00', '19:35'), item('i2', 'Editor', 'harbor-site — README.md', 15, '19:35', '19:50')],
+      agents: [{ id: 'a1', agent: 'Claude Code', project: 'harbor-site', with_you_min: 40, while_away_min: 0, messages: ['19:05 prompt', '19:20 answer', '19:43 prompt (uncertain)'] }],
     },
   },
   {
