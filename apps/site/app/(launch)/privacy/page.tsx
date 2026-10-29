@@ -76,7 +76,7 @@ export default function PrivacyPage() {
                   <td>Pause, exclude or delete any of it</td>
                 </tr>
                 <tr>
-                  <td>An hour being written by AI, or a question in Ask</td>
+                  <td>An hour being written by AI (with a little context from the hours around it), or a question in Ask</td>
                   <td>The AI provider you chose, straight from your computer</td>
                   <td>Yes. Choose no AI</td>
                 </tr>
