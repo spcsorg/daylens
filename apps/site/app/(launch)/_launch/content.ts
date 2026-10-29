@@ -82,7 +82,7 @@ export const COPY = {
     items: ["Screenshots or audio, unless you turn them on", "Keystrokes or anything you type", "File contents", "Private and incognito windows"],
   },
   local:
-    "The record stays on this computer. With AI on, only the hour being written, or the excerpts a question needs, go to the AI provider you pick. Pause recording or delete any of it, from one page up to everything, and choose apps and sites to keep out before recording starts. The beta sends no usage analytics.",
+    "The record stays on this computer. With AI on, only the hour being written (with a little context from the hours around it), or the excerpts a question needs, go to the AI provider you pick. Pause recording or delete any of it, from one page up to everything, and choose apps and sites to keep out before recording starts. The beta sends no usage analytics.",
   ai: "You choose the AI: in the beta, your own API key or no AI at all. What an assistant reads can go to its own AI service.",
   closing: "Daylens V2 is coming.",
   platforms: "The beta comes out in early November as open source on GitHub, for Mac first. Windows and Linux follow.",

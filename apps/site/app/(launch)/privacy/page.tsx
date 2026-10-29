@@ -76,7 +76,7 @@ export default function PrivacyPage() {
                   <td>Pause, exclude or delete any of it</td>
                 </tr>
                 <tr>
-                  <td>An hour being written by AI, or a question in Ask</td>
+                  <td>An hour being written by AI (with a little context from the hours around it), or a question in Ask</td>
                   <td>The AI provider you chose, straight from your computer</td>
                   <td>Yes. Choose no AI</td>
                 </tr>
@@ -190,9 +190,10 @@ export default function PrivacyPage() {
           <h3>When AI writes an hour or answers a question</h3>
           <p>
             If AI is on, Daylens sends the record of an hour (titles, addresses, app names and times, plus screen text
-            and transcripts if you turned them on) to write that hour, and the relevant hours to answer a question you
-            ask. Screenshots and audio themselves never leave your computer. Nothing else is sent. Where it goes depends on
-            your choice:
+            and transcripts if you turned them on) to write that hour, with a little context from the hours around it:
+            the previous hour&rsquo;s title and summary, the threads still open from earlier hours, and any corrections
+            you made to nearby hours. To answer a question you ask, it sends the relevant hours. Screenshots and audio
+            themselves never leave your computer. Nothing else is sent. Where it goes depends on your choice:
           </p>
           <ul>
             <li>
