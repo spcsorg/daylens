@@ -417,7 +417,7 @@ export class AgentReader {
   }
 
   private recordHealth(r: RootState): void {
-    if (!this.healthOn) return
+    if (!this.healthOn || this.stopped) return
     const c = r.counts
     if (r.unreadable) {
       this.store.setHealth(r.root.agent, r.root.dir, 'unreadable', 'file_unreadable', null)

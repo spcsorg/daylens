@@ -113,6 +113,30 @@ test('a folder listing that returns after stop writes nothing, though the store 
   await new Promise((res) => setTimeout(res, 200))
 })
 
+test('a timed pass that resumes after stop records no health, though earlier reads left counts behind', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs file permissions' : false }, async () => {
+  const r = rig()
+  const c = codexCtx()
+  writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text'])))
+  const c2 = codexCtx()
+  const locked = codexFile(r.home, c2)
+  writeFileSync(locked, lines(codex.meta(c2, sec(0))))
+  chmodSync(locked, 0o000)
+  let calls = 0
+  let release!: () => void
+  const gate = new Promise<void>((res) => (release = res))
+  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, []) : []) })
+  try {
+    await reader.start()
+    await waitFor(() => calls > 1)
+    await reader.stop()
+    r.store.close()
+    release()
+    await new Promise((res) => setTimeout(res, 200))
+  } finally {
+    chmodSync(locked, 0o644)
+  }
+})
+
 test('reading is driven by file events, not by rescanning folders', async () => {
   const r = rig()
   const c = codexCtx()
