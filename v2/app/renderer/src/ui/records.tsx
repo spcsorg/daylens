@@ -28,7 +28,7 @@ export type HourKind = 'written' | 'facts' | 'current' | 'gap' | 'filled'
 
 /** One hour of the day: its time, a title, a line under it and the apps it was spent in. A gap is one quiet line, and
  * `time` names the range when it covers several hours. An hour from browser history shows its browser in its note. */
-export function Hour({ start, time, kind, title, summary, apps = [], note, open, onToggle }: { start: number; time?: string; kind: HourKind; title: string; summary?: string | null; apps?: AppTime[]; note?: string | null; open?: boolean; onToggle?: () => void }) {
+export function Hour({ start, time, kind, current, title, summary, apps = [], note, open, onToggle }: { start: number; time?: string; kind: HourKind; current?: boolean; title: string; summary?: string | null; apps?: AppTime[]; note?: string | null; open?: boolean; onToggle?: () => void }) {
   if (kind === 'gap')
     return (
       <div className="hour gap" data-hour={start}>
@@ -37,7 +37,7 @@ export function Hour({ start, time, kind, title, summary, apps = [], note, open,
       </div>
     )
   return (
-    <button type="button" className={`hour ${kind}`} data-hour={start} data-current={kind === 'current'} aria-expanded={open} onClick={onToggle}>
+    <button type="button" className={`hour ${kind}`} data-hour={start} data-current={current} aria-expanded={open} onClick={onToggle}>
       <span className="hour-time">{hourLabel(start)}</span>
       <span className="hour-body">
         <span className="hour-title">

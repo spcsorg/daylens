@@ -154,6 +154,7 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
       <Hour
         start={h.start_ms}
         kind={kind}
+        current={h.current}
         title={h.title ?? history?.title ?? (factsTitle(h) || 'No apps recorded')}
         summary={h.summary ?? (history ? history.summary : factsSummary(h, rec))}
         apps={h.facts.apps}
