@@ -2,6 +2,7 @@
 // retention cutoff, the same rules readHour and the search fence apply, so a deletion shows the moment it is in force.
 import type Database from 'better-sqlite3'
 import { MAX_INTERVAL_MS, siteOf } from '../../storage/derive.ts'
+import { presenceFromCapture, presenceTimeline } from '../../capture/agents/attribution.ts'
 import { readHour } from '../../storage/hours.ts'
 import type { Reader as Finder } from '../../retrieval/reader.ts'
 import { DAY_MS, pendingTombstones, tombstoneMatches, type Tombstone } from '../../storage/rules.ts'
@@ -92,7 +93,7 @@ export class Reader {
     return this.retentionDays === null ? null : this.now() - this.retentionDays * DAY_MS
   }
 
-  /** Focus time in [from, to), clipped to it, with pending deletions cut out. */
+  /** Focus time in [from, to), clipped to it, with pending deletions and time the person was away cut out. */
   spans(from: number, to: number): Span[] {
     const cutoff = this.cutoff()
     const lo = cutoff === null ? from : Math.max(from, cutoff)
@@ -104,21 +105,27 @@ export class Reader {
       )
       .all(lo - MAX_INTERVAL_MS, to, lo) as { s: number; e: number; app_id: string; app_name: string | null; title: string | null; title_state: string | null; url: string | null; site: string | null }[]
     const pending = this.tombstones()
+    // A window in front while the screen was locked, the computer asleep or input idle is not time the person spent:
+    // agents and apps bring windows forward on their own.
+    const away = presenceTimeline(lo, to, presenceFromCapture(this.db, lo, to)).filter((p) => p.state === 'away' || p.state === 'asleep')
+    const cut = (parts: [number, number][], ts: number, te: number): [number, number][] =>
+      parts.flatMap(([a, b]): [number, number][] => {
+        if (te <= a || ts >= b) return [[a, b]]
+        const keep: [number, number][] = []
+        if (ts > a) keep.push([a, ts])
+        if (te < b) keep.push([te, b])
+        return keep
+      })
     const out: Span[] = []
+    let k = 0
     for (const r of rows) {
-      let parts: [number, number][] = [[Math.max(r.s, lo), Math.min(r.e, to)]]
+      const s = Math.max(r.s, lo), e = Math.min(r.e, to)
+      let parts: [number, number][] = [[s, e]]
       for (const t of pending) {
-        if (!tombstoneMatches(t, r.app_id, r.url)) continue
-        const ts = t.from_wall_ms ?? Number.NEGATIVE_INFINITY
-        const te = t.to_wall_ms ?? Number.POSITIVE_INFINITY
-        parts = parts.flatMap(([a, b]): [number, number][] => {
-          if (te <= a || ts >= b) return [[a, b]]
-          const keep: [number, number][] = []
-          if (ts > a) keep.push([a, ts])
-          if (te < b) keep.push([te, b])
-          return keep
-        })
+        if (tombstoneMatches(t, r.app_id, r.url)) parts = cut(parts, t.from_wall_ms ?? Number.NEGATIVE_INFINITY, t.to_wall_ms ?? Number.POSITIVE_INFINITY)
       }
+      while (k < away.length && away[k]!.end <= s) k++
+      for (let j = k; j < away.length && away[j]!.start < e; j++) parts = cut(parts, away[j]!.start, away[j]!.end)
       for (const [a, b] of parts) {
         if (b <= a) continue
         out.push({ s: a, e: b, app_id: r.app_id, app_name: r.app_name ?? r.app_id, title: r.title_state === 'ok' ? r.title : null, url: r.url, site: r.site })
