@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { AgentStore } from '../../capture/agents/store.ts'
+import type { AgentRecord } from '../../capture/agents/types.ts'
 import { factsHour, type CallResult, type HourWriter } from '../../engine/backends.ts'
-import { dueHours, HourWriting, WRITE_DELAY_MS } from '../../engine/hourWriter.ts'
+import { dueHours, HourWriting, OPEN_TURN_WAIT_MS, WRITE_DELAY_MS } from '../../engine/hourWriter.ts'
 import type { Packet } from '../../engine/packet.ts'
 import { app, focus } from '../support/lines.ts'
 import { HOUR, MIN, rig, T0 } from '../storage/support.ts'
@@ -117,4 +119,53 @@ test('an hour whose key is removed while it is being written is not stored, thou
   await hours.run()
   assert.equal(s.r.storage.hourAt(T0), null)
   assert.equal(s.usage().length, 1)
+})
+
+// An agent turn started at 8:56 with one log record, still running when the hour ends.
+function openTurn(r: ReturnType<typeof rig>): AgentStore {
+  const agents = new AgentStore(r.store.database)
+  const start = T0 + 56 * MIN
+  const records: AgentRecord[] = [
+    { t: 'session', session: 's1', origin: 'interactive', parent: null, client: null, dir: '/Users/me/Code/alpha', branch: null, at: start },
+    { t: 'turn', key: 't1', session: 's1', dir: '/Users/me/Code/alpha', branch: null, opener: 'user', start, replayed: false },
+    { t: 'user', key: 't1-u', session: 's1', turn: 't1', act: 'prompt', basis: 'marked', at: start },
+    { t: 'activity', key: 't1', session: 's1', at: start + 42_000 },
+  ]
+  agents.apply('claude_code', records)
+  return agents
+}
+const agentMin = (p: Packet) => p.agents.reduce((n, a) => n + a.with_you_min + a.while_away_min + (a.unknown_min ?? 0), 0)
+
+test('an hour that ends while an agent turn is running waits for its next log record, so the turn counts to the hour end', async () => {
+  const s = setup()
+  const agents = openTurn(s.r)
+  const seen: Packet[] = []
+  const runAt = async (now: number) => {
+    const hours = s.hours(now)
+    hours.setWriter(writer(seen))
+    await hours.run()
+  }
+  await runAt(T0 + HOUR + WRITE_DELAY_MS)
+  assert.equal(seen.length, 0, 'not written while the turn has nothing on record past the hour')
+  agents.apply('claude_code', [{ t: 'activity', key: 't1', session: 's1', at: T0 + HOUR + 3 * MIN }])
+  await runAt(T0 + HOUR + 12 * MIN)
+  assert.equal(seen.length, 1)
+  assert.equal(agentMin(seen[0]!), 4)
+  assert.equal(s.r.storage.hourAt(T0)!.status, 'written')
+})
+
+test('an hour waits for a running turn only so long, then is written with what the log shows', async () => {
+  const s = setup()
+  openTurn(s.r)
+  const seen: Packet[] = []
+  const runAt = async (now: number) => {
+    const hours = s.hours(now)
+    hours.setWriter(writer(seen))
+    await hours.run()
+  }
+  await runAt(T0 + HOUR + OPEN_TURN_WAIT_MS - 1)
+  assert.equal(seen.length, 0)
+  await runAt(T0 + HOUR + OPEN_TURN_WAIT_MS)
+  assert.equal(seen.length, 1)
+  assert.equal(agentMin(seen[0]!), 0.7)
 })
