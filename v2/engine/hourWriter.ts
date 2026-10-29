@@ -14,9 +14,9 @@ export const WRITE_DELAY_MS = 5 * 60_000
 // Hours further back are left as facts, so turning AI on doesn't send weeks of history.
 const LOOKBACK_MS = 24 * HOUR_MS
 // The gold day's packet settings.
-const PACKET: PacketOptions = { staleTitleMs: HOUR_MS, nearbyHours: 2, openThreadMs: 3 * HOUR_MS }
+export const PACKET: PacketOptions = { staleTitleMs: HOUR_MS, nearbyHours: 2, openThreadMs: 3 * HOUR_MS }
 // After each failed try of an hour; after the last, the hour stays as facts until the writer changes.
-const RETRY_MS = [5 * 60_000, 30 * 60_000]
+export const RETRY_MS = [5 * 60_000, 30 * 60_000]
 const LIMIT_WAIT_MS = HOUR_MS
 const TICK_MS = 60_000
 

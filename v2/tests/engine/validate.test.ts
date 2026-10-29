@@ -95,6 +95,7 @@ test('nothing is finished without a cited commit, in the outcome, the title, the
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, summary: 'The record does not show whether you finished or published it.' }), [])
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, summary: 'You didn’t finish the payroll export.' }), [])
   assert.deepEqual(codes({ sources: ['i1'], outcome: null, suggestion: 'Publish the payroll export once it is checked.' }), [], 'a suggestion claims nothing was done')
+  assert.deepEqual(codes({ sources: ['i1'], outcome: null, detail: 'You finished the hour on the payroll export.' }), [], 'finishing the hour finishes no work')
   const fixedPage = { ...packet, pages: [{ id: 'p1', app: 'Dia', title: 'Fixed the login bug - Example Tracker', site: 'tracker.example.com', min: 3, from: '10:52', to: '10:55', times: 1 }] }
   const quoting = (detail: string) => validateHour(JSON.stringify({ ...good, sources: ['i1', 'p1'], outcome: null, detail }), fixedPage, refs).errors.map((e) => e.code)
   assert.deepEqual(quoting('You had “Fixed the login bug - Example Tracker” open in Dia.'), [], 'quoting a title claims nothing')
@@ -134,4 +135,21 @@ test('work the packet marks as done while away is never credited to the person, 
   const late = (detail: string) => validateHour(JSON.stringify({ ...good, title: 'Worked on alpha', summary: 'You worked on alpha in the editor.', apps: ['Editor'], sources: ['i1', 'w1'], outcome: null, detail }), lateHour, refs).errors.map((e) => e.code)
   assert.deepEqual(late('At 23:45 you reviewed the diff.'), ['away_work_credited'], 'an away span that ends at midnight')
   assert.deepEqual(late('At 23:15 you reviewed the diff.'), [])
+})
+
+test('times written as the app writes them, 9:20 AM or 2 PM, are checked like 24-hour ones', () => {
+  assert.deepEqual(codes({ detail: 'You came back to it at 11:30 AM.' }), ['time_outside_hour'])
+  assert.deepEqual(codes({ detail: 'You came back to it at 2 PM.' }), ['time_outside_hour'])
+  assert.deepEqual(codes({ detail: 'You worked on alpha until 10:29 a.m., and Standup was on the calendar from 9:30 AM.' }), [])
+  assert.deepEqual(codes({ detail: 'Codex committed a fix to uploads at 10:40 AM, while the screen was locked.' }), [], 'a time is read as the minute it names')
+  assert.deepEqual(codes({ summary: 'At 10:35 AM you checked the deploy log.' }), ['away_work_credited'], 'and inside an away span it is still away')
+})
+
+test('most of the hour, or the rest of it, holds only when what the sentence names was in front for more than half of it', () => {
+  assert.deepEqual(codes({ summary: 'You spent most of the hour on the release notes in Dia.' }), ['share_overstated'], '3 minutes')
+  assert.deepEqual(codes({ summary: 'Most of the time went to alpha — main.ts in the Editor.' }), [], '25 minutes of the editor and 20 with Codex on alpha')
+  assert.deepEqual(codes({ summary: 'You spent most of the hour in the Editor.' }), ['share_overstated'], 'the editor alone is 25 minutes')
+  assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), [], '3 of the 5 minutes left')
+  assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
+  assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })

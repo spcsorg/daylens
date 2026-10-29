@@ -24,6 +24,7 @@ export type ValidationCode =
   | 'finished_without_proof'
   | 'time_outside_hour'
   | 'away_work_credited'
+  | 'share_overstated'
 
 export interface Validation {
   ok: boolean
@@ -42,11 +43,16 @@ const UNPROVEN = /\b(not|no|never|nothing|whether|unclear|unknown|cannot)\b|n['�
 // Where a denial stops reaching: "You finished the export, but not the cleanup" still claims the export.
 const CLAUSE = /[,;:()–—]|\b(?:but|yet|though|although|whereas|while)\b|\b(?:and|or)(?=\s+(?:then\s+)?you\b)/i
 const QUOTES = [['"', '"'], ['“', '”'], ["'", "'"], ['‘', '’'], ['«', '»']] as const
+// Finishing a stretch of time ("you finished the hour on the email") is not finishing any work.
+const SPAN_OF_TIME = /^\s+(?:the|your|this)\s+(?:hour|day|morning|afternoon|evening|week)\b/i
 function claimsFinished(sentence: string): boolean {
-  return sentence.split(CLAUSE).some((clause) => [...clause.matchAll(FINISHED)].some((m) => !UNPROVEN.test(clause.slice(0, m.index))))
+  return sentence.split(CLAUSE).some((clause) => [...clause.matchAll(FINISHED)].some((m) => !UNPROVEN.test(clause.slice(0, m.index)) && !SPAN_OF_TIME.test(clause.slice(m.index + m[0].length))))
 }
 const ID_TOKEN = /\b[a-z]\d{1,4}\b/g
-const CLOCK = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g
+// A clock time as the writer gives it, "9:20 AM" or "2 PM", or as the packet gives it, "14:05".
+const CLOCK = /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])\.?m\b\.?|\b([01]?\d|2[0-3]):([0-5]\d)\b/gi
+// A claim about how much of the hour something took.
+const SHARE = /\b(?:most|much|the bulk) of the (?:hour|time)\b|\b(the rest of the hour)\b/i
 
 export function validateHour(raw: string, packet: Packet, refs: Record<string, Ref>): Validation {
   // Only the packet's own IDs: "constructor" or "__proto__" would otherwise be found on every object.
@@ -171,11 +177,29 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     }
   }
 
+  // "Most of the hour" holds only when what the sentence names was in front for more than half of it; "the rest of the
+  // hour" from a time, for more than half of what was left.
+  const items = [...packet.windows, ...packet.pages]
+  for (const f of TEXT_FIELDS) {
+    for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
+      const share = SHARE.exec(sentence)
+      if (!share) continue
+      const named = items.filter((i) => [i.title, i.app].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
+      const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
+      if (named.length + agents.length === 0) continue
+      const minutes = named.reduce((n, i) => n + i.min, 0) + agents.reduce((n, a) => n + a.with_you_min, 0)
+      const since = share[1] ? [...sentence.matchAll(CLOCK)].map((m) => toMinute(m)).find((t) => t >= from! && t < end) : undefined
+      if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
+    }
+  }
+
   v.hour = h
   v.ok = v.errors.length === 0
   return v
 }
 
+/** Minutes after midnight of a CLOCK match: 12-hour with AM or PM, else 24-hour. */
 function toMinute(m: RegExpMatchArray | RegExpExecArray): number {
-  return Number(m[1]) * 60 + Number(m[2])
+  if (m[3]) return ((Number(m[1]) % 12) + (m[3].toLowerCase() === 'p' ? 12 : 0)) * 60 + Number(m[2] ?? 0)
+  return Number(m[4] ?? m[1]) * 60 + Number(m[5] ?? m[2])
 }
