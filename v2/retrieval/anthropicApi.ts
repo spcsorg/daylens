@@ -3,9 +3,10 @@
 import { ANTHROPIC_RATES, anthropicClient, type ApiOptions } from '../engine/backends.ts'
 import { ModelError, type AskModel } from './ask.ts'
 
-// Ask answers while the person waits. Sonnet 5.5 at low effort shows its first statement in about 2 s and the whole
-// answer in about 3, against 5 and 7 at its default (docs/engine.md, Choosing the models).
-export const ASK_MODEL = 'claude-sonnet-5-5'
+// Ask answers while the person waits, and the answer has to read the way a person would tell it: Opus 5.5 at low effort
+// passes Ask's evaluation where Sonnet 5.5 doesn't, about a second slower to its first sentence (docs/engine.md, Choosing
+// the models).
+export const ASK_MODEL = 'claude-opus-5-5'
 export const ASK_EFFORT = 'low'
 
 export function anthropicApi(model: string, opts: ApiOptions): AskModel {

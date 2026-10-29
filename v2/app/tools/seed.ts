@@ -1,7 +1,8 @@
 // Fills a data folder with two invented days through the engine's own normalizer and storage, so the interface can be
 // shown and measured without anyone's real record. Times are relative to now: yesterday 8 AM to 6 PM, and today from
 // 8 AM to the current minute.
-// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45]  (--switch-s: a busier day, a new window title that often)
+// Usage: node app/tools/seed.ts --data-dir <dir> [--days 2] [--switch-s 45] [--now <ISO time>]  (--switch-s: a busier day, a new
+// window title that often; --now: seed as of that moment, so an evaluation always sees the same day)
 import { existsSync, mkdirSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { Normalizer, Privacy } from '../../capture/normalize.ts'
@@ -9,7 +10,7 @@ import type { AppIdentity, Kind, Line, LineOf, ObsByKind } from '../../capture/p
 import { Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
 
-const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' } } })
+const { values } = parseArgs({ options: { 'data-dir': { type: 'string' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' }, now: { type: 'string' } } })
 const dir = values['data-dir']
 if (!dir) {
   process.stderr.write('usage: seed.ts --data-dir <dir>\n')
@@ -67,7 +68,14 @@ const HOURS: [number, AppIdentity, string][][] = [
   [[0, notes, 'Tomorrow’s bakes'], [30, calendar, 'Thursday']],
 ]
 
-const now = Date.now()
+// What the browser extension reports for the pages open in Chrome; without it a browser window's title isn't kept.
+const PAGES: Record<string, string> = {
+  'Mill Lane Flour – wholesale prices': 'https://millaneflour.example/wholesale',
+  'Corner Café – menu and opening hours': 'https://cornercafe.example/menu',
+}
+
+const now = values.now !== undefined ? Date.parse(values.now) : Date.now()
+if (!Number.isFinite(now)) throw new Error('--now must be a time')
 const store = new Store(dir)
 const storage = new Storage(store, dir, { deletionStallMs: Infinity })
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
@@ -87,6 +95,13 @@ function seedDay(dayStart: number, until: number): void {
       if (t >= until) return
       const next = HOURS[h]![i + 1]?.[0] ?? 60
       normalizer.handle(line('focus', { trigger: 'app_changed', app: a, window: { window: `w${h}${i}`, title, title_state: 'ok' } }, t))
+      const url = PAGES[title]
+      if (url) {
+        store.insertObservation({
+          run: 'run-seed-ext', seq: seq++, boot: 'boot-seed', platform: 'macos', source: 'browser_ext', kind: 'page', event_wall_ms: t, event_mono_us: t * 1000, tz: 'Example/Town',
+          tz_offset_min: tzOffset, app_id: a.app_id, app_name: a.name, app_path: a.path, pid: a.pid, window: 'ext:1', title, title_raw: null, title_state: 'ok', state: 'normal', detail: null, url,
+        })
+      }
       const step = switchMs ?? 60_000
       for (let s = t + step, n = 1; s < Math.min(hourStart + next * MIN, until); s += step, n++) {
         const shown = switchMs ? `${title} (${n})` : title

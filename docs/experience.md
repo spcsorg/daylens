@@ -37,7 +37,7 @@ Examples, on an invented day:
 | What did I work on yesterday afternoon? | Mostly invoices and the pricing page. You sent the October invoices, then spent the rest of the afternoon on the pricing page fixes from the design sync. |
 | Did I reply to the supplier about the new prices? | I can't tell from your record whether a reply went out. I can see you had their email open twice yesterday and added "reply to supplier" to your reminders. |
 
-Answers that fail these rules don't ship. Ask has an evaluation that checks them.
+Answers that fail these rules don't ship. Ask has an evaluation that checks them: `node tools/eval/ask.ts` in `v2/` asks questions about the invented seed day, each twice, and prints each answer with a pass or fail per rule; it exits non-zero on any failure.
 
 ## Navigation
 
