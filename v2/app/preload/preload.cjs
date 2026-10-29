@@ -20,6 +20,11 @@ ipcRenderer.on('reader-port', (event) => {
   for (const l of listeners) l({ e: 'changed', kinds: ['connected'] })
 })
 
+// A window opened to show Search gets 'navigate' before the page listens; the last one waits here until it does.
+let navigateTo = null
+let pendingNavigate = null
+ipcRenderer.on('navigate', (_e, to) => (navigateTo ? navigateTo(to) : (pendingNavigate = to)))
+
 contextBridge.exposeInMainWorld('daylens', {
   // Known before the first paint, so the window chrome never shifts once the shell state arrives.
   platform: process.platform,
@@ -43,9 +48,12 @@ contextBridge.exposeInMainWorld('daylens', {
     return () => ipcRenderer.removeListener('shell', h)
   },
   onNavigate: (fn) => {
-    const h = (_e, to) => fn(to)
-    ipcRenderer.on('navigate', h)
-    return () => ipcRenderer.removeListener('navigate', h)
+    navigateTo = fn
+    if (pendingNavigate) fn(pendingNavigate)
+    pendingNavigate = null
+    return () => {
+      if (navigateTo === fn) navigateTo = null
+    }
   },
   onDeletionFailed: (fn) => {
     const h = () => fn()

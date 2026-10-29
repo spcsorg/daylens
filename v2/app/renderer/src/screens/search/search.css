@@ -1,23 +1,45 @@
-/* Search: an overlay over the whole window, opened from the sidebar or Cmd+K. */
+/* Search: a floating layer over the whole window, opened with Cmd+K on macOS and Ctrl+K elsewhere. It sits on the
+   shared scrim (ui.css) as a solid panel with the window shadow, results right under the field. */
+/* Above dialogs (20) and popovers (30), so Search opened over either sits on top; under toasts (40). */
+.scrim.search-scrim {
+  z-index: 35;
+}
+
 .search-panel {
-  margin-top: 72px;
+  margin-top: min(96px, 12vh);
   width: 640px;
   max-width: calc(100% - 64px);
-  background: var(--bg-raised);
-  border-radius: var(--radius-lg);
+  background: var(--bg-float);
+  border-radius: 16px;
   box-shadow: var(--shadow-window);
   overflow: hidden;
-  animation: rise var(--reveal) var(--ease);
+  animation: search-in 220ms var(--ease);
+}
+
+.scrim.closing {
+  animation: search-out 140ms var(--ease) forwards;
+}
+
+@keyframes search-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes search-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
 }
 
 .search-field {
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  height: 56px;
+  height: 60px;
   padding: 0 var(--space-20);
-  border-bottom: 1px solid var(--line);
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .search-field input {
@@ -26,13 +48,103 @@
   outline: none;
   background: transparent;
   font: var(--body-large);
+  font-size: 17px;
   color: var(--text);
 }
 
+.search-field input::placeholder {
+  color: var(--text-3);
+}
+
 .search-results {
-  max-height: min(520px, calc(100vh - 220px));
+  position: relative;
+  max-height: min(520px, calc(100vh - 260px));
   overflow-y: auto;
   padding: var(--space-8);
+  border-top: 1px solid var(--line);
+}
+
+/* While the next results load, the last ones stay put and dim a beat later, so a quick answer never flickers. */
+.search-results > .search-group {
+  transition: opacity var(--quick) var(--ease) var(--quick);
+}
+
+.search-results.stale > .search-group {
+  opacity: 0.5;
+}
+
+/* One highlight slides to the selected row. */
+.search-highlight {
+  position: absolute;
+  top: 0;
+  left: var(--space-8);
+  right: var(--space-8);
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  transition:
+    transform 160ms var(--ease),
+    height 160ms var(--ease);
+}
+
+:root[data-theme='dark'] .search-highlight {
+  background: rgb(255 255 255 / 0.08);
+}
+
+.search-panel .search-result {
+  position: relative;
+  animation: fade 160ms var(--ease) both;
+}
+
+.search-panel .search-result[aria-selected='true'] {
+  background: transparent;
+}
+
+/* Rows arrive in a quick cascade, 15 ms apart and never more than 120 ms in all. */
+.search-group > .search-result:nth-child(3) {
+  animation-delay: 15ms;
+}
+
+.search-group > .search-result:nth-child(4) {
+  animation-delay: 30ms;
+}
+
+.search-group > .search-result:nth-child(5) {
+  animation-delay: 45ms;
+}
+
+.search-group > .search-result:nth-child(6) {
+  animation-delay: 60ms;
+}
+
+.search-group > .search-result:nth-child(n + 7) {
+  animation-delay: 75ms;
+}
+
+.search-foot {
+  display: flex;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-20);
+  border-top: 1px solid var(--line);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
+.search-foot kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-right: 2px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  box-shadow: 0 0 0 1px var(--line);
+  font: var(--caption);
+  color: var(--text-2);
+}
+
+.search-results:empty {
+  display: none;
 }
 
 .search-group {
@@ -44,10 +156,42 @@
   margin-bottom: var(--space-4);
 }
 
+/* The app icon sits on a small white tile with a hairline, so a row reads as a thing, not a line of text. */
+.search-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text-2);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 1px 2px rgb(20 22 25 / 0.06);
+}
+
+:root[data-theme='dark'] .search-tile {
+  background: var(--sel);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
 .search-note {
   font: var(--caption);
   color: var(--text-2);
   padding: var(--space-8) var(--space-12);
+}
+
+.search-none {
+  padding: var(--space-12) var(--space-12) var(--space-4);
+}
+
+.search-none > p:first-child {
+  font: var(--body-strong);
+}
+
+.search-none .search-note {
+  padding: var(--space-4) 0 0;
 }
 
 .search-more {

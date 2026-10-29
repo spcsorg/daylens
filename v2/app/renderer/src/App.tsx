@@ -7,6 +7,7 @@ import { Ask } from './screens/ask/Ask.tsx'
 import { AssistantRequests } from './screens/assistants/AssistantRequests.tsx'
 import { Onboarding } from './screens/onboarding/Onboarding.tsx'
 import { SearchOverlay } from './screens/search/Search.tsx'
+import { opensSearch } from './screens/search/shortcut.ts'
 import { Settings } from './screens/settings/Settings.tsx'
 import { Today, type TodayNav } from './screens/today/Today.tsx'
 import { Sidebar, type Screen } from './shell/Sidebar.tsx'
@@ -44,6 +45,8 @@ function Shell() {
           setScreen('today')
           setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
         }
+        if (to === 'search') setSearch(true)
+        if (to === 'search-toggle') setSearch((s) => !s)
       }),
     [],
   )
@@ -52,7 +55,7 @@ function Shell() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if (opensSearch(e, bridge.platform)) {
         e.preventDefault()
         setSearch((s) => !s)
       }
@@ -89,7 +92,7 @@ function Shell() {
 
   return (
     <div className="window">
-      <Sidebar screen={screen} searching={search} onScreen={go} onSearch={() => setSearch(true)} />
+      <Sidebar screen={screen} onScreen={go} />
       <main className="main">
         {screen === 'today' && <Today nav={todayNav} setNav={setTodayNav} shell={shell} rec={rec} onMark={onMark} />}
         {screen === 'apps' && <Apps nav={appsNav} setNav={setAppsNav} firstDay={rec?.first_day ?? null} onMark={onMark} />}
