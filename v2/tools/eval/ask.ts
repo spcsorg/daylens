@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   const now = values.now !== undefined ? Date.parse(values.now) : evalNow()
   if (!Number.isFinite(now)) throw new Error('--now must be a time')
   const dir = values.seed ?? mkdtempSync(path.join(os.tmpdir(), 'daylens-ask-eval-'))
-  if (!values.seed) execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', new Date(now).toISOString()], { stdio: 'ignore' })
+  if (!values.seed) execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--world', 'bakery', '--now', new Date(now).toISOString()], { stdio: 'ignore' })
   const reader = new Reader(openReadOnly(path.join(dir, DB_FILE)))
   const effort = values.effort as ApiOptions['effort']
   const model = anthropicApi(values.model, { apiKey, timeoutMs: 60_000, effort })

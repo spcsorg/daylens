@@ -17,6 +17,7 @@
     "eval:search": "node tools/evalSearch.ts",
     "app:build": "vite build --config app/vite.config.ts",
     "app": "npm run app:build && electron app/main/main.ts",
+    "demo": "npm run app:build && node app/tools/demo.ts",
     "app:typecheck": "tsc --noEmit -p app",
     "app:package": "node app/package/build.ts"
   },

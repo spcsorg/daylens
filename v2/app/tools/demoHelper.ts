@@ -15,8 +15,8 @@ const t = () => ({ wall_ms: Date.now(), mono_us: Math.round((performance.timeOri
 const emit = (kind: string, obs: unknown) => process.stdout.write(JSON.stringify({ v: 1, run, seq: seq++, boot: 'boot-demo', t: t(), platform: 'macos', source: 'demo', kind, obs }) + '\n')
 const app = (app_id: string, name: string, path: string) => ({ app_id, name, path, pid: 700, registered_browser: false, engine: 'none', signer: null, version_info: null, identity_state: 'ok', store: null })
 const windows = [
-  { app: app('com.apple.Notes', 'Notes', '/System/Applications/Notes.app'), title: 'Order form checklist' },
-  { app: app('com.apple.TextEdit', 'TextEdit', '/System/Applications/TextEdit.app'), title: 'order-form notes.txt' },
+  { app: app('notion.id', 'Notion', '/Applications/Notion.app'), title: 'Pricing research' },
+  { app: app('com.apple.mail', 'Mail', '/System/Applications/Mail.app'), title: 'Re: Q2 budget' },
 ]
 let n = 0
 const focus = (trigger: string) => {
