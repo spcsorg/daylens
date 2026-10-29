@@ -188,9 +188,9 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
       const since = share[1] ? [...sentence.matchAll(CLOCK)].map((m) => toMinute(m)).find((t) => t >= from! && t < end) : undefined
-      // From a time, only what was in front after it counts.
+      // From a time, only what was in front after it counts; an agent's minutes carry no times, so they don't.
       const after = (i: PacketItem) => (since === undefined ? i.min : Math.min(i.min, Math.max(0, Math.min(span(i)[1], end) - Math.max(span(i)[0], since))))
-      const minutes = named.reduce((n, i) => n + after(i), 0) + agents.reduce((n, a) => n + a.with_you_min, 0)
+      const minutes = named.reduce((n, i) => n + after(i), 0) + (since === undefined ? agents.reduce((n, a) => n + a.with_you_min, 0) : 0)
       if (minutes * 2 <= (since === undefined ? 60 : end - since)) err('share_overstated', `${f}: ${sentence}`)
     }
   }

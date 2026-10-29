@@ -156,6 +156,7 @@ test('most of the hour, or the rest of it, holds only when what the sentence nam
   const rest = (detail: string) => validateHour(JSON.stringify({ ...good, detail }), late, refs).errors.map((e) => e.code)
   assert.deepEqual(rest('From 10:52 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), [], '7 of the 8 minutes left')
   assert.deepEqual(rest('From 10:00 AM you worked on the plan for tomorrow in Notes for the rest of the hour.'), ['share_overstated'])
+  assert.deepEqual(rest('From 10:52 AM you worked with Codex for the rest of the hour.'), ['share_overstated'], "an agent's minutes don't say when")
   assert.deepEqual(codes({ detail: 'From 10:20 AM you read the release notes in Dia for the rest of the hour.' }), ['share_overstated'], '3 of 40 minutes')
   assert.deepEqual(codes({ summary: 'Most of the hour was quiet.' }), [], 'nothing named, nothing to check')
 })
