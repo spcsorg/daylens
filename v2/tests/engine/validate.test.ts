@@ -155,6 +155,8 @@ test('most of the hour, or the rest of it, holds only when what the sentence nam
   const pages = (summary: string) => validateHour(JSON.stringify({ ...good, summary }), twoPages, refs).errors.map((e) => e.code)
   assert.deepEqual(pages('Most of the hour went to the release notes in Dia.'), ['share_overstated'], 'the page it names, not every page in Dia')
   assert.deepEqual(pages('Most of the hour went to Dia.'), [], 'the app as a whole')
+  const longEdit = { ...twoPages, windows: [{ ...packet.windows[0]!, min: 35 }, packet.windows[1]!] }
+  assert.deepEqual(validateHour(JSON.stringify({ ...good, summary: 'Most of the hour went to the Editor and the release notes in Dia.' }), longEdit, refs).errors.map((e) => e.code), [], 'the editor whole, and the one page in Dia: 35 and 3')
   assert.deepEqual(codes({ summary: 'You spent most of the hour in the Editor.' }), ['share_overstated'], 'the editor alone is 25 minutes')
   assert.deepEqual(codes({ detail: 'From 10:55 AM you read the release notes for the rest of the hour.' }), ['share_overstated'], 'they were on screen before then')
   const late = { ...packet, windows: [...packet.windows, { id: 'i3', app: 'Notes', title: 'Plan for tomorrow', min: 7, from: '10:52', to: '11:00', times: 1 }] }

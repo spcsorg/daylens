@@ -184,10 +184,9 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
       const share = SHARE.exec(sentence)
       if (!share) continue
-      // A title it names stands for that item alone; an app only when it names no title.
+      // A title it names stands for that item alone; an app it names counts whole unless one of its titles is named.
       const says = (n: string | null | undefined) => !!n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())
-      const titled = items.filter((i) => says(i.title))
-      const named = titled.length > 0 ? titled : items.filter((i) => says(i.app))
+      const named = items.filter((i) => says(i.title) || (says(i.app) && !items.some((j) => j.app === i.app && says(j.title))))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
       // The rest of the hour runs from the last time given before it.
