@@ -3,7 +3,7 @@
 // Usage: npm run demo [-- <Electron flags>]
 // The folder is reseeded on every run, since the world is dated from today; an AI key saved in Settings stays.
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,6 +14,20 @@ const data = path.join(root, 'data')
 const home = path.join(root, 'home')
 const shell = path.join(root, 'shell')
 const keyFile = path.join(data, 'anthropic-key')
+
+// Electron's lock names the running demo's pid: reseeding under it would delete the database it has open.
+function running(): boolean {
+  try {
+    process.kill(Number(readlinkSync(path.join(shell, 'SingletonLock')).split('-').pop()), 0)
+    return true
+  } catch {
+    return false
+  }
+}
+if (running()) {
+  process.stderr.write('A Daylens demo is already running. Quit it, then run npm run demo again.\n')
+  process.exit(1)
+}
 
 const key = existsSync(keyFile) ? readFileSync(keyFile) : null
 rmSync(root, { recursive: true, force: true })

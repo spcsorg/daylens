@@ -78,7 +78,7 @@ function page(t: number, title: string, source: 'browser_ext' | 'browser_history
 }
 
 function seedDay(dayStart: number, until: number, day: WorldDay): void {
-  const ran = day.filter((h) => !('history' in h && h.history))
+  const ran = day.filter((h) => !('history' in h && h.history) && dayStart + h.hour * HOUR < until)
   const from = dayStart + (ran[0]?.hour ?? 24) * HOUR
   const to = Math.min(until, dayStart + (ran.length ? ran.at(-1)!.hour + 1 : 24) * HOUR)
   if (ran.length) store.startRun(line('hello', { awake_us: 0, helper: 'seed', boot_identity: 'kernel', version: '1', pid: 1, os: 'seed', permissions: { accessibility: 'granted' }, config: { heartbeat_s: 15, idle_threshold_s: 120, reconcile_s: 60 } }, from) as LineOf<'hello'>)

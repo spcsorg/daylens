@@ -38,3 +38,14 @@ test('the pricing world seeds whole written days, history-only hours included', 
   const visits = db.prepare(`SELECT count(*) AS n FROM observations WHERE source = 'browser_history'`).get() as { n: number }
   assert.ok(visits.n >= 7, 'today and one evening come from browser history')
 })
+
+test('seeded before the day starts, today has no run yet, only what the browser history holds', () => {
+  const dir = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-seed-')), 'data')
+  const now = new Date(2026, 6, 15, 8, 40)
+  execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', now.toISOString()], { env: process.env, stdio: 'ignore' })
+  const db = new Database(path.join(dir, DB_FILE), { readonly: true })
+  const late = db.prepare('SELECT count(*) AS n FROM capture_runs WHERE started_wall_ms > ?').get(now.getTime()) as { n: number }
+  assert.equal(late.n, 0)
+  const today = db.prepare(`SELECT count(*) AS n FROM observations WHERE source = 'browser_history' AND event_wall_ms >= ?`).get(new Date(2026, 6, 15).getTime()) as { n: number }
+  assert.equal(today.n, 4)
+})
