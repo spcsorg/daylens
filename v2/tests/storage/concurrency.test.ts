@@ -425,20 +425,24 @@ test('automatic busy retries retain worker priority while the worker has work, a
   const begin = r.store.onWriteStart, end = r.store.onWriteEnd
   r.store.onWriteStart = () => { events.push('begin'); begin() }
   r.store.onWriteEnd = () => { events.push('end'); end() }
-  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 1050 } })
+  const release = new Int32Array(new SharedArrayBuffer(4))
+  const worker = new Worker(new URL('./holdLock.ts', import.meta.url), { workerData: { file: path.join(r.dir, DB_FILE), ms: 0, release } })
   const exited = new Promise<void>((resolve, reject) => { worker.once('exit', () => resolve()); worker.once('error', reject) })
+  const letGo = () => { Atomics.store(release, 0, 1); Atomics.notify(release, 0) }
   try {
     await new Promise((resolve) => worker.once('message', resolve))
     r.store.insertObservation(row(T0, 'com.example.editor', 'automatic contention'))
-    await new Promise((resolve) => setTimeout(resolve, 1010))
+    // The flush is due at 1000 ms; held to 1500 ms it is refused and retried many times over.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
     assert.equal(r.store.storeHealth().failingSinceWallMs, null)
     assert.deepEqual(events, ['begin'], 'worker priority remains held between retries')
+    letGo()
     await exited
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await eventually(() => r.store.storeHealth().pendingOps === 0)
     assert.equal(r.store.storeHealth().pendingOps, 0)
     assert.deepEqual(events, ['begin', 'end'])
     assert.equal(r.store.query(`SELECT title FROM observations`).length, 1)
-  } finally { await exited; r.close() }
+  } finally { letGo(); await exited; r.close() }
 })
 
 test('a contended derivation retries automatically even when all capture rows already committed', async () => {
