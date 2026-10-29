@@ -432,7 +432,8 @@ test('automatic busy retries retain worker priority while the worker has work, a
   try {
     await new Promise((resolve) => worker.once('message', resolve))
     r.store.insertObservation(row(T0, 'com.example.editor', 'automatic contention'))
-    await new Promise((resolve) => setTimeout(resolve, 1010))
+    // The flush is due at 1000 ms; held to 1500 ms it is refused and retried many times over.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
     assert.equal(r.store.storeHealth().failingSinceWallMs, null)
     assert.deepEqual(events, ['begin'], 'worker priority remains held between retries')
     letGo()
