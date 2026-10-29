@@ -194,6 +194,23 @@ test('a lock, sleep or idle whose end was deleted ends where the deleted range b
   r.close()
 })
 
+test('idle reported after a read ends dates back into it, past a fresh-helper snapshot, and around a deleted range', async () => {
+  const r = rig()
+  const H = 3_600_000
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: false }, T0 + H - 60_000))
+  // A restarted service reads input afresh: its first line is a snapshot of the same last input.
+  const restarted = new Normalizer(r.store)
+  restarted.handle(line('input', { state: 'active', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: true }, T0 + H + 30_000))
+  restarted.handle(line('input', { state: 'idle', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: false }, T0 + H + 60_000))
+  r.store.flush()
+  assert.equal(r.store.database.prepare(`SELECT count(*) FROM observations WHERE kind = 'input'`).pluck().get(), 3)
+  r.clock.t = T0 + 2 * H
+  assert.deepEqual(presenceFromCapture(r.store.database, T0, T0 + H).idle, [{ start: T0 + H - 60_000, end: T0 + H }])
+  await r.storage.deleteRange(T0 + H - 50_000, T0 + H - 40_000).done
+  assert.deepEqual(presenceFromCapture(r.store.database, T0, T0 + H).idle, [{ start: T0 + H - 60_000, end: T0 + H - 50_000 }, { start: T0 + H - 40_000, end: T0 + H }])
+  r.close()
+})
+
 test('a deleted range reads as not recorded, not as present, though capture ran then', async () => {
   const r = rig()
   const H = 3_600_000

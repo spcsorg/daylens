@@ -221,7 +221,7 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
       `SELECT kind, state, event_wall_ms AS at, detail FROM (
          SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND event_wall_ms >= @from AND event_wall_ms < @to ${kept('event_wall_ms')}
          UNION ALL ${['session', 'power', 'input', 'presence'].map(latest).join(' UNION ALL ')}
-         UNION ALL SELECT * FROM (SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND kind = 'input' AND event_wall_ms >= @to AND event_wall_ms < @ahead ${kept('event_wall_ms')} ORDER BY event_wall_ms, id LIMIT 1)
+         UNION ALL SELECT * FROM (SELECT id, kind, state, event_wall_ms, detail FROM observations WHERE ${PRESENCE_KINDS} AND kind = 'input' AND state = 'idle' AND event_wall_ms >= @to AND event_wall_ms < @ahead ${kept('event_wall_ms')} ORDER BY event_wall_ms, id LIMIT 1)
        ) ORDER BY event_wall_ms, id`,
     )
     .all({ from, to, ahead: to + IDLE_NOTICE_MS }) as { kind: string; state: string; at: number; detail: string | null }[]
@@ -233,16 +233,24 @@ export function presenceFromCapture(db: Database.Database, from: number, to: num
     open[k] = null
   }
   // A lock, sleep or idle that began before a deleted range has no end left inside it: it ends where the range begins.
-  const starts = ranges ? (db.prepare(`SELECT from_wall_ms AS f FROM deletions WHERE kind = 'range' AND from_wall_ms < ? ORDER BY from_wall_ms`).pluck().all(to) as number[]) : []
+  const cuts = ranges ? (db.prepare(`SELECT from_wall_ms AS f, to_wall_ms AS t FROM deletions WHERE kind = 'range' AND from_wall_ms < ? ORDER BY from_wall_ms`).all(to) as { f: number; t: number }[]) : []
   let next = 0
   const crossRanges = (until: number) => {
-    for (; next < starts.length && starts[next]! <= until; next++) for (const k of ['locked', 'asleep', 'idle', 'woke'] as const) closeIf(k, starts[next]!)
+    for (; next < cuts.length && cuts[next]!.f <= until; next++) for (const k of ['locked', 'asleep', 'idle', 'woke'] as const) closeIf(k, cuts[next]!.f)
   }
   for (const r of rows) {
-    // Idle is reported once its threshold has passed and dates back to the last input: a report after `to` can start before it.
+    // Idle is reported once its threshold has passed and dates back to the last input: a report after `to` can start
+    // before it. A deleted range inside stays unrecorded: idle stops at it and resumes after it.
     if (r.at >= to) {
-      const since = r.kind === 'input' && r.state === 'idle' ? lastInput(r.detail) : null
-      if (since !== null && since < to) open.idle ??= since
+      crossRanges(to)
+      let since = lastInput(r.detail)
+      if (since === null || since >= to || open.idle !== null) continue
+      for (const c of cuts) {
+        if (c.t <= since) continue
+        if (c.f > since) inputs.idle.push({ start: since, end: c.f })
+        since = c.t
+      }
+      if (since < to) open.idle = since
       continue
     }
     crossRanges(r.at)
