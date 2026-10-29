@@ -964,7 +964,7 @@ test('a question about the morning or the afternoon sends only that part of the 
   s.close()
 })
 
-test('the thing shown is the first the first sentence cites, never what "before" or "after" in the question starts from; one piece of work is no breakdown unless the question is how long', async () => {
+test('the thing shown is the first the first sentence cites, never what "before" or "after" in the question starts from; one piece of work is no breakdown unless the question is how long, and pieces that tie go in the order of the day', async () => {
   const s = setup()
   const reply = (work: (ids: Record<string, string>) => string[]) => fakeModel((req) => {
     const rec = JSON.parse(req.prompt) as { sources: { id: string; title: string | null; file?: string; address?: string }[] }
@@ -980,6 +980,6 @@ test('the thing shown is the first the first sentence cites, never what "before"
   assert.equal(await shown('what did I do after the q4 budget yesterday?'), 'https://docs.example.com/d/budget')
   assert.equal(await shown('what did I do on the budget yesterday?', (i) => [`Budget: ${i.file} 10`]), 'q4-budget.xlsx')
   assert.deepEqual(await shown('how long did I spend on the budget yesterday?', (i) => [`Budget: ${i.file} 10`]), ['Budget'])
-  assert.deepEqual(await shown('what did I do yesterday?', (i) => [`Budget: ${i.file} 10`, `Scratch: ${i.scratch} 10`]), ['Budget', 'Scratch'])
+  assert.deepEqual(await shown('what did I do yesterday?', (i) => [`Scratch: ${i.scratch} 10`, `Budget: ${i.file} 10`]), ['Budget', 'Scratch'], 'pieces of equal minutes go in the order of the day')
   s.close()
 })

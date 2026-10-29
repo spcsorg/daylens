@@ -769,8 +769,9 @@ export async function ask(
     const seenIn = [...new Set(stretches.map((x) => hourOf(x.from_wall_ms)!))]
     pieces.push({ label: m[1]!, minutes: minutesOf, stretches, hours: seenIn.map((h) => byId.get(`h${hours.indexOf(h) + 1}`)!) })
   }
-  // One piece of work is no breakdown, unless the question is how long it took.
-  let visual: Visual | null = pieces.length > 1 || (pieces.length === 1 && /\bhow (long|much time)\b/i.test(question)) ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes) } : null
+  // One piece of work is no breakdown, unless the question is how long it took. Ties go in the order of the day, so a
+  // piece keeps its colour whatever order the model listed them in.
+  let visual: Visual | null = pieces.length > 1 || (pieces.length === 1 && /\bhow (long|much time)\b/i.test(question)) ? { kind: 'work', pieces: pieces.sort((a, b) => b.minutes - a.minutes || a.stretches[0]!.from_wall_ms - b.stretches[0]!.from_wall_ms) } : null
   if (!visual) {
     // Else the one thing the answer is about: the first its first sentence cites, the newest for "when did I last…". What
     // "before" or "after" in the question names is where the answer starts, not what it is about.
