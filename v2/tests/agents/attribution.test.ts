@@ -152,9 +152,9 @@ test('presence reads use the index of presence rows, so a read does not scan the
   presenceFromCapture(spy, T0, T0 + 3_600_000)
   const reads = seen.filter((sql) => sql.includes('FROM observations'))
   assert.equal(reads.length, 1)
-  const plan = (db.prepare(`EXPLAIN QUERY PLAN ${reads[0]}`).all({ from: T0, to: T0 + 3_600_000 }) as { detail: string }[]).map((p) => p.detail)
+  const plan = (db.prepare(`EXPLAIN QUERY PLAN ${reads[0]}`).all({ from: T0, to: T0 + 3_600_000, ahead: T0 + 7_200_000 }) as { detail: string }[]).map((p) => p.detail)
   const scans = plan.filter((d) => /\bobservations\b/.test(d))
-  assert.equal(scans.length, 5, plan.join('\n'))
+  assert.equal(scans.length, 6, plan.join('\n'))
   assert.ok(scans.every((d) => d.includes('USING INDEX observations_presence')), plan.join('\n'))
   r.close()
 })
@@ -191,6 +191,23 @@ test('a lock, sleep or idle whose end was deleted ends where the deleted range b
   assert.deepEqual(inputs.locked, [{ start: T0 + H - 600_000, end: T0 + H }, { start: T0 + 3 * H, end: T0 + 4 * H }])
   assert.deepEqual(inputs.idle, [{ start: T0 + H - 900_000, end: T0 + H }])
   assert.deepEqual(presenceFromCapture(r.store.database, T0 + 2 * H, T0 + 2 * H + 600_000).locked, [], 'a window after the range does not inherit the lock')
+  r.close()
+})
+
+test('idle reported after a read ends dates back into it, past a fresh-helper snapshot, and around a deleted range', async () => {
+  const r = rig()
+  const H = 3_600_000
+  r.feed(line('input', { state: 'active', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: false }, T0 + H - 60_000))
+  // A restarted service reads input afresh: its first line is a snapshot of the same last input.
+  const restarted = new Normalizer(r.store)
+  restarted.handle(line('input', { state: 'active', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: true }, T0 + H + 30_000))
+  restarted.handle(line('input', { state: 'idle', last_input_wall_ms: T0 + H - 60_000, threshold_s: 120, snapshot: false }, T0 + H + 60_000))
+  r.store.flush()
+  assert.equal(r.store.database.prepare(`SELECT count(*) FROM observations WHERE kind = 'input'`).pluck().get(), 3)
+  r.clock.t = T0 + 2 * H
+  assert.deepEqual(presenceFromCapture(r.store.database, T0, T0 + H).idle, [{ start: T0 + H - 60_000, end: T0 + H }])
+  await r.storage.deleteRange(T0 + H - 50_000, T0 + H - 40_000).done
+  assert.deepEqual(presenceFromCapture(r.store.database, T0, T0 + H).idle, [{ start: T0 + H - 60_000, end: T0 + H - 50_000 }, { start: T0 + H - 40_000, end: T0 + H }])
   r.close()
 })
 
