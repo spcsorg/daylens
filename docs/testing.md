@@ -62,3 +62,12 @@ Each release covers:
 ```
 
 AI evaluations call paid providers. They run on purpose, not on every change.
+
+## Invented data and demos
+
+Screens are checked, and Daylens is shown on camera, only on invented data, never on a real record. `v2/app/tools/worlds.ts` holds two worlds, which `v2/app/tools/seed.ts` writes through the engine's own storage:
+
+- **Pricing memo** (the default, the launch film's world): about three weeks of an invented product manager's work on a spring pricing memo, ending today. The days vary, Saturdays are short, browser pages run throughout, and today's early hours and one evening come only from browser history. Every past hour is stored already written, so nothing calls an AI.
+- **Bakery**: the same day twice, nothing written. The Ask and hour evaluations are graded on it.
+
+`npm run demo` in `v2/` reseeds the pricing world in a throwaway folder (the system temp folder's `daylens-demo`) and starts the app on it, on macOS and Linux. Every reader of the computer's own files points at an empty folder (`HOME`, browser history, Claude Code and Codex sessions, the browser extension's socket) and a stand-in helper reports invented windows, so nothing real is read or recorded. An AI key saved in Settings stays across runs. The command prints an MCP config, and `claude --mcp-config <file> --strict-mcp-config` lets Claude Code read the same world and nothing else. The world is dated from the moment it's seeded, so today is full only late in the day.

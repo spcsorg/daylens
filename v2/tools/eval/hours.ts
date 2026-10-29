@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const now = values.now !== undefined ? Date.parse(values.now) : evalNow()
   if (!Number.isFinite(now)) throw new Error('--now must be a time')
   const dir = mkdtempSync(path.join(os.tmpdir(), 'daylens-hours-eval-'))
-  execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', new Date(now).toISOString()], { stdio: 'ignore' })
+  execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--world', 'bakery', '--now', new Date(now).toISOString()], { stdio: 'ignore' })
   const store = new Store(dir)
   const storage = new Storage(store, dir, { deletionStallMs: Infinity })
   const rejected: string[] = []
