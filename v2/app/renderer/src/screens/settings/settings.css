@@ -44,6 +44,8 @@
   flex-direction: column;
   gap: var(--space-24);
   max-width: 640px;
+  /* A new tab crossfades in; its rows don't move. */
+  animation: fade 120ms var(--ease);
 }
 
 .settings-heading {

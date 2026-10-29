@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { AppDetail, AppsView } from '../../../../shared/apps.ts'
 import { useQuery } from '../../lib/api.ts'
 import { addDays, dateKey, dayMonth, duration, hoursList, longDay, parseKey, plainDay, rangeTitle, shortDay, span, weekStart } from '../../lib/format.ts'
@@ -72,16 +72,34 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
         {view && view.apps.length === 0 && <EmptyState>{from === today ? 'Apps appear here as you use them.' : 'Nothing was recorded then.'}</EmptyState>}
         {view && view.apps.length > 0 && (
           <div className="apps-layout">
-            <div className="apps-list">
-              {view.apps.map((a) => (
-                <AppRow key={a.id} app={a} share={a.ms / view.total_ms} detail={`${percent(a.ms / view.total_ms)} of the ${nav.scope}`} selected={a.id === selected} onClick={() => setNav({ ...nav, app: a.id })} />
-              ))}
-            </div>
+            <AppList view={view} scope={nav.scope} selected={selected} onSelect={(app) => setNav({ ...nav, app })} />
             {selected && <Detail id={selected} from={from} days={days} when={when} live={live} />}
           </div>
         )}
       </div>
     </>
+  )
+}
+
+/** The apps and their shares; the selection's highlight slides from row to row instead of jumping. */
+function AppList({ view, scope, selected, onSelect }: { view: AppsView; scope: AppsNav['scope']; selected: string | null; onSelect: (app: string) => void }) {
+  const list = useRef<HTMLDivElement>(null)
+  const shown = useRef<{ selected: string | null; view: AppsView } | null>(null)
+  const [mark, setMark] = useState<{ y: number; h: number; slides: boolean } | null>(null)
+  useLayoutEffect(() => {
+    // Only a new pick on the same list slides; a refresh or another day places the mark directly.
+    const slides = shown.current !== null && shown.current.view === view && shown.current.selected !== selected
+    shown.current = { selected, view }
+    const on = list.current?.querySelector<HTMLElement>('[aria-current="true"]')
+    setMark(on ? { y: on.offsetTop, h: on.offsetHeight, slides } : null)
+  }, [selected, view])
+  return (
+    <div className="apps-list" ref={list}>
+      {mark && <span className={`apps-list-mark${mark.slides ? ' slides' : ''}`} style={{ transform: `translateY(${mark.y}px)`, height: mark.h }} />}
+      {view.apps.map((a) => (
+        <AppRow key={a.id} app={a} share={a.ms / view.total_ms} detail={`${percent(a.ms / view.total_ms)} of the ${scope}`} selected={a.id === selected} onClick={() => onSelect(a.id)} />
+      ))}
+    </div>
   )
 }
 

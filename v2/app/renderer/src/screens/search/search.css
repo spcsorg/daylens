@@ -99,6 +99,11 @@
   background: transparent;
 }
 
+/* Pressed, the row darkens before Search closes on it. */
+.search-panel .search-result:active {
+  background: var(--sel);
+}
+
 /* Rows arrive in a quick cascade, 15 ms apart and never more than 120 ms in all. */
 .search-group > .search-result:nth-child(3) {
   animation-delay: 15ms;
