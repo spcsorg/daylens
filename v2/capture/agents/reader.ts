@@ -156,6 +156,8 @@ export class AgentReader {
   private readonly followUpMs: number
   private draining: Promise<void> | null = null
   private stopped = false
+  // Timer-started passes still running: stop() waits for them, so none touches the store after it returns.
+  private readonly passes = new Set<Promise<void>>()
 
   constructor(store: AgentStore, roots: AgentRoot[], opts: ReaderOptions = {}) {
     this.store = store
@@ -254,9 +256,9 @@ export class AgentReader {
     for (const r of this.roots) await this.reconcile(r)
     await this.drain()
     if (this.stopped) return
-    this.reconcileTimer = setInterval(() => void this.tick(), this.reconcileMs)
+    this.reconcileTimer = setInterval(() => this.track(this.tick()), this.reconcileMs)
     this.reconcileTimer.unref()
-    this.followUpTimer = setTimeout(() => void this.followUp(), this.followUpMs)
+    this.followUpTimer = setTimeout(() => this.track(this.followUp()), this.followUpMs)
     this.followUpTimer.unref()
   }
 
@@ -265,12 +267,18 @@ export class AgentReader {
     await this.drain()
   }
 
+  private track(pass: Promise<void>): void {
+    this.passes.add(pass)
+    void pass.finally(() => this.passes.delete(pass))
+  }
+
   async stop(): Promise<void> {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
     if (this.followUpTimer) clearTimeout(this.followUpTimer)
     for (const r of this.roots) r.watcher?.close()
+    await Promise.allSettled(this.passes)
     await this.draining
     for (const tail of this.tails.values()) tail.close()
     this.tails.clear()
@@ -303,6 +311,7 @@ export class AgentReader {
       names = (await readdir(root.dir, { recursive: root.layout !== 'codex_archive' })) as string[]
       this.stats.listings++
     } catch (err) {
+      if (this.stopped) return
       const code = errCode(err)
       r.present = false
       r.watcher?.close()
@@ -311,6 +320,7 @@ export class AgentReader {
       else this.store.setHealth(root.agent, root.dir, 'unreadable', code, null)
       return
     }
+    if (this.stopped) return
     const appeared = !r.present
     r.present = true
     // A folder that is back is readable again; a format problem stays reported until a clean read clears it.

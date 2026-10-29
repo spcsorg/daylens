@@ -96,6 +96,23 @@ test('a watched folder is never listed again; only the follow-up check after sta
   r.store.close()
 })
 
+test('stop waits for a timed pass already running, so nothing reaches the store after it returns', async () => {
+  const r = rig()
+  let calls = 0
+  let release!: () => void
+  const gate = new Promise<void>((res) => (release = res))
+  const reader = r.reader({ reconcileMs: 20, discover: async () => (++calls > 1 ? (await gate, []) : []) })
+  await reader.start()
+  await waitFor(() => calls > 1)
+  let returned = false
+  const stopping = reader.stop().then(() => (returned = true))
+  await new Promise((res) => setTimeout(res, 50))
+  assert.equal(returned, false)
+  release()
+  await stopping
+  r.store.close()
+})
+
 test('reading is driven by file events, not by rescanning folders', async () => {
   const r = rig()
   const c = codexCtx()
