@@ -438,6 +438,7 @@ test('automatic busy retries retain worker priority while the worker has work, a
     letGo()
     await exited
     await eventually(() => r.store.storeHealth().pendingOps === 0)
+    assert.equal(r.store.storeHealth().pendingOps, 0)
     assert.deepEqual(events, ['begin', 'end'])
     assert.equal(r.store.query(`SELECT title FROM observations`).length, 1)
   } finally { letGo(); await exited; r.close() }
