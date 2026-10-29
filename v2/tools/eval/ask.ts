@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util'
 import { DB_FILE } from '../../capture/store.ts'
 import { anthropicClient, type ApiOptions } from '../../engine/backends.ts'
 import { anthropicApi, ASK_EFFORT, ASK_MODEL } from '../../retrieval/anthropicApi.ts'
-import { ask, type AskResult, type Citation } from '../../retrieval/ask.ts'
+import { ask, type AskResult, type Citation, type Visual } from '../../retrieval/ask.ts'
 import { openReadOnly, Reader } from '../../retrieval/reader.ts'
 
 const LIMITS = { maxHours: 12, maxSources: 40, perGroup: 8 }
@@ -49,13 +49,14 @@ export interface Grade {
   correct: boolean
   consistent: boolean
   sounds_like_a_person: boolean
+  visual_agrees: boolean
   reason: string
 }
 
 const GRADE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['by_clock_hour', 'lists_windows', 'leads_with_answer', 'correct', 'consistent', 'sounds_like_a_person', 'reason'],
+  required: ['by_clock_hour', 'lists_windows', 'leads_with_answer', 'correct', 'consistent', 'sounds_like_a_person', 'visual_agrees', 'reason'],
   properties: {
     by_clock_hour: { type: 'boolean' },
     lists_windows: { type: 'boolean' },
@@ -63,11 +64,12 @@ const GRADE_SCHEMA = {
     correct: { type: 'boolean' },
     consistent: { type: 'boolean' },
     sounds_like_a_person: { type: 'boolean' },
+    visual_agrees: { type: 'boolean' },
     reason: { type: 'string' },
   },
 }
 
-export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has today’s date, the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs.
+export const ASK_GRADER_PROMPT = `You judge answers from Daylens, an app that records what someone did on their computer and answers questions about it. The bar: the answer reads the way the person would describe their day to their boss in the evening. The input has today’s date, the question, its kind, what a right answer conveys (expect), and the same question's answer from two separate runs, each with the visual shown under it: a card of the pieces of work with their minutes, a card of the pages, files or windows the answer is about, or none.
 
 The seed day repeats: yesterday had the same work at the same times, 8 AM to 6 PM, except that yesterday the computer was away for lunch from 12 to 1, while today 12 to 1 was the site's git log and card payment questions. Mentioning yesterday's matching work is correct, not invented.
 
@@ -78,16 +80,26 @@ Judge each field strictly, true or false:
 - correct: both answers agree with expect and claim nothing it contradicts. Leaving out minor items is fine; inventing or misdating work is not.
 - consistent: the two answers say the same thing in substance (the same time, the same yes or no, the same main pieces of work). Wording may differ.
 - sounds_like_a_person: plain, warm and brief, like a colleague who saw the day; not a log, a list of apps, or hedging.
+- visual_agrees: each visual agrees with its answer and with expect: a work card's pieces are the work the words describe, with the minutes the words give (a piece the words leave out, or a few minutes' difference, is fine; a piece the words contradict, or work outside the time asked, is not); a card of things shows what the answer is about, at the time it gives. The two runs show the same kind of visual with the same main pieces or things. A summary of a stretch of time (a morning, an afternoon, a day) shows a work card; no visual is fine for a when or whether answer.
 reason: one or two sentences on any field that failed, quoting the answer. Empty when all pass.`
 
 // One run of a question as the eval reports it: what the person would read, what each sentence cites, and how many
 // sentences the checks left out.
-function run(r: AskResult): { text: string; sources: string[][]; dropped?: number } {
+function run(r: AskResult): { text: string; sources: string[][]; visual: string; visual_kind: Visual['kind'] | null; dropped?: number } {
   const cite = (c: Citation) => (c.kind === 'hour' ? `hour ${new Date(c.start_wall_ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric' })}` : `${c.kind} ${c.title ?? c.file ?? c.url}`)
-  if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)), dropped: r.dropped }
-  if (r.kind === 'no_answer') return { text: r.missing ?? 'Your record doesn’t show that.', sources: [] }
-  return { text: `(${r.kind})`, sources: [] }
+  const at = (ms: number) => new Date(ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+  const shown = (v: Visual | null) =>
+    !v ? 'none'
+    : v.kind === 'work' ? `work card: ${v.pieces.map((p) => `${p.label}, ${p.minutes} min, ${at(p.stretches[0]!.from_wall_ms)} to ${at(p.stretches.at(-1)!.to_wall_ms)}`).join('; ')}`
+    : `card of things: ${v.things.map((t) => `${t.cite.title ?? t.cite.file ?? t.cite.url} (${t.cite.app_name}), ${at(t.from_wall_ms)} to ${at(t.to_wall_ms)}`).join('; ')}`
+  if (r.kind === 'answer') return { text: r.statements.map((s) => s.text).join(' '), sources: r.statements.map((s) => s.cites.map(cite)), visual: shown(r.visual), visual_kind: r.visual?.kind ?? null, dropped: r.dropped }
+  if (r.kind === 'no_answer') return { text: r.missing ?? 'Your record doesn’t show that.', sources: [], visual: 'none', visual_kind: null }
+  return { text: `(${r.kind})`, sources: [], visual: 'none', visual_kind: null }
 }
+
+// An amount shows its work; a summary shows its work or what it is about; a when or whether answer never shows work.
+const visualFits = (kind: Kind, runs: { visual_kind: Visual['kind'] | null }[]) =>
+  runs.every((x) => (kind === 'amount' ? x.visual_kind === 'work' : kind === 'summary' ? x.visual_kind !== null : x.visual_kind !== 'work'))
 
 // A past 6 PM, so the seeded today runs 8 AM to 6 PM in full and nothing is in the future.
 function evalNow(): number {
@@ -118,15 +130,16 @@ async function main(): Promise<void> {
   const results = await Promise.all(
     picked.map(async (item) => {
       const runs: ReturnType<typeof run>[] = []
-      for (let i = 0; i < REPEATS; i++) runs.push(await ask(item.q, { reader, model, log, now: () => now }, LIMITS).then(run, (e: Error) => ({ text: `(error: ${e.message})`, sources: [] })))
-      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ today: new Date(now).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), question: item.q, kind: item.kind, expect: item.expect, answers: runs.map((x) => x.text) }), schema: GRADE_SCHEMA })
+      for (let i = 0; i < REPEATS; i++) runs.push(await ask(item.q, { reader, model, log, now: () => now }, LIMITS).then(run, (e: Error) => ({ text: `(error: ${e.message})`, sources: [], visual: 'none', visual_kind: null })))
+      const r = await grader({ system: ASK_GRADER_PROMPT, message: JSON.stringify({ today: new Date(now).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }), question: item.q, kind: item.kind, expect: item.expect, answers: runs.map((x) => ({ text: x.text, visual: x.visual })) }), schema: GRADE_SCHEMA })
       const g = JSON.parse(r.text ?? '{}') as Grade
-      const pass = r.error === null && !g.by_clock_hour && !g.lists_windows && g.leads_with_answer && g.correct && g.consistent && g.sounds_like_a_person
-      return { question: item.q, kind: item.kind, runs, pass, rules: g, grader_error: r.error }
+      const fits = visualFits(item.kind, runs)
+      const pass = r.error === null && !g.by_clock_hour && !g.lists_windows && g.leads_with_answer && g.correct && g.consistent && g.sounds_like_a_person && g.visual_agrees && fits
+      return { question: item.q, kind: item.kind, runs, pass, rules: { ...g, visual_fits: fits }, grader_error: r.error }
     }),
   )
   const passed = results.filter((r) => r.pass).length
-  for (const r of results) process.stderr.write(`${r.pass ? 'PASS' : 'FAIL'} ${r.question}${r.pass ? '' : `\n    ${r.rules.reason || r.grader_error}`}\n`)
+  for (const r of results) process.stderr.write(`${r.pass ? 'PASS' : 'FAIL'} ${r.question}${r.pass ? '' : `\n    ${r.rules.visual_fits ? '' : 'visual: wrong kind for the question. '}${r.rules.reason || r.grader_error || ''}`}\n`)
   process.stderr.write(`${passed}/${results.length} pass (${values.model} at ${effort} effort, graded by ${GRADER})\n`)
   process.stdout.write(JSON.stringify({ now: new Date(now).toISOString(), model: values.model, effort, grader: GRADER, passed, total: results.length, results }, null, 1) + '\n')
   process.exitCode = passed === results.length ? 0 : 1

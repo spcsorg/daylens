@@ -255,3 +255,195 @@
     animation: none;
   }
 }
+
+/* What an answer shows under its words: a card the width of an answer, drawn from the record. */
+.ask-card {
+  width: 78%;
+  margin: var(--space-6) 0 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-raised);
+  animation: bubble-in var(--settle) var(--ease) both;
+}
+
+.ask-work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  padding: var(--space-16) var(--space-16) var(--space-12);
+}
+
+.ask-work-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.ask-work-when {
+  font: var(--label-regular);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-work-total {
+  font: var(--lede-serif);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ask-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ask-track {
+  position: relative;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.ask-stretch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--bg-raised);
+  cursor: pointer;
+  transform-origin: left center;
+  animation: stretch-in var(--daylight) var(--ease) both;
+  transition: opacity var(--quick) var(--ease);
+}
+
+.ask-stretch.dim {
+  opacity: 0.25;
+}
+
+@keyframes stretch-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+}
+
+.ask-ticks {
+  position: relative;
+  height: 16px;
+  font: var(--caption);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-ticks span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.ask-ticks span:first-child {
+  transform: none;
+}
+
+.ask-ticks span:last-child {
+  transform: translateX(-100%);
+}
+
+.ask-share {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+}
+
+.ask-share .ask-stretch {
+  position: static;
+  min-width: 2px;
+  box-shadow: none;
+}
+
+.ask-pieces {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--space-8));
+}
+
+.ask-piece {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-8);
+  border-radius: 8px;
+  text-align: left;
+  transition: background-color var(--quick) var(--ease);
+}
+
+.ask-piece:hover {
+  background: var(--bg-hover);
+}
+
+.ask-swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ask-piece-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-piece-time {
+  font: var(--label-regular);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-things {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4);
+}
+
+.ask-thing {
+  display: flex;
+  align-items: center;
+  padding-right: var(--space-4);
+  border-radius: 12px;
+  transition: background-color var(--quick) var(--ease);
+}
+
+.ask-thing:hover {
+  background: var(--bg-hover);
+}
+
+.ask-thing .icon-btn {
+  color: var(--text-3);
+}
+
+.ask-actions {
+  display: flex;
+  margin-top: var(--space-2);
+  margin-left: -6px;
+  color: var(--text-3);
+  animation: bubble-in var(--settle) var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-card,
+  .ask-actions {
+    animation: none;
+  }
+
+  .ask-stretch {
+    animation-name: sentence-in;
+  }
+}

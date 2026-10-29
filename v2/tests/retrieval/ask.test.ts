@@ -895,3 +895,70 @@ test('days named in a question resolve to local days; the rest of the question i
   assert.deepEqual(daysIn('and tonight', now).map(([s]) => s), [day(2030, 10, 23)])
   assert.deepEqual(daysIn('what was I reading last night', now).map(([s]) => s), [day(2030, 10, 22)])
 })
+
+test('the work the model added up becomes the visual: minutes from the record, each source once, when it was on screen, the hours it opens', async () => {
+  const s = setup()
+  const model = fakeModel((req) => {
+    const rec = JSON.parse(req.prompt) as { sources: { id: string; title: string | null; file?: string; address?: string }[] }
+    const id = (f: (x: (typeof rec.sources)[number]) => boolean) => rec.sources.find(f)!.id
+    const [file, scratch, doc] = [id((x) => x.file === 'q4-budget.xlsx'), id((x) => x.title === 'Scratch - Editor'), id((x) => !!x.address)]
+    return {
+      work: [`the Q4 budget: ${file} 10 + ${doc} 10 = 20`, `budget notes: ${scratch} 10 + ${file} 10 = 20`, 'groceries: s99 1 = 1', `budget in Notes: ${doc} 10`, 'no ids at all', 42],
+      answerable: true,
+      statements: [{ text: 'You reviewed the Q4 budget.', sources: [file, doc] }],
+    }
+  })
+  const res = await ask('what did I do yesterday?', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.equal(res.kind, 'answer')
+  if (res.kind !== 'answer' || res.visual?.kind !== 'work') return assert.fail('a work visual')
+  const pieces = res.visual.pieces
+  assert.deepEqual(pieces.map((p) => [p.label, p.minutes]), [['the Q4 budget', 20], ['budget notes', 10]], 'a source counted already, an id not sent and an app it was not seen in are left out')
+  assert.deepEqual(pieces[1]!.stretches, [{ from_wall_ms: T0 + 10 * MIN, to_wall_ms: T0 + 20 * MIN }])
+  assert.ok(pieces[0]!.stretches.every((x) => x.from_wall_ms >= T0 && x.to_wall_ms <= T0 + 30 * MIN))
+  assert.deepEqual(pieces[0]!.hours.map((c) => c.kind === 'hour' && c.start_wall_ms), [T0])
+  s.close()
+})
+
+test('with no work added up, the visual is what the answer’s first sentence is about, and a "when did I last" answer shows its newest first', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 9 * HOUR + 30 * MIN))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 9 * HOUR + 30 * MIN, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 10 * HOUR, 'app_changed'))
+  s.r.feed(focus(editor, 'roadmap-old.md - Editor', T0 + 11 * HOUR, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 11 * HOUR + 5 * MIN, 'app_changed'))
+  s.r.store.flush()
+  const model = fakeModel((req) => {
+    const rec = JSON.parse(req.prompt) as { sources: { id: string; file?: string; title: string | null }[] }
+    const [a, b] = [rec.sources.find((x) => x.file === 'roadmap.md')!.id, rec.sources.find((x) => x.file === 'roadmap-old.md')!.id]
+    return { answerable: true, statements: [{ text: 'You had the roadmap open.', sources: [a, b] }, { text: 'You opened the roadmap at 1 AM.', sources: ['h1'] }] }
+  })
+  const res = await ask('when did I last open the roadmap', { reader: s.reader, model, log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 10, perGroup: 5 })
+  if (res.kind !== 'answer' || res.visual?.kind !== 'things') return assert.fail('a things visual')
+  assert.deepEqual(
+    res.visual.things.map((t) => [t.cite.file, t.from_wall_ms, t.to_wall_ms]),
+    [['roadmap-old.md', T0 + 11 * HOUR, T0 + 11 * HOUR + 90_000], ['roadmap.md', T0 + 9 * HOUR + 30 * MIN, T0 + 9 * HOUR + 31 * MIN + 30_000]],
+    'only what the first sentence cites, newest first, with its day’s first to last time on screen',
+  )
+  s.close()
+})
+
+test('a question about the morning or the afternoon sends only that part of the day', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 13 * HOUR))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 13 * HOUR, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 13 * HOUR + 30 * MIN, 'app_changed'))
+  s.r.store.flush()
+  const sent = async (question: string) => {
+    const seen: AskRequest[] = []
+    await ask(question, { reader: s.reader, model: fakeModel(() => ({ answerable: false, statements: [], missing: 'x' }), seen), log: s.log, now: () => NEXT_DAY }, { maxHours: 24, maxSources: 10, perGroup: 5 })
+    return (JSON.parse(seen[0]!.prompt) as { hours: { start: string }[] }).hours.map((h) => h.start.slice(11))
+  }
+  assert.deepEqual(await sent('what did I do yesterday morning?'), ['1 AM'])
+  assert.deepEqual(await sent('what did I do yesterday afternoon?'), ['2 PM'])
+  assert.deepEqual(await sent('what did I do yesterday?'), ['1 AM', '2 PM'])
+  s.close()
+})
