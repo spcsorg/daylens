@@ -85,6 +85,15 @@ export const CASES: { name: string; packet: Packet; watch: string; must?: string
     },
   },
   {
+    name: 'an agent message that may not have been the person',
+    watch: 'that the person sent, prompted, asked or messaged the agent at 7:43 PM, or anything said as done at 7:43 PM by the person',
+    packet: {
+      ...empty, hour: '2026-10-27 19:00-20:00', tz: 'Example/Town',
+      windows: [item('i1', 'Terminal', 'harbor-site — claude', 35, '19:00', '19:35'), item('i2', 'Editor', 'harbor-site — README.md', 15, '19:35', '19:50')],
+      agents: [{ id: 'a1', agent: 'Claude Code', project: 'harbor-site', with_you_min: 40, while_away_min: 0, messages: ['19:05 prompt', '19:20 answer', '19:43 prompt (uncertain)'] }],
+    },
+  },
+  {
     name: 'a short setup in a long hour of coding',
     watch: 'that the hour went mostly to installing or signing in to the CLI, or a title or summary that leads with the setup',
     packet: { ...empty, hour: '2026-10-27 12:00-13:00', tz: 'Example/Town', windows: [item('i1', 'Terminal', 'npm install -g harbor-cli', 5, '12:00', '12:05'), item('i2', 'Editor', 'harbor-site — checkout.ts', 40, '12:05', '12:45'), item('i3', 'Chrome', 'Harbor CLI – Sign in', 3, '12:45', '12:48')] },
