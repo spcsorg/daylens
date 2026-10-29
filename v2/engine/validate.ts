@@ -184,11 +184,19 @@ export function validateHour(raw: string, packet: Packet, refs: Record<string, R
     for (const sentence of (h[f] ?? '').split(/(?<=[.!?;])\s+|\n+/)) {
       const share = SHARE.exec(sentence)
       if (!share) continue
-      // A title it names stands for that item alone; an app it names counts whole unless one of its titles is named. An
-      // app is looked for outside the titles named ("Notes" inside "Release notes" is no app).
-      const says = (n: string | null | undefined, text = sentence) => !!n && n.trim().length >= 3 && mentions(text, n.trim().toLowerCase())
-      const titled = items.filter((i) => says(i.title))
-      const rest = titled.reduce((t, i) => t.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${i.title!.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`, 'giu'), '$1 '), sentence)
+      // A title it names stands for that item alone; an app it names counts whole unless one of its titles is named.
+      // Titles are matched longest first and each is masked before the next is looked for, so "Notes" inside "Release
+      // notes" is neither another title nor the Notes app.
+      const says = (n: string | null | undefined, text: string) => !!n && n.trim().length >= 3 && mentions(text, n.trim().toLowerCase())
+      const mask = (text: string, n: string) => text.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${n.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}])`, 'giu'), '$1 ')
+      const titled: PacketItem[] = []
+      let rest = sentence
+      for (const i of [...items].sort((a, b) => (b.title?.length ?? 0) - (a.title?.length ?? 0))) {
+        const same = titled.some((j) => j.title!.trim().toLowerCase() === i.title?.trim().toLowerCase())
+        if (!same && !says(i.title, rest)) continue
+        titled.push(i)
+        if (!same) rest = mask(rest, i.title!)
+      }
       const named = items.filter((i) => titled.includes(i) || (says(i.app, rest) && !titled.some((j) => j.app === i.app)))
       const agents = packet.agents.filter((a) => [a.agent, a.project].some((n) => n && n.trim().length >= 3 && mentions(sentence, n.trim().toLowerCase())))
       if (named.length + agents.length === 0) continue
