@@ -65,6 +65,14 @@ function joined(stretches: [number, number][]): [number, number][] {
   return out
 }
 
+/** The hours and pages a visual opens, so the chips under the answer leave out only those. */
+export function opened(visual: Visual): Set<number | string> {
+  if (visual.kind === 'thing') return new Set([hourStart(visual.thing.to_wall_ms - 1), visual.thing.cite.url ?? ''])
+  const rows = shown(visual.pieces)
+  const oneDay = new Set(rows.flatMap((r) => r.stretches.map((x) => dateKey(new Date(x[0]))))).size === 1
+  return new Set([...(oneDay ? rows.flatMap((r) => joined(r.stretches).map(([a]) => hourStart(a))) : []), ...(rows.length > 1 ? rows.map((r) => r.hours[0]!) : [])])
+}
+
 export function AnswerVisual({ visual, onOpenHour }: { visual: Visual; onOpenHour: (start: number) => void }) {
   return visual.kind === 'work' ? <WorkCard pieces={visual.pieces} onOpenHour={onOpenHour} /> : <ThingCard thing={visual.thing} onOpenHour={onOpenHour} />
 }

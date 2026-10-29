@@ -9,7 +9,7 @@ import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 import { KeyForm } from '../settings/AiTab.tsx'
-import { AnswerVisual, dayWord } from './Visual.tsx'
+import { AnswerVisual, dayWord, opened } from './Visual.tsx'
 import './ask.css'
 
 const TRY = ['What did I do this morning?', 'What did I work on yesterday afternoon?', 'What took most of my time yesterday?']
@@ -259,11 +259,7 @@ function Sources({ statements, visual, onOpenHour }: { statements: Statement[]; 
   const toast = useToast()
   const hours = new Map<number, Extract<Citation, { kind: 'hour' }>>()
   const pages = new Map<string, Exclude<Citation, { kind: 'hour' }>>()
-  const shown = new Set<number | string>(
-    visual?.kind === 'work'
-      ? visual.pieces.flatMap((p) => p.hours.flatMap((c) => (c.kind === 'hour' ? [c.start_wall_ms] : [])))
-      : visual ? [new Date(visual.thing.to_wall_ms - 1).setMinutes(0, 0, 0), visual.thing.cite.url ?? ''] : [],
-  )
+  const shown = visual ? opened(visual) : new Set()
   for (const c of statements.flatMap((s) => s.cites)) {
     if (c.kind === 'hour' && !shown.has(c.start_wall_ms)) hours.set(c.start_wall_ms, c)
     else if (c.kind === 'page' && c.url && !shown.has(c.url)) pages.set(c.url, c)
