@@ -356,7 +356,9 @@ final class TitleWorker: Thread {
                  obs: Obs.focus(trigger: trigger, app: observedApp, window: w), priority: .normal)
   }
 
-  fileprivate func onNotification(_ name: String, element: AXUIElement) {
+  func onNotification(_ name: String, element: AXUIElement) {
+    // A queued switch is older than this notice; reporting the old app now would date it after the switch. The switch reads the window itself.
+    guard queue.count == 0 else { return }
     let time = Clock.now()
     setBusy(true)
     defer { setBusy(false) }
