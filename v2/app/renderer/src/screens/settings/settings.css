@@ -154,15 +154,6 @@
   font: var(--label-regular);
 }
 
-.date-input {
-  height: 28px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  padding: 0 var(--space-6);
-  font: var(--label-regular);
-}
-
 /* Appearance: a small picture of the window in each look. */
 .appearance {
   display: flex;

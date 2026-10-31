@@ -39,8 +39,8 @@ export function leftOff(r: Reader): Source[] {
   const last = new Map<string, Span>()
   for (let j = i - 1; j >= 0 && last.size < 3; j--) {
     const x = spans[j]!
-    const k = key(x)
-    if (same(x) !== front && !last.has(k)) last.set(k, x)
+    const k = same(x)
+    if (k !== front && !last.has(k)) last.set(k, x)
   }
   const picked = [...last.values()]
   return r.sources(picked, picked).map((s) => ({ ...s, ms: 0 })).sort((a, b) => b.last_ms - a.last_ms)

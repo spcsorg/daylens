@@ -405,3 +405,24 @@ test('a page back in front after the break is left out though its title changed'
   db.close()
   r.close()
 })
+
+test('a page retitled before the break takes one place in left off, not two', async () => {
+  resetSeq()
+  const r = rig()
+  const chrome = app('com.google.Chrome', { name: 'Chrome' })
+  const url = 'https://docs.example.com/d/budget'
+  work(r, T0 + 8 * HOUR + 40 * MIN, [[notes, 'Supplier email', 20], [sheets, 'Order list', 20]])
+  for (const [m, title] of [[20, 'Budget'], [40, 'Budget, edited']] as const) {
+    r.feed(focus(chrome, `${title} - Docs`, T0 + 9 * HOUR + m * MIN, 'app_changed'))
+    r.store.insertObservation({ ...page(T0 + 9 * HOUR + m * MIN, url, title), seq: m })
+    for (let n = 1; n < 20; n++) r.feed(focus(chrome, `${title} - Docs`, T0 + 9 * HOUR + (m + n) * MIN, 'reconcile'))
+  }
+  const end = work(r, T0 + 11 * HOUR, [[sheets, 'Price sheet', 20]])
+  r.clock.t = end + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(today.leftOff(reader).map((s) => s.title), ['Budget, edited', 'Order list', 'Supplier email'])
+  db.close()
+  r.close()
+})

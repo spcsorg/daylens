@@ -4,10 +4,12 @@ import type { Exclusion } from '../../../../shared/settings.ts'
 import type { DeleteWhat, RecordingView, ShellState } from '../../../../shared/types.ts'
 import { act, useQuery } from '../../lib/api.ts'
 import { addDays, dateKey, dayMonth, parseKey, plainDay, rangeTitle, span } from '../../lib/format.ts'
+import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
 import { Button } from '../../ui/controls.tsx'
 import { Dialog, Popover, useToast } from '../../ui/overlays.tsx'
 import { errorText, pauseText, recordingState } from '../../ui/status.tsx'
 import { WHAT_GOES_TO_AI } from './AiTab.tsx'
+import { retentionCuts } from './retention.ts'
 import { Row, Section } from './Row.tsx'
 
 function names(list: string[]): string {
@@ -24,6 +26,12 @@ function browsersText(rec: RecordingView | null): string {
     .join(' ')
 }
 
+const PAUSE: { until: 'hour' | 'tomorrow' | 'until_resumed'; label: string; done: string }[] = [
+  { until: 'hour', label: 'For 1 hour', done: 'Paused for 1 hour.' },
+  { until: 'tomorrow', label: 'Until tomorrow', done: 'Paused until tomorrow.' },
+  { until: 'until_resumed', label: 'Until I resume', done: 'Paused until you resume.' },
+]
+
 const KEEP: { days: number | null; label: string }[] = [
   { days: 30, label: '1 month' },
   { days: 90, label: '3 months' },
@@ -33,8 +41,10 @@ const KEEP: { days: number | null; label: string }[] = [
 ]
 
 export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | null; rec: RecordingView | null; onDeleted: (text: string) => void }) {
-  const { data: privacy } = useQuery({ q: 'privacy' })
+  const { data: privacy, error: privacyError } = useQuery({ q: 'privacy' })
   const [keepOpen, setKeepOpen] = useState(false)
+  const [pauseOpen, setPauseOpen] = useState(false)
+  const [shorten, setShorten] = useState<{ days: number; label: string; deletes: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const toast = useToast()
   const state = recordingState(shell, rec)
@@ -45,13 +55,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
   }
   const keep = KEEP.find((k) => k.days === (privacy?.retention_days ?? null))
   const today = dateKey(new Date())
-  const deletesNow = (days: number | null): string => {
-    const first = rec?.first_day
-    if (days === null || !first) return ''
-    const lastKept = addDays(today, -days)
-    if (first >= lastKept) return ''
-    return ` · deletes ${rangeTitle(first, addDays(lastKept, -1))} now`
-  }
+  const deletesNow = (days: number | null) => retentionCuts(rec?.first_day ?? null, days, Date.now())
   return (
     <>
       <Section title="Recording">
@@ -86,13 +90,28 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           </Row>
         ) : (
           <Row label="Pause" detail="Also in the menu bar.">
-            <Button onClick={() => void run(act({ a: 'pause', until: 'hour' }))}>
-              Pause for 1 hour
-            </Button>
+            <div className="settings-anchor">
+              <Button onClick={() => setPauseOpen((o) => !o)}>Pause…</Button>
+              <Popover open={pauseOpen} onClose={() => setPauseOpen(false)}>
+                {PAUSE.map((p) => (
+                  <button
+                    key={p.until}
+                    className="menu-item"
+                    onClick={() => {
+                      setPauseOpen(false)
+                      void run(act({ a: 'pause', until: p.until }), p.done)
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </Popover>
+            </div>
           </Row>
         )}
       </Section>
-      <NeverRecord exclusions={privacy?.exclusions ?? []} seen={privacy?.seen_apps ?? []} platform={shell?.platform ?? ''} />
+      {privacyError && <p className="settings-problem">Daylens couldn’t read what it keeps out. Close Settings and open it again.</p>}
+      {privacy && <NeverRecord exclusions={privacy.exclusions} defaults={privacy.defaults} seen={privacy.seen_apps} platform={shell?.platform ?? ''} />}
       <Section title="Privacy">
         <Row label="Private and incognito windows" detail="Never recorded, in every browser." />
         <Row label="What goes to AI" detail={WHAT_GOES_TO_AI} />
@@ -100,7 +119,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
       <Section title="History">
         <Row label="Keep history for" detail="Older days are deleted for good. Shortening this deletes them right away.">
           <div className="settings-anchor">
-            <Button onClick={() => setKeepOpen((o) => !o)}>
+            <Button disabled={!rec || !privacy} onClick={() => setKeepOpen((o) => !o)}>
               {keep?.label ?? `${privacy?.retention_days} days`}
             </Button>
             <Popover open={keepOpen} onClose={() => setKeepOpen(false)}>
@@ -111,11 +130,13 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
                   aria-current={k.days === (privacy?.retention_days ?? null)}
                   onClick={() => {
                     setKeepOpen(false)
-                    void run(act({ a: 'retention', days: k.days }))
+                    const deletes = deletesNow(k.days)
+                    if (deletes && k.days !== null) setShorten({ days: k.days, label: k.label, deletes })
+                    else void run(act({ a: 'retention', days: k.days }))
                   }}
                 >
                   {k.label}
-                  {deletesNow(k.days)}
+                  {deletesNow(k.days) && ` · deletes ${deletesNow(k.days)}`}
                 </button>
               ))}
             </Popover>
@@ -127,6 +148,28 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           </Button>
         </Row>
       </Section>
+      {shorten && (
+        <Dialog onClose={() => setShorten(null)} label="Keep history for less">
+          <p>
+            Keep history for {shorten.label.toLowerCase()}? Daylens deletes {shorten.deletes} from this computer now, and it can’t be brought back.
+          </p>
+          <div className="dialog-actions">
+            <Button
+              kind="danger"
+              onClick={() => {
+                const days = shorten.days
+                setShorten(null)
+                void run(act({ a: 'retention', days }))
+              }}
+            >
+              Delete
+            </Button>
+            <Button onClick={() => setShorten(null)} autoFocus>
+              Cancel
+            </Button>
+          </div>
+        </Dialog>
+      )}
       {deleting && (
         <DeleteHistory
           firstDay={rec?.first_day ?? today}
@@ -147,15 +190,38 @@ function siteOf(text: string): string | null {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(t) ? t : null
 }
 
-function NeverRecord({ exclusions, seen, platform }: { exclusions: Exclusion[]; seen: { id: string; name: string }[]; platform: string }) {
+function NeverRecord({ exclusions, defaults: all, seen, platform }: { exclusions: Exclusion[]; defaults: Omit<Exclusion, 'is_default'>[]; seen: { id: string; name: string }[]; platform: string }) {
   const [adding, setAdding] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [text, setText] = useState('')
   const [problem, setProblem] = useState<string | null>(null)
   const toast = useToast()
-  const defaults = exclusions.filter((e) => e.is_default && (platform === 'win32' || e.match !== 'exe'))
+  const here = (e: { match: string }) => platform === 'win32' || e.match !== 'exe'
+  const defaults = exclusions.filter((e) => e.is_default && here(e))
   const own = exclusions.filter((e) => !e.is_default)
-  const defaultNames = [...new Set(defaults.map((e) => e.label))]
+  const defaultNames = [...new Set(all.filter(here).map((e) => e.label))]
+  const missing = all.filter((d) => here(d) && !exclusions.some((e) => e.match === d.match && e.value.toLowerCase() === d.value.toLowerCase()))
   const matches = text.trim() ? seen.filter((a) => a.name.toLowerCase().includes(text.trim().toLowerCase()) && !own.some((e) => e.match === 'app_id' && e.value === a.id)).slice(0, 5) : []
+  const addAll = async (rules: Omit<Exclusion, 'is_default'>[]) => {
+    for (const e of rules) {
+      const r = await act({ a: 'exclude', rule: { match: e.match, value: e.value, label: e.label } })
+      if (!r.ok) return toast({ text: errorText(r.error), error: true })
+    }
+  }
+  const recordManagers = async () => {
+    setConfirming(false)
+    const taken = defaults
+    for (const e of taken) {
+      const r = await act({ a: 'unexclude', match: e.match, value: e.value })
+      if (!r.ok) return toast({ text: errorText(r.error), error: true })
+    }
+    toast({ text: 'Password managers are recorded again.', action: { label: 'Undo', run: () => void addAll(taken) } })
+  }
+  const choose = async () => {
+    const r = await act({ a: 'pick_app' })
+    if (!r.ok) return toast({ text: errorText(r.error), error: true })
+    if (r.result) await add(r.result as { id: string; name: string })
+  }
   const add = async (pick?: { id: string; name: string }) => {
     const app = pick ?? seen.find((a) => a.name.toLowerCase() === text.trim().toLowerCase())
     const site = app ? null : siteOf(text)
@@ -177,10 +243,16 @@ function NeverRecord({ exclusions, seen, platform }: { exclusions: Exclusion[]; 
     <div>
       <h2 className="settings-heading">Never record</h2>
       <div className="settings-card">
-        {defaults.length > 0 && (
+        {missing.length === 0 ? (
           <Row label="Password managers" detail={`${defaultNames.join(', ')} · on from the start`}>
-            <Button kind="quiet" onClick={() => void removeAll(defaults)}>
+            <Button kind="quiet" onClick={() => setConfirming(true)}>
               Remove
+            </Button>
+          </Row>
+        ) : (
+          <Row label="Password managers" detail={defaults.length > 0 ? `Some are recorded: ${[...new Set(missing.map((e) => e.label))].join(', ')}.` : 'Recorded like any other app.'}>
+            <Button kind="quiet" onClick={() => void addAll(missing)}>
+              Add back
             </Button>
           </Row>
         )}
@@ -215,6 +287,11 @@ function NeverRecord({ exclusions, seen, platform }: { exclusions: Exclusion[]; 
                 Cancel
               </Button>
             </div>
+            {platform === 'darwin' && (
+              <button className="menu-item" onClick={() => void choose()}>
+                Choose from Applications…
+              </button>
+            )}
             {matches.map((a) => (
               <button key={a.id} className="menu-item" onClick={() => void add(a)}>
                 {a.name}
@@ -230,7 +307,41 @@ function NeverRecord({ exclusions, seen, platform }: { exclusions: Exclusion[]; 
           </div>
         )}
       </div>
+      {confirming && (
+        <Dialog onClose={() => setConfirming(false)} label="Record password managers">
+          <p>Record password managers again? Daylens will note {defaultNames.join(', ')} and their sites like any other app.</p>
+          <div className="dialog-actions">
+            <Button kind="danger" onClick={() => void recordManagers()}>
+              Record them
+            </Button>
+            <Button onClick={() => setConfirming(false)} autoFocus>
+              Cancel
+            </Button>
+          </div>
+        </Dialog>
+      )}
     </div>
+  )
+}
+
+/** A day written the way the app writes days, "30 October", picked from the app's own calendar. */
+function DateField({ value, firstDay, onPick }: { value: string; firstDay: string; onPick: (d: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="settings-anchor">
+      <Button onClick={() => setOpen((o) => !o)}>{dayMonth(value)}</Button>
+      <Popover open={open} onClose={() => setOpen(false)} align="left">
+        <CalendarPicker
+          selected={value}
+          today={dateKey(new Date())}
+          firstDay={firstDay}
+          onPick={(d) => {
+            setOpen(false)
+            onPick(d)
+          }}
+        />
+      </Popover>
+    </span>
   )
 }
 
@@ -293,14 +404,14 @@ function DeleteHistory({ firstDay, onClose, onDone }: { firstDay: string; onClos
       <div className="settings-options">
         {option('ten', 'The last 10 minutes')}
         {option('hour', 'The last hour')}
-        {option('day', 'A day', <input className="date-input" type="date" min={firstDay} max={today} value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />)}
+        {option('day', 'A day', <DateField value={day} firstDay={firstDay} onPick={setDay} />)}
         {option(
           'range',
           'A range',
           <span className="settings-range">
-            <input className="date-input" type="date" min={firstDay} max={today} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} />
+            <DateField value={from} firstDay={firstDay} onPick={setFrom} />
             <span className="faint">to</span>
-            <input className="date-input" type="date" min={firstDay} max={today} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />
+            <DateField value={to} firstDay={firstDay} onPick={setTo} />
           </span>,
         )}
         {option('everything', 'Everything')}
