@@ -41,7 +41,7 @@ const KEEP: { days: number | null; label: string }[] = [
 ]
 
 export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | null; rec: RecordingView | null; onDeleted: (text: string) => void }) {
-  const { data: privacy } = useQuery({ q: 'privacy' })
+  const { data: privacy, error: privacyError } = useQuery({ q: 'privacy' })
   const [keepOpen, setKeepOpen] = useState(false)
   const [pauseOpen, setPauseOpen] = useState(false)
   const [shorten, setShorten] = useState<{ days: number; label: string; deletes: string } | null>(null)
@@ -110,7 +110,11 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           </Row>
         )}
       </Section>
-      <NeverRecord exclusions={privacy?.exclusions ?? []} defaults={privacy?.defaults ?? []} seen={privacy?.seen_apps ?? []} platform={shell?.platform ?? ''} />
+      {privacy ? (
+        <NeverRecord exclusions={privacy.exclusions} defaults={privacy.defaults} seen={privacy.seen_apps} platform={shell?.platform ?? ''} />
+      ) : (
+        privacyError && <p className="settings-problem">Daylens couldn’t read what it keeps out. Close Settings and open it again.</p>
+      )}
       <Section title="Privacy">
         <Row label="Private and incognito windows" detail="Never recorded, in every browser." />
         <Row label="What goes to AI" detail={WHAT_GOES_TO_AI} />
