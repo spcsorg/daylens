@@ -5,21 +5,32 @@ import { HOUR_MS, dateOf, factsTitle, hourStarts, startOf, type Handlers, type R
 
 export function hour(r: Reader, startMs: number): HourDetail {
   const end = startMs + HOUR_MS
-  const day = dateOf(startMs)
   const inHour = r.spans(startMs, Math.min(end, r.now()))
-  const daySpans = r.spans(startOf(day), Math.min(startOf(day, 1), r.now()))
-  const sources = [...r.sources(inHour, daySpans), ...r.visitSources(r.visits(startMs, Math.min(end, r.now())))]
+  const sources = [...r.sources(inHour, inHour), ...r.visitSources(r.visits(startMs, Math.min(end, r.now())))]
   const w = r.writtenHours(startMs, end).get(startMs)
   return { start_ms: startMs, detail: w?.detail ?? null, sources }
 }
 
-/** The last windows and pages of today, most recent first. */
+const BREAK_MS = 30 * 60_000
+
+/**
+ * The last three windows and pages before your most recent break, half an hour or more with nothing in front, looking
+ * back a week; most recent first. Nothing from the stretch you're in now.
+ */
 export function leftOff(r: Reader): Source[] {
   const now = r.now()
-  const spans = r.spans(startOf(dateOf(now)), now)
-  return r.sources(spans, spans)
-    .sort((a, b) => b.last_ms - a.last_ms)
-    .slice(0, 3)
+  const spans = r.spans(startOf(dateOf(now), -7), now).sort((a, b) => a.s - b.s)
+  let edge = now
+  let i = spans.length
+  while (i > 0 && edge - spans[i - 1]!.e < BREAK_MS) edge = Math.min(edge, spans[--i]!.s)
+  const last = new Map<string, Span>()
+  for (let j = i - 1; j >= 0 && last.size < 3; j--) {
+    const x = spans[j]!
+    const k = `${x.app_id}\u0000${x.url ?? ''}\u0000${x.title ?? ''}`
+    if (!last.has(k)) last.set(k, x)
+  }
+  const picked = [...last.values()]
+  return r.sources(picked, picked).sort((a, b) => b.last_ms - a.last_ms)
 }
 
 export function week(r: Reader, start: string): WeekView {

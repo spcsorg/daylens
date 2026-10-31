@@ -302,3 +302,40 @@ test('search hides what is past the retention period, before pruning reaches it'
   db.close()
   r.close()
 })
+
+test('where you left off is what was open before your last break, not what is in front now', async () => {
+  resetSeq()
+  const r = rig()
+  work(r, T0 + 9 * HOUR, [
+    [notes, 'Order list', 20],
+    [sheets, 'Flour costs', 20],
+    [notes, 'Supplier email', 20],
+  ])
+  const end = work(r, T0 + 11 * HOUR, [[sheets, 'Price sheet', 30]])
+  r.clock.t = end + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  const left = today.leftOff(reader)
+  assert.deepEqual(left.map((s) => s.title), ['Supplier email', 'Flour costs', 'Order list'])
+  // Each row's time is when it was last in front before the break, not the whole day.
+  assert.ok(Math.abs(left[0]!.last_ms - (T0 + 10 * HOUR)) < 2 * MIN)
+  // The open hour lists its rows with their range inside that hour.
+  const nine = today.hour(reader, T0 + 9 * HOUR).sources.find((s) => s.title === 'Order list')!
+  assert.ok(nine.first_ms >= T0 + 9 * HOUR && nine.last_ms <= T0 + 10 * HOUR)
+  db.close()
+  r.close()
+})
+
+test('with no break yet in the record, where you left off shows nothing', async () => {
+  resetSeq()
+  const r = rig()
+  const end = work(r, T0 + 9 * HOUR, [[notes, 'Order list', 40]])
+  r.clock.t = end + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(today.leftOff(reader), [])
+  db.close()
+  r.close()
+})

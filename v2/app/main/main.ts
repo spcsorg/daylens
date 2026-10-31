@@ -2,6 +2,7 @@
 // in their own processes, and routes the interface's actions. It never opens the database.
 import { BrowserWindow, Menu, MessageChannelMain, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AssistantRequest } from '../shared/assistants.ts'
 import type { Action, ActionResult, DayView, Query, RecordingView, ShellState } from '../shared/types.ts'
@@ -193,7 +194,9 @@ const iconCache = new Map<string, Buffer>()
 async function appIcon(id: string): Promise<Buffer | null> {
   const hit = iconCache.get(id)
   if (hit) return hit
-  const appPath = (await query<string | null>({ q: 'app_path', id }).catch(() => null)) ?? (await bundlePath(id))
+  const recorded = await query<string | null>({ q: 'app_path', id }).catch(() => null)
+  // An app no longer on this Mac gets no icon: getFileIcon would draw a generic document.
+  const appPath = recorded && existsSync(recorded) ? recorded : await bundlePath(id)
   if (!appPath) return null
   try {
     // Quick Look draws an app bundle's own icon; getFileIcon gives a generic one for bundles on macOS.

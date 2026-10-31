@@ -59,6 +59,7 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
             <CalendarPicker
               selected={nav.date}
               today={today}
+              firstDay={firstDay}
               onPick={(d) => {
                 setPicker(false)
                 setNav({ ...nav, date: d })

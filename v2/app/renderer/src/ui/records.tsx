@@ -67,7 +67,7 @@ export function Hour({ start, time, kind, current, title, summary, apps = [], no
 export function WeekBlock({ title, current, onClick }: { title: string; current?: boolean; onClick: () => void }) {
   return (
     <button type="button" className={`week-block${current ? ' current' : ''}`} title={title} onClick={onClick}>
-      {title}
+      <span className="week-block-text">{title}</span>
     </button>
   )
 }
@@ -105,7 +105,7 @@ export function SearchResult({ icon, title, meta, hour, selected, onHover, onCli
 }
 
 export interface RemoveTarget {
-  // What the question names: "Cursor", "this site".
+  // What the question names: "Cursor", "docs.google.com".
   name: string
   // "5 March", "4–10 March".
   when: string
@@ -129,7 +129,7 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   return (
     <Dialog onClose={onClose} label="Remove">
       <p>
-        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name === 'this site' ? 'it' : target.name} {target.when.includes('–') ? 'those days' : 'that day'} is deleted from this computer.
+        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name} {target.when.includes('–') ? 'those days' : 'that day'} is deleted from this computer.
       </p>
       <Checkbox checked={never} onChange={setNever}>
         {target.never.text}
@@ -146,7 +146,8 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   )
 }
 
-/** A window or page: opens the thing itself; its menu keeps it out or removes it from the day. */
+/** A window or page: opens the thing itself; its menu keeps it out or removes it from the day. A row given its own
+ * `sub` line shows no time spent. */
 export function SourceRow({ s, date, sub, range }: { s: Source; date: string; sub?: string; range?: { from: number; to: number; when: string } }) {
   const [menu, setMenu] = useState(false)
   const [remove, setRemove] = useState<RemoveTarget | null>(null)
@@ -163,7 +164,7 @@ export function SourceRow({ s, date, sub, range }: { s: Source; date: string; su
   const to = range?.to ?? parseKey(addDays(date, 1)).getTime()
   const when = range?.when ?? dayMonth(date)
   const target: RemoveTarget = isPage
-    ? { name: 'this site', when, what: { kind: 'site', site: s.site!, from_wall_ms: from, to_wall_ms: to }, never }
+    ? { name: s.site!, when, what: { kind: 'site', site: s.site!, from_wall_ms: from, to_wall_ms: to }, never }
     : { name: s.app.name, when, what: { kind: 'app', app_id: s.app.id, from_wall_ms: from, to_wall_ms: to }, never }
   const neverNow = async () => {
     setMenu(false)
@@ -179,7 +180,7 @@ export function SourceRow({ s, date, sub, range }: { s: Source; date: string; su
           <span className="source-title">{s.title}</span>
           <span className="source-where">{where}</span>
         </span>
-        {s.ms > 0 && <span className="source-ms">{duration(s.ms)}</span>}
+        {s.ms > 0 && !sub && <span className="source-ms">{duration(s.ms)}</span>}
       </button>
       <div className="source-more">
         <IconButton icon="more" label="More" onClick={() => setMenu((m) => !m)} />

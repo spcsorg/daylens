@@ -86,7 +86,7 @@ function Shell() {
     )
 
   const go = (s: Screen) => {
-    if (s === 'today' && screen === 'today') setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
+    if (s === 'today') setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
     setScreen(s)
   }
 

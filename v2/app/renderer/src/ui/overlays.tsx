@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './Icon.tsx'
 
 export function Dialog({ children, onClose, label }: { children: ReactNode; onClose: () => void; label: string }) {
@@ -9,12 +10,14 @@ export function Dialog({ children, onClose, label }: { children: ReactNode; onCl
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  return (
+  // At the top level: inside a moved or animated card the scrim would cover only the card.
+  return createPortal(
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={label}>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
