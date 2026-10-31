@@ -29,9 +29,12 @@ export function Popover({ open, onClose, children, align = 'right', className = 
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
-    // Captured and stopped: Escape closes the popover alone, not a dialog it sits in.
+    // Captured and stopped: Escape closes the popover alone, not a dialog it sits in. Pressed in a modal opened over the
+    // popover (Search), it is that modal's.
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      const modal = e.target instanceof Element ? e.target.closest('[aria-modal="true"]') : null
+      if (modal && !modal.contains(ref.current)) return
       e.stopPropagation()
       onClose()
     }
