@@ -9,7 +9,7 @@ import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 import { KeyForm } from '../settings/AiTab.tsx'
-import { AnswerVisual, dayWord, opened } from './Visual.tsx'
+import { AnswerVisual, dayWord, FoundCard, opened } from './Visual.tsx'
 import './ask.css'
 
 const TRY = ['What did I do this morning?', 'What did I work on yesterday afternoon?', 'What took most of my time yesterday?']
@@ -106,6 +106,8 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
   const pinned = useRef(true)
   const lastTop = useRef(0)
   const started = thread.length > 0
+  // One key form, after the thread and always at the same place, so what is typed in it survives another question.
+  const lastNoKey = thread.findLast((t) => t.result?.kind === 'search_only')
   useEffect(() => {
     const el = scroller.current
     const content = el?.firstElementChild
@@ -144,6 +146,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
             {thread.map((t) => (
               <Exchange key={t.id} turn={t} onOpenHour={onOpenHour} onRetry={() => ((pinned.current = true), again(t))} />
             ))}
+            {lastNoKey && <NoKey onSaved={() => ((pinned.current = true), again(lastNoKey))} />}
           </div>
         )}
       </div>
@@ -196,7 +199,7 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
       )}
       {settled && r?.kind === 'no_answer' && <div className="bubble theirs">{r.missing ?? 'Your record doesn’t show that.'}</div>}
       {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
-      {settled && r?.kind === 'search_only' && <NoKey onSaved={onRetry} />}
+      {settled && r?.kind === 'search_only' && <FoundCard results={r.results} onOpenHour={onOpenHour} />}
       {settled && r?.kind === 'answer' && (
         <>
           {r.visual && <AnswerVisual visual={r.visual} onOpenHour={onOpenHour} />}
@@ -221,7 +224,7 @@ function Typing() {
 function NoKey({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="bubble theirs ask-nokey">
-      <span>Add your Anthropic API key and Claude answers from your record. Only the parts a question needs are sent.</span>
+      <span>Add your Anthropic API key and Claude writes the answer from your record. Only the parts a question needs are sent.</span>
       <KeyForm onSaved={onSaved} />
     </div>
   )

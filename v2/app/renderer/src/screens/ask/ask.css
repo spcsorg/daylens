@@ -407,6 +407,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+.ask-found {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4);
+}
+
+.ask-found-row {
+  border-radius: 12px;
+  transition: background-color var(--quick) var(--ease);
+}
+
+.ask-found-row:hover {
+  background: var(--bg-hover);
+}
+
+.ask-found-note {
+  padding: var(--space-8) var(--space-12) var(--space-4);
+  font: var(--caption);
+  color: var(--text-3);
+}
+
 .ask-thing {
   display: flex;
   align-items: center;
