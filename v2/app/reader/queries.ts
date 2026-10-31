@@ -446,6 +446,13 @@ export class Reader {
       .get(id) as { app_path: string } | undefined
     return r?.app_path ?? null
   }
+
+  document(appId: string, title: string): { path: string; app_path: string | null } | null {
+    const r = this.db
+      .prepare(`SELECT o.document, o.app_path FROM intervals i JOIN observations o ON o.id = i.obs_id WHERE i.app_id = ? AND i.title = ? AND o.document IS NOT NULL ORDER BY i.start_wall_ms DESC LIMIT 1`)
+      .get(appId, title) as { document: string; app_path: string | null } | undefined
+    return r ? { path: r.document, app_path: r.app_path } : null
+  }
 }
 
 /** A facts hour's title: the apps it was spent in, longest first. */

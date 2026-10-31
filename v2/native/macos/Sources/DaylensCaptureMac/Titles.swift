@@ -333,7 +333,7 @@ final class TitleWorker: Thread {
     let id = "ax-\(CFHash(win))"
     var ref: CFTypeRef?
     switch AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &ref) {
-    case .success: return WindowInfo.read(window: id, title: ref as? String)
+    case .success: return WindowInfo.read(window: id, title: ref as? String, document: documentPath(win))
     case .noValue: return WindowInfo(window: id, title: nil, titleState: .empty)
     case .apiDisabled: return WindowInfo(window: id, title: nil, titleState: .no_permission)
     case .cannotComplete: return WindowInfo(window: id, title: nil, titleState: .timeout)
@@ -342,6 +342,12 @@ final class TitleWorker: Thread {
       return WindowInfo(window: id, title: nil, titleState: .unavailable)
     default: return WindowInfo(window: id, title: nil, titleState: .unavailable)
     }
+  }
+
+  /// The window's file, from `AXDocument` (a file URL); only local files are kept.
+  private func documentPath(_ win: AXUIElement) -> String? {
+    guard let s = string(win, kAXDocumentAttribute), let url = URL(string: s), url.isFileURL, !url.path.isEmpty else { return nil }
+    return url.path
   }
 
   private func emitIfChanged(_ trigger: FocusTrigger, _ w: WindowInfo, time: EventTime, force: Bool, generation: Int? = nil) {

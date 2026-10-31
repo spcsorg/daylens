@@ -113,6 +113,16 @@ test('browser windows keep app time but never their title', () => {
   assert.ok(!JSON.stringify(sink).includes(CANARY))
 })
 
+test('a window’s file is kept with its title, and never for a window whose title is withheld', () => {
+  const { sink, n } = setup()
+  const withFile = (l: ReturnType<typeof focus>, file: string) => ((l.obs as { window: { document?: string } }).window.document = file, l)
+  n.handle(withFile(focus(app('com.example.notes'), 'Plan.txt', T0, 'app_changed'), '/Users/example/Plan.txt'))
+  n.handle(withFile(focus(app('com.example.notes'), 'Plan.txt', T0 + 1), '/Users/example/Old/Plan.txt'))
+  n.handle(withFile(focus(app('com.google.Chrome'), CANARY, T0 + 2, 'app_changed'), `/Users/example/${CANARY}.html`))
+  assert.deepEqual(sink.rows.map((r) => r.document), ['/Users/example/Plan.txt', '/Users/example/Old/Plan.txt', null], 'another file under the same title is a new row')
+  assert.ok(!JSON.stringify(sink).includes(CANARY))
+})
+
 test('an app whose identity could not be resolved never stores a title', () => {
   const { sink, n } = setup()
   for (const state of ['access_denied', 'timeout', 'gone'] as const) {

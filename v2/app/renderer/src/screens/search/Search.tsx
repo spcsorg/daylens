@@ -1,13 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { FoundHour, FoundItem, SearchResults } from '../../../../shared/search.ts'
 import type { Source } from '../../../../shared/types.ts'
-import { act, query, useQuery } from '../../lib/api.ts'
+import { query, useQuery } from '../../lib/api.ts'
 import { clock, hourLabel, seenAt } from '../../lib/format.ts'
 import { Button } from '../../ui/controls.tsx'
 import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
-import { AppIcon, SearchResult } from '../../ui/records.tsx'
-import { errorText } from '../../ui/status.tsx'
+import { AppIcon, openThing, SearchResult } from '../../ui/records.tsx'
 import './search.css'
 
 // Each kind (pages, files, windows, hours) shows this many, as Spotlight and Raycast do; docs/experience.md records them.
@@ -81,14 +80,15 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     }
     if ('recent' in row) {
       const s = row.recent
-      const r = s.url ? await act({ a: 'open_url', url: s.url }) : await act({ a: 'open_app', id: s.app.id })
-      if (!r.ok) return toast({ text: errorText(r.error), error: true })
-      return close()
+      const said = await openThing({ url: s.url, app_id: s.app.id, app_name: s.app.name, title: s.title })
+      if (said) toast(said)
+      return said?.error ? undefined : close()
     }
     const o = row.item.open
-    const r = o.kind === 'url' ? await act({ a: 'open_url', url: o.url }) : o.kind === 'app' ? await act({ a: 'open_app', id: o.app_id }) : (onOpenHour(o.hour_start_wall_ms), { ok: true as const })
-    if (!r.ok) return toast({ text: errorText(r.error), error: true })
-    close()
+    if (o.kind === 'hour') return (onOpenHour(o.hour_start_wall_ms), close())
+    const said = await openThing(o.kind === 'url' ? { url: o.url, app_id: row.item.app_id, app_name: row.item.app_name ?? '', title: null } : { url: null, app_id: o.app_id, app_name: o.app_name ?? row.item.app_name ?? 'the app', title: row.item.title })
+    if (said) toast(said)
+    if (!said?.error) close()
   }
 
   const onKey = (e: React.KeyboardEvent) => {

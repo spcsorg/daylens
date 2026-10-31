@@ -49,21 +49,24 @@ public struct WindowInfo: Equatable {
   public var window: String?
   public var title: String?
   public var titleState: TitleState
-  public init(window: String?, title: String?, titleState: TitleState) {
+  // The local file the window shows, when the app reports one.
+  public var document: String?
+  public init(window: String?, title: String?, titleState: TitleState, document: String? = nil) {
     self.window = window
     let t = titleState == .ok && !(title ?? "").isEmpty ? WindowInfo.truncate(title) : nil
     self.title = t
     // The protocol requires a title exactly when the state is ok.
     self.titleState = titleState == .ok && t == nil ? (title == nil ? .unavailable : .empty) : titleState
+    self.document = self.titleState == .ok && (document?.utf16.count ?? 0) <= maxTitleUTF16 ? document : nil
   }
   /// Builds from a raw title read: empty strings become `.empty`.
-  public static func read(window: String?, title: String?) -> WindowInfo {
+  public static func read(window: String?, title: String?, document: String? = nil) -> WindowInfo {
     guard let t = title else { return WindowInfo(window: window, title: nil, titleState: .unavailable) }
-    return t.isEmpty ? WindowInfo(window: window, title: nil, titleState: .empty) : WindowInfo(window: window, title: t, titleState: .ok)
+    return t.isEmpty ? WindowInfo(window: window, title: nil, titleState: .empty) : WindowInfo(window: window, title: t, titleState: .ok, document: document)
   }
   static func truncate(_ s: String?) -> String? { clip(s, maxTitleUTF16) }
   var json: JSON {
-    .object([("window", .str(window)), ("title", .str(title)), ("title_state", .string(titleState.rawValue))])
+    .object([("window", .str(window)), ("title", .str(title)), ("title_state", .string(titleState.rawValue))] + (document.map { [("document", .string($0))] } ?? []))
   }
 }
 

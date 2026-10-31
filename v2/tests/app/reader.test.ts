@@ -302,3 +302,23 @@ test('search hides what is past the retention period, before pruning reaches it'
   db.close()
   r.close()
 })
+
+test('a window opens to the newest file it showed under that title, found by app and title', async () => {
+  resetSeq()
+  const r = rig()
+  const withFile = (l: ReturnType<typeof focus>, file: string) => ((l.obs as { window: { document?: string } }).window.document = file, l)
+  const t = T0 + 9 * HOUR
+  r.feed(withFile(focus(notes, 'Plan.txt', t), '/Users/example/Old/Plan.txt'))
+  r.feed(focus(notes, 'Untitled', t + 10 * MIN))
+  r.feed(withFile(focus(notes, 'Plan.txt', t + 20 * MIN), '/Users/example/Plan.txt'))
+  r.feed(focus(sheets, 'Plan.txt', t + 30 * MIN))
+  r.clock.t = t + 40 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(reader.document(notes.app_id!, 'Plan.txt'), { path: '/Users/example/Plan.txt', app_path: notes.path })
+  assert.equal(reader.document(notes.app_id!, 'Untitled'), null)
+  assert.equal(reader.document(sheets.app_id!, 'Plan.txt'), null, 'another app with the same title has no file')
+  db.close()
+  r.close()
+})

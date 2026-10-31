@@ -31,7 +31,9 @@ if (running()) {
 
 const key = existsSync(keyFile) ? readFileSync(keyFile) : null
 rmSync(root, { recursive: true, force: true })
-for (const d of [path.join(home, '.claude'), path.join(home, '.codex'), shell]) mkdirSync(d, { recursive: true })
+for (const d of [path.join(home, '.claude'), path.join(home, '.codex'), path.join(home, 'Documents'), shell]) mkdirSync(d, { recursive: true })
+// The stand-in helper's TextEdit window shows this file, so clicking it opens the file itself.
+writeFileSync(path.join(home, 'Documents', 'Pricing memo.txt'), 'Pricing memo: draft.\n')
 execFileSync(process.execPath, [path.join(v2, 'app', 'tools', 'seed.ts'), '--data-dir', data], { stdio: ['ignore', 'ignore', 'inherit'] })
 if (key) writeFileSync(keyFile, key, { mode: 0o600 })
 writeFileSync(path.join(shell, 'shell.json'), JSON.stringify({ onboarded: true }))

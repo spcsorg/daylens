@@ -31,11 +31,12 @@ function broadcast(e: ReaderEvent): void {
   for (const p of ports) p.postMessage(e)
 }
 
-const core: Handlers<Extract<Query, { q: 'day' | 'recorded_days' | 'recording' | 'app_path' }>> = {
+const core: Handlers<Extract<Query, { q: 'day' | 'recorded_days' | 'recording' | 'app_path' | 'document' }>> = {
   day: ({ record }, q) => record.day(q.date),
   recorded_days: ({ record }, q) => record.recordedDays(q.month),
   recording: ({ record }) => record.recording(),
   app_path: ({ record }, q) => record.appPath(q.id),
+  document: ({ record }, q) => record.document(q.app_id, q.title),
 }
 
 // Ask answers asynchronously, over the network, so it is not a handler here.

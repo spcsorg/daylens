@@ -103,5 +103,10 @@
   "name": "tab_unknown_reason",
   "reason": "malformed",
   "raw": "{\"v\": 1, \"run\": \"run-0002\", \"seq\": 0, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"browser_ext\", \"kind\": \"tab\", \"obs\": {\"trigger\": \"activated\", \"state\": \"unknown\", \"reason\": \"private_window\", \"browser\": {\"app_id\": \"company.thebrowser.dia\", \"name\": \"Dia\", \"path\": \"/Applications/Dia.app\", \"pid\": 812, \"registered_browser\": true, \"identity_state\": \"ok\", \"store\": null}, \"extension\": \"abcdefghijklmnopabcdefghijklmnop\", \"window\": \"1\", \"tab\": \"2\", \"url\": null, \"title\": null}}"
+ },
+ {
+  "name": "document_without_title",
+  "reason": "malformed",
+  "raw": "{\"v\": 1, \"run\": \"run-0001\", \"seq\": 3, \"boot\": \"boot-0001\", \"t\": {\"wall_ms\": 1792130412345, \"mono_us\": 881234567890, \"tz\": \"Example/Town\", \"tz_offset_min\": -300}, \"platform\": \"macos\", \"source\": \"ax_observer\", \"kind\": \"focus\", \"obs\": {\"trigger\": \"window_changed\", \"app\": {\"app_id\": \"com.apple.Terminal\", \"name\": \"Terminal\", \"path\": \"/System/Applications/Utilities/Terminal.app\", \"pid\": 501, \"registered_browser\": false, \"engine\": \"none\", \"signer\": null, \"version_info\": null, \"identity_state\": \"ok\", \"store\": null}, \"window\": {\"window\": \"w-2\", \"title\": null, \"title_state\": \"timeout\", \"document\": \"/Users/example/Documents/Plan.txt\"}}}"
  }
 ]
