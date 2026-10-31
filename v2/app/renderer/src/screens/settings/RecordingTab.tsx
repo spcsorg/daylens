@@ -110,11 +110,8 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           </Row>
         )}
       </Section>
-      {privacy ? (
-        <NeverRecord exclusions={privacy.exclusions} defaults={privacy.defaults} seen={privacy.seen_apps} platform={shell?.platform ?? ''} />
-      ) : (
-        privacyError && <p className="settings-problem">Daylens couldn’t read what it keeps out. Close Settings and open it again.</p>
-      )}
+      {privacyError && <p className="settings-problem">Daylens couldn’t read what it keeps out. Close Settings and open it again.</p>}
+      {privacy && <NeverRecord exclusions={privacy.exclusions} defaults={privacy.defaults} seen={privacy.seen_apps} platform={shell?.platform ?? ''} />}
       <Section title="Privacy">
         <Row label="Private and incognito windows" detail="Never recorded, in every browser." />
         <Row label="What goes to AI" detail={WHAT_GOES_TO_AI} />
