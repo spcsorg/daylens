@@ -8,6 +8,12 @@
   position: relative;
 }
 
+.apps-total {
+  font: var(--label-regular);
+  color: var(--text-2);
+  margin-bottom: var(--space-12);
+}
+
 .apps-layout {
   display: flex;
   gap: var(--space-24);

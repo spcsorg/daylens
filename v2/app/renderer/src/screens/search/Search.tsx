@@ -13,14 +13,19 @@ import './search.css'
 // Each kind (pages, files, windows, hours) shows this many, as Spotlight and Raycast do; docs/experience.md records them.
 const FIRST = 5
 const MORE = 25
+interface Limit {
+  things: number
+  hours: number
+}
 
 const KIND = { page: 'Page', file: 'File', window: 'Window' } as const
 
 type Row = { key: string; item: FoundItem } | { key: string; hour: FoundHour } | { key: string; recent: Source }
 
-function rows(r: SearchResults): { things: Row[]; hours: Row[] } {
-  const things = [...r.pages, ...r.files, ...r.windows].map((item) => ({ key: `${item.kind}|${item.app_id}|${item.url ?? ''}|${item.file ?? ''}|${item.title}`, item }))
-  const hours = r.hours.map((hour) => ({ key: `hour|${hour.hour_id}`, hour }))
+// Each group shows up to its own limit, so Show more on one leaves the other as it was.
+function rows(r: SearchResults, limit: Limit): { things: Row[]; hours: Row[] } {
+  const things = [...r.pages.slice(0, limit.things), ...r.files.slice(0, limit.things), ...r.windows.slice(0, limit.things)].map((item) => ({ key: `${item.kind}|${item.app_id}|${item.url ?? ''}|${item.file ?? ''}|${item.title}`, item }))
+  const hours = r.hours.slice(0, limit.hours).map((hour) => ({ key: `hour|${hour.hour_id}`, hour }))
   return { things, hours }
 }
 
@@ -28,7 +33,7 @@ function rows(r: SearchResults): { things: Row[]; hours: Row[] } {
  * anything is typed it offers where you left off, as Raycast and Linear offer recents. */
 export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; onOpenHour: (startMs: number) => void }) {
   const [text, setText] = useState('')
-  const [perGroup, setPerGroup] = useState(FIRST)
+  const [limit, setLimit] = useState<Limit>({ things: FIRST, hours: FIRST })
   const [active, setActive] = useState(0)
   const [closing, setClosing] = useState(false)
   const [shown, setShown] = useState<SearchResults | null>(null)
@@ -37,14 +42,14 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   const list = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const typed = text.trim()
-  const { data, error, current } = useQuery(typed ? { q: 'search', text: typed, per_group: perGroup } : null, { live: true })
+  const { data, error, current } = useQuery(typed ? { q: 'search', text: typed, per_group: Math.max(limit.things, limit.hours) } : null, { live: true })
   const { data: leftOff } = useQuery(typed ? null : { q: 'left_off' })
   // Only results for what is typed now can be opened. While the next ones load, the last stay in place, dimmed, so the
   // panel never blanks and jumps on a keystroke.
   const results = typed && data && current ? data : null
   const display = results ?? (typed ? shown : null)
   const stale = display !== null && results === null
-  const { things, hours } = display ? rows(display) : { things: [], hours: [] }
+  const { things, hours } = display ? rows(display, limit) : { things: [], hours: [] }
   const recents: Row[] = typed ? [] : (leftOff ?? []).map((s) => ({ key: `recent|${s.app.id}|${s.url ?? ''}|${s.title}`, recent: s }))
   const all = typed ? [...things, ...hours] : recents
 
@@ -56,7 +61,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   }, [])
   useEffect(() => {
     setActive(0)
-    setPerGroup(FIRST)
+    setLimit({ things: FIRST, hours: FIRST })
   }, [typed])
   useEffect(() => {
     if (results || !typed) setShown(results)
@@ -66,7 +71,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     const el = list.current?.querySelector<HTMLElement>('[aria-selected="true"]')
     setHighlight(el ? { top: el.offsetTop, height: el.offsetHeight } : null)
     el?.scrollIntoView({ block: 'nearest' })
-  }, [active, display, leftOff, perGroup])
+  }, [active, display, leftOff, limit])
 
   const close = () => {
     setClosing(true)
@@ -118,8 +123,8 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     stops[(at + (e.shiftKey ? -1 : 1) + stops.length) % stops.length]?.focus()
   }
 
-  const moreThings = display?.more.some((g) => g !== 'hours') && perGroup === FIRST
-  const moreHours = display?.more.includes('hours') && perGroup === FIRST
+  const moreThings = limit.things === FIRST && display !== null && (display.more.some((g) => g !== 'hours') || [display.pages, display.files, display.windows].some((g) => g.length > FIRST))
+  const moreHours = limit.hours === FIRST && display !== null && (display.more.includes('hours') || display.hours.length > FIRST)
   const tile = (icon: ReactNode) => <span className="search-tile">{icon}</span>
   const row = (r: Row, i: number) => {
     const [icon, name, sub] =
@@ -160,7 +165,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               <h2 className="section-label">Pages, files and windows</h2>
               {things.map((r, i) => row(r, i))}
               {moreThings && (
-                <Button kind="quiet" className="search-more" onClick={() => setPerGroup(MORE)}>
+                <Button kind="quiet" className="search-more" onClick={() => setLimit((l) => ({ ...l, things: MORE }))}>
                   Show more
                 </Button>
               )}
@@ -171,7 +176,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               <h2 className="section-label">Hours</h2>
               {hours.map((r, i) => row(r, things.length + i))}
               {moreHours && (
-                <Button kind="quiet" className="search-more" onClick={() => setPerGroup(MORE)}>
+                <Button kind="quiet" className="search-more" onClick={() => setLimit((l) => ({ ...l, hours: MORE }))}>
                   Show more
                 </Button>
               )}
