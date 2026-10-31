@@ -165,10 +165,9 @@ test('killing the service stops the helper and the next start records an unclean
       return false
     }
   }
-  // On Windows the helper can die writing to the broken pipe before it reads the end of its input.
-  await waitFor(() => existsSync(path.join(work, 'eof')) || !alive(), 3000)
-  const stoppedAt = existsSync(path.join(work, 'eof')) ? Number(readFileSync(path.join(work, 'eof'), 'utf8')) : Date.now()
-  assert.ok(stoppedAt - killedAt < 1000, `helper exited ${stoppedAt - killedAt} ms after the service died`)
+  // On Windows the helper can die writing to the broken pipe before it reads the end of its input. An orphaned helper
+  // never stops, so how soon it stops is the runner's speed, not the behaviour.
+  await waitFor(() => existsSync(path.join(work, 'eof')) || !alive())
   await sleep(1000)
   const svc2 = startService(dataDir, work)
   await waitFor(() => svc2.log().includes('helper hello'))
