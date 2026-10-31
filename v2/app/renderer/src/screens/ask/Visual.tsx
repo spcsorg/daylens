@@ -178,7 +178,7 @@ export function FoundCard({ results, onOpenHour }: { results: SearchResults; onO
   const toast = useToast()
   const things = [...results.pages, ...results.files, ...results.windows].slice(0, 5)
   const hours = results.hours.slice(0, 3)
-  if (things.length + hours.length === 0) return null
+  if (things.length + hours.length === 0) return <div className="bubble theirs">No page, file or hour matched those words.</div>
   const open = async (o: FoundItem['open']) => {
     const r = o.kind === 'url' ? await act({ a: 'open_url', url: o.url }) : o.kind === 'app' ? await act({ a: 'open_app', id: o.app_id }) : (onOpenHour(o.hour_start_wall_ms), { ok: true as const })
     if (!r.ok) toast({ text: errorText(r.error), error: true })

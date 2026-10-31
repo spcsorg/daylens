@@ -106,8 +106,8 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
   const pinned = useRef(true)
   const lastTop = useRef(0)
   const started = thread.length > 0
-  // One key form in the thread: under the latest answer that had no key.
-  const lastNoKey = thread.findLast((t) => t.result?.kind === 'search_only')?.id
+  // One key form, after the thread and always at the same place, so what is typed in it survives another question.
+  const lastNoKey = thread.findLast((t) => t.result?.kind === 'search_only')
   useEffect(() => {
     const el = scroller.current
     const content = el?.firstElementChild
@@ -144,8 +144,9 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
         ) : (
           <div className="ask-thread">
             {thread.map((t) => (
-              <Exchange key={t.id} turn={t} keyForm={t.id === lastNoKey} onOpenHour={onOpenHour} onRetry={() => ((pinned.current = true), again(t))} />
+              <Exchange key={t.id} turn={t} onOpenHour={onOpenHour} onRetry={() => ((pinned.current = true), again(t))} />
             ))}
+            {lastNoKey && <NoKey onSaved={() => ((pinned.current = true), again(lastNoKey))} />}
           </div>
         )}
       </div>
@@ -168,7 +169,7 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
   )
 }
 
-function Exchange({ turn, keyForm, onOpenHour, onRetry }: { turn: Turn; keyForm: boolean; onOpenHour: (start: number) => void; onRetry: () => void }) {
+function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (start: number) => void; onRetry: () => void }) {
   const r = turn.result
   // The whole answer replaces what streamed: a statement can be withdrawn by a deletion made while Claude answered.
   const statements = r ? (r.kind === 'answer' ? r.statements : []) : turn.streamed
@@ -198,12 +199,7 @@ function Exchange({ turn, keyForm, onOpenHour, onRetry }: { turn: Turn; keyForm:
       )}
       {settled && r?.kind === 'no_answer' && <div className="bubble theirs">{r.missing ?? 'Your record doesn’t show that.'}</div>}
       {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
-      {settled && r?.kind === 'search_only' && (
-        <>
-          <FoundCard results={r.results} onOpenHour={onOpenHour} />
-          {keyForm && <NoKey onSaved={onRetry} />}
-        </>
-      )}
+      {settled && r?.kind === 'search_only' && <FoundCard results={r.results} onOpenHour={onOpenHour} />}
       {settled && r?.kind === 'answer' && (
         <>
           {r.visual && <AnswerVisual visual={r.visual} onOpenHour={onOpenHour} />}
