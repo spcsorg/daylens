@@ -14,6 +14,7 @@ import { handleControl, type ControlReply } from '../../capture/control.ts'
 import { DB_FILE } from '../../capture/store.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, T0, rig } from '../storage/support.ts'
+import { page } from '../retrieval/support.ts'
 
 const notes = app('com.example.notes', { name: 'Notes' })
 const sheets = app('com.example.sheets', { name: 'Sheets' })
@@ -337,6 +338,27 @@ test('with no break yet in the record, where you left off shows nothing', async 
   await r.storage.derivationSettled()
   const { reader, db } = readOnly(r)
   assert.deepEqual(today.leftOff(reader), [])
+  db.close()
+  r.close()
+})
+
+test('a page back in front after the break is left out though its title changed', async () => {
+  resetSeq()
+  const r = rig()
+  const chrome = app('com.google.Chrome', { name: 'Chrome' })
+  const url = 'https://docs.example.com/d/budget'
+  r.feed(focus(chrome, 'Budget - Docs', T0 + 9 * HOUR, 'app_changed'))
+  r.store.insertObservation({ ...page(T0 + 9 * HOUR, url, 'Budget'), seq: 1 })
+  for (let m = 1; m < 30; m++) r.feed(focus(chrome, 'Budget - Docs', T0 + 9 * HOUR + m * MIN, 'reconcile'))
+  work(r, T0 + 9 * HOUR + 30 * MIN, [[notes, 'Order list', 30]])
+  r.feed(focus(chrome, 'Budget, edited - Docs', T0 + 11 * HOUR, 'app_changed'))
+  r.store.insertObservation({ ...page(T0 + 11 * HOUR, url, 'Budget, edited'), seq: 2 })
+  for (let m = 1; m < 20; m++) r.feed(focus(chrome, 'Budget, edited - Docs', T0 + 11 * HOUR + m * MIN, 'reconcile'))
+  r.clock.t = T0 + 11 * HOUR + 20 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(today.leftOff(reader).map((s) => s.title), ['Order list'])
   db.close()
   r.close()
 })

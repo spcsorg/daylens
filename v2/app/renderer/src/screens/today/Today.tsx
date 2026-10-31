@@ -144,7 +144,7 @@ function LeftOff({ today }: { today: string }) {
     <section className="left-off">
       <h2 className="left-off-title">Where you left off</h2>
       {data.map((s) => (
-        <SourceRow key={`${s.app.id}|${s.url ?? ''}|${s.title}`} s={s} date={dateKey(new Date(s.last_ms))} sub={`${s.site ?? s.app.name} · ${at(s.last_ms)}`} />
+        <SourceRow key={`${s.app.id}|${s.url ?? ''}|${s.title}`} s={s} date={dateKey(new Date(s.last_ms - 1))} sub={`${s.site ?? s.app.name} · ${at(s.last_ms)}`} />
       ))}
     </section>
   )

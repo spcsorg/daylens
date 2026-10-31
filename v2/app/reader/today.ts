@@ -30,7 +30,9 @@ export function leftOff(r: Reader): Source[] {
   const now = r.now()
   const spans = r.spans(startOf(dateOf(now), -7), now).sort((a, b) => a.s - b.s)
   const key = (x: Span) => `${x.app_id}\u0000${x.url ?? ''}\u0000${x.title ?? ''}`
-  const front = spans.length > 0 && now - spans.at(-1)!.e < BREAK_MS ? key(spans.at(-1)!) : null
+  // A page is the same page by its address, whatever its title says now.
+  const same = (x: Span) => (x.url ? `${x.app_id}\u0000${x.url}` : key(x))
+  const front = spans.length > 0 && now - spans.at(-1)!.e < BREAK_MS ? same(spans.at(-1)!) : null
   let edge = now
   let i = spans.length
   while (i > 0 && edge - spans[i - 1]!.e < BREAK_MS) edge = Math.min(edge, spans[--i]!.s)
@@ -38,7 +40,7 @@ export function leftOff(r: Reader): Source[] {
   for (let j = i - 1; j >= 0 && last.size < 3; j--) {
     const x = spans[j]!
     const k = key(x)
-    if (k !== front && !last.has(k)) last.set(k, x)
+    if (same(x) !== front && !last.has(k)) last.set(k, x)
   }
   const picked = [...last.values()]
   return r.sources(picked, picked).map((s) => ({ ...s, ms: 0 })).sort((a, b) => b.last_ms - a.last_ms)

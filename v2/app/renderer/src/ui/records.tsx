@@ -129,7 +129,7 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   return (
     <Dialog onClose={onClose} label="Remove">
       <p>
-        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name} {target.when.includes('–') ? 'those days' : 'that day'} is deleted from this computer.
+        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name} {target.when.includes('–') ? 'on those days' : 'that day'} is deleted from this computer.
       </p>
       <Checkbox checked={never} onChange={setNever}>
         {target.never.text}
