@@ -11,6 +11,15 @@ export function hour(r: Reader, startMs: number): HourDetail {
   return { start_ms: startMs, detail: w?.detail ?? null, sources }
 }
 
+/** Today's last windows and pages, most recent first: what assistants are told the person was just doing. */
+export function recent(r: Reader): Source[] {
+  const now = r.now()
+  const spans = r.spans(startOf(dateOf(now)), now)
+  return r.sources(spans, spans)
+    .sort((a, b) => b.last_ms - a.last_ms)
+    .slice(0, 3)
+}
+
 const BREAK_MS = 30 * 60_000
 
 /**
