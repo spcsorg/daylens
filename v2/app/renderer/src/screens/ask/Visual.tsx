@@ -1,10 +1,12 @@
 // What an answer shows under its words, drawn from data code built from the record: the work of the time asked on one
 // timeline, or the page, file or window the answer is about. Each part opens the hour or the thing it came from.
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Piece, Thing, Visual } from '../../../../shared/ai.ts'
+import type { FoundHour, FoundItem, SearchResults } from '../../../../shared/search.ts'
 import { act } from '../../lib/api.ts'
-import { addDays, dateKey, duration, hourLabel, parseKey, shortDay, span } from '../../lib/format.ts'
+import { addDays, dateKey, duration, hourLabel, parseKey, seenAt, shortDay, span } from '../../lib/format.ts'
 import { IconButton } from '../../ui/controls.tsx'
+import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { AppIcon } from '../../ui/records.tsx'
 import { errorText } from '../../ui/status.tsx'
@@ -164,6 +166,37 @@ function ThingCard({ thing: t, onOpenHour }: { thing: Thing; onOpenHour: (start:
         </span>
       </button>
       <IconButton icon="today" label="Show this hour" onClick={() => onOpenHour(hourStart(t.to_wall_ms - 1))} />
+    </div>
+  )
+}
+
+const KIND = { page: 'Page', file: 'File', window: 'Window' } as const
+
+/** Without a key, what search found for the question: the pages, files and windows first, then the hours, as Search
+ * lists them, each opening the thing itself. */
+export function FoundCard({ results, onOpenHour }: { results: SearchResults; onOpenHour: (start: number) => void }) {
+  const toast = useToast()
+  const things = [...results.pages, ...results.files, ...results.windows].slice(0, 5)
+  const hours = results.hours.slice(0, 3)
+  if (things.length + hours.length === 0) return <div className="bubble theirs">No page, file or hour matched those words.</div>
+  const open = async (o: FoundItem['open']) => {
+    const r = o.kind === 'url' ? await act({ a: 'open_url', url: o.url }) : o.kind === 'app' ? await act({ a: 'open_app', id: o.app_id }) : (onOpenHour(o.hour_start_wall_ms), { ok: true as const })
+    if (!r.ok) toast({ text: errorText(r.error), error: true })
+  }
+  const row = (key: string, icon: ReactNode, title: string, where: string, o: FoundItem['open']) => (
+    <button type="button" key={key} className="source-main ask-found-row" onClick={() => void open(o)}>
+      {icon}
+      <span className="source-text">
+        <span className="source-title">{title}</span>
+        <span className="source-where">{where}</span>
+      </span>
+    </button>
+  )
+  return (
+    <div className="ask-card ask-found">
+      {results.looser && <p className="ask-found-note">Nothing had every word, so these have some of them.</p>}
+      {things.map((i) => row(`${i.kind}|${i.app_id}|${i.url ?? ''}|${i.file ?? ''}|${i.title}`, <AppIcon id={i.app_id} size={20} />, i.title, `${KIND[i.kind]} in ${i.app_name ?? i.app_id} · ${seenAt(i.last_wall_ms)}`, i.open))}
+      {hours.map((h: FoundHour) => row(`hour|${h.hour_id}`, <Icon name="today" size={20} />, h.title ?? h.summary ?? hourLabel(h.start_wall_ms), `Hour · ${seenAt(h.start_wall_ms)}`, h.open))}
     </div>
   )
 }

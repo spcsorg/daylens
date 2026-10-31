@@ -67,7 +67,7 @@ export function Hour({ start, time, kind, current, title, summary, apps = [], no
 export function WeekBlock({ title, current, onClick }: { title: string; current?: boolean; onClick: () => void }) {
   return (
     <button type="button" className={`week-block${current ? ' current' : ''}`} title={title} onClick={onClick}>
-      {title}
+      <span className="week-block-text">{title}</span>
     </button>
   )
 }
@@ -105,7 +105,7 @@ export function SearchResult({ icon, title, meta, hour, selected, onHover, onCli
 }
 
 export interface RemoveTarget {
-  // What the question names: "Cursor", "this site".
+  // What the question names: "Cursor", "docs.google.com".
   name: string
   // "5 March", "4–10 March".
   when: string
@@ -129,7 +129,7 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   return (
     <Dialog onClose={onClose} label="Remove">
       <p>
-        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name === 'this site' ? 'it' : target.name} {target.when.includes('–') ? 'those days' : 'that day'} is deleted from this computer.
+        Remove {target.name} from {target.when}? Everything Daylens recorded from {target.name} {target.when.includes('–') ? 'on those days' : 'that day'} is deleted from this computer.
       </p>
       <Checkbox checked={never} onChange={setNever}>
         {target.never.text}
@@ -173,7 +173,7 @@ export function SourceRow({ s, date, sub, range }: { s: Source; date: string; su
   const to = range?.to ?? parseKey(addDays(date, 1)).getTime()
   const when = range?.when ?? dayMonth(date)
   const target: RemoveTarget = isPage
-    ? { name: 'this site', when, what: { kind: 'site', site: s.site!, from_wall_ms: from, to_wall_ms: to }, never }
+    ? { name: s.site!, when, what: { kind: 'site', site: s.site!, from_wall_ms: from, to_wall_ms: to }, never }
     : { name: s.app.name, when, what: { kind: 'app', app_id: s.app.id, from_wall_ms: from, to_wall_ms: to }, never }
   const neverNow = async () => {
     setMenu(false)

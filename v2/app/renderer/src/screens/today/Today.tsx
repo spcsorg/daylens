@@ -4,7 +4,7 @@ import type { DayView, GapReason, HourRow, RecordingView, ShellState } from '../
 import { useQuery } from '../../lib/api.ts'
 import { addDays, addMonths, clock, dateKey, duration, factsTitle, hourLabel, longDay, monthOf, monthTitle, parseKey, rangeTitle, shortDay, span, weekStart } from '../../lib/format.ts'
 import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
-import { Button, IconButton, Segmented } from '../../ui/controls.tsx'
+import { IconButton, Segmented } from '../../ui/controls.tsx'
 import { Popover } from '../../ui/overlays.tsx'
 import { AppIcon, Hour, SourceRow, WeekBlock } from '../../ui/records.tsx'
 import { EmptyState, StatusNotice } from '../../ui/status.tsx'
@@ -77,6 +77,7 @@ export function Today({ nav, setNav, shell, rec, onMark }: { nav: TodayNav; setN
             <CalendarPicker
               selected={date}
               today={today}
+              firstDay={first}
               onPick={(d) => {
                 setPicker(false)
                 setNav({ date: d, scope, openHour: null })
@@ -110,6 +111,7 @@ function DayList({ nav, setNav, rec, onMark }: { nav: TodayNav; setNav: (n: Toda
   }, [day, nav.openHour, nav.jump, onMark])
   return (
     <div className="scroll today-day" ref={scroller}>
+      {day && day.date === day.today && <LeftOff today={day.today} />}
       {day && day.hours.length === 0 && <EmptyState>{day.date === day.today ? 'Hours appear here as you work.' : 'Nothing was recorded on this day.'}</EmptyState>}
       {day &&
         dayRows(day.hours).map((r) =>
@@ -127,19 +129,22 @@ function DayList({ nav, setNav, rec, onMark }: { nav: TodayNav; setNav: (n: Toda
             />
           ),
         )}
-      {day && day.date === day.today && day.hours.length > 0 && <LeftOff date={day.date} />}
     </div>
   )
 }
 
-function LeftOff({ date }: { date: string }) {
+function LeftOff({ today }: { today: string }) {
   const { data } = useQuery({ q: 'left_off' }, { live: true })
   if (!data || data.length === 0) return null
+  const at = (ms: number) => {
+    const date = dateKey(new Date(ms))
+    return date === today ? clock(ms) : date === addDays(today, -1) ? `Yesterday ${clock(ms)}` : `${shortDay(date)}, ${clock(ms)}`
+  }
   return (
     <section className="left-off">
       <h2 className="left-off-title">Where you left off</h2>
       {data.map((s) => (
-        <SourceRow key={`${s.app.id}|${s.url ?? ''}|${s.title}`} s={s} date={date} sub={`${s.site ?? s.app.name} · ${clock(s.last_ms)}`} />
+        <SourceRow key={`${s.app.id}|${s.url ?? ''}|${s.title}`} s={s} date={dateKey(new Date(s.last_ms - 1))} sub={`${s.site ?? s.app.name} · ${at(s.last_ms)}`} />
       ))}
     </section>
   )
@@ -177,7 +182,7 @@ function HourOpen({ start, day, history, onMark }: { start: number; day: DayView
   if (!detail) return <div className="hour-open" />
   return (
     <div className="hour-open">
-      {history && <p className="hour-open-why">Daylens wasn’t recording then. These are the pages your browser remembers you opening, without how long each stayed open.</p>}
+      {history && <p className="hour-open-why">The times are when each page was opened; how long it stayed open isn’t known.</p>}
       {detail.detail && <p>{detail.detail}</p>}
       {detail.sources.length > 0 ? (
         <div>
@@ -188,11 +193,6 @@ function HourOpen({ start, day, history, onMark }: { start: number; day: DayView
       ) : (
         <p className="muted">Nothing left in this hour.</p>
       )}
-      <div>
-        <Button disabled title="Coming soon">
-          Fix this hour
-        </Button>
-      </div>
     </div>
   )
 }

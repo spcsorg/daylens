@@ -89,7 +89,7 @@ export function AiTab() {
   return (
     <div className="settings-group">
       {status.saved ? (
-        <Row label="Anthropic API key" detail={note ?? 'Saved. Claude Opus 5.5 writes your hours and Claude Sonnet 5.5 answers Ask.'}>
+        <Row label="Anthropic API key" detail={note ?? 'Saved. Claude Opus 5.5 writes your hours and answers Ask.'}>
           <div className="settings-actions">
             <Button
               disabled={testing}
