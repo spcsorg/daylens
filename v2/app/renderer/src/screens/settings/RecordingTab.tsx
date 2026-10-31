@@ -9,6 +9,7 @@ import { Button } from '../../ui/controls.tsx'
 import { Dialog, Popover, useToast } from '../../ui/overlays.tsx'
 import { errorText, pauseText, recordingState } from '../../ui/status.tsx'
 import { WHAT_GOES_TO_AI } from './AiTab.tsx'
+import { retentionCuts } from './retention.ts'
 import { Row, Section } from './Row.tsx'
 
 function names(list: string[]): string {
@@ -54,13 +55,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
   }
   const keep = KEEP.find((k) => k.days === (privacy?.retention_days ?? null))
   const today = dateKey(new Date())
-  const deletesNow = (days: number | null): string => {
-    const first = rec?.first_day
-    if (days === null || !first) return ''
-    const lastKept = addDays(today, -days)
-    if (first >= lastKept) return ''
-    return rangeTitle(first, addDays(lastKept, -1))
-  }
+  const deletesNow = (days: number | null) => retentionCuts(rec?.first_day ?? null, days, Date.now())
   return (
     <>
       <Section title="Recording">
@@ -140,7 +135,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
                   }}
                 >
                   {k.label}
-                  {deletesNow(k.days) && ` · deletes ${deletesNow(k.days)} now`}
+                  {deletesNow(k.days) && ` · deletes ${deletesNow(k.days)}`}
                 </button>
               ))}
             </Popover>
@@ -155,7 +150,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
       {shorten && (
         <Dialog onClose={() => setShorten(null)} label="Keep history for less">
           <p>
-            Keep history for {shorten.label.toLowerCase()}? {shorten.deletes} is deleted from this computer now, and can’t be brought back.
+            Keep history for {shorten.label.toLowerCase()}? Daylens deletes {shorten.deletes} from this computer now, and it can’t be brought back.
           </p>
           <div className="dialog-actions">
             <Button
