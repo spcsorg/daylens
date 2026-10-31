@@ -40,10 +40,12 @@ test('a deletion responds at once and never stalls capture, however much it remo
     const responded = performance.now() - t0
     assert.deepEqual(r.storage.search('chat'), [], 'hidden from search as soon as the call returns')
     const result = await handle.done
-    assert.ok(responded < 100, `the call returned in ${responded.toFixed(1)} ms`)
+    const took = performance.now() - t0
+    // Measured against the deletion itself, so a slow runner slows both: work done in one go would hold capture for all of it.
+    assert.ok(responded < took / 10, `the call returned in ${responded.toFixed(1)} ms of a ${took.toFixed(0)} ms deletion`)
     assert.ok(flushes.length > 0, 'capture ran while deletion was in progress')
     // Windows CI disks stall single writes by up to a second; the budget is held where the runner can measure it.
-    if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true') assert.ok(Math.max(...flushes) < 100, `capture flushes took up to ${Math.max(...flushes).toFixed(1)} ms`)
+    if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true') assert.ok(Math.max(...flushes) < took / 10, `capture flushes took up to ${Math.max(...flushes).toFixed(1)} ms of a ${took.toFixed(0)} ms deletion`)
     assert.equal(result.observations, 20_000)
     assert.deepEqual(r.q(`SELECT 1 FROM observations WHERE app_id = 'com.example.chat' LIMIT 1`), [])
     assert.deepEqual(r.q(`SELECT 1 FROM search_docs WHERE app_id = 'com.example.chat' LIMIT 1`), [])
