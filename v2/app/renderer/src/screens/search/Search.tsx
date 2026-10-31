@@ -34,7 +34,8 @@ function rows(r: SearchResults, limit: Limit): { things: Row[]; hours: Row[] } {
 export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; onOpenHour: (startMs: number) => void }) {
   const [text, setText] = useState('')
   const [limit, setLimit] = useState<Limit>({ things: FIRST, hours: FIRST })
-  const [active, setActive] = useState(0)
+  // The selection is a row, not a position: rows added above it by Show more leave it on the same result.
+  const [activeKey, setActiveKey] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
   const [shown, setShown] = useState<SearchResults | null>(null)
   const [highlight, setHighlight] = useState<{ top: number; height: number } | null>(null)
@@ -52,6 +53,12 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   const { things, hours } = display ? rows(display, limit) : { things: [], hours: [] }
   const recents: Row[] = typed ? [] : (leftOff ?? []).map((s) => ({ key: `recent|${s.app.id}|${s.url ?? ''}|${s.title}`, recent: s }))
   const all = typed ? [...things, ...hours] : recents
+  const active = Math.max(0, all.findIndex((r) => r.key === activeKey))
+  // The clicked button goes away, so focus goes back to the field, where the keys work.
+  const more = (group: keyof Limit) => {
+    input.current?.focus()
+    setLimit((l) => ({ ...l, [group]: MORE }))
+  }
 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null
@@ -60,7 +67,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
     return () => before?.focus()
   }, [])
   useEffect(() => {
-    setActive(0)
+    setActiveKey(null)
     setLimit({ things: FIRST, hours: FIRST })
   }, [typed])
   useEffect(() => {
@@ -99,10 +106,10 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown' && all.length) {
       e.preventDefault()
-      setActive((a) => Math.min(a + 1, all.length - 1))
+      setActiveKey(all[Math.min(active + 1, all.length - 1)]!.key)
     } else if (e.key === 'ArrowUp' && all.length) {
       e.preventDefault()
-      setActive((a) => Math.max(a - 1, 0))
+      setActiveKey(all[Math.max(active - 1, 0)]!.key)
     } else if (e.key === 'Enter' && all[active]) {
       e.preventDefault()
       void open(all[active]!)
@@ -133,7 +140,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
         : 'recent' in r
           ? [tile(<AppIcon id={r.recent.app.id} size={20} />), r.recent.title, `${r.recent.site ?? r.recent.app.name} · ${clock(r.recent.last_ms)}`]
           : [tile(<AppIcon id={r.item.app_id} size={20} />), r.item.title, `${KIND[r.item.kind]} in ${r.item.app_name ?? r.item.app_id} · ${seenAt(Math.max(r.item.last_wall_ms, ...r.item.seen_in.map((h) => h.hour_start_wall_ms)))}`]
-    return <SearchResult key={r.key} icon={icon} title={name} meta={sub} selected={i === active} onHover={() => setActive(i)} onClick={() => void open(r)} />
+    return <SearchResult key={r.key} icon={icon} title={name} meta={sub} selected={i === active} onHover={() => setActiveKey(r.key)} onClick={() => void open(r)} />
   }
 
   return (
@@ -165,7 +172,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               <h2 className="section-label">Pages, files and windows</h2>
               {things.map((r, i) => row(r, i))}
               {moreThings && (
-                <Button kind="quiet" className="search-more" onClick={() => setLimit((l) => ({ ...l, things: MORE }))}>
+                <Button kind="quiet" className="search-more" onClick={() => more('things')}>
                   Show more
                 </Button>
               )}
@@ -176,7 +183,7 @@ export function SearchOverlay({ onClose, onOpenHour }: { onClose: () => void; on
               <h2 className="section-label">Hours</h2>
               {hours.map((r, i) => row(r, things.length + i))}
               {moreHours && (
-                <Button kind="quiet" className="search-more" onClick={() => setLimit((l) => ({ ...l, hours: MORE }))}>
+                <Button kind="quiet" className="search-more" onClick={() => more('hours')}>
                   Show more
                 </Button>
               )}
