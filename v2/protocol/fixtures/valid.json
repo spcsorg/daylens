@@ -142,6 +142,45 @@
   }
  },
  {
+  "name": "mac_focus_document",
+  "line": {
+   "v": 1,
+   "run": "run-0001",
+   "seq": 3,
+   "boot": "boot-0001",
+   "t": {
+    "wall_ms": 1792130412345,
+    "mono_us": 881234567890,
+    "tz": "Example/Town",
+    "tz_offset_min": -300
+   },
+   "platform": "macos",
+   "source": "ax_observer",
+   "kind": "focus",
+   "obs": {
+    "trigger": "window_changed",
+    "app": {
+     "app_id": "com.apple.Terminal",
+     "name": "Terminal",
+     "path": "/System/Applications/Utilities/Terminal.app",
+     "pid": 501,
+     "registered_browser": false,
+     "engine": "none",
+     "signer": null,
+     "version_info": null,
+     "identity_state": "ok",
+     "store": null
+    },
+    "window": {
+     "window": "w-2",
+     "title": "Plan.txt",
+     "title_state": "ok",
+     "document": "/Users/example/Documents/Plan.txt"
+    }
+   }
+  }
+ },
+ {
   "name": "mac_focus_no_permission",
   "line": {
    "v": 1,

@@ -7,7 +7,7 @@ import type { Reader, Sighting } from './reader.ts'
 
 export type OpenAction =
   | { kind: 'url'; url: string }
-  // Capture records file names and window titles, not paths, so a file or window opens by bringing its app forward.
+  // A file or window opens through its app: the app shell opens the file that window showed when capture recorded one.
   | { kind: 'app'; app_id: string; app_name: string | null }
   | { kind: 'hour'; hour_start_wall_ms: number; hour_id: number | null }
 

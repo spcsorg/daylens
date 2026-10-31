@@ -59,7 +59,7 @@ Every `reconcile_s` the helper also reads the display and lock state again, sinc
 
 `app`: `app_id` (bundle ID on macOS; the AUMID for packaged Windows apps, else the executable path), `name`, `path`, `pid`, `registered_browser`, `identity_state`, `store`.
 
-`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one. No helper sets `mode` yet. A `private` window never has its title stored. A browser window's title stays withheld even while the extension reports pages, because the window in front may be one the extension cannot see.
+`window`: `window` (an opaque window ID), `title`, `title_state`, and optionally `mode` (`normal`, `private`, `unknown`) when the platform can tell a private window from a normal one, and `document`, the absolute path of the local file the window shows (at most 1024 characters, only with a title). No helper sets `mode` yet. The macOS helper sets `document` from the window's `AXDocument` when that is a file URL; the Windows helper never sets it. A `private` window never has its title stored. A browser window's title stays withheld even while the extension reports pages, because the window in front may be one the extension cannot see.
 
 `permissions` is `{accessibility}`, each `granted`, `denied` or `not_applicable`.
 

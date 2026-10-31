@@ -73,6 +73,8 @@ export interface WindowInfo {
   title_state: TitleState
   // Set only when the platform can tell a private window from a normal one; absent means not reported.
   mode?: WindowMode
+  // The local file the window shows, when the app reports one; only with a title.
+  document?: string
 }
 export type FocusTrigger = 'app_changed' | 'window_changed' | 'title_changed' | 'reconcile' | 'snapshot'
 export interface FocusObs {
@@ -288,6 +290,11 @@ function windowInfo(v: unknown): WindowInfo {
   if ((title === null) === (title_state === 'ok')) fail('title: present exactly when title_state is ok')
   const info: WindowInfo = { window: strOrNull(o, 'window', 64), title, title_state }
   if (o.mode !== undefined && o.mode !== null) info.mode = oneOf(o, 'mode', ['normal', 'private', 'unknown'] as const)
+  const document = strOrNull(o, 'document', MAX_TITLE_CHARS)
+  if (document !== null) {
+    if (title === null) fail('document: only with a title')
+    info.document = document
+  }
   return info
 }
 

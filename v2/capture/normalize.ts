@@ -47,6 +47,7 @@ export interface ObservationRow {
   state: string | null
   detail: string | null
   url?: string | null
+  document?: string | null
 }
 
 export type GapReason =
@@ -546,6 +547,7 @@ export class Normalizer {
 
     let title: string | null = null
     let titleRaw: string | null = null
+    let document: string | null = null
     let titleState: StoredTitleState = win.title_state
     // A window the platform reports as private is never stored with its title, whatever the app.
     if (c.title !== 'allowed' || win.mode === 'private') {
@@ -555,10 +557,11 @@ export class Normalizer {
       title = cleaned.title
       if (title === null) titleState = 'empty'
       else if (cleaned.changed) titleRaw = win.title
+      if (title !== null) document = win.document ?? null
     }
 
     const known = app.identity_state === 'ok'
-    const key = JSON.stringify([known ? app.app_id : null, app.signer, app.store?.aumid, app.version_info, app.pid, app.identity_state, win.window, title, titleState, line.t.tz, line.t.tz_offset_min])
+    const key = JSON.stringify([known ? app.app_id : null, app.signer, app.store?.aumid, app.version_info, app.pid, app.identity_state, win.window, title, document, titleState, line.t.tz, line.t.tz_offset_min])
     // A fresh read after the title channel recovers starts a new row, even with the same title.
     const freshAfterStale = this.focus?.stale === true && this.titleChannel === 'ok'
     if (this.focus && this.focus.key === key && !freshAfterStale) {
@@ -574,6 +577,7 @@ export class Normalizer {
     row.title = title
     row.title_raw = titleRaw
     row.title_state = titleState
+    row.document = document
     row.state = app.identity_state
     row.detail = JSON.stringify({
       trigger: line.obs.trigger,

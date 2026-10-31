@@ -146,14 +146,24 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   )
 }
 
+/** Opens a page, or the file a window showed when Daylens knows it and it still exists; otherwise the app, saying why. */
+export async function openThing(t: { url: string | null; app_id: string; app_name: string; title: string | null }): Promise<{ text: string; error?: boolean } | null> {
+  const r = t.url ? await act({ a: 'open_url', url: t.url }) : await act({ a: 'open_app', id: t.app_id, title: t.title })
+  if (!r.ok) return { text: errorText(r.error), error: true }
+  const fell = (r.result as { fell_back?: 'no_document' | 'document_gone' } | undefined)?.fell_back
+  if (fell === 'document_gone') return { text: `That file isn’t where it was anymore, so Daylens opened ${t.app_name}.` }
+  if (fell === 'no_document') return { text: `${t.app_name} doesn’t tell Daylens which file this was, so Daylens opened the app.` }
+  return null
+}
+
 /** A window or page: opens the thing itself; its menu keeps it out or removes it from the day. */
 export function SourceRow({ s, date, sub, range }: { s: Source; date: string; sub?: string; range?: { from: number; to: number; when: string } }) {
   const [menu, setMenu] = useState(false)
   const [remove, setRemove] = useState<RemoveTarget | null>(null)
   const toast = useToast()
   const open = async () => {
-    const r = s.url ? await act({ a: 'open_url', url: s.url }) : await act({ a: 'open_app', id: s.app.id })
-    if (!r.ok) toast({ text: errorText(r.error), error: true })
+    const said = await openThing({ url: s.url, app_id: s.app.id, app_name: s.app.name, title: s.title })
+    if (said) toast(said)
   }
   const isPage = s.kind !== 'window' && s.site !== null
   const never = isPage

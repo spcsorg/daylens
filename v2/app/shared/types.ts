@@ -78,13 +78,15 @@ export interface RecordingView {
 }
 
 // Reads every screen or the shell makes; a screen's own reads are in its file.
-type CoreQuery = { q: 'day'; date: string } | { q: 'recorded_days'; month: string } | { q: 'recording' } | { q: 'app_path'; id: string }
+type CoreQuery = { q: 'day'; date: string } | { q: 'recorded_days'; month: string } | { q: 'recording' } | { q: 'app_path'; id: string } | { q: 'document'; app_id: string; title: string }
 
 interface CoreResults {
   day: DayView
   recorded_days: string[]
   recording: RecordingView
   app_path: string | null
+  // The newest file a window with this title showed, and the app that showed it.
+  document: { path: string; app_path: string | null } | null
 }
 
 export type Query = CoreQuery | TodayQuery | AppsQuery | SearchQuery | SettingsQuery | AskQuery | AssistantsQuery
@@ -108,7 +110,8 @@ type CoreAction =
   | { a: 'delete'; what: DeleteWhat; never?: { match: 'app_id' | 'site'; value: string; label: string } }
   | { a: 'exclude'; rule: { match: 'app_id' | 'site'; value: string; label: string } }
   | { a: 'open_url'; url: string }
-  | { a: 'open_app'; id: string }
+  // With a window title, opens the file that window showed when it still exists; otherwise the app, and says why.
+  | { a: 'open_app'; id: string; title?: string | null }
   | { a: 'open_settings_privacy' }
   | { a: 'restart_capture' }
   | { a: 'bench'; marks: Record<string, number> }

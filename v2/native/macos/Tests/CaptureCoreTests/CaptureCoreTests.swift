@@ -27,6 +27,8 @@ final class CaptureCoreTests: XCTestCase {
                       Obs.focus(trigger: .app_changed, app: term, window: .read(window: "w-1", title: "daylens — zsh — 80×24")))
     try assertMatches("mac_focus_title", seq: 3, source: "ax_observer", kind: "focus",
                       Obs.focus(trigger: .title_changed, app: term, window: .read(window: "w-1", title: "✳ Fix capture")))
+    try assertMatches("mac_focus_document", seq: 3, source: "ax_observer", kind: "focus",
+                      Obs.focus(trigger: .window_changed, app: term, window: .read(window: "w-2", title: "Plan.txt", document: "/Users/example/Documents/Plan.txt")))
     try assertMatches("mac_focus_no_permission", seq: 4, source: "nsworkspace", kind: "focus",
                       Obs.focus(trigger: .app_changed, app: term, window: WindowInfo(window: nil, title: nil, titleState: .no_permission)))
     try assertMatches("mac_input_idle", seq: 5, source: "idle_timer", kind: "input", Obs.input(idle: true, lastInputWallMs: 1_792_130_292_345, thresholdS: 120, snapshot: false))
@@ -44,6 +46,11 @@ final class CaptureCoreTests: XCTestCase {
     let parsed = try JSONSerialization.jsonObject(with: Data(s.utf8)) as! [String: Any]
     XCTAssertEqual((parsed["window"] as! [String: Any])["title"] as? String, title)
     XCTAssertFalse(s.contains("\n"))
+  }
+
+  func testADocumentTravelsOnlyWithATitle() throws {
+    XCTAssertNil(WindowInfo(window: "w", title: nil, titleState: .timeout, document: "/Users/example/Notes.txt").document)
+    XCTAssertNil(WindowInfo.read(window: "w", title: "x", document: "/" + String(repeating: "a", count: 1024)).document)
   }
 
   func testTitlesAreTruncatedOnCharacterBoundaries() {

@@ -148,7 +148,8 @@ CREATE TABLE IF NOT EXISTS observations (
   state TEXT,
   detail TEXT,
   possibly_stale_since_wall_ms INTEGER,
-  url TEXT
+  url TEXT,
+  document TEXT
 );
 CREATE INDEX IF NOT EXISTS observations_event_wall ON observations(event_wall_ms);
 CREATE TABLE IF NOT EXISTS capture_gaps (
@@ -318,6 +319,8 @@ export class Store implements Sink {
       if (v === 4) v = this.migrateV4()
       if (v !== SCHEMA_VERSION) throw new Error(`unsupported schema version ${version.value}`)
     }
+    // No version bump: an older build leaves it empty, so its rows open their app instead of the file.
+    if (!this.db.prepare(`SELECT 1 FROM pragma_table_info('observations') WHERE name = 'document'`).get()) this.db.exec('ALTER TABLE observations ADD COLUMN document TEXT')
     this.seedExclusions(opts.firstSeed)
     // Ids are never reused, even after the rows with the highest ids are deleted: derived rows are keyed by them.
     const mark = this.db.prepare(`SELECT value FROM meta WHERE key = 'next_observation_id'`).get() as { value: string } | undefined
@@ -658,12 +661,12 @@ export class Store implements Sink {
   private observationInsert(id: number, row: ObservationRow): Op {
     return {
       sql: `INSERT INTO observations (id, run, seq, boot, platform, source, kind, event_wall_ms, event_mono_us, tz, tz_offset_min,
-         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, possibly_stale_since_wall_ms, url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recorded_wall_ms, last_seen_wall_ms, app_id, app_name, app_path, pid, window, title, title_raw, title_state, state, detail, possibly_stale_since_wall_ms, url, document)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         id, row.run, row.seq, row.boot, row.platform, row.source, row.kind, row.event_wall_ms, row.event_mono_us, row.tz, row.tz_offset_min,
         this.now(), row.event_wall_ms, row.app_id, row.app_name, row.app_path, row.pid, row.window, row.title, row.title_raw, row.title_state,
-        row.state, row.detail, row.possibly_stale_since_wall_ms ?? null, row.url ?? null,
+        row.state, row.detail, row.possibly_stale_since_wall_ms ?? null, row.url ?? null, row.document ?? null,
       ],
     }
   }

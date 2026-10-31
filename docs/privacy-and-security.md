@@ -14,7 +14,7 @@ This document describes the finished product. The beta differs in these ways:
 
 ## What Daylens records
 
-- The app in front and its window titles.
+- The app in front and its window titles. On macOS, also the path of the file a window shows, when the app reports one (`AXDocument`), so the window can reopen that file. It is kept only with a title, never for a private or browser window, and never sent to an AI or an assistant.
 - The page in normal browser windows: its title and its address, with tracking codes, tokens and most other parameters removed. Pages from browser history are read from the start of the day Daylens is installed.
 - When the computer is idle, locked or asleep.
 - The user's own commits in git repositories under the usual code folders in the home folder: message and time. Commits made by coding agents are marked as theirs.

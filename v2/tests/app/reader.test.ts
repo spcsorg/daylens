@@ -304,6 +304,26 @@ test('search hides what is past the retention period, before pruning reaches it'
   r.close()
 })
 
+test('a window opens to the newest file it showed under that title, found by app and title', async () => {
+  resetSeq()
+  const r = rig()
+  const withFile = (l: ReturnType<typeof focus>, file: string) => ((l.obs as { window: { document?: string } }).window.document = file, l)
+  const t = T0 + 9 * HOUR
+  r.feed(withFile(focus(notes, 'Plan.txt', t), '/Users/example/Old/Plan.txt'))
+  r.feed(focus(notes, 'Untitled', t + 10 * MIN))
+  r.feed(withFile(focus(notes, 'Plan.txt', t + 20 * MIN), '/Users/example/Plan.txt'))
+  r.feed(focus(sheets, 'Plan.txt', t + 30 * MIN))
+  r.clock.t = t + 40 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(reader.document(notes.app_id!, 'Plan.txt'), { path: '/Users/example/Plan.txt', app_path: notes.path })
+  assert.equal(reader.document(notes.app_id!, 'Untitled'), null)
+  assert.equal(reader.document(sheets.app_id!, 'Plan.txt'), null, 'another app with the same title has no file')
+  db.close()
+  r.close()
+})
+
 test('where you left off is what was open before your last break, not what is in front now', async () => {
   resetSeq()
   const r = rig()
@@ -325,6 +345,29 @@ test('where you left off is what was open before your last break, not what is in
   // The open hour lists its rows with their range inside that hour, not to the same window after the break.
   const nine = today.hour(reader, T0 + 9 * HOUR).sources.find((s) => s.title === 'Order list')!
   assert.ok(nine.first_ms >= T0 + 9 * HOUR && nine.last_ms <= T0 + 10 * HOUR)
+  db.close()
+  r.close()
+})
+
+test('a file being deleted is never reopened, and a decomposed file name is found by the title Search shows', async () => {
+  resetSeq()
+  const r = rig(undefined, { holdDeletions: true })
+  const withFile = (l: ReturnType<typeof focus>, file: string) => ((l.obs as { window: { document?: string } }).window.document = file, l)
+  const t = T0 + 9 * HOUR
+  const decomposed = 'Café menu.txt'
+  r.feed(withFile(focus(notes, 'Plan.txt', t), '/Users/example/Old/Plan.txt'))
+  r.feed(withFile(focus(notes, decomposed, t + 10 * MIN), '/Users/example/Café menu.txt'))
+  r.feed(withFile(focus(notes, decomposed, t + 19 * MIN, 'reconcile'), '/Users/example/Café menu.txt'))
+  r.feed(withFile(focus(notes, 'Plan.txt', t + 20 * MIN), '/Users/example/Plan.txt'))
+  r.feed(focus(sheets, 'Order list', t + 30 * MIN))
+  r.clock.t = t + 40 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  r.storage.deleteRange(t + 20 * MIN, t + 30 * MIN)
+  r.storage.deleteRange(t + 12 * MIN, t + 15 * MIN)
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(reader.document(notes.app_id!, 'Plan.txt'), { path: '/Users/example/Old/Plan.txt', app_path: notes.path })
+  assert.equal(reader.document(notes.app_id!, decomposed.normalize('NFC'))?.path, '/Users/example/Café menu.txt', 'a deletion inside a row leaves the rest of it to open')
   db.close()
   r.close()
 })
