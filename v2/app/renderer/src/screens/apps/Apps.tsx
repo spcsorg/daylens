@@ -36,10 +36,7 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
   return (
     <>
       <div className="header">
-        <div className="grow">
-          <h1 className="title">{title}</h1>
-          <div className="subline">{view ? `${duration(view.total_ms)} recorded${nav.scope === 'week' && live ? ' so far' : ''}` : ' '}</div>
-        </div>
+        <h1 className="title grow">{title}</h1>
         <Segmented
           label="Show"
           value={nav.scope}
@@ -69,12 +66,13 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
         </div>
       </div>
       <div className="scroll">
+        {view && view.apps.length > 0 && <p className="apps-total">{`${duration(view.total_ms)} recorded${nav.scope === 'week' && live ? ' so far' : ''}`}</p>}
         {view && nav.scope === 'week' && <WeekBars view={view} today={today} onDay={(date) => setNav({ ...nav, scope: 'day', date })} />}
         {view && view.apps.length === 0 && <EmptyState>{from === today ? 'Apps appear here as you use them.' : 'Nothing was recorded then.'}</EmptyState>}
         {view && view.apps.length > 0 && (
           <div className="apps-layout">
             <AppList view={view} scope={nav.scope} selected={selected} onSelect={(app) => setNav({ ...nav, app })} />
-            {selected && <Detail id={selected} from={from} days={days} when={when} live={live} />}
+            {selected && <Detail key={selected} id={selected} from={from} days={days} when={when} live={live} />}
           </div>
         )}
       </div>
