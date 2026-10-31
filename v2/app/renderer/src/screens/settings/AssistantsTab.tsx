@@ -118,8 +118,8 @@ export function AssistantsTab() {
         <Row label="Another app" detail="Copy the setup and paste it into the app’s MCP settings.">
           <Button onClick={() => void copy()}>Copy setup</Button>
         </Row>
-        <Row label="Daylens’s server" detail={test ?? 'Test starts it the way an assistant does.'}>
-          <Button onClick={() => void runTest()} disabled={busy}>
+        <Row label="Daylens’s server" detail={busy ? 'Testing…' : (test ?? 'Test starts it the way an assistant does.')}>
+          <Button onClick={() => void runTest()} loading={busy}>
             Test
           </Button>
         </Row>
