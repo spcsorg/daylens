@@ -72,7 +72,7 @@ export function Apps({ nav, setNav, firstDay, onMark }: { nav: AppsNav; setNav: 
         {view && view.apps.length > 0 && (
           <div className="apps-layout">
             <AppList view={view} scope={nav.scope} selected={selected} onSelect={(app) => setNav({ ...nav, app })} />
-            {selected && <Detail key={selected} id={selected} from={from} days={days} when={when} live={live} />}
+            {selected && <Detail key={`${selected}|${from}|${days}`} id={selected} from={from} days={days} when={when} live={live} />}
           </div>
         )}
       </div>
