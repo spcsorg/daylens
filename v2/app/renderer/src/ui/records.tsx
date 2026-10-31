@@ -146,8 +146,7 @@ export function RemoveDialog({ target, onClose }: { target: RemoveTarget; onClos
   )
 }
 
-/** A window or page: opens the thing itself; its menu keeps it out or removes it from the day. A row given its own
- * `sub` line shows no time spent. */
+/** A window or page: opens the thing itself; its menu keeps it out or removes it from the day. */
 export function SourceRow({ s, date, sub, range }: { s: Source; date: string; sub?: string; range?: { from: number; to: number; when: string } }) {
   const [menu, setMenu] = useState(false)
   const [remove, setRemove] = useState<RemoveTarget | null>(null)
@@ -180,7 +179,7 @@ export function SourceRow({ s, date, sub, range }: { s: Source; date: string; su
           <span className="source-title">{s.title}</span>
           <span className="source-where">{where}</span>
         </span>
-        {s.ms > 0 && !sub && <span className="source-ms">{duration(s.ms)}</span>}
+        {s.ms > 0 && <span className="source-ms">{duration(s.ms)}</span>}
       </button>
       <div className="source-more">
         <IconButton icon="more" label="More" onClick={() => setMenu((m) => !m)} />

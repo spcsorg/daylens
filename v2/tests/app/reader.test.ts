@@ -311,16 +311,17 @@ test('where you left off is what was open before your last break, not what is in
     [sheets, 'Flour costs', 20],
     [notes, 'Supplier email', 20],
   ])
-  const end = work(r, T0 + 11 * HOUR, [[sheets, 'Price sheet', 30]])
+  // Back after the break, on the first window again.
+  const end = work(r, T0 + 11 * HOUR, [[notes, 'Order list', 30]])
   r.clock.t = end + MIN
   r.storage.start()
   await r.storage.derivationSettled()
   const { reader, db } = readOnly(r)
   const left = today.leftOff(reader)
-  assert.deepEqual(left.map((s) => s.title), ['Supplier email', 'Flour costs', 'Order list'])
+  assert.deepEqual(left.map((s) => s.title), ['Supplier email', 'Flour costs'])
   // Each row's time is when it was last in front before the break, not the whole day.
   assert.ok(Math.abs(left[0]!.last_ms - (T0 + 10 * HOUR)) < 2 * MIN)
-  // The open hour lists its rows with their range inside that hour.
+  // The open hour lists its rows with their range inside that hour, not to the same window after the break.
   const nine = today.hour(reader, T0 + 9 * HOUR).sources.find((s) => s.title === 'Order list')!
   assert.ok(nine.first_ms >= T0 + 9 * HOUR && nine.last_ms <= T0 + 10 * HOUR)
   db.close()
