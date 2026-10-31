@@ -122,6 +122,10 @@ Ask answers questions about any day from the same record.
 
 Each tab groups its settings into a few titled cards (Recording, Never record, Privacy, History), as System Settings and Linear do, rather than one long list. The selected tab's underline slides to it. Appearance is three small pictures of the window (Light, Dark, Match system); the chosen one has a ring.
 
+Anything in Recording and privacy that deletes history or starts recording more asks first and names exactly what it does: taking the password managers out of Never record (its toast has Undo, and an "Add back" stays in their place), and shortening "Keep history for" when that deletes days. On a Mac, an app can be kept out before Daylens has ever seen it, chosen from Applications. Pause offers the same three choices as the tray (for an hour, until tomorrow, until you resume) and says what it did. Days are written as the app writes them ("30 October") and picked from its own calendar.
+
+The Mac menu bar has Settings… (Cmd+,) in the app menu and Close (Cmd+W) under File, as every Mac app does. Builds people install have no Reload or developer tools in View.
+
 ## Assistant requests
 
 When an assistant asks for a change that needs a yes, Daylens shows a card over whatever screen is open: "Claude Code asks: Delete everything recorded from 2:00 PM to 3:00 PM." with the main button (red, "Delete", for anything that deletes; "Allow" otherwise) and "Don't". One card at a time, oldest first. A notification says the same when the window is closed, and the menu bar menu shows "An assistant is asking you something…". Pausing and new exclusions need no card. After 10 minutes a request lapses and the card goes; answering a lapsed one says so.

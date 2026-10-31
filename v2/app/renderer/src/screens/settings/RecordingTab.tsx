@@ -4,6 +4,7 @@ import type { Exclusion } from '../../../../shared/settings.ts'
 import type { DeleteWhat, RecordingView, ShellState } from '../../../../shared/types.ts'
 import { act, useQuery } from '../../lib/api.ts'
 import { addDays, dateKey, dayMonth, parseKey, plainDay, rangeTitle, span } from '../../lib/format.ts'
+import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
 import { Button } from '../../ui/controls.tsx'
 import { Dialog, Popover, useToast } from '../../ui/overlays.tsx'
 import { errorText, pauseText, recordingState } from '../../ui/status.tsx'
@@ -326,6 +327,27 @@ function NeverRecord({ exclusions, defaults: all, seen, platform }: { exclusions
   )
 }
 
+/** A day written the way the app writes days, "30 October", picked from the app's own calendar. */
+function DateField({ value, firstDay, onPick }: { value: string; firstDay: string; onPick: (d: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="settings-anchor">
+      <Button onClick={() => setOpen((o) => !o)}>{dayMonth(value)}</Button>
+      <Popover open={open} onClose={() => setOpen(false)} align="left">
+        <CalendarPicker
+          selected={value}
+          today={dateKey(new Date())}
+          firstDay={firstDay}
+          onPick={(d) => {
+            setOpen(false)
+            onPick(d)
+          }}
+        />
+      </Popover>
+    </span>
+  )
+}
+
 type Choice = 'ten' | 'hour' | 'day' | 'range' | 'everything'
 
 function DeleteHistory({ firstDay, onClose, onDone }: { firstDay: string; onClose: () => void; onDone: (text: string) => void }) {
@@ -385,14 +407,14 @@ function DeleteHistory({ firstDay, onClose, onDone }: { firstDay: string; onClos
       <div className="settings-options">
         {option('ten', 'The last 10 minutes')}
         {option('hour', 'The last hour')}
-        {option('day', 'A day', <input className="date-input" type="date" min={firstDay} max={today} value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />)}
+        {option('day', 'A day', <DateField value={day} firstDay={firstDay} onPick={setDay} />)}
         {option(
           'range',
           'A range',
           <span className="settings-range">
-            <input className="date-input" type="date" min={firstDay} max={today} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} />
+            <DateField value={from} firstDay={firstDay} onPick={setFrom} />
             <span className="faint">to</span>
-            <input className="date-input" type="date" min={firstDay} max={today} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />
+            <DateField value={to} firstDay={firstDay} onPick={setTo} />
           </span>,
         )}
         {option('everything', 'Everything')}
