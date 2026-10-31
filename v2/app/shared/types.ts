@@ -108,7 +108,7 @@ type CoreAction =
   | { a: 'pause'; until: 'hour' | 'tomorrow' | 'until_resumed' }
   | { a: 'resume' }
   | { a: 'delete'; what: DeleteWhat; never?: { match: 'app_id' | 'site'; value: string; label: string } }
-  | { a: 'exclude'; rule: { match: 'app_id' | 'site'; value: string; label: string } }
+  | { a: 'exclude'; rule: { match: 'app_id' | 'exe' | 'site'; value: string; label: string } }
   | { a: 'open_url'; url: string }
   // With a window title, opens the file that window showed when it still exists; otherwise the app, and says why.
   | { a: 'open_app'; id: string; title?: string | null }

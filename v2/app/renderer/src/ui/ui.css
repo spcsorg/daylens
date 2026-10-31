@@ -394,6 +394,13 @@
   animation: toast-in var(--reveal) var(--ease);
 }
 
+.toast-action {
+  font: var(--label);
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: var(--space-4);
+}
+
 .toast.error > svg {
   color: var(--danger);
 }

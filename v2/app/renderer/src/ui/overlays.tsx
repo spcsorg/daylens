@@ -50,6 +50,8 @@ export function Popover({ open, onClose, children, align = 'right', className = 
 interface ToastMsg {
   text: string
   error?: boolean
+  // One step back, such as Undo; the toast stays a little longer to give time for it.
+  action?: { label: string; run: () => void }
 }
 
 const ToastContext = createContext<(t: ToastMsg) => void>(() => {})
@@ -60,7 +62,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
   const show = useCallback((t: ToastMsg) => {
     setToast((prev) => ({ ...t, n: (prev?.n ?? 0) + 1 }))
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setToast(null), t.error ? 6000 : 4000)
+    timer.current = setTimeout(() => setToast(null), t.error || t.action ? 6000 : 4000)
   }, [])
   return (
     <ToastContext.Provider value={show}>
@@ -69,6 +71,18 @@ export function ToastHost({ children }: { children: ReactNode }) {
         <div key={toast.n} className={`toast${toast.error ? ' error' : ''}`} role="status">
           <Icon name={toast.error ? 'alert' : 'check'} />
           {toast.text}
+          {toast.action && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                setToast(null)
+                toast.action!.run()
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </ToastContext.Provider>

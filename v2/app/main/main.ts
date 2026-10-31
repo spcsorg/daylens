@@ -147,7 +147,7 @@ function createWindow(): BrowserWindow {
 }
 
 // A window still loading gets the message once it has loaded; the preload holds it until the page listens.
-function showAndNavigate(to: 'today' | 'search' | 'search-toggle'): void {
+function showAndNavigate(to: 'today' | 'search' | 'search-toggle' | 'settings'): void {
   if (!win) win = createWindow()
   win.show()
   win.focus()
@@ -171,12 +171,17 @@ function setAppMenu(): void {
   if (process.platform !== 'darwin') return
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { role: 'appMenu' },
+      {
+        role: 'appMenu',
+        submenu: [{ role: 'about' }, { type: 'separator' }, { label: 'Settings…', accelerator: 'Command+,', click: () => showAndNavigate('settings') }, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }],
+      },
+      { label: 'File', submenu: [{ role: 'close' }] },
       {
         label: 'Edit',
         submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { type: 'separator' }, { label: 'Search…', accelerator: 'Command+K', click: (_item, _win, e) => showSearch(e.triggeredByAccelerator ? 'search-toggle' : 'search') }],
       },
-      { role: 'viewMenu' },
+      // Reload and the developer tools are for runs from source only.
+      app.isPackaged ? { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] } : { role: 'viewMenu' },
       { role: 'windowMenu' },
     ]),
   )

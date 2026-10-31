@@ -13,6 +13,8 @@ export interface PrivacyView {
   retention_days: number | null
   // Apps seen recently, to pick one to keep out.
   seen_apps: AppTime[]
+  // The rules Daylens starts with, so the ones taken out can be added back.
+  defaults: Omit<Exclusion, 'is_default'>[]
 }
 
 export type SettingsQuery = { q: 'privacy' }
@@ -23,6 +25,7 @@ export interface SettingsResults {
 
 export type SettingsAction =
   | { a: 'unexclude'; match: 'app_id' | 'exe' | 'site'; value: string }
+  | { a: 'pick_app' }
   | { a: 'retention'; days: number | null }
   | { a: 'login_item'; on: boolean }
   | { a: 'appearance'; mode: 'light' | 'dark' | 'system' }

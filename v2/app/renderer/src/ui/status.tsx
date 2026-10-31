@@ -13,6 +13,8 @@ export function errorText(code: string): string {
       return 'Daylens didn’t answer in time. Try again.'
     case 'app_not_found':
       return 'That app isn’t on this computer anymore.'
+    case 'not_an_app':
+      return 'That isn’t an app Daylens can keep out. Choose one from Applications.'
     case 'login_item_refused':
       return 'macOS didn’t allow that. Change it in System Settings › General › Login Items.'
     default:
