@@ -447,10 +447,18 @@ export class Reader {
     return r?.app_path ?? null
   }
 
+  /** The newest file shown under this title that the screens may still show: not being deleted, not past retention. */
   document(appId: string, title: string): { path: string; app_path: string | null } | null {
-    const r = this.db
-      .prepare(`SELECT o.document, o.app_path FROM intervals i JOIN observations o ON o.id = i.obs_id WHERE i.app_id = ? AND i.title = ? AND o.document IS NOT NULL ORDER BY i.start_wall_ms DESC LIMIT 1`)
-      .get(appId, title) as { document: string; app_path: string | null } | undefined
+    const cutoff = this.cutoff() ?? Number.NEGATIVE_INFINITY
+    const pending = this.tombstones().filter((t) => tombstoneMatches(t, appId, null))
+    // Search shows titles in NFC; a macOS file name is often captured decomposed.
+    const rows = this.db
+      .prepare(
+        `SELECT o.document, o.app_path, i.start_wall_ms AS s, i.end_wall_ms AS e FROM intervals i JOIN observations o ON o.id = i.obs_id
+         WHERE i.app_id = ? AND i.title IN (?, ?, ?) AND o.document IS NOT NULL ORDER BY i.start_wall_ms DESC`,
+      )
+      .all(appId, title, title.normalize('NFC'), title.normalize('NFD')) as { document: string; app_path: string | null; s: number; e: number }[]
+    const r = rows.find((r) => r.e > cutoff && !pending.some((t) => (t.from_wall_ms ?? Number.NEGATIVE_INFINITY) < r.e && r.s < (t.to_wall_ms ?? Number.POSITIVE_INFINITY)))
     return r ? { path: r.document, app_path: r.app_path } : null
   }
 }

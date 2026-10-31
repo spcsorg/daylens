@@ -322,3 +322,24 @@ test('a window opens to the newest file it showed under that title, found by app
   db.close()
   r.close()
 })
+
+test('a file being deleted is never reopened, and a decomposed file name is found by the title Search shows', async () => {
+  resetSeq()
+  const r = rig(undefined, { holdDeletions: true })
+  const withFile = (l: ReturnType<typeof focus>, file: string) => ((l.obs as { window: { document?: string } }).window.document = file, l)
+  const t = T0 + 9 * HOUR
+  const decomposed = 'Café menu.txt'
+  r.feed(withFile(focus(notes, 'Plan.txt', t), '/Users/example/Old/Plan.txt'))
+  r.feed(withFile(focus(notes, decomposed, t + 10 * MIN), '/Users/example/Café menu.txt'))
+  r.feed(withFile(focus(notes, 'Plan.txt', t + 20 * MIN), '/Users/example/Plan.txt'))
+  r.feed(focus(sheets, 'Order list', t + 30 * MIN))
+  r.clock.t = t + 40 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  r.storage.deleteRange(t + 20 * MIN, t + 30 * MIN)
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(reader.document(notes.app_id!, 'Plan.txt'), { path: '/Users/example/Old/Plan.txt', app_path: notes.path })
+  assert.equal(reader.document(notes.app_id!, decomposed.normalize('NFC'))?.path, '/Users/example/Café menu.txt')
+  db.close()
+  r.close()
+})
