@@ -118,7 +118,7 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
       <Section title="History">
         <Row label="Keep history for" detail="Older days are deleted for good. Shortening this deletes them right away.">
           <div className="settings-anchor">
-            <Button onClick={() => setKeepOpen((o) => !o)}>
+            <Button disabled={!rec || !privacy} onClick={() => setKeepOpen((o) => !o)}>
               {keep?.label ?? `${privacy?.retention_days} days`}
             </Button>
             <Popover open={keepOpen} onClose={() => setKeepOpen(false)}>
@@ -199,6 +199,7 @@ function NeverRecord({ exclusions, defaults: all, seen, platform }: { exclusions
   const defaults = exclusions.filter((e) => e.is_default && here(e))
   const own = exclusions.filter((e) => !e.is_default)
   const defaultNames = [...new Set(all.filter(here).map((e) => e.label))]
+  const missing = all.filter((d) => here(d) && !exclusions.some((e) => e.match === d.match && e.value.toLowerCase() === d.value.toLowerCase()))
   const matches = text.trim() ? seen.filter((a) => a.name.toLowerCase().includes(text.trim().toLowerCase()) && !own.some((e) => e.match === 'app_id' && e.value === a.id)).slice(0, 5) : []
   const addAll = async (rules: Omit<Exclusion, 'is_default'>[]) => {
     for (const e of rules) {
@@ -241,15 +242,15 @@ function NeverRecord({ exclusions, defaults: all, seen, platform }: { exclusions
     <div>
       <h2 className="settings-heading">Never record</h2>
       <div className="settings-card">
-        {defaults.length > 0 ? (
+        {missing.length === 0 ? (
           <Row label="Password managers" detail={`${defaultNames.join(', ')} · on from the start`}>
             <Button kind="quiet" onClick={() => setConfirming(true)}>
               Remove
             </Button>
           </Row>
         ) : (
-          <Row label="Password managers" detail="Recorded like any other app.">
-            <Button kind="quiet" onClick={() => void addAll(all.filter(here))}>
+          <Row label="Password managers" detail={defaults.length > 0 ? `Some are recorded: ${[...new Set(missing.map((e) => e.label))].join(', ')}.` : 'Recorded like any other app.'}>
+            <Button kind="quiet" onClick={() => void addAll(missing)}>
               Add back
             </Button>
           </Row>

@@ -5,10 +5,11 @@ import type { Exclusion, PrivacyView, SettingsQuery } from '../shared/settings.t
 import type { Handlers, Reader } from './queries.ts'
 
 function privacy(r: Reader): PrivacyView {
-  // A default taken out and added back is stored as the person's own; it is still one of the defaults.
+  // A default taken out and added back is stored as the person's own; it is still one of the defaults. Capture matches
+  // without case, so a rule kept from V1 as com.apple.passwords is the default com.apple.Passwords.
   const exclusions = (r.db.prepare('SELECT match, value, label, is_default FROM exclusions ORDER BY id').all() as (Omit<Exclusion, 'is_default'> & { is_default: number })[]).map((e) => ({
     ...e,
-    is_default: e.is_default === 1 || DEFAULT_EXCLUSIONS.some((d) => d.match === e.match && d.value === e.value),
+    is_default: e.is_default === 1 || DEFAULT_EXCLUSIONS.some((d) => d.match === e.match && d.value.toLowerCase() === e.value.toLowerCase()),
   }))
   const row = r.db.prepare(`SELECT value FROM settings WHERE key = 'retention_days'`).get() as { value: string } | undefined
   const now = r.now()

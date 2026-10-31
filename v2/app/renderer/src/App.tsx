@@ -45,7 +45,10 @@ function Shell() {
           setScreen('today')
           setTodayNav({ date: dateKey(new Date()), scope: 'day', openHour: null })
         }
-        if (to === 'settings') setScreen('settings')
+        if (to === 'settings') {
+          setSearch(false)
+          setScreen('settings')
+        }
         if (to === 'search') setSearch(true)
         if (to === 'search-toggle') setSearch((s) => !s)
       }),
