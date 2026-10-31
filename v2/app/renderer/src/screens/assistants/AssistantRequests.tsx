@@ -10,6 +10,9 @@ const ARM_MS = 700
 // Changes that delete or can't be taken back get the red button.
 const deletes = (c: RequestChange) => c.kind === 'delete' || (c.kind === 'retention' && c.days !== null)
 
+// Esc or a click outside leaves the request waiting: only a button answers, so a stray dismissal never reads as "no".
+const stay = () => {}
+
 const failed = (code: string) => (code === 'request_expired' ? 'That request had waited too long, so nothing changed. Ask again if you still want it.' : code === 'request_gone' ? 'That request was already answered.' : errorText(code))
 
 /** A change an assistant asked for, waiting on the person's answer: one at a time, oldest first, over any screen. */
@@ -41,7 +44,7 @@ export function AssistantRequests() {
     else if (allow) toast({ text: 'Done.' })
   }
   return (
-    <Dialog onClose={() => void answer(false)} label={`${r.assistant} asks`}>
+    <Dialog onClose={stay} label={`${r.assistant} asks`}>
       <div>
         {r.assistant} asks: {describeRequest(r.change)}.
       </div>
