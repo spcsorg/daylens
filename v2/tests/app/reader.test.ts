@@ -14,6 +14,7 @@ import { handleControl, type ControlReply } from '../../capture/control.ts'
 import { DB_FILE } from '../../capture/store.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, T0, rig } from '../storage/support.ts'
+import { page } from '../retrieval/support.ts'
 
 const notes = app('com.example.notes', { name: 'Notes' })
 const sheets = app('com.example.sheets', { name: 'Sheets' })
@@ -299,6 +300,65 @@ test('search hides what is past the retention period, before pruning reaches it'
   assert.equal(found(), 1)
   r.clock.t = T0 + 4 * 24 * HOUR
   assert.equal(found(), 0)
+  db.close()
+  r.close()
+})
+
+test('where you left off is what was open before your last break, not what is in front now', async () => {
+  resetSeq()
+  const r = rig()
+  work(r, T0 + 9 * HOUR, [
+    [notes, 'Order list', 20],
+    [sheets, 'Flour costs', 20],
+    [notes, 'Supplier email', 20],
+  ])
+  // Back after the break, on the first window again.
+  const end = work(r, T0 + 11 * HOUR, [[notes, 'Order list', 30]])
+  r.clock.t = end + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  const left = today.leftOff(reader)
+  assert.deepEqual(left.map((s) => s.title), ['Supplier email', 'Flour costs'])
+  // Each row's time is when it was last in front before the break, not the whole day.
+  assert.ok(Math.abs(left[0]!.last_ms - (T0 + 10 * HOUR)) < 2 * MIN)
+  // The open hour lists its rows with their range inside that hour, not to the same window after the break.
+  const nine = today.hour(reader, T0 + 9 * HOUR).sources.find((s) => s.title === 'Order list')!
+  assert.ok(nine.first_ms >= T0 + 9 * HOUR && nine.last_ms <= T0 + 10 * HOUR)
+  db.close()
+  r.close()
+})
+
+test('with no break yet in the record, where you left off shows nothing', async () => {
+  resetSeq()
+  const r = rig()
+  const end = work(r, T0 + 9 * HOUR, [[notes, 'Order list', 40]])
+  r.clock.t = end + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(today.leftOff(reader), [])
+  db.close()
+  r.close()
+})
+
+test('a page back in front after the break is left out though its title changed', async () => {
+  resetSeq()
+  const r = rig()
+  const chrome = app('com.google.Chrome', { name: 'Chrome' })
+  const url = 'https://docs.example.com/d/budget'
+  r.feed(focus(chrome, 'Budget - Docs', T0 + 9 * HOUR, 'app_changed'))
+  r.store.insertObservation({ ...page(T0 + 9 * HOUR, url, 'Budget'), seq: 1 })
+  for (let m = 1; m < 30; m++) r.feed(focus(chrome, 'Budget - Docs', T0 + 9 * HOUR + m * MIN, 'reconcile'))
+  work(r, T0 + 9 * HOUR + 30 * MIN, [[notes, 'Order list', 30]])
+  r.feed(focus(chrome, 'Budget, edited - Docs', T0 + 11 * HOUR, 'app_changed'))
+  r.store.insertObservation({ ...page(T0 + 11 * HOUR, url, 'Budget, edited'), seq: 2 })
+  for (let m = 1; m < 20; m++) r.feed(focus(chrome, 'Budget, edited - Docs', T0 + 11 * HOUR + m * MIN, 'reconcile'))
+  r.clock.t = T0 + 11 * HOUR + 20 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const { reader, db } = readOnly(r)
+  assert.deepEqual(today.leftOff(reader).map((s) => s.title), ['Order list'])
   db.close()
   r.close()
 })

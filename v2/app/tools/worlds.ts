@@ -323,8 +323,8 @@ export function pricing(weekdays: number[]): WorldDay[] {
   return weekdays.map((dow, i) => {
     if (i === last) {
       const early: WorldDay = [
-        { hour: 7, history: true, segs: [[40, chrome, 'Hacker News'], [52, chrome, 'Usage-based pricing – Stripe Docs']], written: { title: 'Hacker News and Stripe’s pricing docs', summary: 'Before Daylens started: Hacker News, then Stripe’s docs on usage-based pricing.', detail: 'Hacker News at 7:40 and the Stripe docs at 7:52, from your browser’s history.' } },
-        { hour: 8, history: true, segs: [[5, chrome, 'Weather – Riverside'], [30, chrome, 'Plans and pricing – Quillmate']], written: { title: 'Weather and Quillmate’s plans', summary: 'Before Daylens started: the weather, then Quillmate’s pricing page.', detail: 'The weather at 8:05 and Quillmate’s plans at 8:30, from your browser’s history.' } },
+        { hour: 7, history: true, segs: [[40, chrome, 'Hacker News'], [52, chrome, 'Usage-based pricing – Stripe Docs']], written: { title: 'Hacker News and Stripe’s pricing docs', summary: 'Hacker News, then Stripe’s docs on usage-based pricing.', detail: 'Hacker News at 7:40, then the Stripe docs at 7:52.' } },
+        { hour: 8, history: true, segs: [[5, chrome, 'Weather – Riverside'], [30, chrome, 'Plans and pricing – Quillmate']], written: { title: 'Weather and Quillmate’s plans', summary: 'The weather, then Quillmate’s pricing page.', detail: 'The weather at 8:05, then Quillmate’s plans at 8:30.' } },
       ]
       return [...early, ...hours(TODAY)]
     }
@@ -332,7 +332,7 @@ export function pricing(weekdays: number[]): WorldDay[] {
     if (dow === 0) return []
     if (dow === 6) return hours([10, ['saturday', 'saturdayLater']])
     const day = hours(WEEKDAYS[cycle++ % WEEKDAYS.length]!)
-    if (i === evening) day.push({ hour: 21, history: true, segs: [[10, chrome, 'Pricing – Tessellate'], [25, chrome, 'Plans and pricing – Quillmate'], [40, chrome, 'Hacker News']], written: { title: 'Tessellate and Quillmate pricing', summary: 'While Daylens wasn’t running: Tessellate’s and Quillmate’s pricing pages, then Hacker News.', detail: 'Tessellate at 9:10 PM, Quillmate at 9:25 and Hacker News at 9:40, from your browser’s history.' } })
+    if (i === evening) day.push({ hour: 21, history: true, segs: [[10, chrome, 'Pricing – Tessellate'], [25, chrome, 'Plans and pricing – Quillmate'], [40, chrome, 'Hacker News']], written: { title: 'Tessellate and Quillmate pricing', summary: 'Tessellate’s and Quillmate’s pricing pages, then Hacker News.', detail: 'Tessellate at 9:10 PM, Quillmate at 9:25 and Hacker News at 9:40.' } })
     return day
   })
 }

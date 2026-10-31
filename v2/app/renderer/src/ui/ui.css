@@ -694,10 +694,16 @@ button.hour:hover .hour-title {
   font: var(--caption-strong);
   text-align: left;
   overflow: hidden;
+  transition: background-color var(--quick) var(--ease);
+}
+
+/* The clamp hides nothing past two lines in a taller box, so the text gets its own box two lines high. */
+.week-block-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  transition: background-color var(--quick) var(--ease);
+  overflow: hidden;
+  max-height: 2lh;
 }
 
 .week-block:hover {
@@ -904,6 +910,11 @@ button.hour:hover .hour-title {
 
 .calendar-grid button:disabled {
   color: var(--text-3);
+}
+
+.calendar-grid button.today:not(.selected) {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .calendar-grid button.selected {

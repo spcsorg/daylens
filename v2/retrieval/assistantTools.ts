@@ -4,7 +4,7 @@
 // record.
 import { app, appsView } from '../app/reader/apps.ts'
 import { Reader as ScreenReader } from '../app/reader/queries.ts'
-import { leftOff } from '../app/reader/today.ts'
+import { recent } from '../app/reader/today.ts'
 import { describeRequest, recentRequests } from '../storage/assistantRequests.ts'
 import { HOUR_MS, siteOf } from '../storage/derive.ts'
 import { pendingVerdict, type HourSource } from '../storage/hours.ts'
@@ -441,7 +441,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
       const shown = new Shown()
       const { rec, left, exclusions, quit, retention } = sr.read(() => ({
         rec: sr.recording(),
-        left: leftOff(sr),
+        left: recent(sr),
         exclusions: ctx.reader.db.prepare('SELECT label, is_default FROM exclusions ORDER BY id').all() as { label: string; is_default: number }[],
         // Set when the capture service stops cleanly, cleared when it starts.
         quit: ctx.reader.db.prepare(`SELECT value FROM meta WHERE key = 'service_stopped_wall_ms'`).get() as { value: string } | undefined,
