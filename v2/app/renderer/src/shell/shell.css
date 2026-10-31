@@ -95,12 +95,6 @@
   white-space: nowrap;
 }
 
-.subline {
-  font: var(--label-regular);
-  color: var(--text-2);
-  margin-top: var(--space-2);
-}
-
 .scroll {
   flex: 1;
   min-height: 0;
