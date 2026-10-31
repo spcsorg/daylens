@@ -331,15 +331,17 @@ test('a file being deleted is never reopened, and a decomposed file name is foun
   const decomposed = 'Café menu.txt'
   r.feed(withFile(focus(notes, 'Plan.txt', t), '/Users/example/Old/Plan.txt'))
   r.feed(withFile(focus(notes, decomposed, t + 10 * MIN), '/Users/example/Café menu.txt'))
+  r.feed(withFile(focus(notes, decomposed, t + 19 * MIN, 'reconcile'), '/Users/example/Café menu.txt'))
   r.feed(withFile(focus(notes, 'Plan.txt', t + 20 * MIN), '/Users/example/Plan.txt'))
   r.feed(focus(sheets, 'Order list', t + 30 * MIN))
   r.clock.t = t + 40 * MIN
   r.storage.start()
   await r.storage.derivationSettled()
   r.storage.deleteRange(t + 20 * MIN, t + 30 * MIN)
+  r.storage.deleteRange(t + 12 * MIN, t + 15 * MIN)
   const { reader, db } = readOnly(r)
   assert.deepEqual(reader.document(notes.app_id!, 'Plan.txt'), { path: '/Users/example/Old/Plan.txt', app_path: notes.path })
-  assert.equal(reader.document(notes.app_id!, decomposed.normalize('NFC'))?.path, '/Users/example/Café menu.txt')
+  assert.equal(reader.document(notes.app_id!, decomposed.normalize('NFC'))?.path, '/Users/example/Café menu.txt', 'a deletion inside a row leaves the rest of it to open')
   db.close()
   r.close()
 })

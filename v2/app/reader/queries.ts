@@ -458,7 +458,8 @@ export class Reader {
          WHERE i.app_id = ? AND i.title IN (?, ?, ?) AND o.document IS NOT NULL ORDER BY i.start_wall_ms DESC`,
       )
       .all(appId, title, title.normalize('NFC'), title.normalize('NFD')) as { document: string; app_path: string | null; s: number; e: number }[]
-    const r = rows.find((r) => r.e > cutoff && !pending.some((t) => (t.from_wall_ms ?? Number.NEGATIVE_INFINITY) < r.e && r.s < (t.to_wall_ms ?? Number.POSITIVE_INFINITY)))
+    // A pending deletion is not yet cut into the intervals, so a row stays while any of its visible time is outside it.
+    const r = rows.find((r) => r.e > cutoff && !pending.some((t) => (t.from_wall_ms ?? Number.NEGATIVE_INFINITY) <= Math.max(r.s, cutoff) && r.e <= (t.to_wall_ms ?? Number.POSITIVE_INFINITY)))
     return r ? { path: r.document, app_path: r.app_path } : null
   }
 }
