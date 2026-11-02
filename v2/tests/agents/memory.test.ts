@@ -20,7 +20,7 @@ test('capture and backfill stay below 135 MB in Electron Node mode over three ru
   for (let run = 1; run <= 3; run++) {
     const result = await measureScan(home, tmp())
     t.diagnostic(JSON.stringify({ run, combined_peak_mb: result.combined_peak_mb, wall_ms: result.passes[0].wall_ms, mean_sample_interval_ms: result.mean_sample_interval_ms }))
-    assert.equal(result.runtime.electron, '44.5.1')
+    assert.equal(result.runtime.electron, '45.2.1')
     assert.ok(result.entrypoint.endsWith('build/js/tools/agentScan.js'))
     assert.equal(result.sample_interval_ms, 1)
     assert.ok(result.samples > 0, 'sampler observes RSS for the process including all worker threads')
