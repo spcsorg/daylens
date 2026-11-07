@@ -35,7 +35,9 @@ The real baseline is taken when I-0 is done: the packaged app, a quiet machine, 
 | I-13 | Battery | macOS Energy Impact "Low" while recording | not measured | ❌ |
 | I-14 | 72-hour soak | 0 crashes; memory growth ≤ 5% | not measured | ❌ |
 | I-15 | Deletion | UI responds in ≤ 100 ms; a disk scan finds nothing | not measured | ❌ See A-7 |
-| I-16 | Install | first launch to recording ≤ 2 minutes on every OS, with no Gatekeeper or SmartScreen warning | not measured | ❌ See N-6 |
+| I-16 | Install | first launch to recording ≤ 2 minutes on every OS; only the standard first-open dialog, no Gatekeeper or SmartScreen warning | not measured | ❌ See N-6 |
+| I-17 | The calendar never waits | With AI and network throttled, day, week and month paint facts within I-1 and I-4 | not measured | ❌ |
+| I-18 | An hour is written after it ends | Within 10 minutes, in the background | 5-minute delay in code (`hourWriter.ts:13`); not measured | ❌ |
 
 ## Quality
 
