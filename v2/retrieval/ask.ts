@@ -3,6 +3,7 @@
 // and drops a statement that cites nothing, anything it was not given, or nothing from a time, day, app, site or file
 // the statement names. Daylens's own written hour text is not evidence; the person's corrections are. Answers are
 // returned, never stored.
+import { dateOf, factsTitle, hourStarts, Reader as ScreenReader } from '../app/reader/queries.ts'
 import type { HourSource } from '../storage/hours.ts'
 import type { AssistantRead, UsageEntry } from '../storage/index.ts'
 import { deletionCovers, type HourView, type ReadSpan, type Reader, type Sighting } from './reader.ts'
@@ -441,12 +442,26 @@ export function completeStatements(json: string): unknown[] {
   return out
 }
 
-/** An hour as search lists it; one not yet written is titled by its three longest apps, as Today titles it. */
-function foundHour(h: HourView): FoundHour {
-  const open: OpenAction = { kind: 'hour', hour_start_wall_ms: h.start_wall_ms, hour_id: h.hour?.id ?? null }
-  if (h.hour) return { kind: 'hour', hour_id: h.hour.id, start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, status: h.hour.status, title: h.hour.title, summary: h.hour.summary, corrected: h.hour.corrected, open }
-  const apps = h.apps.flatMap((a) => a.app_name ?? a.app_id ?? []).slice(0, 3)
-  return { kind: 'hour', hour_id: null, start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, status: 'facts', title: apps.join(' · ') || null, summary: null, corrected: [], open }
+/**
+ * The hours of [from, to) as Today shows them: past the retention period left out, hours known only from browser history
+ * in, each by its written title, else its first page if only history knows it, else its three longest apps.
+ */
+function todaysHours(reader: Reader, now: number, from: number, to: number): FoundHour[] {
+  const screens = new ScreenReader(reader.db, () => now)
+  return screens.read(() => {
+    const dates = [...new Set(hourStarts(from, to).map(dateOf))]
+    const stored = reader.db.prepare('SELECT id FROM hours WHERE start_wall_ms >= ? AND start_wall_ms < ?').pluck().all(from, to) as number[]
+    const hours = new Map(stored.flatMap((id) => reader.writtenHour(id) ?? []).map((h) => [h.start_wall_ms, h]))
+    return dates
+      .flatMap((d) => screens.day(d).hours)
+      .filter((h) => h.start_ms >= from && h.start_ms < to && (h.title !== null || h.facts.apps.length > 0))
+      .map((h): FoundHour => {
+        const hour = hours.get(h.start_ms)
+        const title = h.title ?? (h.from_history ? (h.facts.titles[0] ?? 'Pages opened') : factsTitle(h.facts.apps))
+        const open: OpenAction = { kind: 'hour', hour_start_wall_ms: h.start_ms, hour_id: hour?.id ?? null }
+        return { kind: 'hour', hour_id: hour?.id ?? null, start_wall_ms: h.start_ms, end_wall_ms: h.end_ms, status: hour?.status ?? 'facts', title, summary: h.summary, corrected: hour?.corrected ?? [], open }
+      })
+  })
 }
 
 /**
@@ -474,7 +489,7 @@ export async function ask(
   let results = find()
   // With no AI, a time whose words match nothing ("what did I do this morning?") shows its hours, written or not.
   const nothing = results.pages.length + results.files.length + results.windows.length + results.hours.length === 0
-  if (!deps.model) return { kind: 'search_only', results: days.length > 0 && nothing ? { ...results, hours: days.flatMap(([from, to]) => deps.reader.hours(from, to)).map(foundHour) } : results }
+  if (!deps.model) return { kind: 'search_only', results: days.length > 0 && nothing ? { ...results, hours: days.flatMap(([from, to]) => todaysHours(deps.reader, now, from, to)) } : results }
 
   // Hours: those of the days asked about, else those the search results were seen in. Hours where a result was seen
   // come first, then the busiest; the ones sent are put back in time order.

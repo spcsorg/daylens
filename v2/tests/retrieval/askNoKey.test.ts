@@ -8,6 +8,9 @@ import { test } from 'node:test'
 import { DB_FILE } from '../../capture/store.ts'
 import { ask, type AskLog } from '../../retrieval/ask.ts'
 import { Reader } from '../../retrieval/reader.ts'
+import { Reader as Today, dateOf } from '../../app/reader/queries.ts'
+import { historyLines, kindOf } from '../../app/renderer/src/screens/today/rows.ts'
+import { factsTitle } from '../../app/renderer/src/lib/format.ts'
 import { tempDir } from '../support/tmp.ts'
 
 // A Wednesday at 4:30 PM: today has its morning, and yesterday a whole working day.
@@ -38,7 +41,10 @@ test('with no AI, each of Ask’s example questions shows the hours of the time 
       assert.ok(h.title, `${question}: an hour has no title`)
       assert.deepEqual(h.open, { kind: 'hour', hour_start_wall_ms: h.start_wall_ms, hour_id: h.hour_id })
     }
-    assert.deepEqual(hours.map((h) => h.start_wall_ms), reader.hours(from, to).map((h) => h.start_wall_ms), `${question}: every hour of the time asked, in order`)
+    // Today's rows for that time, titled as Today draws them.
+    const today = new Today(reader.db, () => NOW.getTime()).day(dateOf(from)).hours.filter((h) => h.start_ms >= from && h.start_ms < to && !h.gap && (h.title !== null || h.facts.apps.length > 0))
+    const shown = today.map((h) => [h.start_ms, h.title ?? (kindOf(h) === 'filled' ? historyLines(h).title : factsTitle(h))])
+    assert.deepEqual(hours.map((h) => [h.start_wall_ms, h.title]), shown, `${question}: every hour of the time asked, in order, as Today shows it`)
   }
   reader.close()
 })
