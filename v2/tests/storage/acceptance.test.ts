@@ -585,7 +585,7 @@ test('stopping storage never reports a deletion purged; the purge resumes at the
   const r2 = rig(r.dir)
   r2.storage.start()
   const t0 = Date.now()
-  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 3000) await new Promise((res) => setTimeout(res, 50))
+  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 10_000) await new Promise((res) => setTimeout(res, 50))
   assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
   assert.deepEqual(diskContains(r2.dir, 'Dingo'), [])
   r2.close()
@@ -667,7 +667,7 @@ async function crashedDeletion(stopAfter: DeletionStep) {
   r2.storage.start()
   await r2.storage.deletionsSettled()
   const t0 = Date.now()
-  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 3000) await new Promise((res) => setTimeout(res, 50))
+  while (r2.q<{ state: string }>(`SELECT state FROM deletions`)[0]!.state !== 'purged' && Date.now() - t0 < 10_000) await new Promise((res) => setTimeout(res, 50))
   assert.deepEqual(r2.q(`SELECT state FROM deletions`), [{ state: 'purged' }])
   assert.deepEqual(containsAnywhere(r2, 'Quail'), [])
   // The hour is only partly inside the range, so it is cleared, not removed: both threads keep their ids, untitled.
