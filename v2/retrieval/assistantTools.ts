@@ -214,7 +214,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
   {
     name: 'list_days',
     title: 'List recorded days',
-    description: `An overview of the local days from \`from\` to \`to\` (inclusive) that have anything recorded, as the week and month views show them: time recorded, the five apps used most, and each hour's title (its written title, else its three longest apps). Use it for a week or a month; use get_day for one day in detail. ${UNTRUSTED}`,
+    description: `An overview of the local days from \`from\` to \`to\` (inclusive) that have anything recorded, as the week and month views show them: time recorded, the five apps used most, and each hour's title (its written or corrected title, else its three longest apps). Use it for a week or a month; use get_day for one day in detail. ${UNTRUSTED}`,
     inputSchema: { type: 'object', properties: { from: DATE, to: DATE }, required: ['from', 'to'], additionalProperties: false },
     run(args, ctx, mark) {
       const [from, to] = dateSpan(args, ctx.limits.maxDays)
@@ -235,7 +235,7 @@ export const READ_TOOLS: readonly ReadTool[] = [
         }
         shown.hour(h.hour?.id)
         for (const a of h.apps.slice(0, 3)) shown.app(a.app_id)
-        const title = h.hour?.status === 'written' && h.hour.title ? h.hour.title : h.apps.slice(0, 3).map((a) => a.app_name ?? a.app_id).join(' · ')
+        const title = h.hour?.title || h.apps.slice(0, 3).map((a) => a.app_name ?? a.app_id).join(' · ')
         d.hours.push({ start: localIso(h.start_wall_ms), title })
         days.set(date, d)
       }

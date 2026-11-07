@@ -81,7 +81,7 @@ test('an hour with nothing recorded says why: the computer was asleep', async ()
   r.close()
 })
 
-test('a correction to an hour AI has not written shows on Today and in the week, marked Edited, until it is undone', async () => {
+test('a correction to an hour AI has not written shows on Today, marked Edited, and in the week, until it is undone', async () => {
   resetSeq()
   const r = rig()
   const end = work(r, T0 + 9 * HOUR, [
@@ -99,13 +99,7 @@ test('a correction to an hour AI has not written shows on Today and in the week,
   assert.deepEqual([corrected!.title, corrected!.edited], ['Costed the bakery order', true])
   assert.deepEqual([untouched!.title, untouched!.edited], [null, false], 'an hour nobody corrected still shows only its facts')
   const blocks = today.week(reader, DAY).days[0]!.blocks
-  assert.deepEqual(
-    blocks.map((b) => [b.title, b.written]),
-    [
-      ['Costed the bakery order', true],
-      ['Sheets', false],
-    ],
-  )
+  assert.deepEqual(blocks.map((b) => b.title), ['Costed the bakery order', 'Sheets'])
   r.storage.undoCorrection(correction)
   const undone = reader.day(DAY).hours[0]!
   assert.deepEqual([undone.title, undone.edited], [null, false])

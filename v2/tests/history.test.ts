@@ -403,7 +403,7 @@ test('a day known only from history is marked in the calendar, shows in the week
   assert.deepEqual(view.recordedDays('2026-10'), ['2026-10-16'])
   assert.equal(view.firstDay(), '2026-10-16')
   const week = today.week(view, '2026-10-12').days.find((d) => d.date === '2026-10-16')!
-  assert.deepEqual(week, { date: '2026-10-16', total_ms: 0, blocks: [{ start_ms: NOON + 8 * HOUR, title: 'Google Chrome', written: false }] })
+  assert.deepEqual(week, { date: '2026-10-16', total_ms: 0, blocks: [{ start_ms: NOON + 8 * HOUR, title: 'Google Chrome' }] })
   const month = today.month(view, '2026-10')
   assert.deepEqual(month.days.find((d) => d.date === '2026-10-16'), { date: '2026-10-16', total_ms: 0, apps: [{ id: 'com.google.Chrome', name: 'Google Chrome', ms: 0 }] })
   assert.equal(month.total_ms, 0)

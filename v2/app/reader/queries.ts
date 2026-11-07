@@ -266,6 +266,7 @@ export class Reader {
     return Number.isFinite(first) ? dateOf(first) : null
   }
 
+  /** Written hours, and facts hours a person corrected: a correction shows whether or not AI wrote the hour. */
   writtenHours(from: number, to: number): Map<number, { title: string | null; summary: string | null; detail: string | null; edited: boolean }> {
     const out = new Map<number, { title: string | null; summary: string | null; detail: string | null; edited: boolean }>()
     const ids = this.db.prepare('SELECT id FROM hours WHERE start_wall_ms >= ? AND start_wall_ms < ?').all(from, to) as { id: number }[]

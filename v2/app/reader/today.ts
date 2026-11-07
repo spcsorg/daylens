@@ -68,7 +68,7 @@ export function week(r: Reader, start: string): WeekView {
       const f = r.withVisits(live, visits.filter((v) => v.t >= h && v.t < h + HOUR_MS))
       const w = written.get(h)
       if (f.apps.length === 0 && !w) continue
-      blocks.push({ start_ms: h, title: w?.title ?? factsTitle(f.apps), written: Boolean(w?.title) })
+      blocks.push({ start_ms: h, title: w?.title ?? factsTitle(f.apps) })
     }
     days.push({ date, total_ms: r.facts(spans).total_ms, blocks })
   }
