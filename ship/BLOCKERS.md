@@ -9,6 +9,7 @@ Sorted by lead time, longest first. Checked 7 November 2026.
 | D1 | **What ships on 20 November: the beta or the release checklist?** | The [release checklist](../docs/build-plan.md#release-checklist) requires the Microsoft Store listing, billing in production, the extension in three stores, a Windows gold day from the Store build, and V1 data opening in V2. Extension review alone can take five weeks. None of that fits before 1 December. | Ship `2.0.0-beta.2` on 20 November against a strict, provable beta gate: notarized macOS, own key or no AI, no accounts. Keep the full checklist as the gate for `2.0.0`. |
 | D2 | **Accounts and billing in V2** | The beta promises no accounts, billing or analytics ([privacy](../docs/privacy-and-security.md#in-the-beta)). The finished product has a billing service with accounts, Daylens AI, and analytics on by default. V1's web companion (`irachrist1/daylens` `apps/web`: Next.js, Convex, workspaces, device link codes, recovery, PostHog) is the only account system that exists. | No accounts in the beta. Memo with options follows in `ship/ACCOUNTS.md`. |
 | D3 | **Windows: Store only, or a signed installer too** | The docs ship Windows only through the Microsoft Store. Azure Artifact Signing doesn't serve Rwanda (organizations: US, Canada, EU, UK; individuals: US and Canada only), so a direct installer needs a purchased OV certificate. | Store only. |
+| D5 | **Screen and audio capture** | It's build step 1d and fully specified (Settings switches, on-device text reading and transcription), but none of it exists. "Every feature works" either includes it or names it as later. | Later. It's off by default, and building it means new permissions and privacy proof on three platforms. |
 | D4 | **Domain** | `daylens.app` is still yours. The download page, docs and store listings need one final address. | Renew `daylens.app` (B2). Don't register a new one. |
 
 ## Accounts to open (days of lead time)
@@ -56,12 +57,14 @@ The notarized macOS build needs this, and so does every Gatekeeper-free install.
 - The new harness needs far more minutes: each test run 20 times, packaged E2E on three operating systems, and notarized builds. macOS minutes bill at 10 times the Linux rate.
 - **Decide:** a monthly Actions spending limit for `spcsorg`.
 
-### B6 · An Anthropic API key with a spend cap
+### B6 · An Anthropic API key with a spend cap: needed first
+
+Every AI feature is unproven until this exists: Ask, written hours, key errors, both evals and the first-token budget. It takes minutes and blocks the most items.
 
 - **Steps:** in [console.anthropic.com](https://console.anthropic.com/), create a workspace called `daylens-evals`, set its monthly spend limit, and create a key in it. Then run this and paste the key at the prompt:
 
 ```bash
-gh secret set ANTHROPIC_API_KEY -R spcsorg/daylens
+gh secret set DAYLENS_TEST_ANTHROPIC_API_KEY -R spcsorg/daylens
 ```
 
 - **Tell me:** the cap. Nightly evals stop when they reach it.
