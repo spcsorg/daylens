@@ -5,7 +5,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { askFailure, keyCheckFailure } from '../../app/shared/ai.ts'
 import { DB_FILE } from '../../capture/store.ts'
-import { checkKey } from '../../engine/backends.ts'
+import { checkKey, offline } from '../../engine/backends.ts'
 import { anthropicApi } from '../../retrieval/anthropicApi.ts'
 import { ask, type AskLog } from '../../retrieval/ask.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
@@ -71,4 +71,12 @@ test('offline, Ask says so instead of saying Claude couldn’t answer', async ()
     store.close()
     r.close()
   }
+})
+
+test('a name whose addresses fail in different ways is unreachable, not offline', () => {
+  const code = (c: string) => Object.assign(new Error(c), { code: c })
+  const mixed = Object.assign(new AggregateError([code('EHOSTUNREACH'), code('ECONNREFUSED')]), { code: 'EHOSTUNREACH' })
+  assert.equal(offline(new Error('fetch failed', { cause: mixed })), false)
+  assert.equal(offline(new Error('fetch failed', { cause: new AggregateError([code('ENETUNREACH'), code('EHOSTUNREACH')]) })), true)
+  assert.equal(offline(new Error('fetch failed', { cause: new AggregateError([]) })), false)
 })

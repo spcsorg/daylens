@@ -84,8 +84,12 @@ function apiClient(opts: ApiOptions): Anthropic {
 // The network itself is gone: no name lookup, no route. A refused, reset or TLS-failed connection is not offline.
 const OFFLINE_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH'])
 
-function offline(e: unknown): boolean {
-  for (let c = e; c instanceof Error; c = c.cause) if (OFFLINE_CODES.has((c as NodeJS.ErrnoException).code ?? '')) return true
+// Node tries each address of a name and reports them together; offline only if every address failed that way.
+export function offline(e: unknown): boolean {
+  for (let c = e; c instanceof Error; c = c.cause) {
+    if (c instanceof AggregateError) return c.errors.length > 0 && c.errors.every(offline)
+    if (OFFLINE_CODES.has((c as NodeJS.ErrnoException).code ?? '')) return true
+  }
   return false
 }
 
