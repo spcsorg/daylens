@@ -83,6 +83,8 @@ function apiClient(opts: ApiOptions): Anthropic {
 
 function apiError(e: unknown): { error: string; quota: boolean } {
   if (e instanceof Anthropic.AuthenticationError) return { error: 'the API key was refused', quota: false }
+  // A timeout is also a connection error to the SDK, but it says the network is slow, not gone.
+  if (e instanceof Anthropic.APIConnectionError && !(e instanceof Anthropic.APIConnectionTimeoutError)) return { error: 'no connection to Anthropic', quota: false }
   if (e instanceof Anthropic.APIError) return { error: `${e.status ?? 'no status'}: ${e.message}`, quota: e.status === 429 || QUOTA.test(e.message) }
   return { error: (e as Error).message, quota: false }
 }

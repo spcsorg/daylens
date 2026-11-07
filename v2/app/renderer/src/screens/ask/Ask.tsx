@@ -1,7 +1,7 @@
 // Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; the
 // answer arrives on the left as one message, a sentence at a time as it streams.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { AskResult, Citation, Statement, Visual } from '../../../../shared/ai.ts'
+import { askFailure, type AskResult, type Citation, type Statement, type Visual } from '../../../../shared/ai.ts'
 import { act, bridge, query } from '../../lib/api.ts'
 import { hourLabel, seenAt } from '../../lib/format.ts'
 import { IconButton } from '../../ui/controls.tsx'
@@ -58,18 +58,10 @@ async function send(question: string): Promise<void> {
     const result = await query({ q: 'ask', ask_id: id, question })
     update(id, (t) => ({ ...t, result }))
   } catch (err) {
-    update(id, (t) => ({ ...t, error: failure((err as Error).message) }))
+    update(id, (t) => ({ ...t, error: askFailure((err as Error).message) }))
   } finally {
     off()
   }
-}
-
-function failure(message: string): string {
-  if (/key was refused/.test(message)) return 'Anthropic didn’t accept your key. Check it in Settings › AI.'
-  if (/429|rate limit|credit balance|quota/i.test(message)) return 'Your Anthropic account is out of credit or over its limit, so Claude couldn’t answer.'
-  if (/timed? ?out|fetch failed|ENOTFOUND|ECONN|network/i.test(message)) return 'Couldn’t reach Anthropic. Check your connection and try again.'
-  if (/being deleted|deletion began/.test(message)) return 'Part of your record is being deleted. Ask again in a moment.'
-  return 'Claude couldn’t answer that. Try again.'
 }
 
 /** How many of `total` items to show: one more every PACE_MS until all are out. */
