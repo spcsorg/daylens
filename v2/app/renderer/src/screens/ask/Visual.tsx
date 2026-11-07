@@ -177,7 +177,8 @@ const KIND = { page: 'Page', file: 'File', window: 'Window' } as const
 export function FoundCard({ results, onOpenHour }: { results: SearchResults; onOpenHour: (start: number) => void }) {
   const toast = useToast()
   const things = [...results.pages, ...results.files, ...results.windows].slice(0, 5)
-  const hours = results.hours.slice(0, 3)
+  // With nothing else found, the hours are those of the time asked about (Ask with no AI), and all of them show.
+  const hours = things.length > 0 ? results.hours.slice(0, 3) : results.hours
   if (things.length + hours.length === 0) return <div className="bubble theirs">No page, file or hour matched those words.</div>
   const open = async (o: FoundItem['open']) => {
     const r = o.kind === 'url' ? await act({ a: 'open_url', url: o.url }) : o.kind === 'app' ? await act({ a: 'open_app', id: o.app_id }) : (onOpenHour(o.hour_start_wall_ms), { ok: true as const })
@@ -196,7 +197,7 @@ export function FoundCard({ results, onOpenHour }: { results: SearchResults; onO
     <div className="ask-card ask-found">
       {results.looser && <p className="ask-found-note">Nothing had every word, so these have some of them.</p>}
       {things.map((i) => row(`${i.kind}|${i.app_id}|${i.url ?? ''}|${i.file ?? ''}|${i.title}`, <AppIcon id={i.app_id} size={20} />, i.title, `${KIND[i.kind]} in ${i.app_name ?? i.app_id} · ${seenAt(i.last_wall_ms)}`, i.open))}
-      {hours.map((h: FoundHour) => row(`hour|${h.hour_id}`, <Icon name="today" size={20} />, h.title ?? h.summary ?? hourLabel(h.start_wall_ms), `Hour · ${seenAt(h.start_wall_ms)}`, h.open))}
+      {hours.map((h: FoundHour) => row(`hour|${h.start_wall_ms}`, <Icon name="today" size={20} />, h.title ?? h.summary ?? hourLabel(h.start_wall_ms), `Hour · ${seenAt(h.start_wall_ms)}`, h.open))}
     </div>
   )
 }

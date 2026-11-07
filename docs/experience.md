@@ -99,7 +99,7 @@ Ask answers questions about any day from the same record.
 - "This morning" is until noon, "this afternoon" until 6 PM, "this evening" after; Ask reads only that part of the day.
 - Asking for a timesheet or a report ("my hours on the bank project this week") drafts it from the recorded hours, with time per piece of work and the hours it came from, ready to copy.
 - Example questions lead with finding things and picking up work, then summaries and time.
-- With no AI, or at the free limit, Ask still searches and shows matching results.
+- With no AI, or at the free limit, Ask still searches and shows matching results. A question about a time with nothing to search for ("What did I do this morning?") shows every hour of that time instead, by its written title or, for an hour not yet written, its apps.
 - The usage counter appears only when the user is close to their limit.
 
 ## Apps

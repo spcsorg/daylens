@@ -536,6 +536,27 @@ test('with no AI, Ask returns search results only and sends nothing', async () =
   s.close()
 })
 
+test('with no AI, a question about a time shows its hours: a written hour by its title, one still facts only by its apps', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 13 * HOUR))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 13 * HOUR, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 13 * HOUR + 30 * MIN, 'app_changed'))
+  s.r.store.flush()
+  const res = await ask('what did I do yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.equal(res.kind, 'search_only')
+  assert.deepEqual(
+    res.results.hours.map((h) => [h.start_wall_ms, h.status, h.title, h.open]),
+    [
+      [T0, 'written', 'Budget review', { kind: 'hour', hour_start_wall_ms: T0, hour_id: res.results.hours[0]!.hour_id }],
+      [T0 + 13 * HOUR, 'facts', 'Editor · Notes', { kind: 'hour', hour_start_wall_ms: T0 + 13 * HOUR, hour_id: null }],
+    ],
+  )
+  assert.deepEqual([s.reads().length, s.usage().length], [0, 0])
+  s.close()
+})
+
 test('the limits cap what is sent, and captured text reaches the AI only as data in the record', async () => {
   const s = setup()
   const notes = app('com.example.notes', { name: 'Notes' })

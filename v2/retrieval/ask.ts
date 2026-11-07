@@ -6,7 +6,7 @@
 import type { HourSource } from '../storage/hours.ts'
 import type { AssistantRead, UsageEntry } from '../storage/index.ts'
 import { deletionCovers, type HourView, type ReadSpan, type Reader, type Sighting } from './reader.ts'
-import { search, type FoundItem, type OpenAction, type SearchResults } from './search.ts'
+import { search, type FoundHour, type FoundItem, type OpenAction, type SearchResults } from './search.ts'
 
 /** How much of the record one question may send. Product decisions with no defaults: the caller states each. */
 export interface AskLimits {
@@ -441,6 +441,14 @@ export function completeStatements(json: string): unknown[] {
   return out
 }
 
+/** An hour as search lists it; one not yet written is titled by its three longest apps, as Today titles it. */
+function foundHour(h: HourView): FoundHour {
+  const open: OpenAction = { kind: 'hour', hour_start_wall_ms: h.start_wall_ms, hour_id: h.hour?.id ?? null }
+  if (h.hour) return { kind: 'hour', hour_id: h.hour.id, start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, status: h.hour.status, title: h.hour.title, summary: h.hour.summary, corrected: h.hour.corrected, open }
+  const apps = h.apps.flatMap((a) => a.app_name ?? a.app_id ?? []).slice(0, 3)
+  return { kind: 'hour', hour_id: null, start_wall_ms: h.start_wall_ms, end_wall_ms: h.end_wall_ms, status: 'facts', title: apps.join(' · ') || null, summary: null, corrected: [], open }
+}
+
 /**
  * onStatement gets each statement as soon as it is complete and passes the same checks as the final answer, while no
  * deletion has begun. The result is still the whole answer: it replaces what was shown, and can withdraw a statement.
@@ -464,7 +472,8 @@ export async function ask(
   const find = (): SearchResults =>
     words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...(days.length > 0 ? { ranges: days } : {}) }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
   let results = find()
-  if (!deps.model) return { kind: 'search_only', results }
+  // With no AI, a time with nothing to search for ("what did I do this morning?") shows its hours, written or not.
+  if (!deps.model) return { kind: 'search_only', results: words ? results : { ...results, hours: days.flatMap(([from, to]) => deps.reader.hours(from, to)).map(foundHour) } }
 
   // Hours: those of the days asked about, else those the search results were seen in. Hours where a result was seen
   // come first, then the busiest; the ones sent are put back in time order.
