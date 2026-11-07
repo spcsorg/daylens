@@ -553,6 +553,9 @@ test('with no AI, a question about a time shows its hours: a written hour by its
       [T0 + 13 * HOUR, 'facts', 'Editor · Notes', { kind: 'hour', hour_start_wall_ms: T0 + 13 * HOUR, hour_id: null }],
     ],
   )
+  // A word that matches nothing in that time still shows its hours.
+  const reworded = await ask('What happened yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(reworded.kind === 'search_only' && reworded.results.hours.map((h) => h.start_wall_ms), [T0, T0 + 13 * HOUR])
   assert.deepEqual([s.reads().length, s.usage().length], [0, 0])
   s.close()
 })

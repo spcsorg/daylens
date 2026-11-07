@@ -472,8 +472,9 @@ export async function ask(
   const find = (): SearchResults =>
     words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...(days.length > 0 ? { ranges: days } : {}) }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
   let results = find()
-  // With no AI, a time with nothing to search for ("what did I do this morning?") shows its hours, written or not.
-  if (!deps.model) return { kind: 'search_only', results: words ? results : { ...results, hours: days.flatMap(([from, to]) => deps.reader.hours(from, to)).map(foundHour) } }
+  // With no AI, a time whose words match nothing ("what did I do this morning?") shows its hours, written or not.
+  const nothing = results.pages.length + results.files.length + results.windows.length + results.hours.length === 0
+  if (!deps.model) return { kind: 'search_only', results: days.length > 0 && nothing ? { ...results, hours: days.flatMap(([from, to]) => deps.reader.hours(from, to)).map(foundHour) } : results }
 
   // Hours: those of the days asked about, else those the search results were seen in. Hours where a result was seen
   // come first, then the busiest; the ones sent are put back in time order.

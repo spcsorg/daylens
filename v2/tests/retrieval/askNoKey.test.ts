@@ -3,13 +3,12 @@ process.env.TZ = 'Etc/GMT+5'
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { DB_FILE } from '../../capture/store.ts'
 import { ask, type AskLog } from '../../retrieval/ask.ts'
 import { Reader } from '../../retrieval/reader.ts'
+import { tempDir } from '../support/tmp.ts'
 
 // A Wednesday at 4:30 PM: today has its morning, and yesterday a whole working day.
 const NOW = new Date(2026, 6, 15, 16, 30)
@@ -17,7 +16,7 @@ const LIMITS = { maxHours: 12, maxSources: 40, perGroup: 8 }
 const at = (dayOffset: number, hour: number) => new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() + dayOffset, hour).getTime()
 
 test('with no AI, each of Ask’s example questions shows the hours of the time it names, with their titles', async () => {
-  const dir = path.join(mkdtempSync(path.join(os.tmpdir(), 'daylens-asknokey-')), 'data')
+  const dir = path.join(tempDir('daylens-asknokey-'), 'data')
   execFileSync(process.execPath, [path.join(import.meta.dirname, '../../app/tools/seed.ts'), '--data-dir', dir, '--now', NOW.toISOString()], { env: process.env, stdio: 'ignore' })
   const reader = Reader.open(path.join(dir, DB_FILE))
   const log: AskLog = {

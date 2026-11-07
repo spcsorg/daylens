@@ -173,11 +173,11 @@ function ThingCard({ thing: t, onOpenHour }: { thing: Thing; onOpenHour: (start:
 const KIND = { page: 'Page', file: 'File', window: 'Window' } as const
 
 /** Without a key, what search found for the question: the pages, files and windows first, then the hours, as Search
- * lists them, each opening the thing itself. */
+ * lists them, each opening the thing itself. When the question names a time and nothing matched, the hours of that time. */
 export function FoundCard({ results, onOpenHour }: { results: SearchResults; onOpenHour: (start: number) => void }) {
   const toast = useToast()
   const things = [...results.pages, ...results.files, ...results.windows].slice(0, 5)
-  // With nothing else found, the hours are those of the time asked about (Ask with no AI), and all of them show.
+  // Hours alone show in full: the cap only keeps them from burying pages, files and windows.
   const hours = things.length > 0 ? results.hours.slice(0, 3) : results.hours
   if (things.length + hours.length === 0) return <div className="bubble theirs">No page, file or hour matched those words.</div>
   const open = async (o: FoundItem['open']) => {
