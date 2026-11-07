@@ -271,7 +271,7 @@ export class Reader {
     const ids = this.db.prepare('SELECT id FROM hours WHERE start_wall_ms >= ? AND start_wall_ms < ?').all(from, to) as { id: number }[]
     for (const { id } of ids) {
       const h = readHour(this.db, id)
-      if (!h || h.status !== 'written') continue
+      if (!h || (h.status !== 'written' && h.corrected.length === 0)) continue
       out.set(h.start_wall_ms, { title: h.title, summary: h.summary, detail: h.detail, edited: h.corrected.length > 0 })
     }
     return out

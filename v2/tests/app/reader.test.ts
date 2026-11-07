@@ -81,6 +81,39 @@ test('an hour with nothing recorded says why: the computer was asleep', async ()
   r.close()
 })
 
+test('a correction to an hour AI has not written shows on Today and in the week, marked Edited, until it is undone', async () => {
+  resetSeq()
+  const r = rig()
+  const end = work(r, T0 + 9 * HOUR, [
+    [notes, 'Order list', 50],
+    [sheets, 'Flour costs', 60],
+  ])
+  r.clock.t = end + 5 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const fixed = r.storage.writeHour({ start_wall_ms: T0 + 9 * HOUR, tz: 'Example/Town', status: 'facts' }, r.storage.hourBasis(T0 + 9 * HOUR))
+  r.storage.writeHour({ start_wall_ms: T0 + 10 * HOUR, tz: 'Example/Town', status: 'facts' }, r.storage.hourBasis(T0 + 10 * HOUR))
+  const correction = r.storage.correct(fixed.id, 'title', 'Costed the bakery order')
+  const { reader, db } = readOnly(r)
+  const [corrected, untouched] = reader.day(DAY).hours
+  assert.deepEqual([corrected!.title, corrected!.edited], ['Costed the bakery order', true])
+  assert.deepEqual([untouched!.title, untouched!.edited], [null, false], 'an hour nobody corrected still shows only its facts')
+  const blocks = today.week(reader, DAY).days[0]!.blocks
+  assert.deepEqual(
+    blocks.map((b) => [b.title, b.written]),
+    [
+      ['Costed the bakery order', true],
+      ['Sheets', false],
+    ],
+  )
+  r.storage.undoCorrection(correction)
+  const undone = reader.day(DAY).hours[0]!
+  assert.deepEqual([undone.title, undone.edited], [null, false])
+  assert.equal(today.week(reader, DAY).days[0]!.blocks[0]!.title, 'Notes · Sheets')
+  db.close()
+  r.close()
+})
+
 test('a window that comes to the front while nobody is at the computer adds no time to the day or its apps', async () => {
   resetSeq()
   const r = rig()
