@@ -11,6 +11,9 @@ on:
       - "v2/**"
       - ".github/workflows/v2.yml"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -21,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-15, macos-15-intel, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     defaults:
@@ -30,8 +33,10 @@ jobs:
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -41,3 +46,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run app:typecheck
       - run: npm test
+      - name: Swift helper tests
+        if: runner.os == 'macOS'
+        run: swift test --package-path native/macos
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: 10.0.x
+      - name: Windows helper tests
+        if: runner.os == 'Windows'
+        run: dotnet test native/windows/Daylens.Capture.sln
