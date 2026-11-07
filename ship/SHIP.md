@@ -74,11 +74,11 @@ Nothing else is proven until these exist.
 | B-1 | Add, test and remove a key in onboarding and Settings | E2E with a real key: add, test and remove each succeed, and Ask and hours stop on removal | 🟡 `ipc/ai.ts:53-75`; IPC and UI untested ⛔ B6 |
 | B-2 | Replace a key in one step | E2E: paste a new key over the saved one | 🟠 Needs Remove first (`AiTab.tsx:91-125`) |
 | B-3 | A key with no credit is caught when saved | Replaying Anthropic's recorded 400 `invalid_request_error` credit body at save shows the no-credit message | 🐞 The check calls `models.list`, which passes (`backends.ts:91-97`) |
-| B-4 | Offline says offline | With the network cut, Ask and key save both say you're offline | 🐞 The "Connection error." message misses the regex at `Ask.tsx:70`; key save shows the raw error |
-| B-5 | Every API failure says what happened | Recorded real bodies for 400 credit, 401 revoked key, 429, 529 overload and a mid-stream `error` event each show their own message in Ask and in Settings | 🟠 One message for credit and rate limit (`Ask.tsx:69`) |
+| B-4 | Offline says offline | With the network cut, Ask and key save both say you're offline | 🟡 PR #58: verified, all four runners green, CodeRabbit finding fixed; merges on green |
+| B-5 | Every API failure says what happened, including a connection dropped mid-answer | Recorded real bodies for 400 credit, 401 revoked key, 429, 529 overload and a mid-stream `error` event each show their own message in Ask and in Settings | 🟠 One message for credit and rate limit (`Ask.tsx:69`) |
 | B-6 | Hour-writing failures reach the UI | A failing write shows a quiet status on Today with what to do | ❌ Log only (`hourWriter.ts:125-128`) |
 | B-7 | An AI error still shows search results | Stub an error; the matching results show under the message | ❌ `Ask.tsx:192-198` |
-| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | 🐞 Seen in the demo: "No page, file or hour matched those words." |
+| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | 🟡 PR #59: verified after two fix rounds; before-and-after screenshots taken; CI running |
 | B-9 | Example questions lead with finding things | The examples follow `docs/experience.md` | ⚠️ All three are summaries (`Ask.tsx:15`) |
 | B-10 | Timesheets and reports | "my hours on the pricing memo this week" drafts time per piece of work, with its hours, ready to copy; an eval case | ❌ No code |
 | B-11 | Every citation opens | File and window citations open like pages | 🟠 Dropped at `Ask.tsx:266-269` |
@@ -107,7 +107,7 @@ Nothing else is proven until these exist.
 | ID | Item | Acceptance test | Status · evidence |
 |---|---|---|---|
 | T-1 | Fix an hour | E2E: open an hour, Edit, "What were you doing?", save, then force a rewrite. The correction shows on Today, Search, Ask and MCP `get_hour`; "Edited" shows; Undo restores | ❌ No UI (`Today.tsx:176-198`); storage and undo exist |
-| T-2 | Corrections show on facts-only hours | A correction to an unwritten hour shows on Today and in the week view | 🐞 `queries.ts:225` skips hours that aren't written |
+| T-2 | Corrections show on facts-only hours | A correction to an unwritten hour shows on Today and in the week view | 🟡 PR #60: verified after two fix rounds; CI running |
 | T-3 | The open hour shows its outcome and suggestion | A written hour with an outcome and a suggestion shows both, with the checklist | ❌ Stored, never read |
 | T-4 | Remove one source, not its whole site | Removing one page leaves other pages from that site | ⚠️ `records.tsx:175-177` removes the site or app |
 | T-5 | Ask about unreadable browser time | A 20-minute unexplained browser span offers the question, "Leave it" and the extension | ❌ |

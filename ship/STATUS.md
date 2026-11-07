@@ -1,6 +1,6 @@
 # Status
 
-Updated 7 November 2026, 16:10. SHIP.md has had two adversarial reviews, and their findings are applied.
+Updated 7 November 2026, 21:30. Phase 1 started: CI hardened and merged; the 3-item trial is in review.
 
 ## Where it stands
 
@@ -37,6 +37,15 @@ No console errors.
 3. **Fixing an hour has no UI** (T-1), and the extension can't connect after install (F-2).
 4. **Missing settings:** start and end of the day, notifications, the extension's connection status (S-G1, S-G2, S-G5).
 
+## The trial run
+
+All three items went through the full loop: implementer, two adversarial reviewers, fixer, verifier.
+
+- **The loop works, with one fix.** Read-only droid can't run shell commands, so its first three reviews silently didn't happen. Once given a throwaway copy, it reproduced four real defects in B-8 and T-2 that the Claude reviewer and the first fixer had missed or only half-fixed. Retention was ignored on two new read paths, history-only hours were missing, and a deleted hour's correction disappeared.
+- **Each verifier proved its new tests fail on `main`**, and every suite ran with 0 failures.
+- **CodeRabbit added one more** on B-4: mixed address failures were reported as offline. Fixed, with a test.
+- **The new Windows runner exposed one flaky test** (a 3 s wait). Fixed in #57.
+
 ## Budgets
 
 See `BUDGETS.md`. There's only a smoke reading so far: dev build, loaded machine, three-week world.
@@ -49,6 +58,10 @@ Not run. Waiting on B6.
 
 | Repo | PR | State |
 |---|---|---|
+| spcsorg/daylens | #57 CI: four runners, Swift and .NET tests, hardened | Merged |
+| spcsorg/daylens | #58 Offline says offline (B-4) | Green on all four runners |
+| spcsorg/daylens | #59 Ask without a key shows the hours asked about (B-8) | CI running |
+| spcsorg/daylens | #60 Corrections show on unwritten hours (T-2) | CI running |
 | irachrist1/daylens | #279 Next.js 16.4.5 | Open, mergeable (H-1) |
 | spcsorg/daylens | Issue #21, design | Open |
 
