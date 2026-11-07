@@ -269,7 +269,8 @@ export class Reader {
   /** Written hours, and facts hours a person corrected: a correction shows whether or not AI wrote the hour. */
   writtenHours(from: number, to: number): Map<number, { title: string | null; summary: string | null; detail: string | null; edited: boolean }> {
     const out = new Map<number, { title: string | null; summary: string | null; detail: string | null; edited: boolean }>()
-    const ids = this.db.prepare('SELECT id FROM hours WHERE start_wall_ms >= ? AND start_wall_ms < ?').all(from, to) as { id: number }[]
+    const cutoff = this.cutoff()
+    const ids = this.db.prepare('SELECT id FROM hours WHERE start_wall_ms >= ? AND start_wall_ms < ?').all(cutoff === null ? from : Math.max(from, cutoff), to) as { id: number }[]
     for (const { id } of ids) {
       const h = readHour(this.db, id)
       if (!h || (h.status !== 'written' && h.corrected.length === 0)) continue
@@ -310,7 +311,7 @@ export class Reader {
         visitsByHour.get(h)!.push(v)
         withActivity.add(h)
       }
-      const active = [...withActivity].sort((a, b) => a - b)
+      const active = [...withActivity, ...written.keys()].sort((a, b) => a - b)
       const currentHour = isToday ? starts[starts.length - 1]! : null
       const first = active[0] ?? currentHour
       const last = isToday ? currentHour : active[active.length - 1]
@@ -332,7 +333,7 @@ export class Reader {
             summary: w?.summary ?? null,
             edited: w?.edited ?? false,
             facts: { apps: f.apps, titles: f.titles },
-            gap: empty ? this.emptyHour(h, Math.min(h + HOUR_MS, now), current) : null,
+            gap: empty && !w ? this.emptyHour(h, Math.min(h + HOUR_MS, now), current) : null,
             recorded_until_ms: current ? (pause?.since_wall_ms ?? stopped ?? null) : null,
             from_history: live.apps.length === 0 && !empty,
           })

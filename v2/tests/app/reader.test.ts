@@ -15,6 +15,7 @@ import { DB_FILE } from '../../capture/store.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, T0, rig } from '../storage/support.ts'
 import { page } from '../retrieval/support.ts'
+import { dayRows } from '../../app/renderer/src/screens/today/rows.ts'
 
 const notes = app('com.example.notes', { name: 'Notes' })
 const sheets = app('com.example.sheets', { name: 'Sheets' })
@@ -104,6 +105,51 @@ test('a correction to an hour AI has not written shows on Today, marked Edited, 
   const undone = reader.day(DAY).hours[0]!
   assert.deepEqual([undone.title, undone.edited], [null, false])
   assert.equal(today.week(reader, DAY).days[0]!.blocks[0]!.title, 'Notes · Sheets')
+  db.close()
+  r.close()
+})
+
+test('a corrected hour whose recorded part was deleted keeps its title and Edited mark on Today, inside the day or at its end', async () => {
+  resetSeq()
+  const r = rig()
+  work(r, T0 + 9 * HOUR, [[notes, 'Order list', 50]])
+  work(r, T0 + 10 * HOUR, [[sheets, 'Flour costs', 50]])
+  work(r, T0 + 11 * HOUR, [[notes, 'Order list', 30]])
+  r.clock.t = T0 + 30 * HOUR
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const ids = [10, 11].map((h) => r.storage.writeHour({ start_wall_ms: T0 + h * HOUR, tz: 'Example/Town', status: 'facts' }, r.storage.hourBasis(T0 + h * HOUR)).id)
+  r.storage.deleteRange(T0 + 10 * HOUR, T0 + 10 * HOUR + 55 * MIN)
+  r.storage.deleteRange(T0 + 11 * HOUR, T0 + 11 * HOUR + 40 * MIN)
+  await r.storage.deletionsSettled()
+  r.storage.correct(ids[0]!, 'title', 'Costed the bakery order')
+  r.storage.correct(ids[1]!, 'title', 'Called the mill')
+  const { reader, db } = readOnly(r)
+  const rows = dayRows(reader.day(DAY).hours).map((x) => (x.kind === 'hour' ? [x.h.start_ms, x.h.title, x.h.edited] : [x.start_ms, x.kind]))
+  assert.deepEqual(rows, [
+    [T0 + 9 * HOUR, null, false],
+    [T0 + 10 * HOUR, 'Costed the bakery order', true],
+    [T0 + 11 * HOUR, 'Called the mill', true],
+  ])
+  db.close()
+  r.close()
+})
+
+test('a corrected hour AI has not written leaves Today and the week once it passes the retention period, before the purge reaches it', async () => {
+  resetSeq()
+  const r = rig()
+  const end = work(r, T0 + 9 * HOUR, [[notes, 'Order list', 50]])
+  r.clock.t = end + 5 * MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  const fixed = r.storage.writeHour({ start_wall_ms: T0 + 9 * HOUR, tz: 'Example/Town', status: 'facts' }, r.storage.hourBasis(T0 + 9 * HOUR))
+  r.storage.correct(fixed.id, 'title', 'Costed the bakery order')
+  handleControl(r.storage, { op: 'retention', id: '1', days: 2 }, () => {})
+  const { reader, db } = readOnly(r)
+  assert.equal(today.week(reader, DAY).days[0]!.blocks[0]!.title, 'Costed the bakery order')
+  r.clock.t = T0 + 4 * 24 * HOUR
+  assert.deepEqual(today.week(reader, DAY).days[0]!.blocks, [])
+  assert.deepEqual(reader.day(DAY).hours, [])
   db.close()
   r.close()
 })
