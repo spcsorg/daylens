@@ -81,6 +81,7 @@ gh secret set DAYLENS_TEST_ANTHROPIC_API_KEY -R spcsorg/daylens
 | S1 | `spcsorg` organization: Settings, Authentication security | Require two-factor authentication for everyone | Off. The release checklist requires 2FA on every account that can publish. |
 | S2 | `spcsorg/daylens`: Settings, Advanced Security | Turn on secret scanning, push protection and Dependabot security updates | All off. They're free on a public repo. |
 | S3 | Apple, Microsoft, Google, Mozilla, Resend, Convex, Vercel | Two-factor authentication on every account that can publish or deploy | Not checked; only you can see these |
+| S4 | `spcsorg/daylens`: Settings, Branches | Protect `main`: require a PR and the four `v2 (…)` checks to pass, block force-pushes | Not protected. A red PR can be merged today. |
 
 ## Only you can do these
 

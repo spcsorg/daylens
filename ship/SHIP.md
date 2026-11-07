@@ -26,19 +26,19 @@ Nothing else is proven until these exist.
 
 | ID | Item | Acceptance test | Status · evidence |
 |---|---|---|---|
-| O-1 | The full suite passes on all three operating systems | `npm test` green on every CI job | 🟡 macOS, 7 November: 827 of 827 passed, 0 skipped, typechecks clean. All three operating systems green in CI on 31 October (run 41226910911) |
-| O-2 | CI covers macOS on Apple silicon and Intel, Windows x64 and Ubuntu 24.04 | The matrix lists `macos-15`, `macos-15-intel`, `windows-2025`, `ubuntu-24.04`, all green | 🟠 Today: `macos-latest`, `ubuntu-latest`, `windows-latest` only |
-| O-3 | Swift tests run in CI | The macOS job runs `swift test` in `native/macos` | ❌ Not in `.github/workflows/v2.yml`. Locally: 44 of 44 pass |
-| O-4 | .NET helper tests run in CI | The Windows job runs `dotnet test native/windows` | ❌ Not in the workflow |
+| O-1 | The full suite passes on all three operating systems | `npm test` green on every CI job | 🟡 Green on all four runners, CI run 42401866370 (PR #57, merged). Skips: 10 on macOS, 14 on Ubuntu, 27 on Windows (O-5) |
+| O-2 | CI covers macOS on Apple silicon and Intel, Windows x64 and Ubuntu 24.04 | The matrix lists `macos-15`, `macos-15-intel`, `windows-2025`, `ubuntu-24.04`, all green | ✅ macos-15, macos-15-intel, ubuntu-24.04, windows-2025 all green, CI run 42401866370 (PR #57, merged) |
+| O-3 | Swift tests run in CI | The macOS job runs `swift test` in `native/macos` | ✅ 50 Swift tests on both Macs, CI run 42401866370 (PR #57, merged) |
+| O-4 | .NET helper tests run in CI | The Windows job runs `dotnet test native/windows` | ✅ 338 .NET tests on Windows, the first run in CI, CI run 42401866370 (PR #57, merged) |
 | O-5 | No test is skipped without a SHIP item | A script lists every `skip:` and fails if any lacks a SHIP ID | 🟠 18 platform skips, none linked: `store.test.ts:331`; `service.test.ts:112,133,359,376,380`; `supervisor.test.ts:176`; `agents/host.test.ts:25,42,54,65,88,111`; `agents/reader.test.ts:116`; `agents/memory.test.ts:8`; `mcp/server.test.ts:95,179`; `mcp/clients.test.ts:145`. Plus a runtime skip at `realHelper.test.ts:192` |
-| O-6 | No flaky tests | A nightly job runs every test 20 times on each OS, and any failure opens a SHIP item | ❌ |
+| O-6 | No flaky tests | A nightly job runs every test 20 times on each OS, and any failure opens a SHIP item | ❌ Already found one: a resumed-purge wait capped at 3 s failed on Windows Server 2025 (fixed in #57) |
 | O-7 | Electron E2E against the packaged app on the demo world | Playwright drives the packaged build through every screen and query listed in `e2e/fixtures.json` (Today day/week/month, open hour, Search ×4 named queries, Apps day/week, Ask, every Settings tab, onboarding, tray) on three operating systems, in CI | ❌ No E2E exists |
 | O-8 | Visual regression | Every screen in `e2e/fixtures.json` in light and dark, at 3 window sizes, at 1× and 2×; CI fails above 0.1% changed pixels per screen; screens compared across platforms differ only as `docs/experience.md#platform-differences` allows | ❌ |
 | O-9 | Clean-machine install and uninstall | A fresh VM per OS installs, onboards, records 10 minutes of scripted activity, checks Today, Search and Ask, updates N → N+1, then uninstalls. After uninstall: no native-host manifests, MCP config entries or login items point at the removed app; the data folder is kept and the install docs say so | ❌ |
 | O-10 | A nightly eval job | The job runs B-15 and B-16 under the spend cap and writes pass rate and variance to STATUS | ❌ No npm scripts, no job. Needs `DAYLENS_TEST_ANTHROPIC_API_KEY` ⛔ B6 |
 | O-11 | Network egress, measured at the packet level | The packaged app runs a scripted day under pf/tcpdump (macOS, Linux) or pktmon (Windows). AI off: 0 connections except the update host. AI on: only `api.anthropic.com` and the update host. Never an analytics endpoint | ❌ |
 | O-12 | Performance benches ratchet in CI | Each budget in `BUDGETS.md` has a bench that fails CI above its ceiling, and a daily job lowers the ceiling | 🟠 `app/tools/bench.ts` measures but checks nothing |
-| O-13 | CI is hardened | `permissions: contents: read`; `persist-credentials: false`; actions pinned by SHA | ❌ None of the three |
+| O-13 | CI is hardened | `permissions: contents: read`; `persist-credentials: false`; actions pinned by SHA | ✅ Read-only token, `persist-credentials: false`, actions pinned to the SHAs of checkout v7.0.1, setup-node v7.1.0 and setup-dotnet v6.1.0, CI run 42401866370 (PR #57, merged) |
 | O-14 | The demo world loads in the packaged app for testing, and never in a release | A test-only build flag loads the demo world; the release build refuses it and CI checks the release asar has no seed code | ❌ |
 | O-15 | A VM harness with a scripted activity driver | One command boots a clean VM per OS, grants Accessibility where the OS allows it by MDM profile, and replays scripted app, window and page activity | ❌ |
 | O-16 | The reference machines run as CI runners | An M1 Air, a 4-core Windows 11 laptop and a 4-vCPU Ubuntu box run the benches as self-hosted runners; wall-clock benches run only there | ❌ ⛔ B7 |
@@ -220,7 +220,7 @@ Nothing else is proven until these exist.
 | H-5 | The data folder is owner-only on every OS | The test passes on Windows too | 🟠 Skipped on Windows (`store.test.ts:331`) |
 | H-6 | The website's privacy page matches behavior | A claims file maps every sentence on the page to a passing test ID; CI fails on an unmapped claim | ❌ |
 | H-7 | A Terms and Privacy page, linked from onboarding, Settings and every store listing | The page is live, and each link opens it | ❌ |
-| H-8 | Two-factor authentication and repo security settings | `gh api orgs/spcsorg` shows 2FA required; secret scanning and push protection on for `spcsorg/daylens` | ⛔ S1–S3 |
+| H-8 | Two-factor authentication and repo security settings | `gh api orgs/spcsorg` shows 2FA required; secret scanning and push protection on for `spcsorg/daylens`; `main` requires a PR and the four CI checks | ⛔ S1–S4 |
 
 ## I · Performance
 
