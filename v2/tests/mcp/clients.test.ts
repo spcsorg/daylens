@@ -142,7 +142,7 @@ test('the check starts the server as a client would and lists its tools', async 
 })
 
 // Windows has no POSIX modes, and symlinks there need a privilege most accounts lack.
-test('a config file keeps its permissions, and a symlinked one is written where it points', { skip: process.platform === 'win32' }, () => {
+test('a config file keeps its permissions, and a symlinked one is written where it points', { skip: process.platform === 'win32' ? 'no mode bits or unprivileged symlinks on Windows [E-2]' : false }, () => {
   const w = home('darwin')
   const file = path.join(w.home, '.claude.json')
   put(file, '{}')

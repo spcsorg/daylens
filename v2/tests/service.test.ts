@@ -107,7 +107,7 @@ test('the service runs without being given a deletion stall time', async () => {
 })
 
 // Sleep is simulated by suspending processes with SIGSTOP, which Windows does not have.
-const noStop = process.platform === 'win32' ? 'no SIGSTOP on Windows' : false
+const noStop = process.platform === 'win32' ? 'no SIGSTOP on Windows [A-19]' : false
 
 test('a whole-machine pause (service and helper suspended together) is not a hang', { skip: noStop }, async () => {
   const { work, dataDir } = setup()
@@ -356,7 +356,7 @@ test('installed over V1, a new store starts paused with the exclusions V1 kept, 
   assert.deepEqual(rows().carried, [{ match: 'app_id', value: 'com.example.Notes' }, { match: 'site', value: 'example.org' }])
 })
 
-test('an app V1 excluded by name carries as the bundle id of the installed app with that name', { skip: process.platform !== 'darwin' }, () => {
+test('an app V1 excluded by name carries as the bundle id of the installed app with that name', { skip: process.platform !== 'darwin' ? 'V1 app names resolve to bundle ids on macOS only [G-7]' : false }, () => {
   const work = tempDir('daylens-v2-v1apps-')
   const apps = path.join(work, 'Applications')
   mkdirSync(path.join(apps, 'Example Notes.app', 'Contents'), { recursive: true })
@@ -373,11 +373,11 @@ test('an app V1 excluded by name carries as the bundle id of the installed app w
 })
 
 // The name V1 saw is the one the app shows, which can differ from its file; Voice Memos is VoiceMemos.app.
-test('an app V1 excluded by the name it shows carries even when its file is named differently', { skip: process.platform !== 'darwin' || !existsSync('/System/Applications/VoiceMemos.app') }, () => {
+test('an app V1 excluded by the name it shows carries even when its file is named differently', { skip: process.platform !== 'darwin' || !existsSync('/System/Applications/VoiceMemos.app') ? 'needs macOS with Voice Memos installed [G-7]' : false }, () => {
   assert.deepEqual(appsByName(['/System/Applications'])('Voice Memos'), ['com.apple.VoiceMemos'])
 })
 
-test('installed over a paused V1, browser history earlier that day is not read in: V1 recorded nothing then either', { skip: process.platform !== 'darwin' }, async () => {
+test('installed over a paused V1, browser history earlier that day is not read in: V1 recorded nothing then either', { skip: process.platform !== 'darwin' ? 'reads V1 and Chrome at their macOS paths only [G-7]' : false }, async () => {
   const { work, dataDir } = setup()
   const appData = path.join(work, 'appData')
   v1Config(appData, 'Daylens Desktop', { trackingPaused: true })

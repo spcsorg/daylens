@@ -92,7 +92,7 @@ test('the server exits the moment its client closes stdin', async () => {
   r.close()
 })
 
-test('the server exits when the process that started it dies, even while its stdin stays open', { skip: process.platform === 'win32' && 'needs a named pipe' }, async () => {
+test('the server exits when the process that started it dies, even while its stdin stays open', { skip: process.platform === 'win32' && 'needs a named pipe [E-2]' }, async () => {
   const r = seeded()
   const fifo = path.join(tmpDir(), 'stdin')
   execFileSync('mkfifo', [fifo])
@@ -176,7 +176,7 @@ test('a line that is not JSON gets a parse error, and the server carries on', as
   r.close()
 })
 
-test('a server whose parent died while it started exits too', { skip: process.platform === 'win32' && 'needs a named pipe' }, async () => {
+test('a server whose parent died while it started exits too', { skip: process.platform === 'win32' && 'needs a named pipe [E-2]' }, async () => {
   const r = seeded()
   const fifo = path.join(tmpDir(), 'stdin')
   execFileSync('mkfifo', [fifo])

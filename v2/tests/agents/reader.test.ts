@@ -113,7 +113,7 @@ test('a folder listing that returns after stop writes nothing, though the store 
   await new Promise((res) => setTimeout(res, 200))
 })
 
-test('a timed pass that resumes after stop records no health, though earlier reads left counts behind', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs file permissions' : false }, async () => {
+test('a timed pass that resumes after stop records no health, though earlier reads left counts behind', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs file permissions, which Windows and root do not enforce [A-13]' : false }, async () => {
   const r = rig()
   const c = codexCtx()
   writeFileSync(codexFile(r.home, c), lines(codex.meta(c, sec(0)), codex.started(sec(1), 't', 'composer'), codex.userItem(sec(1), 'go', ['user.text'])))

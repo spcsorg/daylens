@@ -328,7 +328,7 @@ test('continued overflow while one title stays unchanged: after recovery that ti
 })
 
 // Windows keeps a user's app data folder private through its own permissions; there are no mode bits to check.
-test('the data folder is readable by its owner alone, made that way and tightened when it already exists', { skip: process.platform === 'win32' }, () => {
+test('the data folder is readable by its owner alone, made that way and tightened when it already exists', { skip: process.platform === 'win32' ? 'no mode bits on Windows; its owner-only check is not written yet [H-5]' : false }, () => {
   const made = path.join(tmp(), 'data')
   new Store(made).close()
   assert.equal(statSync(made).mode & 0o777, 0o700)

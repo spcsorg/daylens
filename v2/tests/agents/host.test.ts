@@ -8,9 +8,9 @@ import { claudeSessionPid, clientApp, codexSessionPids, HostResolver, isKnownAge
 import { tmp } from './fixtures.ts'
 
 const HELPER = fileURLToPath(new URL('../../native/macos/.build/release/daylens-capture-macos', import.meta.url))
-const noHelper = process.platform !== 'darwin' || !existsSync(HELPER) ? 'real macOS helper not built' : false
+const noHelper = process.platform !== 'darwin' ? 'session hosts are traced on macOS only [A-13]' : existsSync(HELPER) ? false : 'real macOS helper not built: swift build -c release in native/macos [O-5]'
 // The service traces sessions to their apps on macOS only (capture/service.ts), through the helper and ps.
-const notMac = process.platform === 'win32' ? 'session hosts are traced on macOS only' : false
+const notMac = process.platform === 'win32' ? 'session hosts are traced on macOS only [A-13]' : false
 
 test('only the clients that name an app give a session its app; a CLI or an editor extension does not', () => {
   assert.equal(clientApp('claude_code', 'claude-desktop', 'darwin')?.app_id, 'com.anthropic.claudefordesktop')
@@ -51,7 +51,7 @@ test("a running Claude Code session is traced to its process only if that proces
   assert.equal(await claudeSessionPid(dir, 'absent'), null)
 })
 
-test('a running Codex session is traced to the process holding its log open', { skip: process.platform === 'win32' ? 'no lsof' : false }, async () => {
+test('a running Codex session is traced to the process holding its log open', { skip: process.platform === 'win32' ? 'no lsof on Windows [A-13]' : false }, async () => {
   const file = path.join(tmp(), 'rollout.jsonl')
   writeFileSync(file, '')
   const fd = openSync(file, 'r')
@@ -85,7 +85,7 @@ const sleeper = async (): Promise<{ proc: ChildProcess; startedAt: number }> => 
   return { proc, startedAt }
 }
 
-test('a Claude Code session resumed in another app is traced there, though the process it was traced to before is still alive', { skip: process.platform === 'win32' ? 'no ps' : false }, async () => {
+test('a Claude Code session resumed in another app is traced there, though the process it was traced to before is still alive', { skip: process.platform === 'win32' ? 'no ps on Windows [A-13]' : false }, async () => {
   const dir = tmp()
   mkdirSync(path.join(dir, 'sessions'))
   const { helper, map } = mappedHelper()
@@ -108,7 +108,7 @@ test('a Claude Code session resumed in another app is traced there, though the p
   }
 })
 
-test('a Codex session whose log another process now holds is traced to that process, though the first is still alive', { skip: process.platform === 'win32' ? 'no lsof' : false }, async () => {
+test('a Codex session whose log another process now holds is traced to that process, though the first is still alive', { skip: process.platform === 'win32' ? 'no lsof on Windows [A-13]' : false }, async () => {
   const file = path.join(tmp(), 'rollout.jsonl')
   writeFileSync(file, '')
   const { helper, map } = mappedHelper()

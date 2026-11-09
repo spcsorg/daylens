@@ -5,7 +5,7 @@ import path from 'node:path'
 import { measureScan } from '../../tools/agentMemory.ts'
 import { claude, claudeCtx, sec, tmp } from './fixtures.ts'
 
-test('capture and backfill stay below 135 MB in Electron Node mode over three runs', { skip: process.platform !== 'darwin' ? '1 ms sampler uses macOS proc_pid_rusage' : false }, async (t) => {
+test('capture and backfill stay below 135 MB in Electron Node mode over three runs', { skip: process.platform !== 'darwin' ? '1 ms sampler uses macOS proc_pid_rusage [O-12]' : false }, async (t) => {
   const home = tmp()
   const c = claudeCtx()
   const dir = path.join(home, '.claude', 'projects', '-memory')
