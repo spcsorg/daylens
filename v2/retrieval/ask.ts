@@ -199,7 +199,11 @@ export function daysIn(question: string, nowMs: number): [number, number][] {
   }
   for (const m of q.matchAll(/\b([a-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?\b/g)) dated(month(m[1]!), Number(m[2]))
   for (const m of q.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)? (?:of )?([a-z]{3,9})\b/g)) dated(month(m[2]!), Number(m[1]))
-  return [...starts].sort((a, b) => a - b).map((s) => [s, shift(s, 1)])
+  // Each day ends where the next date starts, which is not always 24 hours on when the clocks change at midnight.
+  return [...starts].sort((a, b) => a - b).map((s) => {
+    const d = new Date(s)
+    return [s, dayStarting(d.getFullYear(), d.getMonth(), d.getDate() + 1)]
+  })
 }
 
 /** The part of a day a question names, in local hours: the morning until noon, the afternoon until 6 PM, then the evening. */
