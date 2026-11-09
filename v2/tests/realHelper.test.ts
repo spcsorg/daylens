@@ -149,7 +149,7 @@ test('the real helper tells installed browsers from Electron and CEF apps by the
     '/Applications/Does Not Exist.app': 'unknown',
   }
   const present = Object.keys(expected).filter((p) => existsSync(p) || p.includes('Does Not Exist'))
-  if (present.length < 4) return t.skip('too few of these apps installed to mean something, as on CI runners [O-16]')
+  if (present.length < 4) return t.skip('too few of these apps installed to mean something, as on CI runners [O-15]')
   const out = execFileSync(HELPER, ['--classify', ...present]).toString().trim().split('\n')
   const got = Object.fromEntries(out.map((l) => l.split('\t').reverse()))
   for (const p of present) assert.equal(got[p], expected[p], p)

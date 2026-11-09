@@ -173,7 +173,7 @@ test('a helper whose event loop stops heartbeating is killed even while other th
   await h.finish()
 })
 
-test('a frozen helper (SIGSTOP) is detected, killed and replaced', { skip: process.platform === 'win32' ? 'no SIGSTOP on Windows [A-19]' : false }, async () => {
+test('a frozen helper (SIGSTOP) is detected, killed and replaced', { skip: process.platform === 'win32' ? 'no SIGSTOP on Windows [A-1]' : false }, async () => {
   const h = harness({})
   h.sup.start()
   await waitFor(() => h.sup.stats.lines > 10)
