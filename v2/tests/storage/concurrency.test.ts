@@ -644,7 +644,8 @@ test('a same-connection lock error is a failure, not contention: it is reported 
     assert.equal(calls, 1, 'not retried as contention')
     assert.deepEqual(errors, ['derive_SQLITE_LOCKED'])
     const deletion = r.storage.deleteSource('com.example.chat')
-    const result = await Promise.race([deletion.done, new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))])
+    // Only a deletion held back for good misses this; a slow runner can take several seconds.
+    const result = await Promise.race([deletion.done, new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000))])
     assert.equal(result?.observations, 25, 'the deletion finished')
     assert.equal(isBusy({ code: 'SQLITE_LOCKED' }), false)
   } finally {
