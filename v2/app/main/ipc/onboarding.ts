@@ -2,6 +2,7 @@
 import { app } from 'electron'
 import type { OnboardingAction } from '../../shared/onboarding.ts'
 import { paths } from '../paths.ts'
+import { TEST_BUILD } from '../testEnv.ts'
 import type { ActionHandlers } from './context.ts'
 
 export const onboarding: ActionHandlers<OnboardingAction> = {
@@ -11,7 +12,7 @@ export const onboarding: ActionHandlers<OnboardingAction> = {
   },
   onboarded: async (ctx) => {
     ctx.savePrefs({ onboarded: true })
-    if (app.isPackaged && !app.getLoginItemSettings().openAtLogin) app.setLoginItemSettings({ openAtLogin: true })
+    if (app.isPackaged && !TEST_BUILD && !app.getLoginItemSettings().openAtLogin) app.setLoginItemSettings({ openAtLogin: true })
     ctx.pushShell()
     return { ok: true }
   },

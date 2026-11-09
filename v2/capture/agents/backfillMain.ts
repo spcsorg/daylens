@@ -1,4 +1,5 @@
 // Collection between slices releases native decode buffers before more history is read.
+import '../../app/shared/childClock.ts'
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'node:url'
 import { setFlagsFromString } from 'node:v8'

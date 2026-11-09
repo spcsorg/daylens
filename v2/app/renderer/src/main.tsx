@@ -1,3 +1,5 @@
+// The clock moves to DAYLENS_TEST_NOW before any other module can read the time.
+import './lib/testClock.ts'
 // Shared styles load before any screen's, so a screen's stylesheet can build on them.
 import './styles/tokens.css'
 import './styles/base.css'

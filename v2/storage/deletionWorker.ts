@@ -1,4 +1,5 @@
 // Runs deletions off the capture thread, on its own connection to the same database.
+import '../app/shared/childClock.ts'
 import Database from 'better-sqlite3'
 import { parentPort, workerData } from 'node:worker_threads'
 import { Deleter } from './deletion.ts'
