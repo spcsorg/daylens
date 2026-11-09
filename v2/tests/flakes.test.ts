@@ -92,6 +92,38 @@ not ok 1 - suite
   assert.deepEqual(failedTests(tap), { names: ['tests/storage/x.test.ts > suite > case'], finished: true })
 })
 
+test('a whole file that fails on Windows gets the same name as on macOS and Linux', () => {
+  const at = (loc: string, name: string) => `TAP version 13
+# Subtest: ${name}
+not ok 1 - ${name}
+  ---
+  location: '${loc}'
+  failureType: 'testCodeFailure'
+  ...
+1..1
+`
+  const dir = results({
+    'macos-15-1.tap': at('/w/v2/tests/sub/broken.test.ts:1:1', 'tests/sub/broken.test.ts'),
+    'windows-2025-1.tap': at('D:\\a\\daylens\\daylens\\v2\\tests\\sub\\broken.test.ts:1:1', 'tests\\\\sub\\\\broken.test.ts'),
+  })
+  assert.deepEqual(report(dir, 2).tests, [{ name: 'tests/sub/broken.test.ts', count: 2, runners: { 'macos-15': 1, 'windows-2025': 1 } }])
+})
+
+// The step's timeout stops node while a file that has passed every test still holds its process open.
+test('a run stopped while a test file would not exit names that file, on any OS', () => {
+  const posix = `TAP version 13
+# Subtest: passes, then holds the process open
+ok 1 - passes, then holds the process open
+  ---
+  duration_ms: 0.3
+  type: 'test'
+  ...
+# Interrupted while running: tests/sub/hang.test.ts at /w/v2/tests/sub/hang.test.ts:1:1
+`
+  const windows = 'TAP version 13\n# Interrupted while running: tests\\sub\\hang.test.ts at D:\\a\\daylens\\daylens\\v2\\tests\\sub\\hang.test.ts:1:1\n'
+  for (const tap of [posix, windows]) assert.deepEqual(failedTests(tap), { names: ['tests/sub/hang.test.ts'], finished: false })
+})
+
 test('a failure with no location takes no file from its error text or the next failure', () => {
   const tap = `TAP version 13
 # Subtest: lost
@@ -206,6 +238,32 @@ test('files one flake issue per failing test, commenting on the open one with th
     { method: 'POST', url: 'https://api.github.com/repos/owner/repo/issues/7/comments', body: { body } },
     { method: 'POST', url: 'https://api.github.com/repos/owner/repo/issues', body: { title: 'tests/a.test.ts > rare', body, labels: ['flake'] } },
   ])
+})
+
+test('a test name too long for a GitHub title is cut to 256 characters, with the whole name in the issue', async () => {
+  const name = `tests/a.test.ts > ${'long '.repeat(60)}end`
+  const title = `${name.slice(0, 255)}…`
+  const posts: { url: string; body: { title?: string; body: string } }[] = []
+  const fake = async (url: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') posts.push({ url: String(url), body: JSON.parse(String(init.body)) })
+    if (String(url).includes('/issues?')) return Response.json([])
+    return Response.json({}, { status: 200 })
+  }
+  const r = report(results({ 'macos-15-1.tap': failing(name.slice('tests/a.test.ts > '.length)) }), 1)
+  await fileIssues(r, { repo: 'owner/repo', token: 't', runUrl: 'u' }, fake)
+  assert.equal(posts.length, 1)
+  assert.equal(posts[0]!.body.title, title)
+  assert.equal([...posts[0]!.body.title!].length, 256)
+  assert.ok(posts[0]!.body.body.startsWith(`${name}\n\n`))
+
+  const comments: string[] = []
+  const known = async (url: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') comments.push(String(url))
+    if (String(url).includes('/issues?')) return Response.json([{ number: 9, title }])
+    return Response.json({}, { status: 200 })
+  }
+  await fileIssues(r, { repo: 'owner/repo', token: 't', runUrl: 'u' }, known)
+  assert.deepEqual(comments, ['https://api.github.com/repos/owner/repo/issues/9/comments'])
 })
 
 test('a GitHub error stops filing and says which request failed', async () => {

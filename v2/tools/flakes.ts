@@ -6,6 +6,8 @@ import { parseArgs } from 'node:util'
 
 const RESULT = /^( *)not ok \d+ - (.*)$/
 const SUBTEST = /^( *)# Subtest: (.*)$/
+// Written when the run is stopped (the step's timeout) while a test file has not exited.
+const INTERRUPTED = /^# Interrupted while running: (.*?)(?: at (.*))?$/
 const UNESCAPE: Record<string, string> = { n: '\n', t: '\t', r: '\r', f: '\f', b: '\b', v: '\v' }
 // Suites that failed through a child, and children cancelled by a failed parent, repeat a failure named elsewhere.
 const ECHOES = new Set(['subtestsFailed', 'cancelledByParent'])
@@ -26,6 +28,11 @@ export function failedTests(tap: string): { names: string[]; finished: boolean }
   let finished = false
   lines.forEach((line, i) => {
     if (/^1\.\.\d+$/.test(line)) finished = true
+    const hung = INTERRUPTED.exec(line)
+    if (hung) {
+      names.add(fileOf(hung[2] ?? hung[1]!))
+      return
+    }
     const sub = SUBTEST.exec(line)
     if (sub) {
       parents.length = sub[1]!.length / 4
@@ -47,7 +54,9 @@ export function failedTests(tap: string): { names: string[]; finished: boolean }
     if (ECHOES.has(fields.failureType ?? '')) return
     const parts = [...parents.slice(0, indent.length / 4), name]
     const file = fields.location && fileOf(fields.location)
-    if (file && !(parts.length === 1 && name.replace(/\\/g, '/') === file)) parts.unshift(file)
+    // A whole file's failure is named by its path, with backslashes on Windows.
+    if (file && parts.length === 1 && name.replace(/\\/g, '/') === file) parts[0] = file
+    else if (file) parts.unshift(file)
     names.add(parts.join(' > '))
   })
   return { names: [...names], finished }
@@ -88,6 +97,8 @@ export function report(dir: string, runs: number): Report {
   }
 }
 
+// GitHub rejects issue titles over 256 characters.
+const title = (name: string) => ([...name].length > 256 ? `${[...name].slice(0, 255).join('')}…` : name)
 const runnersText = (runners: Record<string, number>) => Object.entries(runners).map(([r, n]) => `${r} (${n})`).join(', ')
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/</g, '&lt;').replace(/\n/g, ' ')
 
@@ -124,9 +135,10 @@ export async function fileIssues(r: Report, gh: { repo: string; token: string; r
   }
   for (const t of r.tests) {
     const body = `Failed in ${t.count} of ${r.runs} nightly runs: ${runnersText(t.runners)}. ${gh.runUrl}`
-    const number = open.get(t.name)
+    const short = title(t.name)
+    const number = open.get(short)
     if (number) await call('POST', `${repo}/issues/${number}/comments`, { body })
-    else await call('POST', `${repo}/issues`, { title: t.name, body, labels: ['flake'] })
+    else await call('POST', `${repo}/issues`, { title: short, body: short === t.name ? body : `${t.name}\n\n${body}`, labels: ['flake'] })
   }
 }
 
