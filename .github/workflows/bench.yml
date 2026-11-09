@@ -1,0 +1,44 @@
+name: Bench
+
+on:
+  pull_request:
+    paths:
+      - "v2/**"
+      - ".github/workflows/bench.yml"
+  push:
+    branches: [main]
+    paths:
+      - "v2/**"
+      - ".github/workflows/bench.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  bench:
+    name: packaged bench on the heavy world (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm run app:package -- --dir
+      - name: Seed the heavy world
+        run: node app/tools/seed.ts --data-dir "$RUNNER_TEMP/heavy" --world heavy
+      - name: Bench the packaged app
+        run: node app/tools/bench.ts --data-dir "$RUNNER_TEMP/heavy" --app build/release/mac-universal/Daylens.app --runs 100
