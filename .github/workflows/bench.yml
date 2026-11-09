@@ -1,15 +1,8 @@
 name: Bench
 
+# Pull requests and main turn on once the test clock and app:package --test are on main (O-14): a release build ignores
+# DAYLENS_TEST_NOW and the data folder, so it can't be benched on the world.
 on:
-  pull_request:
-    paths:
-      - "v2/**"
-      - ".github/workflows/bench.yml"
-  push:
-    branches: [main]
-    paths:
-      - "v2/**"
-      - ".github/workflows/bench.yml"
   workflow_dispatch:
 
 permissions:
@@ -37,8 +30,9 @@ jobs:
           cache: npm
           cache-dependency-path: v2/package-lock.json
       - run: npm ci
-      - run: npm run app:package -- --dir
+      - run: npm run app:package -- --test --dir
+      # Late in a whole day, the same day on every run.
       - name: Seed the heavy world
-        run: node app/tools/seed.ts --data-dir "$RUNNER_TEMP/heavy" --world heavy
-      - name: Bench the packaged app
-        run: node app/tools/bench.ts --data-dir "$RUNNER_TEMP/heavy" --app build/release/mac-universal/Daylens.app --runs 100
+        run: node app/tools/seed.ts --data-dir "$RUNNER_TEMP/heavy" --world heavy --now 2030-03-14T19:30:00-07:00
+      - name: Bench the packaged test build
+        run: node app/tools/bench.ts --data-dir "$RUNNER_TEMP/heavy" --now 2030-03-14T19:30:00-07:00 --app build/test/mac-arm64/Daylens.app --runs 100
