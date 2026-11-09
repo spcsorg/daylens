@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { makeWorld, SOURCE } from './world.ts'
+import { makeWorld, source } from './world.ts'
 
 const v2 = path.resolve(import.meta.dirname, '..', '..')
 const root = path.join(os.tmpdir(), 'daylens-demo')
@@ -42,4 +42,5 @@ Any other assistant, in its MCP config:
 ${readFileSync(mcp, 'utf8')}
 `)
 
-spawn(SOURCE.command, [...SOURCE.args, ...process.argv.slice(2)], { env, stdio: 'inherit' }).on('exit', (code) => process.exit(code ?? 1))
+const { command, args } = source()
+spawn(command, [...args, ...process.argv.slice(2)], { env, stdio: 'inherit' }).on('exit', (code) => process.exit(code ?? 1))
