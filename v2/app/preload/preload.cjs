@@ -25,9 +25,14 @@ let navigateTo = null
 let pendingNavigate = null
 ipcRenderer.on('navigate', (_e, to) => (navigateTo ? navigateTo(to) : (pendingNavigate = to)))
 
+// DAYLENS_TEST_NOW's offset, as main hands it to the window (OFFSET_ARG in shared/clock.ts).
+const OFFSET_ARG = '--daylens-test-offset-ms='
+const offsetArg = process.argv.find((a) => a.startsWith(OFFSET_ARG))
+
 contextBridge.exposeInMainWorld('daylens', {
   // Known before the first paint, so the window chrome never shifts once the shell state arrives.
   platform: process.platform,
+  testOffsetMs: offsetArg ? Number(offsetArg.slice(OFFSET_ARG.length)) : 0,
   query: (query) =>
     new Promise((resolve, reject) => {
       const id = nextId++

@@ -4,6 +4,7 @@
 //        [--browser-history]  reads browser history files (macOS), from the start of the day they are first read
 //        [--v1-app-data <dir>] a new store starts with the pause and exclusions V1 kept under this folder
 
+import '../app/shared/childClock.ts'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
