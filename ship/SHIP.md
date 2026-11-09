@@ -42,6 +42,8 @@ Nothing else is proven until these exist.
 | O-14 | The demo world loads in the packaged app for testing, and never in a release | A test-only build flag loads the demo world; the release build refuses it and CI checks the release asar has no seed code | ❌ |
 | O-15 | A VM harness with a scripted activity driver | One command boots a clean VM per OS, grants Accessibility where the OS allows it by MDM profile, and replays scripted app, window and page activity | ❌ |
 | O-16 | The reference machines run as CI runners | An M1 Air, a 4-core Windows 11 laptop and a 4-vCPU Ubuntu box run the benches as self-hosted runners; wall-clock benches run only there | ❌ ⛔ B7 |
+| O-17 | E2E opens the real tray menu | On each OS, the native tray or menu-bar menu is opened and its items clicked, through the VM harness (O-15) or an accessibility driver | ❌ Playwright can't open a native menu; `tray.spec` builds the menu the click would show and clicks its items from main |
+| O-18 | The capture helper starts where it needs a shell | The E2E suite runs on windows-2025 with the stand-in helper | ❌ Main spawns `DAYLENS_HELPER` without a shell, so `demo-helper.sh` can't start on Windows |
 
 ## A · Capture engine
 
