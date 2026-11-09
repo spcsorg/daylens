@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# Overlapping runs would each open an issue for the same new failure.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   test:
     name: test (${{ matrix.os }}, run ${{ matrix.run }})
@@ -34,11 +39,15 @@ jobs:
           cache-dependency-path: v2/package-lock.json
       - run: npm ci
       - run: npm run build:sqlite
-      - run: npm test
-        env:
-          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=${{ matrix.os }}-${{ matrix.run }}.tap
+      - name: Build the macOS helper, so the real-helper tests run
+        if: runner.os == 'macOS'
+        run: swift build -c release --package-path native/macos
+      # npm test with a TAP copy of the results; node ignores reporter flags placed after the pattern, so npm can't add them.
+      # Its own timeout, under the job's, stops a file that never exits and still leaves its TAP to upload.
+      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=${{ matrix.os }}-${{ matrix.run }}.tap "tests/**/*.test.ts"
+        timeout-minutes: 20
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: always()
         with:
           name: tap-${{ matrix.os }}-${{ matrix.run }}
           path: v2/${{ matrix.os }}-${{ matrix.run }}.tap
