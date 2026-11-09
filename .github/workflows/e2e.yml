@@ -18,9 +18,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# No Windows job: there is no Windows test build [G-3], and the app can't start the stand-in helper there [A-1].
 jobs:
   macos:
-    name: test clock and builds (macos-15)
+    name: test clock, builds and E2E on the test build (macos-15)
     runs-on: macos-15
     timeout-minutes: 45
     defaults:
@@ -57,3 +58,54 @@ jobs:
           grep -q 'the data folder was' refused.txt
           grep -q 'the shell folder was' refused.txt
           grep -q 'the stand-in helper ran' refused.txt
+      - name: Every screen on the test build
+        run: npm run e2e
+        env:
+          DAYLENS_E2E_APP: ${{ github.workspace }}/v2/build/test/mac-arm64/Daylens.app/Contents/MacOS/Daylens
+
+  linux:
+    name: E2E from source (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm run build:sqlite
+      - run: npm run app:build
+      - name: Electron's sandbox helper is setuid root, so Daylens runs sandboxed
+        run: |
+          node -e "require('electron')"
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Every screen, from source
+        run: xvfb-run -a -s '-screen 0 3200x2000x24' npm run e2e
+      - name: A screen that logs an error fails it
+        run: |
+          sed -i "s/^export function Apps(.*) {$/&\n  console.error('a deliberately broken Apps screen')/" app/renderer/src/screens/apps/Apps.tsx
+          grep -q "console.error('a deliberately broken Apps screen')" app/renderer/src/screens/apps/Apps.tsx
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '2 failed' broken.txt
+          grep -q 'Apps: yesterday' broken.txt
+          grep -q 'Apps: last week' broken.txt
+          grep -q 'console: a deliberately broken Apps screen' broken.txt
+      - name: A screen without its text fails it
+        run: |
+          sed -i "s/asleep: 'Your computer was asleep'/asleep: 'Asleep'/" app/renderer/src/screens/today/Today.tsx
+          grep -q "asleep: 'Asleep'" app/renderer/src/screens/today/Today.tsx
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line --grep 'Today: today' > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '1 failed' broken.txt
+          grep -q 'Expected substring: "Your computer was asleep"' broken.txt
