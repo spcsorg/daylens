@@ -31,7 +31,7 @@ Nothing else is proven until these exist.
 | O-3 | Swift tests run in CI | The macOS job runs `swift test` in `native/macos` | ✅ 50 Swift tests on both Macs, CI run 42401866370 (PR #57, merged) |
 | O-4 | .NET helper tests run in CI | The Windows job runs `dotnet test native/windows` | ✅ 338 .NET tests on Windows, the first run in CI, CI run 42401866370 (PR #57, merged) |
 | O-5 | No test is skipped without a SHIP item | A script lists every `skip:` and fails if any lacks a SHIP ID | 🟠 18 platform skips, none linked: `store.test.ts:331`; `service.test.ts:112,133,359,376,380`; `supervisor.test.ts:176`; `agents/host.test.ts:25,42,54,65,88,111`; `agents/reader.test.ts:116`; `agents/memory.test.ts:8`; `mcp/server.test.ts:95,179`; `mcp/clients.test.ts:145`. Plus a runtime skip at `realHelper.test.ts:192` |
-| O-6 | No flaky tests | A nightly job runs every test 20 times on each OS, and any failure opens a SHIP item | ❌ Already found one: a resumed-purge wait capped at 3 s failed on Windows Server 2025 (fixed in #57) |
+| O-6 | No flaky tests | A nightly job runs every test 20 times on each OS, and any failure opens a SHIP item | ❌ Two flakes found so far, both on Windows Server 2025: a 3 s resumed-purge wait (fixed in #57) and a 5 s lock-error deletion guard (#61) |
 | O-7 | Electron E2E against the packaged app on the demo world | Playwright drives the packaged build through every screen and query listed in `e2e/fixtures.json` (Today day/week/month, open hour, Search ×4 named queries, Apps day/week, Ask, every Settings tab, onboarding, tray) on three operating systems, in CI | ❌ No E2E exists |
 | O-8 | Visual regression | Every screen in `e2e/fixtures.json` in light and dark, at 3 window sizes, at 1× and 2×; CI fails above 0.1% changed pixels per screen; screens compared across platforms differ only as `docs/experience.md#platform-differences` allows | ❌ |
 | O-9 | Clean-machine install and uninstall | A fresh VM per OS installs, onboards, records 10 minutes of scripted activity, checks Today, Search and Ask, updates N → N+1, then uninstalls. After uninstall: no native-host manifests, MCP config entries or login items point at the removed app; the data folder is kept and the install docs say so | ❌ |
@@ -74,11 +74,11 @@ Nothing else is proven until these exist.
 | B-1 | Add, test and remove a key in onboarding and Settings | E2E with a real key: add, test and remove each succeed, and Ask and hours stop on removal | 🟡 `ipc/ai.ts:53-75`; IPC and UI untested ⛔ B6 |
 | B-2 | Replace a key in one step | E2E: paste a new key over the saved one | 🟠 Needs Remove first (`AiTab.tsx:91-125`) |
 | B-3 | A key with no credit is caught when saved | Replaying Anthropic's recorded 400 `invalid_request_error` credit body at save shows the no-credit message | 🐞 The check calls `models.list`, which passes (`backends.ts:91-97`) |
-| B-4 | Offline says offline | With the network cut, Ask and key save both say you're offline | 🟡 PR #58: verified, all four runners green, CodeRabbit finding fixed; merges on green |
+| B-4 | Offline says offline | With the network cut, Ask and key save both say you're offline | 🟡 PR #58: verified; rebased on #60, CI rerunning (the last Intel failure was a nodejs.org timeout in `npm ci`) |
 | B-5 | Every API failure says what happened, including a connection dropped mid-answer | Recorded real bodies for 400 credit, 401 revoked key, 429, 529 overload and a mid-stream `error` event each show their own message in Ask and in Settings | 🟠 One message for credit and rate limit (`Ask.tsx:69`) |
 | B-6 | Hour-writing failures reach the UI | A failing write shows a quiet status on Today with what to do | ❌ Log only (`hourWriter.ts:125-128`) |
 | B-7 | An AI error still shows search results | Stub an error; the matching results show under the message | ❌ `Ask.tsx:192-198` |
-| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | 🟡 PR #59: verified after two fix rounds; before-and-after screenshots taken; CI running |
+| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | 🟡 PR #59: verified; CodeRabbit's midnight clock-change finding fixed with a test; rebased, CI rerunning |
 | B-9 | Example questions lead with finding things | The examples follow `docs/experience.md` | ⚠️ All three are summaries (`Ask.tsx:15`) |
 | B-10 | Timesheets and reports | "my hours on the pricing memo this week" drafts time per piece of work, with its hours, ready to copy; an eval case | ❌ No code |
 | B-11 | Every citation opens | File and window citations open like pages | 🟠 Dropped at `Ask.tsx:266-269` |
@@ -107,7 +107,7 @@ Nothing else is proven until these exist.
 | ID | Item | Acceptance test | Status · evidence |
 |---|---|---|---|
 | T-1 | Fix an hour | E2E: open an hour, Edit, "What were you doing?", save, then force a rewrite. The correction shows on Today, Search, Ask and MCP `get_hour`; "Edited" shows; Undo restores | ❌ No UI (`Today.tsx:176-198`); storage and undo exist |
-| T-2 | Corrections show on facts-only hours | A correction to an unwritten hour shows on Today and in the week view | 🟡 PR #60: verified after two fix rounds; CI running |
+| T-2 | Corrections show on facts-only hours | A correction to an unwritten hour shows on Today and in the week view | ✅ Merged in #60: green on all four runners; verifier showed the tests fail on `main`; reviewed by Claude, droid, CodeRabbit and Bugbot |
 | T-3 | The open hour shows its outcome and suggestion | A written hour with an outcome and a suggestion shows both, with the checklist | ❌ Stored, never read |
 | T-4 | Remove one source, not its whole site | Removing one page leaves other pages from that site | ⚠️ `records.tsx:175-177` removes the site or app |
 | T-5 | Ask about unreadable browser time | A 20-minute unexplained browser span offers the question, "Leave it" and the extension | ❌ |
