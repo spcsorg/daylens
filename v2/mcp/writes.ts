@@ -113,7 +113,7 @@ export const WRITE_TOOLS: readonly WriteTool[] = [
   {
     name: 'correct_hour',
     title: 'Correct an hour',
-    description: `Replace an hour's title or summary with the person's own words, as fixing an hour in Daylens does: the correction shows everywhere and survives rewrites. Give hour_id (from get_day), or date and hour (0-23), and title, summary or both. Only hours Daylens has written can be corrected. Use the person's words, not your own. ${CONFIRMED} ${ONLY_WHEN_ASKED}`,
+    description: `Replace an hour's title or summary with the person's own words, as fixing an hour in Daylens does: the correction shows everywhere and survives rewrites. Give hour_id (from get_day), or date and hour (0-23), and title, summary or both. An hour can be corrected once get_day gives it an hour_id, written or not. Use the person's words, not your own. ${CONFIRMED} ${ONLY_WHEN_ASKED}`,
     inputSchema: {
       type: 'object',
       properties: { hour_id: { type: 'integer', minimum: 1 }, date: DATE, hour: { type: 'integer', minimum: 0, maximum: 23 }, title: { type: 'string', maxLength: 200 }, summary: { type: 'string', maxLength: 512 } },

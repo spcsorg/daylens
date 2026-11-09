@@ -10,7 +10,6 @@ export interface HourDetail {
 export interface WeekBlock {
   start_ms: number
   title: string
-  written: boolean
 }
 
 export interface WeekView {

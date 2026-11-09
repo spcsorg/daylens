@@ -43,6 +43,16 @@ function setup(opts: { holdDeletions?: boolean } = {}) {
   return { r, reader, log, ctx, reads, items, close: () => (reader.close(), log.close(), r.close()) }
 }
 
+test('list_days gives a corrected hour AI has not written its corrected title, as the week view does', () => {
+  const s = setup()
+  const facts = s.r.storage.writeHour({ start_wall_ms: T0, tz: 'Example/Town', status: 'facts' }, s.r.storage.hourBasis(T0))
+  const titles = () => (runReadTool('list_days', { from: DATE, to: DATE }, s.ctx) as { days: { hours: { title: string }[] }[] }).days[0]!.hours.map((h) => h.title)
+  assert.deepEqual(titles(), ['Editor · Chrome · Notes'])
+  s.r.storage.correct(facts.id, 'title', 'Costed the bakery order')
+  assert.deepEqual(titles(), ['Costed the bakery order'])
+  s.close()
+})
+
 test('every read tool is logged with the assistant, the span and what it showed before anything is returned', () => {
   const s = setup()
   const hourId = s.r.storage.hourAt(T0)!.id
