@@ -1,11 +1,14 @@
 // Fills a data folder with invented days through the engine's own normalizer and storage, so the interface can be
 // shown, measured and recorded without anyone's real record. Times are relative to now; today runs to the current
-// minute. Two worlds, in app/tools/worlds.ts:
+// minute, and the database's own clock stands still at now, so a world seeded as of one moment is the same database
+// every time. Three worlds, in app/tools/worlds.ts:
 //   pricing (the default): about three weeks of the launch film's spring pricing memo, every past hour already written,
 //   so nothing calls an AI. `npm run demo` starts the app on it.
 //   bakery: the evaluations' world, the same day twice, 8 AM to 6 PM, nothing written. Their questions are graded on it.
-// Usage: node app/tools/seed.ts --data-dir <dir> [--world pricing|bakery] [--now <ISO time>]
-//   bakery only: [--days 2] [--switch-s 45] [--history]
+//   heavy: the speed budgets' world, 90 days of a heavy user in Phoenix time, every finished hour written.
+// Usage: node app/tools/seed.ts --data-dir <dir> [--world pricing|bakery|heavy] [--now <ISO time>]
+//   [--days N]: how many days, today the last (pricing 24, bakery 2, heavy 90)
+//   bakery only: [--switch-s 45] [--history]
 //   --switch-s: a busier day, a new window title that often
 //   --now: seed as of that moment, so an evaluation always sees the same day
 //   --history: today also has a page read at 1 AM and an early morning known only from browser history, while Daylens
@@ -18,16 +21,20 @@ import { Store } from '../../capture/store.ts'
 import { buildPacket } from '../../engine/packet.ts'
 import { PACKET } from '../../engine/hourWriter.ts'
 import { Storage } from '../../storage/index.ts'
-import { bakery, PAGES, pricing, type WorldDay } from './worlds.ts'
+import { AgentStore } from '../../capture/agents/store.ts'
+import type { AgentRecord } from '../../capture/agents/types.ts'
+import { bakery, heavy, PAGES, pricing, type WorldDay } from './worlds.ts'
 
 const { values } = parseArgs({
-  options: { 'data-dir': { type: 'string' }, world: { type: 'string', default: 'pricing' }, days: { type: 'string', default: '2' }, 'switch-s': { type: 'string' }, now: { type: 'string' }, history: { type: 'boolean', default: false } },
+  options: { 'data-dir': { type: 'string' }, world: { type: 'string', default: 'pricing' }, days: { type: 'string' }, 'switch-s': { type: 'string' }, now: { type: 'string' }, history: { type: 'boolean', default: false } },
 })
 const dir = values['data-dir']
-if (!dir || (values.world !== 'pricing' && values.world !== 'bakery')) {
-  process.stderr.write('usage: seed.ts --data-dir <dir> [--world pricing|bakery]\n')
+if (!dir || !['pricing', 'bakery', 'heavy'].includes(values.world)) {
+  process.stderr.write('usage: seed.ts --data-dir <dir> [--world pricing|bakery|heavy]\n')
   process.exit(64)
 }
+// The same days and hours on every machine; the bench runs the app in the same timezone.
+if (values.world === 'heavy') process.env.TZ = 'America/Phoenix'
 if (existsSync(`${dir}/daylens-v2.sqlite`)) {
   process.stderr.write('refusing to seed a folder that already has a database\n')
   process.exit(1)
@@ -57,8 +64,10 @@ function line<K extends Kind>(kind: K, obs: ObsByKind[K], wallMs: number): Line 
 
 const now = values.now !== undefined ? Date.parse(values.now) : Date.now()
 if (!Number.isFinite(now)) throw new Error('--now must be a time')
-const store = new Store(dir)
-const storage = new Storage(store, dir, { deletionStallMs: Infinity })
+const clock = () => now
+const store = new Store(dir, { now: clock })
+const storage = new Storage(store, dir, { deletionStallMs: Infinity, now: clock })
+const agents = Object.assign(new AgentStore(store.database, clock), storage.agentPolicy())
 const normalizer = new Normalizer(store, new Privacy(store.exclusions()))
 storage.attachCapture({ interrupt: () => normalizer.interrupt({ wall_ms: Date.now(), mono_us: null, boot: null }), setPrivacy: (p) => normalizer.setPrivacy(p) })
 const switchMs = values['switch-s'] ? Number(values['switch-s']) * 1000 : null
@@ -117,13 +126,32 @@ function seedDay(dayStart: number, until: number, day: WorldDay): void {
   if (ran.length && to < until) normalizer.handle(line('power', { state: 'sleep' }, to))
 }
 
+// An agent session's turns, each opened by a prompt; a turn still going at `until` has no end yet.
+function agentTurns(hourStart: number, until: number, h: WorldDay[number]): void {
+  if ('away' in h || !h.agent) return
+  const { agent, session, dir, turns } = h.agent
+  const at = (m: number) => hourStart + m * MIN
+  if (at(turns[0]![0]) >= until) return
+  const records: AgentRecord[] = [{ t: 'session', session, origin: 'interactive', parent: null, client: 'cli', dir, branch: 'main', at: at(turns[0]![0]) }]
+  for (const [i, [start, end]] of turns.entries()) {
+    if (at(start) >= until) break
+    const key = `${session}:${i}`
+    records.push({ t: 'turn', key, session, dir, branch: 'main', opener: 'user', start: at(start), replayed: false }, { t: 'user', key: `${key}:u`, session, turn: key, act: 'prompt', basis: 'marked', at: at(start) })
+    for (let m = start + 1; m < end && at(m) < until; m++) records.push({ t: 'activity', key, session, at: at(m) })
+    if (at(end) <= until) records.push({ t: 'end', key, state: 'completed', at: at(end) })
+  }
+  agents.apply(agent, records)
+}
+
 const today = new Date(now)
-const count = values.world === 'bakery' ? Number(values.days) : 24
+const count = Number(values.days ?? (values.world === 'heavy' ? 90 : values.world === 'bakery' ? 2 : 24))
 const starts = Array.from({ length: count }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - (count - 1 - i)))
-const world = values.world === 'bakery' ? bakery(count, values.history) : pricing(starts.map((d) => d.getDay()))
+const world = values.world === 'bakery' ? bakery(count, values.history) : values.world === 'heavy' ? heavy(count) : pricing(starts.map((d) => d.getDay()))
 for (const [i, d] of starts.entries()) {
   run = `run-seed-${count - 1 - i}`
-  seedDay(d.getTime(), i === count - 1 ? now : d.getTime() + 24 * HOUR, world[i]!)
+  const until = i === count - 1 ? now : d.getTime() + 24 * HOUR
+  seedDay(d.getTime(), until, world[i]!)
+  for (const h of world[i]!) agentTurns(d.getTime() + h.hour * HOUR, until, h)
 }
 store.flush(true)
 storage.start()

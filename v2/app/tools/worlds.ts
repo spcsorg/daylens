@@ -9,8 +9,15 @@ export interface Written {
   summary: string
   detail: string
 }
+/** An agent session at work in an hour: each turn's [start, end] in minutes into the hour. */
+export interface AgentRun {
+  agent: 'claude_code' | 'codex'
+  session: string
+  dir: string
+  turns: [number, number][]
+}
 /** One clock hour: windows in front, the computer asleep, or pages only the browser's own history holds. */
-export type WorldHour = { hour: number; segs: Seg[]; written?: Written; history?: true } | { hour: number; away: true }
+export type WorldHour = { hour: number; segs: Seg[]; written?: Written; history?: true; agent?: AgentRun } | { hour: number; away: true }
 /** A day's hours in clock order. Daylens runs from its first recorded hour to the end of its last. */
 export type WorldDay = WorldHour[]
 
@@ -335,4 +342,134 @@ export function pricing(weekdays: number[]): WorldDay[] {
     if (i === evening) day.push({ hour: 21, history: true, segs: [[10, chrome, 'Pricing – Tessellate'], [25, chrome, 'Plans and pricing – Quillmate'], [40, chrome, 'Hacker News']], written: { title: 'Tessellate and Quillmate pricing', summary: 'Tessellate’s and Quillmate’s pricing pages, then Hacker News.', detail: 'Tessellate at 9:10 PM, Quillmate at 9:25 and Hacker News at 9:40.' } })
     return day
   })
+}
+
+// --- The heavy user: the speed budgets' world ------------------------------------------------------------------------
+
+const PROJECTS = ['Fernhill', 'Larkspur', 'Quillmate', 'Tessellate', 'Kestrel', 'Marlowe', 'Juniper', 'Halcyon', 'Brightside', 'Corvid', 'Saltmarsh', 'Wren']
+const FEATURES = ['billing export', 'onboarding flow', 'search page', 'release notes', 'pricing table', 'sync service', 'settings screen', 'audit log', 'mobile layout', 'import tool', 'invite emails', 'usage meter']
+const SITES: [string, string][] = [
+  ['Tracker', 'tracker.example'], ['Wiki', 'wiki.example'], ['Docs', 'docs.example'], ['Code Review', 'review.example'], ['Status', 'status.example'],
+  ['Forum', 'forum.example'], ['Newsroom', 'news.example'], ['Design Board', 'board.example'], ['Metrics', 'metrics.example'], ['Webmail', 'mail.example'],
+  ['Planner', 'planner.example'], ['Sheets', 'sheets.example'], ['Q&A', 'answers.example'], ['Packages', 'packages.example'], ['Reader', 'reader.example'],
+]
+const VISITS_PER_HOUR = 250
+
+type Titler = (project: string, feature: string) => string
+const doc = (noun: string): Titler => (p, f) => `${p} ${f} ${noun}`
+// The 39 apps besides the browser, each titling its windows after the project and feature in hand.
+const HEAVY_APPS: [AppIdentity, Titler][] = (
+  [
+    ['com.apple.mail', 'Mail', (p, f) => `Re: ${p} ${f}`],
+    ['com.apple.iCal', 'Calendar', (p) => `${p} week`],
+    ['com.apple.Notes', 'Notes', doc('notes')],
+    ['com.apple.reminders', 'Reminders', (p) => `${p} follow-ups`],
+    ['com.apple.Terminal', 'Terminal', (p) => `${p.toLowerCase()} — zsh`],
+    ['com.apple.TextEdit', 'TextEdit', doc('draft.txt')],
+    ['com.apple.Preview', 'Preview', doc('proof.pdf')],
+    ['com.apple.MobileSMS', 'Messages', (p) => `${p} team`],
+    ['com.apple.finder', 'Finder', (p) => p],
+    ['com.apple.Music', 'Music', () => 'Focus mix'],
+    ['com.apple.iWork.Keynote', 'Keynote', doc('review.key')],
+    ['com.apple.iWork.Numbers', 'Numbers', doc('estimates.numbers')],
+    ['com.apple.iWork.Pages', 'Pages', doc('spec.pages')],
+    [null, 'Quill Code', (p, f) => `${f.replaceAll(' ', '-')}.ts — ${p.toLowerCase()}`],
+    [null, 'Kestrel IDE', (p, f) => `${p}: ${f.replaceAll(' ', '_')}.py`],
+    [null, 'Tidewater Terminal', (p) => `~/code/${p.toLowerCase()}`],
+    [null, 'Larkspur Chat', (p) => `#${p.toLowerCase()}-dev`],
+    [null, 'Meetly', (p) => `${p} standup`],
+    [null, 'Canvasly', (p, f) => `${p} ${f} designs`],
+    [null, 'Notebook', doc('plan')],
+    [null, 'Ledgerly', (p) => `${p} invoices`],
+    [null, 'Taskboard', (p) => `${p} sprint board`],
+    [null, 'Inkwell', doc('outline')],
+    [null, 'Pixelwork', doc('mockup.png')],
+    [null, 'Querylab', (p) => `${p.toLowerCase()}_prod queries`],
+    [null, 'Packetview', (p) => `${p.toLowerCase()} API traces`],
+    [null, 'Clipkeep', (p) => `${p} snippets`],
+    [null, 'Mapleaf', (p) => `${p} customer map`],
+    [null, 'Soundcheck', (p) => `${p} call recording`],
+    [null, 'Draftboard', doc('whiteboard')],
+    [null, 'Ferry FTP', (p) => `${p.toLowerCase()}-static`],
+    [null, 'Heron Mail', (p, f) => `${p}: ${f} feedback`],
+    [null, 'Sparrow Docs', doc('handbook')],
+    [null, 'Timekeep', (p) => `${p} hours`],
+    [null, 'Lumen Reader', (_, f) => `A paper on ${f}s`],
+    [null, 'Gridline', doc('roadmap')],
+    [null, 'Petrel Git', (p) => `${p.toLowerCase()} — main`],
+    [null, 'Ostrich DB', (p) => `${p.toLowerCase()}_staging`],
+    [null, 'Willow Voice', (p) => `${p} weekly call`],
+  ] as [string | null, string, Titler][]
+).map(([id, name, titler]) => [app(id ?? `com.example.${name.toLowerCase().replaceAll(' ', '-')}`, name, `/Applications/${name}.app`), titler])
+const named = (name: string) => HEAVY_APPS.findIndex(([a]) => a.name === name)
+// The apps each kind of work is done in: [the main one, the one beside it].
+const WORK = {
+  build: [['Quill Code', 'Kestrel IDE'], ['Terminal', 'Tidewater Terminal']],
+  write: [['Pages', 'Notebook', 'Inkwell', 'Sparrow Docs'], ['Mail', 'Larkspur Chat', 'Heron Mail']],
+  meet: [['Meetly', 'Willow Voice'], ['Notes']],
+  review: [['Larkspur Chat', 'Heron Mail'], ['Taskboard']],
+}
+
+// A small seeded generator, so the same number of days is the same world on every machine.
+function random(seed: number): () => number {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+/**
+ * `days` days of a heavy user, the last of them today: 12 hours a day from 8 AM, every day, across 40 apps and 3,000
+ * page visits, with a Claude Code or Codex session in each hour spent building. Every hour is written. An hour is four
+ * stretches of 7.5 minutes in apps, two on its piece of work and two cycling through all the others, each followed by
+ * one in the browser, most of whose pages are on one site.
+ */
+export function heavy(days: number): WorldDay[] {
+  const rand = random(90)
+  const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)]!
+  const name = (i: number) => HEAVY_APPS[i]![0].name
+  let cycle = 0
+  return Array.from({ length: days }, (_, d) =>
+    Array.from({ length: 12 }, (_, h): WorldHour => {
+      const hour = 8 + h
+      const project = pick(PROJECTS)
+      const feature = pick(FEATURES)
+      const [site, host] = pick(SITES)
+      const roll = rand()
+      const work = roll < 0.4 ? 'build' : roll < 0.65 ? 'write' : roll < 0.8 ? 'meet' : 'review'
+      const main = WORK[work].map((names) => named(pick(names)))
+      const apps = [...main, cycle++ % HEAVY_APPS.length, cycle++ % HEAVY_APPS.length]
+      const segs: Seg[] = []
+      for (const [i, a] of apps.entries()) {
+        const [identity, title] = HEAVY_APPS[a]!
+        segs.push([i * 15, identity, title(project, feature)])
+        const [from, to] = [Math.floor((i * VISITS_PER_HOUR) / 4), Math.floor(((i + 1) * VISITS_PER_HOUR) / 4)]
+        for (let v = from; v < to; v++) {
+          // Most pages are about the work in hand on the hour's site; the rest are anything, anywhere.
+          const [s, at] = rand() < 0.6 ? [site, host] : pick(SITES)
+          const [p, f] = rand() < 0.7 ? [project, feature] : [pick(PROJECTS), pick(FEATURES)]
+          const topic = s === 'Tracker' || s === 'Code Review' ? `${p} #${1 + Math.floor(rand() * 400)}: ${f}` : `${p} ${f}`
+          const page = `${topic} – ${s}`
+          PAGES[page] ??= `https://${at}/${slug(topic)}`
+          segs.push([i * 15 + 7.5 + ((v - from) * 7.5) / (to - from), chrome, page])
+        }
+      }
+      const Feature = feature[0]!.toUpperCase() + feature.slice(1)
+      const [a, b] = main.map(name)
+      const written = {
+        build: { title: `${Feature} in ${project}`, summary: `You built ${project}’s ${feature} in ${a}, with an agent working in ${b}.` },
+        write: { title: `Wrote up ${project}’s ${feature}`, summary: `You wrote up the ${feature} for ${project} in ${a} and answered the thread about it in ${b}.` },
+        meet: { title: `${project} meeting on the ${feature}`, summary: `A meeting about ${project}’s ${feature} in ${a}, with notes in ${b} as it went.` },
+        review: { title: `Reviewed ${project}’s ${feature}`, summary: `You went through feedback on ${project}’s ${feature} in ${a} and moved its cards along in ${b}.` },
+      }[work]
+      const detail = `${a} and ${b} took a quarter of the hour, ${name(apps[2]!)} and ${name(apps[3]!)} another quarter, and the other half went to ${VISITS_PER_HOUR} pages in Chrome, most of them on ${site}.`
+      const agent: AgentRun | undefined =
+        work === 'build' ? { agent: (d + h) % 3 ? 'claude_code' : 'codex', session: `heavy-${d}-${hour}-${Math.floor(rand() * 2 ** 32).toString(16)}`, dir: `/Users/example/code/${slug(project)}`, turns: [[1, 6], [16, 22], [31, 37], [46, 52]] } : undefined
+      return { hour, segs, written: { ...written, detail }, ...(agent && { agent }) }
+    }),
+  )
 }
