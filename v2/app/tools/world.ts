@@ -1,22 +1,27 @@
 // The one way to start Daylens on an invented world: seeds it into a throwaway folder and returns the environment that
 // points every reader of this computer's own files (browser history, agent sessions, assistant configs, V1's settings)
-// at that folder, with the stand-in helper reporting invented windows instead of the real ones. The demo, the
-// end-to-end tests, the bench and the release check all launch through it.
+// at that folder, with the stand-in helper reporting invented windows instead of the real ones. The demo, the launch
+// test and the release check launch through it; the end-to-end tests and the bench will.
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { Store } from '../../capture/store.ts'
+import { Storage } from '../../storage/index.ts'
 
 const V2 = path.resolve(import.meta.dirname, '..', '..')
 
-// Daylens from source: Electron on the shell's entry point. Run `npm run app:build` first for the interface.
-export const SOURCE = { command: createRequire(import.meta.url)('electron') as string, args: [path.join(V2, 'app', 'main', 'main.ts')] }
+// Daylens from source: Electron on the shell's entry point. Run `npm run app:build` first for the interface. Resolved
+// only when asked: requiring electron fetches its binary, which a check of a packaged app has no need for.
+export function source(): { command: string; args: string[] } {
+  return { command: createRequire(import.meta.url)('electron') as string, args: [path.join(V2, 'app', 'main', 'main.ts')] }
+}
 
 export interface WorldOptions {
   // Emptied and reused if given; otherwise a new folder in the system's temporary folder.
   root?: string
-  // A world seed.ts knows; pricing by default.
+  // A world seed.ts knows, pricing by default, or 'empty' for none: the app starts on an empty record.
   world?: string
   // An ISO time: the world is seeded as of it and the app launches with DAYLENS_TEST_NOW set to it.
   now?: string
@@ -25,6 +30,8 @@ export interface WorldOptions {
   zone?: string | null
   onboarded?: boolean
   appearance?: 'system' | 'light' | 'dark'
+  // Capture starts paused: until resumed, or until a time.
+  paused?: true | { until_ms: number }
 }
 
 export interface World {
@@ -65,7 +72,17 @@ export function makeWorld(o: WorldOptions = {}): World {
     DAYLENS_HELPER: path.join(V2, 'app', 'tools', 'demo-helper.sh'),
     ...(o.now !== undefined && { DAYLENS_TEST_NOW: o.now }),
   }
-  const seed = [path.join(V2, 'app', 'tools', 'seed.ts'), '--data-dir', data, '--world', o.world ?? 'pricing', ...(o.now !== undefined ? ['--now', o.now] : [])]
-  execFileSync(process.execPath, seed, { env, stdio: ['ignore', 'ignore', 'inherit'] })
+  if (o.world !== 'empty') {
+    const seed = [path.join(V2, 'app', 'tools', 'seed.ts'), '--data-dir', data, '--world', o.world ?? 'pricing', ...(o.now !== undefined ? ['--now', o.now] : [])]
+    execFileSync(process.execPath, seed, { env, stdio: ['ignore', 'ignore', 'inherit'] })
+  }
+  if (o.paused) {
+    // Through storage, as the pause action does, from the moment the app starts at.
+    const store = new Store(data)
+    const storage = new Storage(store, data, { deletionStallMs: Infinity, now: () => (o.now === undefined ? Date.now() : Date.parse(o.now)) })
+    storage.pause(o.paused === true ? null : o.paused.until_ms)
+    storage.stop()
+    store.close()
+  }
   return { root, data, home, shell, env }
 }

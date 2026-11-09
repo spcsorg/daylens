@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline'
 import { after, test } from 'node:test'
 import Database from 'better-sqlite3'
 import { DB_FILE } from '../../capture/store.ts'
-import { makeWorld, SOURCE, type World } from '../../app/tools/world.ts'
+import { makeWorld, source, type World } from '../../app/tools/world.ts'
 
 // 8:30 PM on 4 March in the world's pinned zone (UTC−7), already 5 March in UTC, and years from the real date.
 const TEST_NOW = '2031-03-05T03:30:00Z'
@@ -26,7 +26,8 @@ after(async () => {
 })
 
 function launch(env: NodeJS.ProcessEnv, args: string[] = []): ChildProcess {
-  const app = spawn(SOURCE.command, [...SOURCE.args, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const { command, args: entry } = source()
+  const app = spawn(command, [...entry, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   apps.push(app)
   return app
 }
@@ -123,4 +124,18 @@ test('the main process runs on the test time and the world’s data folder', asy
   const run = JSON.parse(json!) as { now_ms: number; data_dir: string }
   assert.ok(within(run.now_ms), `main's now ${new Date(run.now_ms).toISOString()}`)
   assert.equal(run.data_dir, world.data)
+})
+
+test('a test time without a throwaway data and shell folder is refused, so it never reaches a real record', async () => {
+  const world = makeWorld({ world: 'empty', now: TEST_NOW })
+  worlds.push(world)
+  for (const missing of ['DAYLENS_V2_DATA_DIR', 'DAYLENS_SHELL_DIR']) {
+    const { [missing]: _gone, ...env } = world.env
+    const app = launch(env)
+    app.stdout!.resume()
+    const refused = line(app.stderr!, /^DAYLENS_TEST_NOW needs DAYLENS_V2_DATA_DIR and DAYLENS_SHELL_DIR$/, 30_000)
+    const code = await new Promise((r) => app.once('exit', r))
+    await refused
+    assert.equal(code, 64, `without ${missing}`)
+  }
 })

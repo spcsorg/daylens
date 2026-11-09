@@ -16,6 +16,11 @@ if (testNow !== null && !Number.isFinite(testNow)) {
   process.stderr.write('DAYLENS_TEST_NOW is not a time\n')
   process.exit(64)
 }
+// Captures stamped with a made-up time can't be told apart from real ones afterwards, so they never reach a real record.
+if (testNow !== null && (!process.env.DAYLENS_V2_DATA_DIR || !process.env.DAYLENS_SHELL_DIR)) {
+  process.stderr.write('DAYLENS_TEST_NOW needs DAYLENS_V2_DATA_DIR and DAYLENS_SHELL_DIR\n')
+  process.exit(64)
+}
 export const testOffsetMs = testNow === null ? 0 : testNow - Date.now()
 if (testOffsetMs) process.env[OFFSET_ENV] = String(testOffsetMs)
 else delete process.env[OFFSET_ENV]
