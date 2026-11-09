@@ -58,6 +58,13 @@ The macOS helper is Swift and the Windows helper is C#, published as one native 
 - **macOS:** a Developer ID–signed, notarized app, downloaded from the website and updated in the app.
 - **Linux:** nightly packages.
 
+### Test builds and the test clock
+
+- **One way onto an invented world.** `v2/app/tools/world.ts` seeds a world into a throwaway folder and returns the environment to launch with: every reader of the computer's own files points into that folder, the stand-in helper reports invented windows, and the time zone and language are pinned (`America/Phoenix`, `en_US.UTF-8`) so days fall the same on every machine. The demo, the end-to-end tests, the bench and the release check all launch through it.
+- **`DAYLENS_TEST_NOW=<ISO time>`** starts every process at that moment, and time passes from there. Main reads it once and turns it into one offset; the Node processes it starts (capture, the reader, the stand-in helper, their workers) get the offset in their environment, the window as an argument its preload reads. Each moves its own `Date` by it as its first import (`app/shared/clock.ts`), so every reader of the time, a library's too, agrees, and the window's first paint is already on the test day. The offset travels by environment rather than by arguments because the helper is the capture service's child and inherits it with no extra plumbing.
+- **Test builds.** `npm run app:package -- --test` builds an `.app` for the host's architecture into `v2/build/test`, marked as a test build in its `package.json`. Only a test build or a run from source honours `DAYLENS_TEST_NOW`, `DAYLENS_V2_DATA_DIR`, `DAYLENS_SHELL_DIR` and `DAYLENS_HELPER`; a release build deletes them before anything reads them (`v2/app/main/testEnv.ts`). A test build turns the Node inspector fuse on for Playwright, never imports V1's settings, never registers a login item, and draws every app with its fallback icon. It is never signed for release.
+- **The release check.** `v2/app/package/checkRelease.ts` proves on a release build that the inspector fuse is off, that `app.asar` holds no tool code (`app/tools/`: the worlds, the seed, the stand-in helper, the demo), and that launched on a world at `2001-01-01T12:00:00Z` it reports the real time, its own default data folder and its own helper. With `--test` it proves a test build the other way round. CI runs both on macOS (`.github/workflows/e2e.yml`), and runs the release check against the test build to see it fail.
+
 ## Capture
 
 ### Signals by platform
