@@ -18,3 +18,28 @@ export type AiAction = { a: 'ai_status' } | { a: 'ai_key_save'; key: string } | 
 export interface AiStatus {
   saved: boolean
 }
+
+const OFFLINE = 'You’re offline. Connect to the internet and try again.'
+const UNREACHABLE = 'Couldn’t reach Anthropic. Check your connection and try again.'
+// The engine's reasons when the SDK couldn't get a request through.
+const NO_INTERNET = /no internet connection/
+const NO_ANTHROPIC = /could not connect to Anthropic|timed? ?out/i
+
+/** What Ask says when it couldn't answer, from the reason the call failed. */
+export function askFailure(message: string): string {
+  if (/key was refused/.test(message)) return 'Anthropic didn’t accept your key. Check it in Settings › AI.'
+  if (/429|rate limit|credit balance|quota/i.test(message)) return 'Your Anthropic account is out of credit or over its limit, so Claude couldn’t answer.'
+  if (NO_INTERNET.test(message)) return OFFLINE
+  if (NO_ANTHROPIC.test(message)) return UNREACHABLE
+  if (/being deleted|deletion began/.test(message)) return 'Part of your record is being deleted. Ask again in a moment.'
+  return 'Claude couldn’t answer that. Try again.'
+}
+
+/** What the key form says when Anthropic didn't accept a key, from checkKey's reason; null when it did. */
+export function keyCheckFailure(err: string | null): string | null {
+  if (err === null) return null
+  if (err === 'the API key was refused') return 'Anthropic didn’t accept this key. Check it and try again.'
+  if (NO_INTERNET.test(err)) return OFFLINE
+  if (NO_ANTHROPIC.test(err)) return UNREACHABLE
+  return 'Anthropic couldn’t check the key right now. Try again in a moment.'
+}

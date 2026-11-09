@@ -81,8 +81,22 @@ function apiClient(opts: ApiOptions): Anthropic {
   return new Anthropic({ apiKey: opts.apiKey, authToken: null, baseURL: opts.baseURL ?? null, timeout: opts.timeoutMs, defaultHeaders })
 }
 
+// The network itself is gone: no name lookup, no route. A refused, reset or TLS-failed connection is not offline.
+const OFFLINE_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH'])
+
+// Node tries each address of a name and reports them together; offline only if every address failed that way.
+export function offline(e: unknown): boolean {
+  for (let c = e; c instanceof Error; c = c.cause) {
+    if (c instanceof AggregateError) return c.errors.length > 0 && c.errors.every(offline)
+    if (OFFLINE_CODES.has((c as NodeJS.ErrnoException).code ?? '')) return true
+  }
+  return false
+}
+
 function apiError(e: unknown): { error: string; quota: boolean } {
   if (e instanceof Anthropic.AuthenticationError) return { error: 'the API key was refused', quota: false }
+  // A timeout is also a connection error to the SDK, but it says the network is slow, not gone.
+  if (e instanceof Anthropic.APIConnectionError && !(e instanceof Anthropic.APIConnectionTimeoutError)) return { error: offline(e) ? 'no internet connection' : 'could not connect to Anthropic', quota: false }
   if (e instanceof Anthropic.APIError) return { error: `${e.status ?? 'no status'}: ${e.message}`, quota: e.status === 429 || QUOTA.test(e.message) }
   return { error: (e as Error).message, quota: false }
 }

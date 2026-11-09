@@ -4,7 +4,7 @@ import { safeStorage } from 'electron'
 import path from 'node:path'
 import { checkKey } from '../../../engine/backends.ts'
 import { keyStore, KeyStoreError, type KeyStore } from '../../../retrieval/apiKey.ts'
-import type { AiAction, AiStatus } from '../../shared/ai.ts'
+import { keyCheckFailure, type AiAction, type AiStatus } from '../../shared/ai.ts'
 import type { ActionResult } from '../../shared/types.ts'
 import { dataDir } from '../paths.ts'
 import type { ActionHandlers } from './context.ts'
@@ -34,11 +34,7 @@ function changed(): void {
   for (const fn of listeners) fn(key)
 }
 
-async function check(key: string): Promise<string | null> {
-  const err = await checkKey({ apiKey: key, timeoutMs: CHECK_TIMEOUT_MS })
-  if (err === null) return null
-  return err === 'the API key was refused' ? 'Anthropic didn’t accept this key. Check it and try again.' : `Couldn’t reach Anthropic to check the key (${err}).`
-}
+const check = async (key: string) => keyCheckFailure(await checkKey({ apiKey: key, timeoutMs: CHECK_TIMEOUT_MS }))
 
 const failed = (err: unknown): ActionResult => ({ ok: false, error: err instanceof KeyStoreError ? err.message : 'The key couldn’t be saved.' })
 
