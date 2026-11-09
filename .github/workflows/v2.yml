@@ -45,7 +45,13 @@ jobs:
       - run: npm run build:sqlite
       - run: npm run typecheck
       - run: npm run app:typecheck
-      - run: npm test
+      - name: Build the macOS helper, so the real-helper tests run
+        if: runner.os == 'macOS'
+        run: swift build -c release --package-path native/macos
+      # npm test with a TAP copy of the results; node ignores reporter flags placed after the pattern, so npm can't add them.
+      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=tap --test-reporter-destination=tests.tap "tests/**/*.test.ts"
+      - name: Every skipped test names its SHIP item
+        run: node tools/skips.ts tests.tap
       - name: Swift helper tests
         if: runner.os == 'macOS'
         run: swift test --package-path native/macos
