@@ -78,7 +78,7 @@ Nothing else is proven until these exist.
 | B-5 | Every API failure says what happened, including a connection dropped mid-answer | Recorded real bodies for 400 credit, 401 revoked key, 429, 529 overload and a mid-stream `error` event each show their own message in Ask and in Settings | 🟠 One message for credit and rate limit (`Ask.tsx:69`) |
 | B-6 | Hour-writing failures reach the UI | A failing write shows a quiet status on Today with what to do | ❌ Log only (`hourWriter.ts:125-128`) |
 | B-7 | An AI error still shows search results | Stub an error; the matching results show under the message | ❌ `Ask.tsx:192-198` |
-| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | 🟡 PR #59: verified, review fixed, rebased on #58; combined Ask tests 49 of 49 locally; CI rerunning |
+| B-8 | Ask without a key is useful for its own examples | With no key, "What did I do this morning?" lists this morning's hours | ✅ Merged in #59: green on all four runners; verifier showed the tests fail on `main`; reviewed by Claude, droid, CodeRabbit and Bugbot; before-and-after screenshots |
 | B-9 | Example questions lead with finding things | The examples follow `docs/experience.md` | ⚠️ All three are summaries (`Ask.tsx:15`) |
 | B-10 | Timesheets and reports | "my hours on the pricing memo this week" drafts time per piece of work, with its hours, ready to copy; an eval case | ❌ No code |
 | B-11 | Every citation opens | File and window citations open like pages | 🟠 Dropped at `Ask.tsx:266-269` |

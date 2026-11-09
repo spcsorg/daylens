@@ -1,13 +1,13 @@
 # Status
 
-Updated 9 November 2026. B-4 and T-2 merged and proven; B-8 waiting for CI.
+Updated 9 November 2026. The 3-item trial is done: B-4, B-8 and T-2 are merged and proven.
 
 ## Where it stands
 
 | | Count |
 |---|---|
 | SHIP items | 132, plus 19 budgets in `BUDGETS.md` |
-| ✅ Done and proven | 0 |
+| ✅ Done and proven | 7 (O-2, O-3, O-4, O-13, B-4, B-8, T-2) |
 | 🟡 Works, not yet proven | 22 |
 | 🟠 Partial | 28 |
 | ❌ Missing | 60 |
@@ -60,7 +60,7 @@ Not run. Waiting on B6.
 |---|---|---|
 | spcsorg/daylens | #57 CI: four runners, Swift and .NET tests, hardened | Merged |
 | spcsorg/daylens | #58 Offline says offline (B-4) | Merged |
-| spcsorg/daylens | #59 Ask without a key shows the hours asked about (B-8) | Rebased on #58, CI rerunning |
+| spcsorg/daylens | #59 Ask without a key shows the hours asked about (B-8) | Merged |
 | spcsorg/daylens | #60 Corrections show on unwritten hours (T-2) | Merged |
 | spcsorg/daylens | #61 Lock-error deletion guard allows 20 s (flake) | Merged |
 | irachrist1/daylens | #279 Next.js 16.4.5 | Open, mergeable (H-1) |
