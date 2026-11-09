@@ -19,7 +19,8 @@
     "app": "npm run app:build && electron app/main/main.ts",
     "demo": "npm run app:build && node app/tools/demo.ts",
     "app:typecheck": "tsc --noEmit -p app",
-    "app:package": "node app/package/build.ts"
+    "app:package": "node app/package/build.ts",
+    "e2e": "tsc --noEmit -p e2e && playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
@@ -29,6 +30,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.5",
     "@types/react": "19.2.14",

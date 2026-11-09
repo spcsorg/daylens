@@ -1,0 +1,73 @@
+{
+  "now": "2031-03-05T00:30:00Z",
+  "zone": "America/Phoenix",
+  "locale": "en-US",
+  "window": { "width": 1120, "height": 720 },
+  "today": [
+    {
+      "name": "today's hours",
+      "scope": "Day",
+      "back": 0,
+      "title": "Tuesday, 4 March",
+      "expect": ["Where you left off", "Hacker News and Stripe’s pricing docs", "Answered the Thursday review notes", "Spring pricing memo and Q2 numbers", "Your computer was asleep", "Sent invoice 1042, then back on the memo", "Pricing review with Dana", "Recording now."]
+    },
+    {
+      "name": "last week",
+      "scope": "Week",
+      "back": 1,
+      "title": "24 February – 2 March",
+      "expect": ["Weekly standup and notes", "Usage meter for billing", "Competitor pricing", "A running route and Hacker News", "Tessellate and Quillmate pricing", "Time by app"]
+    },
+    {
+      "name": "last month",
+      "scope": "Month",
+      "back": 1,
+      "title": "February 2031",
+      "expect": ["Google Chrome", "Cursor", "Spotify", "Time by app"]
+    }
+  ],
+  "hour": {
+    "open": "Sent invoice 1042, then back on the memo",
+    "expect": ["The invoice took 20 minutes and was sent by 1:15. The other 40 went to the memo.", "Invoice 1042 – Harbor Studio", "Sent: Invoice 1042 – Harbor Studio", "Spring pricing memo – Google Docs"]
+  },
+  "search": [
+    { "query": "pricing memo", "expect": ["Spring pricing memo – Google Docs", "Pricing memo comments", "4 PM · Comments on the pricing memo", "10 AM · Spring pricing memo"] },
+    { "query": "invoice 1042", "expect": ["Invoice 1042 – Harbor Studio", "1 PM · Sent invoice 1042, then back on the memo"] },
+    { "query": "Kestrel", "expect": ["Per-seat or usage pricing? – Kestrel", "2 PM · Pricing tiers with Claude", "10 AM · Spring pricing memo and Q2 numbers"] },
+    { "query": "zebra crossing", "expect": ["Nothing you saw matches “zebra crossing”."] }
+  ],
+  "searchKeyboard": {
+    "query": "invoice 1042",
+    "open": "1 PM · Sent invoice 1042, then back on the memo",
+    "expect": ["The invoice took 20 minutes and was sent by 1:15. The other 40 went to the memo."]
+  },
+  "apps": [
+    { "name": "yesterday", "scope": "Day", "back": 1, "title": "Monday, 3 March", "expect": ["8h recorded", "Google Chrome", "Notion", "Zoom", "Q2 budget – Google Sheets", "Spring pricing memo – Google Docs"] },
+    { "name": "last week", "scope": "Week", "back": 1, "title": "24 February – 2 March", "expect": ["37h recorded", "Google Chrome", "Cursor", "Spotify", "Riverside loop – Trailmap"] }
+  ],
+  "ask": [
+    { "question": "What did I do this morning?", "expect": ["Hacker News and Stripe’s pricing docs", "Weather and Quillmate’s plans", "Answered the Thursday review notes", "Spring pricing memo and Q2 numbers", "Design sync, then the pricing page"] },
+    { "question": "What did I work on yesterday afternoon?", "expect": ["Call with Harbor Studio", "Pricing tiers component", "Annual plan discount", "Comments on the pricing memo", "Plans for the rest of the week"] },
+    { "question": "What took most of my time yesterday?", "expect": ["Weekly standup and notes", "Spring pricing memo", "Q2 budget", "Call with Harbor Studio", "Comments on the pricing memo"] }
+  ],
+  "askWithoutKey": "Add your Anthropic API key and Claude writes the answer from your record.",
+  "settings": [
+    { "tab": "Recording & privacy", "expect": ["Window titles", "Browser history", "Pause", "Password managers", "Private and incognito windows", "What goes to AI", "Keep history for", "Delete history"] },
+    { "tab": "General", "expect": ["Open at login", "Appearance", "Light", "Dark", "Match system"] },
+    { "tab": "Assistants", "expect": ["Another app", "Daylens’s server"] },
+    { "tab": "AI", "expect": ["Anthropic API key", "Without one, hours show what Daylens recorded and nothing is sent."] }
+  ],
+  "onboarding": {
+    "permission": ["Let Daylens see your windows", "Windows and their titles", "Allowed"],
+    "morning": ["Your day so far", "Tuesday, 4 March", "Hours appear here from now on.", "Write these hours with Claude"]
+  },
+  "tray": {
+    "hour": "5 PM",
+    "recording": ["Pause for 1 hour", "Pause until tomorrow", "Pause until I resume", "Delete the last 10 minutes", "Open Today", "Search…", "Quit Daylens"],
+    "pauses": [
+      { "item": "Pause for 1 hour", "until": "+1h", "summary": "Paused until 6:" },
+      { "item": "Pause until tomorrow", "until": "2031-03-05T07:00:00Z", "summary": "Paused until 12:00 AM" },
+      { "item": "Pause until I resume", "until": null, "summary": "Paused until you resume" }
+    ]
+  }
+}
