@@ -48,5 +48,12 @@ jobs:
         run: npm run app:package -- --test
       - name: The test build honours them
         run: node app/package/checkRelease.ts --test
-      - name: The release check refuses the test build
-        run: "! node app/package/checkRelease.ts build/test/mac-arm64/Daylens.app"
+      - name: The release check refuses the test build, for the right reasons
+        run: |
+          if node app/package/checkRelease.ts build/test/mac-arm64/Daylens.app > refused.txt; then cat refused.txt; exit 1; fi
+          cat refused.txt
+          grep -q 'the Node inspector fuse is on' refused.txt
+          grep -q 'main ran on the test time' refused.txt
+          grep -q 'the data folder was' refused.txt
+          grep -q 'the shell folder was' refused.txt
+          grep -q 'the stand-in helper ran' refused.txt

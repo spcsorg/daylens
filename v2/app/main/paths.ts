@@ -20,6 +20,12 @@ export function dataDir(): string {
   return path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share'), DATA_NAME.toLowerCase().replaceAll(' ', '-'))
 }
 
+// Electron's appData ignores HOME on macOS; this follows it, as dataDir() does, so a launch with another HOME keeps its
+// shell folder there and reads V1's settings from there. For a person HOME is their home, and the two are the same.
+export function appData(): string {
+  return process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : app.getPath('appData')
+}
+
 export const paths = {
   shellName: `${DATA_NAME} Shell`,
   service: path.join(V2, 'capture', `service${EXT}`),

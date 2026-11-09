@@ -3,7 +3,7 @@ import childProcess from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import type { Action } from '../../shared/types.ts'
 import { dataDir } from '../paths.ts'
 import { capture, type ActionHandlers } from './context.ts'
@@ -52,7 +52,7 @@ export const core: ActionHandlers<CoreAction> = {
   },
   bench: async (ctx, a) => {
     // What this run ran on, apart from the marks, so a check can see a release build ignore the test switches.
-    process.stdout.write(`DAYLENS_BENCH_RUN ${JSON.stringify({ now_ms: Date.now(), data_dir: dataDir() })}\n`)
+    process.stdout.write(`DAYLENS_BENCH_RUN ${JSON.stringify({ now_ms: Date.now(), data_dir: dataDir(), shell_dir: app.getPath('userData') })}\n`)
     process.stdout.write(`DAYLENS_BENCH ${JSON.stringify(a.marks)}\n`)
     setTimeout(() => ctx.quit(), 50)
     return { ok: true }

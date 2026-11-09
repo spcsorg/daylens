@@ -15,7 +15,7 @@ import { chrome, followTheme } from './chrome.ts'
 import { onKeyChange, savedKey } from './ipc/ai.ts'
 import { act } from './ipc/index.ts'
 import type { Ctx } from './ipc/context.ts'
-import { dataDir, paths } from './paths.ts'
+import { appData, dataDir, paths } from './paths.ts'
 import { loadPrefs, writePrefs, type Prefs } from './prefs.ts'
 import { createTray } from './tray.ts'
 import { installUpdate, startUpdates } from './updates.ts'
@@ -31,7 +31,7 @@ const BENCH = process.env.DAYLENS_BENCH === '1'
 const log = (line: string) => process.stderr.write(`${line}\n`)
 
 app.setName('Daylens')
-app.setPath('userData', process.env.DAYLENS_SHELL_DIR ?? path.join(app.getPath('appData'), BENCH ? 'Daylens V2 Dev Shell Bench' : paths.shellName))
+app.setPath('userData', process.env.DAYLENS_SHELL_DIR ?? path.join(appData(), BENCH ? 'Daylens V2 Dev Shell Bench' : paths.shellName))
 
 if (!BENCH && !app.requestSingleInstanceLock()) app.exit(0)
 
@@ -51,7 +51,7 @@ let quitting = false
 let updateReady: string | null = null
 // Installed over V1 as the same app, the first run keeps V1's pause and exclusions. Runs from source and test builds
 // start clean.
-const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? app.getPath('appData') : undefined, log })
+const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? appData() : undefined, log })
 
 // The shell's own channel to the reader, for the menu bar item and app icons.
 let mainPort: Electron.MessagePortMain | null = null
