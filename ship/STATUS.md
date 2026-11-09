@@ -1,6 +1,6 @@
 # Status
 
-Updated 9 November 2026. T-2 merged; B-4, B-8 and the second flake fix are waiting for CI.
+Updated 9 November 2026. B-4 and T-2 merged and proven; B-8 waiting for CI.
 
 ## Where it stands
 
@@ -59,10 +59,10 @@ Not run. Waiting on B6.
 | Repo | PR | State |
 |---|---|---|
 | spcsorg/daylens | #57 CI: four runners, Swift and .NET tests, hardened | Merged |
-| spcsorg/daylens | #58 Offline says offline (B-4) | Rebased, CI rerunning |
-| spcsorg/daylens | #59 Ask without a key shows the hours asked about (B-8) | Review fixed, rebased, CI rerunning |
+| spcsorg/daylens | #58 Offline says offline (B-4) | Merged |
+| spcsorg/daylens | #59 Ask without a key shows the hours asked about (B-8) | Rebased on #58, CI rerunning |
 | spcsorg/daylens | #60 Corrections show on unwritten hours (T-2) | Merged |
-| spcsorg/daylens | #61 Lock-error deletion guard allows 20 s (flake) | CI running |
+| spcsorg/daylens | #61 Lock-error deletion guard allows 20 s (flake) | Merged |
 | irachrist1/daylens | #279 Next.js 16.4.5 | Open, mergeable (H-1) |
 | spcsorg/daylens | Issue #21, design | Open |
 
