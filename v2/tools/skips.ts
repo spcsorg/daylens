@@ -9,10 +9,12 @@ export interface Skip {
 }
 
 // node's TAP reporter writes `#` in names and reasons as `\#`, so only an unescaped ` # ` starts a directive.
-const POINT = /^\s*(?:not )?ok \d+ - (.*?)(?: # (SKIP|TODO)(?: (.*))?)?$/
+// The s flag lets . match U+2028 and U+2029, which the reporter writes unescaped.
+const POINT = /^\s*(?:not )?ok \d+ - (.*?)(?: # (SKIP|TODO)(?: (.*))?)?$/s
 const unescape = (s: string) => s.replace(/\\([\\#])/g, '$1')
 
-export const linked = (reason: string) => /\[[A-Z]-[A-Z]?\d+\]/.test(reason)
+// SHIP.md is kept off main, so an ID is checked against its streams' prefixes rather than its rows.
+export const linked = (reason: string) => /\[(?:[A-CE-JM-RT]-|S-G)\d+\]/.test(reason)
 
 export function readSkips(tap: string): { tests: number; skips: Skip[] } {
   let tests = 0

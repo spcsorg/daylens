@@ -54,9 +54,21 @@ test('a report with Windows line endings reads the same', () => {
   assert.deepEqual(readSkips(tap.replaceAll('\n', '\r\n')), readSkips(tap))
 })
 
-test('a reason is linked only by a SHIP ID in brackets', () => {
-  for (const r of ['no SIGSTOP on Windows [A-19]', '[E-2] needs a named pipe', 'billing [S-G7]', 'two [A-1] and [A-2]']) assert.ok(linked(r), r)
-  for (const r of ['', 'no lsof', 'see A-13', '(A-13)', '[a-13]', '[A13]', '[A-]', '[AB-1]']) assert.ok(!linked(r), r)
+test('a reason is linked only by a SHIP ID in brackets, from one of SHIP.md\'s streams', () => {
+  for (const r of ['no SIGSTOP on Windows [A-19]', '[E-2] needs a named pipe', 'billing [S-G7]', 'two [A-1] and [A-2]', 'memory [I-11]', '[T-13]']) assert.ok(linked(r), r)
+  for (const r of ['', 'no lsof', 'see A-13', '(A-13)', '[a-13]', '[A13]', '[A-]', '[AB-1]', '[Z-999999]', '[K-1]', '[D-1]', '[S-1]', '[S-GX]']) assert.ok(!linked(r), r)
+})
+
+test('the script fails on a skip citing an ID from no SHIP stream', () => {
+  const r = check(tapOf(`import { test } from 'node:test'\ntest('ran', () => {})\ntest('made up', { skip: 'no such item [Z-999999]' }, () => {})\n`))
+  assert.equal(r.status, 1)
+  assert.match(r.out, /made up/)
+})
+
+test('a skip whose name or reason holds a line or paragraph separator is still listed, and fails unlinked', () => {
+  const tap = tapOf(`import { test } from 'node:test'\ntest('ran', () => {})\ntest('a\\u2028name', { skip: 'no\\u2029reason' }, () => {})\n`)
+  assert.deepEqual(readSkips(tap).skips, [{ name: 'a\u2028name', directive: 'SKIP', reason: 'no\u2029reason' }])
+  assert.equal(check(tap).status, 1)
 })
 
 test('the script fails on a run with an unlinked skip and names it', () => {
