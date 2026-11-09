@@ -347,7 +347,7 @@ export function pricing(weekdays: number[]): WorldDay[] {
 // --- The heavy user: the speed budgets' world ------------------------------------------------------------------------
 
 const PROJECTS = ['Fernhill', 'Larkspur', 'Quillmate', 'Tessellate', 'Kestrel', 'Marlowe', 'Juniper', 'Halcyon', 'Brightside', 'Corvid', 'Saltmarsh', 'Wren']
-const FEATURES = ['billing export', 'onboarding flow', 'search page', 'release notes', 'pricing table', 'sync service', 'settings screen', 'audit log', 'mobile layout', 'import tool', 'invite emails', 'usage meter']
+const FEATURES = ['billing export', 'onboarding flow', 'search page', 'release notes', 'pricing table', 'sync service', 'settings screen', 'audit log', 'mobile layout', 'import tool', 'invite emails', 'usage meter', 'order form']
 const SITES: [string, string][] = [
   ['Tracker', 'tracker.example'], ['Wiki', 'wiki.example'], ['Docs', 'docs.example'], ['Code Review', 'review.example'], ['Status', 'status.example'],
   ['Forum', 'forum.example'], ['Newsroom', 'news.example'], ['Design Board', 'board.example'], ['Metrics', 'metrics.example'], ['Webmail', 'mail.example'],
@@ -380,7 +380,7 @@ const HEAVY_APPS: [AppIdentity, Titler][] = (
     [null, 'Meetly', (p) => `${p} standup`],
     [null, 'Canvasly', (p, f) => `${p} ${f} designs`],
     [null, 'Notebook', doc('plan')],
-    [null, 'Ledgerly', (p) => `${p} invoices`],
+    [null, 'Ledgerly', (p) => `${p} invoice for October`],
     [null, 'Taskboard', (p) => `${p} sprint board`],
     [null, 'Inkwell', doc('outline')],
     [null, 'Pixelwork', doc('mockup.png')],

@@ -8,7 +8,10 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { test } from 'node:test'
 import Database from 'better-sqlite3'
+import { MARKS } from '../../app/tools/bench.ts'
 import { DB_FILE } from '../../capture/store.ts'
+import { Reader } from '../../retrieval/reader.ts'
+import { search } from '../../retrieval/search.ts'
 import { tempDir } from '../support/tmp.ts'
 
 const HOUR = 3_600_000
@@ -39,8 +42,16 @@ function contents(file: string): Record<string, string> {
 }
 
 test('the heavy world: 12 recorded hours a day, 40 apps, 3,000 page visits a day, agent sessions, past hours written', () => {
-  const db = new Database(seed(), { readonly: true })
+  const file = seed()
+  const db = new Database(file, { readonly: true })
   const count = (sql: string, ...args: unknown[]) => (db.prepare(sql).get(...args) as { n: number }).n
+
+  // Exactly the days asked for, and nothing after now.
+  for (const [table, start, end] of [['intervals', 'start_wall_ms', 'end_wall_ms'], ['observations', 'event_wall_ms', 'event_wall_ms'], ['hours', 'start_wall_ms', 'end_wall_ms']]) {
+    const { first, last } = db.prepare(`SELECT min(${start}) AS first, max(${end}) AS last FROM ${table}`).get() as { first: number; last: number }
+    assert.ok(first >= dayStart(0) && last <= NOW.getTime(), `${table} runs from ${new Date(first)} to ${new Date(last)}`)
+  }
+  assert.equal(count(`SELECT count(DISTINCT date(start_wall_ms / 1000, 'unixepoch', '-7 hours')) AS n FROM intervals`), DAYS)
 
   for (let i = 0; i < DAYS; i++) {
     const from = dayStart(i)
@@ -71,6 +82,14 @@ test('the heavy world: 12 recorded hours a day, 40 apps, 3,000 page visits a day
   assert.ok(urls.length > 50)
   assert.deepEqual(urls.filter((h) => !h.endsWith('.example')), [])
   db.close()
+
+  // Every search the bench times finds what it typed.
+  const reader = Reader.open(file)
+  reader.warmSearch()
+  for (const text of MARKS.filter((m) => m.startsWith('search_')).map((m) => m.slice('search_'.length, -'_ms'.length).replaceAll('_', ' '))) {
+    const found = search(reader, text, { perGroup: 5 })
+    assert.ok(!found.looser && found.pages.length + found.windows.length + found.hours.length > 0, text)
+  }
 })
 
 test('the heavy world seeds the same database twice', () => {
