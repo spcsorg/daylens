@@ -536,6 +536,70 @@ test('with no AI, Ask returns search results only and sends nothing', async () =
   s.close()
 })
 
+test('with no AI, a question about a time shows its hours: a written hour by its title, one still facts only by its apps', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + 13 * HOUR))
+  s.r.feed(focus(editor, 'roadmap.md - Editor', T0 + 13 * HOUR, 'app_changed'))
+  s.r.feed(focus(other, 'Scratch', T0 + 13 * HOUR + 30 * MIN, 'app_changed'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 + 13 * HOUR + 31 * MIN))
+  s.r.store.flush()
+  const res = await ask('what did I do yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.equal(res.kind, 'search_only')
+  assert.deepEqual(
+    res.results.hours.map((h) => [h.start_wall_ms, h.status, h.title, h.open]),
+    [
+      [T0, 'written', 'Budget review', { kind: 'hour', hour_start_wall_ms: T0, hour_id: res.results.hours[0]!.hour_id }],
+      [T0 + 13 * HOUR, 'facts', 'Editor · Notes', { kind: 'hour', hour_start_wall_ms: T0 + 13 * HOUR, hour_id: null }],
+    ],
+  )
+  // A word that matches nothing in that time still shows its hours.
+  const reworded = await ask('What happened yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(reworded.kind === 'search_only' && reworded.results.hours.map((h) => h.start_wall_ms), [T0, T0 + 13 * HOUR])
+  assert.deepEqual([s.reads().length, s.usage().length], [0, 0])
+  s.close()
+})
+
+test('with no AI, the hours of a time leave out what is past the retention period before pruning, in the hour it falls in too', async () => {
+  const s = setup()
+  const editor = app('com.example.editor', { name: 'Editor' })
+  const other = app('com.example.notes', { name: 'Notes' })
+  s.r.feed(line('session', { state: 'unlocked', snapshot: false }, T0 + HOUR + 10 * MIN))
+  for (let m = 10; m < 35; m++) s.r.feed(focus(m < 20 ? editor : other, m < 20 ? 'roadmap.md - Editor' : 'Scratch', T0 + HOUR + m * MIN, m === 10 || m === 20 ? 'app_changed' : 'reconcile'))
+  s.r.feed(line('session', { state: 'locked', snapshot: false }, T0 + HOUR + 35 * MIN))
+  s.r.store.flush()
+  // As the setting stands between the person choosing it and the background prune: the cutoff falls at 1:25 AM.
+  s.r.store.database.prepare(`INSERT INTO settings (key, value, updated_wall_ms) VALUES ('retention_days', '1', 0) ON CONFLICT (key) DO UPDATE SET value = excluded.value`).run()
+  const res = await ask('what did I do yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY + HOUR + 25 * MIN }, LIMITS)
+  assert.deepEqual(res.kind === 'search_only' && res.results.hours.map((h) => [h.start_wall_ms, h.status, h.title]), [[T0 + HOUR, 'facts', 'Notes']])
+  s.close()
+})
+
+test('with no AI, an hour known only from browser history shows, titled by its first page as Today titles it', async () => {
+  const s = setup()
+  s.r.store.insertObservation({ ...page(NEXT_DAY + 8 * HOUR, 'https://docs.example.com/d/notes', 'Release notes'), source: 'browser_history', kind: 'visit', run: 'history', boot: 'history', seq: 1, pid: null, window: null, state: null })
+  s.r.store.flush()
+  const res = await ask('What did I do this morning?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY + 10 * HOUR }, LIMITS)
+  assert.deepEqual(
+    res.kind === 'search_only' && res.results.hours.map((h) => [h.start_wall_ms, h.status, h.title, h.open]),
+    [[NEXT_DAY + 8 * HOUR, 'facts', 'Release notes', { kind: 'hour', hour_start_wall_ms: NEXT_DAY + 8 * HOUR, hour_id: null }]],
+  )
+  s.close()
+})
+
+test('with no AI, a written hour a deletion has cleared is titled by its apps that are left, and still opens as itself', async () => {
+  const s = setup()
+  const id = s.r.storage.hourAt(T0)!.id
+  await s.r.storage.deleteSource('com.example.editor').done
+  const res = await ask('what did I do yesterday?', { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY }, LIMITS)
+  assert.deepEqual(
+    res.kind === 'search_only' && res.results.hours.map((h) => [h.start_wall_ms, h.hour_id, h.status, h.title, h.open]),
+    [[T0, id, 'facts', 'Chrome · Notes', { kind: 'hour', hour_start_wall_ms: T0, hour_id: id }]],
+  )
+  s.close()
+})
+
 test('the limits cap what is sent, and captured text reaches the AI only as data in the record', async () => {
   const s = setup()
   const notes = app('com.example.notes', { name: 'Notes' })

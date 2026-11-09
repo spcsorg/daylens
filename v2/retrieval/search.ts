@@ -35,7 +35,8 @@ export interface FoundItem {
 
 export interface FoundHour {
   kind: 'hour'
-  hour_id: number
+  // Null for an hour that is recorded but not written: Ask shows those with no AI.
+  hour_id: number | null
   start_wall_ms: number
   end_wall_ms: number
   status: 'facts' | 'written'
