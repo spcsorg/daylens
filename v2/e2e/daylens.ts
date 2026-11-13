@@ -59,6 +59,8 @@ export async function sized(d: Daylens): Promise<void> {
   const { width, height } = fixtures.window
   await d.app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0]!.setContentSize(s.width, s.height), { width, height })
   await expect.poll(() => d.window.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([width, height])
+  await expect.poll(() => d.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true)
+  await d.window.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
 }
 
 // The errors since the last take, leaving none behind.
