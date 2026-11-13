@@ -4,7 +4,7 @@ import { test as base, expect, type Page } from '@playwright/test'
 import Database from 'better-sqlite3'
 import path from 'node:path'
 import { DB_FILE } from '../capture/store.ts'
-import { clearErrors, close, errors, launch, openSearch, screen, sized, type Daylens } from './daylens.ts'
+import { close, launch, openSearch, screen, shows, sized, takeErrors, type Daylens } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
 const test = base.extend<{ window: Page }, { daylens: Daylens }>({
@@ -19,14 +19,13 @@ const test = base.extend<{ window: Page }, { daylens: Daylens }>({
   // Each test starts and ends at the fixtures' window size with no console error in the window.
   window: async ({ daylens }, use) => {
     await sized(daylens)
-    expect(await errors(daylens)).toEqual([])
+    expect(takeErrors(daylens)).toEqual([])
     await use(daylens.window)
-    expect(await errors(daylens)).toEqual([])
-    await clearErrors(daylens)
+    expect(takeErrors(daylens)).toEqual([])
   },
 })
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the stand-in helper can’t start on Windows [G-3] [A-1]')
+test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
 
 const HOUR_MS = 3_600_000
 const main = (window: Page) => window.getByRole('main')
@@ -38,6 +37,19 @@ async function step(window: Page, scope: string, back: number): Promise<void> {
 
 test('Daylens runs from the build it was given: the packaged test build, or from source', async ({ daylens }) => {
   expect(await daylens.app.evaluate(({ app }) => app.isPackaged)).toBe(process.env.DAYLENS_E2E_APP !== undefined)
+})
+
+test('Daylens runs sandboxed', async ({ daylens }) => {
+  expect(await daylens.app.evaluate(({ app }) => app.commandLine.hasSwitch('no-sandbox'))).toBe(false)
+})
+
+test('an error is caught however much the window logs after it', async ({ daylens, window }) => {
+  await window.evaluate(() => {
+    console.error('a deliberate error')
+    for (let i = 0; i < 250; i++) console.log(`line ${i}`)
+  })
+  await expect.poll(() => daylens.errors.length).toBe(1)
+  expect(takeErrors(daylens)).toEqual([expect.stringMatching(/^console: a deliberate error /)])
 })
 
 test('the stand-in helper and the capture service record at the test time', async ({ daylens, window }) => {
@@ -59,14 +71,14 @@ for (const f of fixtures.today)
     await screen(window, 'Today')
     await step(window, f.scope, f.back)
     await expect(main(window).getByRole('heading', { level: 1 })).toHaveText(f.title)
-    for (const text of f.expect) await expect(main(window)).toContainText(text)
+    await shows(main(window), f.expect)
   })
 
 test('Today: an hour opens to what was in it', async ({ window }) => {
   await screen(window, 'Today')
   await main(window).getByText(fixtures.hour.open, { exact: true }).click()
   const sheet = main(window).locator('.hour-sheet')
-  for (const text of fixtures.hour.expect) await expect(sheet).toContainText(text)
+  await shows(sheet, fixtures.hour.expect)
 })
 
 for (const f of fixtures.search)
@@ -74,7 +86,7 @@ for (const f of fixtures.search)
     await openSearch(daylens)
     const search = window.getByRole('dialog', { name: 'Search' })
     await search.getByRole('textbox').fill(f.query)
-    for (const text of f.expect) await expect(search).toContainText(text)
+    await shows(search, f.expect)
     await window.keyboard.press('Escape')
     await expect(search).toBeHidden()
   })
@@ -94,7 +106,7 @@ test('Search: the keyboard picks an hour and opens it in Today', async ({ daylen
   await window.keyboard.press('Enter')
   await expect(search).toBeHidden()
   const sheet = main(window).locator('.hour-sheet')
-  for (const text of f.expect) await expect(sheet).toContainText(text)
+  await shows(sheet, f.expect)
 })
 
 for (const f of fixtures.apps)
@@ -102,23 +114,18 @@ for (const f of fixtures.apps)
     await screen(window, 'Apps')
     await step(window, f.scope, f.back)
     await expect(main(window).getByRole('heading', { level: 1 })).toHaveText(f.title)
-    for (const text of f.expect) await expect(main(window)).toContainText(text)
+    await shows(main(window), f.expect)
   })
 
+// The examples show only before the first question, so each test starts from a fresh window.
 for (const f of fixtures.ask)
   test(`Ask without a key: ${f.question}`, async ({ window }) => {
+    await window.reload()
     await screen(window, 'Ask')
-    // The examples show until the first question; after it, the same question is typed.
-    const example = main(window).getByRole('button', { name: f.question, exact: true })
-    if (await example.isVisible()) await example.click()
-    else {
-      await main(window).getByPlaceholder('Ask about any day').fill(f.question)
-      await main(window).getByRole('button', { name: 'Ask', exact: true }).click()
-    }
+    await main(window).getByRole('button', { name: f.question, exact: true }).click()
     const answer = main(window).locator('.ask-exchange').last()
-    await expect(answer).toContainText(f.question)
-    for (const text of f.expect) await expect(answer).toContainText(text)
-    await expect(main(window)).toContainText(fixtures.askWithoutKey)
+    await shows(answer, [f.question, ...f.expect])
+    await shows(main(window), [fixtures.askWithoutKey])
   })
 
 for (const f of fixtures.settings)
@@ -126,7 +133,7 @@ for (const f of fixtures.settings)
     await screen(window, 'Settings')
     await main(window).getByRole('tab', { name: f.tab, exact: true }).click()
     await expect(main(window).getByRole('tab', { name: f.tab, exact: true })).toHaveAttribute('aria-selected', 'true')
-    for (const text of f.expect) await expect(main(window)).toContainText(text)
+    await shows(main(window), f.expect)
   })
 
 test('Settings: Daylens never turns on open at login by itself', async ({ daylens, window }) => {

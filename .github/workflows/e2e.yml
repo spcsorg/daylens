@@ -18,7 +18,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# No Windows job: there is no Windows test build [G-3], and the app can't start the stand-in helper there [A-1].
+# No Windows job: there is no Windows test build [G-3], and the app spawns its helper without a shell, so the stand-in
+# can't start there [O-18].
 jobs:
   macos:
     name: test clock, builds and E2E on the test build (macos-15)
@@ -109,3 +110,15 @@ jobs:
           cat broken.txt
           grep -q '1 failed' broken.txt
           grep -q 'Expected substring: "Your computer was asleep"' broken.txt
+      - name: A screen whose text is there but hidden fails it
+        run: |
+          git checkout -- app/renderer/src/screens/apps/Apps.tsx app/renderer/src/screens/today/Today.tsx
+          echo '.apps-layout { display: none }' >> app/renderer/src/screens/apps/apps.css
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line --grep 'Apps:' > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '2 failed' broken.txt
+          grep -q 'Apps: yesterday' broken.txt
+          grep -q 'Apps: last week' broken.txt
+          grep -q 'Expected substring' broken.txt
+          if grep -q 'console:' broken.txt; then exit 1; fi

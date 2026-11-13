@@ -1,13 +1,14 @@
-// The menu bar item's menu, as its click builds it. The native menu can't be opened by Playwright, so main is asked for
-// the menu the click would pop up, and its items are clicked as the menu would click them.
+// The menu bar item's menu, as its click builds it. Playwright can't open a native menu [O-17], so main is asked for the
+// menu the click would pop up, and its items are clicked as the menu would click them.
 import { test, expect } from '@playwright/test'
 import Database from 'better-sqlite3'
 import path from 'node:path'
 import { DB_FILE } from '../capture/store.ts'
-import { close, errors, launch, sized, type Daylens } from './daylens.ts'
+import { close, launch, sized, takeErrors, type Daylens } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the stand-in helper can’t start on Windows [G-3] [A-1]')
+test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
+test.skip(process.platform === 'linux', 'the tray menu never opens on Linux: the app never calls setContextMenu [M-1]')
 
 const HOUR_MS = 3_600_000
 
@@ -52,6 +53,7 @@ async function click(d: Daylens, label: string): Promise<number> {
   return d.app.evaluate(({ BrowserWindow }, label) => {
     const item = (globalThis as { e2eMenu?: Electron.Menu }).e2eMenu!.items.find((i) => i.label === label)
     if (!item) throw new Error(`no ${label} in the menu`)
+    if (!item.enabled) throw new Error(`${label} is disabled`)
     const at = Date.now()
     item.click({ triggeredByAccelerator: false }, BrowserWindow.getFocusedWindow() ?? undefined)
     return at
@@ -76,7 +78,7 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
     const recording = await menu(d)
     expect(recording[0]!.label.startsWith(`${fixtures.tray.hour} · `), recording[0]!.label).toBe(true)
     expect(recording[1]).toEqual({ label: 'Recording now', enabled: false })
-    expect(recording.slice(2).map((i) => i.label)).toEqual(fixtures.tray.recording)
+    expect(recording.slice(2)).toEqual(fixtures.tray.recording.map((label) => ({ label, enabled: true })))
 
     for (const p of fixtures.tray.pauses) {
       const at = await click(d, p.item)
@@ -88,7 +90,7 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
       } else expect(until).toBe(p.until === null ? null : Date.parse(p.until))
       const paused = await menu(d)
       expect(paused[1]!.label.startsWith(p.summary), paused[1]!.label).toBe(true)
-      expect(paused.slice(2).map((i) => i.label)).toEqual(['Resume', ...fixtures.tray.recording.slice(3)])
+      expect(paused.slice(2)).toEqual(['Resume', ...fixtures.tray.recording.slice(3)].map((label) => ({ label, enabled: true })))
       await click(d, 'Resume')
       await expect.poll(() => pause(d)).toBeNull()
       expect((await menu(d))[1]!.label).toBe('Recording now')
@@ -130,7 +132,7 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
     await click(d, 'Search…')
     await expect(d.window.getByRole('dialog', { name: 'Search' })).toBeVisible()
 
-    expect(await errors(d)).toEqual([])
+    expect(takeErrors(d)).toEqual([])
     await menu(d)
     const exited = new Promise<number | null>((resolve) => d.app.process().once('exit', (code) => resolve(code)))
     await click(d, 'Quit Daylens')
