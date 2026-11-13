@@ -65,14 +65,14 @@ AI evaluations call paid providers. They run on purpose, not on every change.
 
 ## End to end
 
-`npm run e2e` in `v2/` drives Daylens with Playwright through every screen and query in `v2/e2e/fixtures.json`: Today's day, a past week and month, an opened hour, four searches and one by keyboard, Apps for a past day and week, Ask without a key on its three examples, every Settings tab, onboarding on an empty record, and every item in the menu bar item's menu. Each launch gets its own throwaway pricing world at a fixed test time (`DAYLENS_TEST_NOW`), pinned to `America/Phoenix` and `en-US`, at a fixed window size.
+`npm run e2e` in `v2/` drives Daylens with Playwright through every screen and query in `v2/e2e/fixtures.json`: Today's day, a past week and month, an opened hour, four searches and one by keyboard, Apps for a past day and week, Ask without a key on its three examples, every Settings tab, onboarding on an empty record, and the menu bar item's menu: the current hour, the three pauses, Resume, deleting the last 10 minutes, Open Today, Search… and Quit. Each launch gets its own throwaway pricing world at a fixed test time (`DAYLENS_TEST_NOW`), pinned to `America/Phoenix` and `en-US`, at a fixed window size.
 
-- A test fails when its screen doesn't show the expected text, or the window logs a console error or throws. The one expected error is an app with no icon: the icon protocol answers 404 by design and the window draws the fallback.
+- A test fails when its screen doesn't show the expected text where a person can see it (text CSS hides doesn't count), or the window logs a console error or throws. Errors are collected as they happen, so none is lost to Playwright's bounded buffers. The one expected error is an app with no icon: the icon protocol answers 404 by design and the window draws the fallback.
 - It runs from source after `npm run app:build`, or on a packaged test build with `DAYLENS_E2E_APP` set to its executable.
-- CI (`.github/workflows/e2e.yml`) runs it on the macOS test build, and on Linux from source under `xvfb-run` with Electron's sandbox helper setuid root, never `--no-sandbox`. The Linux job then breaks a screen twice, once logging an error and once dropping a line, and checks each run fails.
-- Windows doesn't run it yet: there is no Windows test build [G-3], and the app can't start the stand-in helper there [A-1].
+- CI (`.github/workflows/e2e.yml`) runs it on the macOS test build, and on Linux from source under `xvfb-run` with Electron's sandbox helper setuid root, never `--no-sandbox`; a test checks Daylens runs without it. The Linux job then breaks a screen three times, logging an error, dropping a line and hiding a list, and checks each run fails.
+- Windows doesn't run it yet: there is no Windows test build [G-3], and the app spawns its helper without a shell, so the stand-in helper can't start there [O-18].
 - On macOS, Search opens from the Edit menu's Search… item, pressed from the main process: Cmd+K is a menu shortcut a test can't press. Elsewhere the window takes Ctrl+K.
-- The menu bar item's menu is native and a test can't open it. The test asks main for the menu a click would pop up and clicks its items as the menu would; whether the menu appears on screen stays a manual check. The native confirmation before deleting the last 10 minutes is answered by the test.
+- The menu bar item's menu is native and a test can't open it [O-17]. The test asks main for the menu a click would pop up and clicks its items as the menu would, failing on a disabled one; whether the menu appears on screen stays a manual check. The native confirmation before deleting the last 10 minutes is answered by the test. It runs on macOS only: on Linux the menu never opens [M-1]. Restart to Update and the assistant's question are not covered.
 
 ## Invented data and demos
 

@@ -2,10 +2,10 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { close, errors, launch, sized } from './daylens.ts'
+import { close, launch, shows, sized, takeErrors } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the stand-in helper can’t start on Windows [G-3] [A-1]')
+test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
 
 test('onboarding: the permission, the day so far, then Today', async () => {
   const d = await launch({ world: 'empty', onboarded: false })
@@ -13,13 +13,13 @@ test('onboarding: the permission, the day so far, then Today', async () => {
     await sized(d)
     const main = d.window.getByRole('main')
     const f = fixtures.onboarding
-    for (const text of f.permission) await expect(main).toContainText(text)
+    await shows(main, f.permission)
     await main.getByRole('button', { name: 'Continue', exact: true }).click()
-    for (const text of f.morning) await expect(main).toContainText(text)
+    await shows(main, f.morning)
     await main.getByRole('button', { name: 'Open Today', exact: true }).click()
     await expect(main.getByRole('heading', { level: 1 })).toHaveText(fixtures.today[0]!.title)
     expect((JSON.parse(readFileSync(path.join(d.world.shell, 'shell.json'), 'utf8')) as { onboarded: boolean }).onboarded).toBe(true)
-    expect(await errors(d)).toEqual([])
+    expect(takeErrors(d)).toEqual([])
   } finally {
     await close(d)
   }
