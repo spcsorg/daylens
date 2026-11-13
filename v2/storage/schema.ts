@@ -465,4 +465,5 @@ export const STORAGE_MIGRATIONS: readonly Migration[] = [
   fileNamesWithSpaces,
   siteDeletionsEnd,
   assistantRequestsMigration,
+  { name: 'hour_edit_groups', up: (db) => db.exec('ALTER TABLE corrections ADD COLUMN edit_id INTEGER') },
 ]

@@ -8,7 +8,8 @@ export function hour(r: Reader, startMs: number): HourDetail {
   const inHour = r.spans(startMs, Math.min(end, r.now()))
   const sources = [...r.sources(inHour, inHour), ...r.visitSources(r.visits(startMs, Math.min(end, r.now())))]
   const w = r.writtenHours(startMs, end).get(startMs)
-  return { start_ms: startMs, detail: w?.detail ?? null, sources }
+  const edit = w ? r.db.prepare('SELECT max(c.edit_id) AS id FROM corrections c JOIN hours h ON h.id = c.hour_id WHERE h.start_wall_ms = ? AND c.undone_wall_ms IS NULL').get(startMs) as { id: number | null } : null
+  return { start_ms: startMs, detail: w?.edited ? null : w?.detail ?? null, sources, edit_id: edit?.id ?? null }
 }
 
 /** Today's last windows and pages, most recent first: what assistants are told the person was just doing. */

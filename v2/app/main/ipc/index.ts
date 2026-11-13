@@ -6,8 +6,9 @@ import type { ActionHandlers, Ctx } from './context.ts'
 import { core } from './core.ts'
 import { onboarding } from './onboarding.ts'
 import { settings } from './settings.ts'
+import { today } from './today.ts'
 
-const handlers: ActionHandlers<Action> = { ...core, ...settings, ...onboarding, ...ai, ...assistants }
+const handlers: ActionHandlers<Action> = { ...core, ...settings, ...onboarding, ...ai, ...assistants, ...today }
 
 export function act(ctx: Ctx, a: Action): Promise<ActionResult> {
   const run = handlers[a.a] as (ctx: Ctx, a: Action) => Promise<ActionResult>

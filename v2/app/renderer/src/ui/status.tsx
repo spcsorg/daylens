@@ -11,6 +11,9 @@ export function errorText(code: string): string {
       return 'Daylens isn’t recording right now, so that couldn’t be saved. Restart recording and try again.'
     case 'timeout':
       return 'Daylens didn’t answer in time. Try again.'
+    case 'no_hour':
+    case 'no_edit':
+      return 'This hour has changed. Open it again and try.'
     case 'app_not_found':
       return 'That app isn’t on this computer anymore.'
     case 'not_an_app':
