@@ -2,7 +2,7 @@
   "now": "2031-03-05T00:30:00Z",
   "zone": "America/Phoenix",
   "locale": "en-US",
-  "window": { "width": 1120, "height": 720 },
+  "window": { "width": 900, "height": 640 },
   "today": [
     {
       "name": "today's hours",

@@ -51,6 +51,13 @@ test('a seeded world is not paused', () => {
   assert.equal(pauseOf(plain.data), null)
 })
 
+test('a failed seed removes its temporary world before throwing', () => {
+  const w = makeWorld({ world: 'empty' })
+  worlds.push(w)
+  assert.throws(() => makeWorld({ root: w.root, world: 'missing' }))
+  assert.equal(existsSync(w.root), false)
+})
+
 test('importing the world leaves Electron unloaded, so checking a packaged app never fetches it', () => {
   const script = `
     import { createRequire } from 'node:module'

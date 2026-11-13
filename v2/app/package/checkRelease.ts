@@ -37,7 +37,7 @@ export function benchRun(command: string, args: string[], env: NodeJS.ProcessEnv
     createInterface({ input: child.stdout! }).on('line', (line) => {
       if (line.startsWith('DAYLENS_BENCH_RUN ')) run = JSON.parse(line.slice('DAYLENS_BENCH_RUN '.length)) as BenchRun
     })
-    child.on('exit', (code, signal) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timer)
       if (code !== 0 || signal !== null) reject(new Error(`Daylens exited with ${signal ?? `code ${code}`}`))
       else if (run) resolve(run)

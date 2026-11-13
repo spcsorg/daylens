@@ -22,9 +22,10 @@ const uncaught = (e: Error) => `uncaught: ${e.message}`
 export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}): Promise<Daylens> {
   const world = makeWorld({ ...o, now: fixtures.now, zone: fixtures.zone })
   const packaged = process.env.DAYLENS_E2E_APP
+  let app: ElectronApplication | undefined
   try {
     // Without chromiumSandbox Playwright adds --no-sandbox on Linux.
-    const app = await _electron.launch({ ...(packaged ? { executablePath: packaged } : { args: source().args }), env: world.env as Record<string, string>, timezoneId: fixtures.zone, locale: fixtures.locale, chromiumSandbox: true })
+    app = await _electron.launch({ ...(packaged ? { executablePath: packaged } : { args: source().args }), env: world.env as Record<string, string>, timezoneId: fixtures.zone, locale: fixtures.locale, chromiumSandbox: true })
     const errors: string[] = []
     // What came before the window was ready is only in its buffer, and until the buffer is read an error can arrive both ways.
     let seen: Set<string> | undefined = new Set()
@@ -41,6 +42,7 @@ export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}): Promis
     seen = undefined
     return { app, window, world, errors }
   } catch (err) {
+    await app?.close().catch(() => {})
     rmSync(world.root, { recursive: true, force: true })
     throw err
   }

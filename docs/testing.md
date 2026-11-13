@@ -69,6 +69,7 @@ AI evaluations call paid providers. They run on purpose, not on every change.
 
 - A test fails when its screen doesn't show the expected text where a person can see it (hidden containers and text CSS hides don't count), or the window logs a console error or throws. Errors after launch are collected as they happen; startup errors still depend on Playwright's bounded buffers. The one expected error is an app with no icon: the icon protocol answers 404 by design and the window draws the fallback. Screen tests attach a screenshot for inspection.
 - It runs from source after `npm run app:build`, or on a packaged test build with `DAYLENS_E2E_APP` set to its executable.
+- Functional tests use 900×640, which fits the hosted Mac's 1024×768 desktop without the window manager clamping it. Larger viewports remain part of the separate visual-regression gate.
 - CI (`.github/workflows/e2e.yml`) runs it on the macOS test build, and on Linux from source under `xvfb-run` with Electron's sandbox helper setuid root, never `--no-sandbox`; a test checks Daylens runs without it. The Linux job then breaks a screen three times, logging an error, dropping a line and hiding a list, and checks each run fails.
 - Windows doesn't run it yet: there is no Windows test build [G-3], and the app spawns its helper without a shell, so the stand-in helper can't start there [O-18].
 - On macOS, Search opens from the Edit menu's Search… item, pressed from the main process: Cmd+K is a menu shortcut a test can't press. Elsewhere the window takes Ctrl+K.
