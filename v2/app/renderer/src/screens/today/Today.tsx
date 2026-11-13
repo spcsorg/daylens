@@ -178,13 +178,11 @@ function HourOpen({ start, day, history, title, summary, onMark }: { start: numb
   const { data } = useQuery({ q: 'hour', start_ms: start }, { live: true })
   const [edit, setEdit] = useState<{ title: string; summary: string } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const detail = data && data.start_ms === start ? data : null
   const closeEditor = () => {
     setEdit(null)
-    setError(null)
     requestAnimationFrame(() => root.current?.parentElement?.querySelector('.hour')?.scrollIntoView({ block: 'start' }))
   }
   const undo = async (editId: number) => {
@@ -201,15 +199,14 @@ function HourOpen({ start, day, history, title, summary, onMark }: { start: numb
   const save = async () => {
     if (!edit) return
     setBusy(true)
-    setError(null)
     try {
       const r = await act({ a: 'edit_hour', start_ms: start, title: edit.title, summary: edit.summary })
-      if (!r.ok) return setError(errorText(r.error))
+      if (!r.ok) return toast({ text: errorText(r.error), error: true })
       const id = (r.result as { edit_id: number }).edit_id
       closeEditor()
       toast({ text: 'Hour updated', action: { label: 'Undo', run: () => void undo(id) } })
     } catch {
-      setError('Couldn’t save the hour. Try again.')
+      toast({ text: 'Couldn’t save the hour. Try again.', error: true })
     } finally {
       setBusy(false)
     }
@@ -224,7 +221,6 @@ function HourOpen({ start, day, history, title, summary, onMark }: { start: numb
         <form className="hour-editor" onSubmit={(e) => { e.preventDefault(); void save() }}>
           <label>What were you doing?<input autoFocus value={edit.title} maxLength={200} disabled={busy} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
           <label>Anything to add?<textarea value={edit.summary} maxLength={512} rows={2} disabled={busy} onChange={(e) => setEdit({ ...edit, summary: e.target.value })} /></label>
-          {error && <p role="alert">{error}</p>}
           <div className="hour-edit-actions">
             <Button type="submit" kind="primary" loading={busy} disabled={!edit.title.trim()}>Save</Button>
             <Button disabled={busy} onClick={closeEditor}>Cancel</Button>
@@ -232,7 +228,7 @@ function HourOpen({ start, day, history, title, summary, onMark }: { start: numb
         </form>
       ) : (
         <div className="hour-edit-actions">
-          <Button onClick={() => { setEdit({ title, summary }); setError(null) }}>Edit</Button>
+          <Button onClick={() => setEdit({ title, summary })}>Edit</Button>
           {detail.edit_id !== null && <Button kind="quiet" loading={busy} onClick={() => void undo(detail.edit_id!)}>Undo edit</Button>}
         </div>
       )}

@@ -4,6 +4,32 @@ import fixtures from './fixtures.json' with { type: 'json' }
 
 test.skip(process.platform === 'win32', 'no Windows test build or stand-in helper launch [G-3] [O-18]')
 
+for (const failure of ['reply', 'throw'] as const) test(`a Save ${failure} failure remains visible after leaving the hour`, async () => {
+  const d = await launch()
+  try {
+    await sized(d)
+    await d.app.evaluate(({ ipcMain }, failure) => {
+      ipcMain.removeHandler('action')
+      ipcMain.handle('action', async (_event, action) => {
+        if (action.a !== 'edit_hour') return { ok: true }
+        return new Promise((resolve, reject) => {
+          (globalThis as { finishSave?: () => void }).finishSave = () => failure === 'reply' ? resolve({ ok: false, error: 'capture_stopped' }) : reject(new Error('save failed'))
+        })
+      })
+    }, failure)
+    await d.window.getByText(fixtures.hour.open, { exact: true }).click()
+    const sheet = d.window.locator('.hour-sheet')
+    await sheet.getByRole('button', { name: 'Edit', exact: true }).click()
+    await sheet.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => d.app.evaluate(() => typeof (globalThis as { finishSave?: () => void }).finishSave)).toBe('function')
+    await screen(d.window, 'Settings')
+    await d.app.evaluate(() => (globalThis as { finishSave?: () => void }).finishSave!())
+    await expect(d.window.getByText(failure === 'reply' ? 'Daylens isn’t recording right now, so that couldn’t be saved. Restart recording and try again.' : 'Couldn’t save the hour. Try again.', { exact: true })).toBeVisible()
+  } finally {
+    await close(d)
+  }
+})
+
 test('edit an hour, find it everywhere, reopen it and undo the edit', async ({}, info) => {
   const d = await launch()
   try {
