@@ -19,11 +19,12 @@ const isError = (m: ConsoleMessage) => m.type() === 'error' && !(m.location().ur
 const logged = (m: ConsoleMessage) => `console: ${m.text()} (${m.location().url})`
 const uncaught = (e: Error) => `uncaught: ${e.message}`
 
-export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}): Promise<Daylens> {
+export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}, prepare?: (world: World) => void): Promise<Daylens> {
   const world = makeWorld({ ...o, now: fixtures.now, zone: fixtures.zone })
   const packaged = process.env.DAYLENS_E2E_APP
   let app: ElectronApplication | undefined
   try {
+    prepare?.(world)
     // Without chromiumSandbox Playwright adds --no-sandbox on Linux.
     app = await _electron.launch({ ...(packaged ? { executablePath: packaged } : { args: source().args }), env: world.env as Record<string, string>, timezoneId: fixtures.zone, locale: fixtures.locale, chromiumSandbox: true })
     const errors: string[] = []
@@ -58,6 +59,8 @@ export async function sized(d: Daylens): Promise<void> {
   const { width, height } = fixtures.window
   await d.app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0]!.setContentSize(s.width, s.height), { width, height })
   await expect.poll(() => d.window.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([width, height])
+  await expect.poll(() => d.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true)
+  await d.window.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
 }
 
 // The errors since the last take, leaving none behind.

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { cleanAddress } from '../../capture/address.ts'
 import { ABORTED_EXIT, AWAY_IDLE_S, DEFAULT_MARKER, NOT_AWAY_EXIT, endAll, gate, mayTakeScreen, onAbort, watch, type Signals } from './away.ts'
-import { DEV_CHROMIUM_ID, register, unregister } from './register.ts'
+import { DEV_CHROMIUM_ID, FIREFOX_ID, register, unregister } from '../../capture/browserHosts.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const v2 = path.join(here, '..', '..')
@@ -58,7 +58,6 @@ const LOCAL = values.local!
 const HEADLESS = values.headless!
 // Fixed so the runner can open the Firefox popup page; Firefox otherwise picks a random UUID per install.
 const FIREFOX_UUID = '6f2b7d1e-5c3a-4a8e-9d10-2b6e7f9a4c31'
-const FIREFOX_ID = 'browser@daylens.app'
 
 function log(msg: string): void {
   process.stdout.write(`[live ${new Date().toISOString().slice(11, 23)}] ${msg}\n`)
