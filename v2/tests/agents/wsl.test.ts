@@ -4,6 +4,18 @@ import { parseDistroList, WslDiscovery } from '../../capture/agents/wsl.ts'
 
 const utf16 = (s: string, bom = false) => Buffer.concat([bom ? Buffer.from([0xff, 0xfe]) : Buffer.alloc(0), Buffer.from(s, 'utf16le')])
 
+test('an invented world never discovers host WSL logs', async () => {
+  const previous = process.env.DAYLENS_V2_HISTORY_HOME
+  process.env.DAYLENS_V2_HISTORY_HOME = '/invented/home'
+  try {
+    const d = new WslDiscovery(async () => assert.fail('must not run host WSL'), async () => assert.fail('must not read host files'))
+    assert.deepEqual(await d.discover(), [])
+  } finally {
+    if (previous === undefined) delete process.env.DAYLENS_V2_HISTORY_HOME
+    else process.env.DAYLENS_V2_HISTORY_HOME = previous
+  }
+})
+
 test('the running-distribution list is read in the encodings wsl.exe writes', () => {
   assert.deepEqual(parseDistroList(utf16('Ubuntu-24.04\r\nDebian\r\n')), ['Ubuntu-24.04', 'Debian'])
   assert.deepEqual(parseDistroList(utf16('Ubuntu\r\n', true)), ['Ubuntu'])

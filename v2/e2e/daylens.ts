@@ -65,6 +65,7 @@ export function takeErrors(d: Daylens): string[] {
 
 // Each text is shown in `where`: innerText leaves out what CSS hides.
 export async function shows(where: Locator, texts: string[]): Promise<void> {
+  await expect(where).toBeVisible()
   for (const text of texts) await expect(where).toContainText(text, { useInnerText: true })
 }
 

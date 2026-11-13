@@ -63,6 +63,12 @@ jobs:
         run: npm run e2e
         env:
           DAYLENS_E2E_APP: ${{ github.workspace }}/v2/build/test/mac-arm64/Daylens.app/Contents/MacOS/Daylens
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-screens
+          path: v2/build/e2e
+          retention-days: 7
 
   linux:
     name: E2E from source (ubuntu-24.04)
@@ -90,6 +96,12 @@ jobs:
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Every screen, from source
         run: xvfb-run -a -s '-screen 0 3200x2000x24' npm run e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: linux-screens
+          path: v2/build/e2e
+          retention-days: 7
       - name: A screen that logs an error fails it
         run: |
           sed -i "s/^export function Apps(.*) {$/&\n  console.error('a deliberately broken Apps screen')/" app/renderer/src/screens/apps/Apps.tsx

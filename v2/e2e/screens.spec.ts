@@ -27,6 +27,12 @@ const test = base.extend<{ window: Page }, { daylens: Daylens }>({
 
 test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
 
+test.afterEach(async ({ window }, info) => {
+  const file = info.outputPath('screen.png')
+  await window.screenshot({ path: file, animations: 'disabled' })
+  await info.attach('screen', { path: file, contentType: 'image/png' })
+})
+
 const HOUR_MS = 3_600_000
 const main = (window: Page) => window.getByRole('main')
 
@@ -82,11 +88,14 @@ test('Today: an hour opens to what was in it', async ({ window }) => {
 })
 
 for (const f of fixtures.search)
-  test(`Search: ${f.query}`, async ({ daylens, window }) => {
+  test(`Search: ${f.query}`, async ({ daylens, window }, info) => {
     await openSearch(daylens)
     const search = window.getByRole('dialog', { name: 'Search' })
     await search.getByRole('textbox').fill(f.query)
     await shows(search, f.expect)
+    const file = info.outputPath('search.png')
+    await window.screenshot({ path: file, animations: 'disabled' })
+    await info.attach('search', { path: file, contentType: 'image/png' })
     await window.keyboard.press('Escape')
     await expect(search).toBeHidden()
   })
