@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 import { OFFSET_ENV } from '../../app/shared/clock.ts'
 
@@ -11,7 +12,7 @@ const YEAR_MS = 365 * 86_400_000
 // Each case runs in its own process, as each app process does: the shift is for the life of the process.
 function probe(offset: string | undefined): Record<string, unknown> {
   const script = `
-    await import(${JSON.stringify(CHILD_CLOCK)})
+    await import(${JSON.stringify(pathToFileURL(CHILD_CLOCK).href)})
     const real = performance.timeOrigin + performance.now()
     process.stdout.write(JSON.stringify({
       real,

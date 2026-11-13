@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { after, test } from 'node:test'
 import { DB_FILE, Store } from '../../capture/store.ts'
 import { Storage } from '../../storage/index.ts'
@@ -53,7 +54,7 @@ test('a seeded world is not paused', () => {
 test('importing the world leaves Electron unloaded, so checking a packaged app never fetches it', () => {
   const script = `
     import { createRequire } from 'node:module'
-    await import(${JSON.stringify(path.join(import.meta.dirname, '..', '..', 'app', 'tools', 'world.ts'))})
+    await import(${JSON.stringify(pathToFileURL(path.join(import.meta.dirname, '..', '..', 'app', 'tools', 'world.ts')).href)})
     process.stdout.write(String(Object.keys(createRequire(import.meta.url).cache).some((f) => f.includes(\`node_modules\${path.sep}electron\${path.sep}\`))))`
   const loaded = execFileSync(process.execPath, ['--input-type=module', '-e', `import path from 'node:path'\n${script}`], { encoding: 'utf8' })
   assert.equal(loaded, 'false')

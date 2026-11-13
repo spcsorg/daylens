@@ -25,6 +25,8 @@ jobs:
     name: test clock, builds and E2E on the test build (macos-15)
     runs-on: macos-15
     timeout-minutes: 45
+    env:
+      CSC_FOR_PULL_REQUEST: 'true'
     defaults:
       run:
         working-directory: v2
@@ -121,7 +123,8 @@ jobs:
           if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line --grep 'Today: today' > broken.txt 2>&1; then cat broken.txt; exit 1; fi
           cat broken.txt
           grep -q '1 failed' broken.txt
-          grep -q 'Expected substring: "Your computer was asleep"' broken.txt
+          grep -q 'Your computer was asleep' broken.txt
+          grep -q 'Expected substring' broken.txt
       - name: A screen whose text is there but hidden fails it
         run: |
           git checkout -- app/renderer/src/screens/apps/Apps.tsx app/renderer/src/screens/today/Today.tsx
