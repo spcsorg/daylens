@@ -46,12 +46,23 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
   const [pauseOpen, setPauseOpen] = useState(false)
   const [shorten, setShorten] = useState<{ days: number; label: string; deletes: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [linking, setLinking] = useState(false)
   const toast = useToast()
   const state = recordingState(shell, rec)
   const run = async (p: Promise<{ ok: boolean; error?: string }>, success?: string) => {
     const r = await p
     if (!r.ok) toast({ text: errorText(r.error ?? 'failed'), error: true })
     else if (success) toast({ text: success })
+  }
+  const retryBrowser = async () => {
+    setLinking(true)
+    try {
+      await run(act({ a: 'browser_hosts_retry' }), 'Browser extension setup repaired.')
+    } catch {
+      toast({ text: 'Couldn’t set up the extension. Try again.', error: true })
+    } finally {
+      setLinking(false)
+    }
   }
   const keep = KEEP.find((k) => k.days === (privacy?.retention_days ?? null))
   const today = dateKey(new Date())
@@ -82,6 +93,11 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
           )}
         </Row>
         <Row label="Browser history" detail={browsersText(rec)} />
+        {shell?.browser_host_error && (
+          <Row label="Browser extension" detail={shell.browser_host_error}>
+            <Button loading={linking} onClick={() => void retryBrowser()}>Retry</Button>
+          </Row>
+        )}
         {rec?.pause ? (
           <Row label="Pause" detail={pauseText(rec.pause)}>
             <Button onClick={() => void run(act({ a: 'resume' }), 'Recording again.')}>

@@ -6,6 +6,8 @@ import { BrowserWindow, Menu, MessageChannelMain, Notification, Tray, app, dialo
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
+import { registerMacBrowserHosts } from '../../capture/browserHosts.ts'
 import type { AssistantRequest } from '../shared/assistants.ts'
 import type { Action, ActionResult, DayView, Query, RecordingView, ShellState } from '../shared/types.ts'
 import { describeRequest, runsWithoutAsking } from '../../storage/assistantRequests.ts'
@@ -15,7 +17,7 @@ import { chrome, followTheme } from './chrome.ts'
 import { onKeyChange, savedKey } from './ipc/ai.ts'
 import { act } from './ipc/index.ts'
 import type { Ctx } from './ipc/context.ts'
-import { appData, dataDir, paths } from './paths.ts'
+import { appData, dataDir, MOVE_FIRST, PACKAGED_HELPER, paths } from './paths.ts'
 import { loadPrefs, writePrefs, type Prefs } from './prefs.ts'
 import { createTray } from './tray.ts'
 import { installUpdate, startUpdates } from './updates.ts'
@@ -49,6 +51,23 @@ let tray: Tray | null = null
 let reader: UtilityProcess | null = null
 let quitting = false
 let updateReady: string | null = null
+let browserHostError: string | null = null
+
+async function setupBrowserHosts(): Promise<ActionResult> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return { ok: true }
+  if (TEST_BUILD && (!process.env.DAYLENS_V2_DATA_DIR || !process.env.DAYLENS_SHELL_DIR || process.env.DAYLENS_V2_HISTORY_HOME !== os.homedir() || !process.env.DAYLENS_V2_BROWSER_SOCKET)) return { ok: true }
+  if (MOVE_FIRST) browserHostError = MOVE_FIRST
+  else {
+    try {
+      const failed = await registerMacBrowserHosts(os.homedir(), PACKAGED_HELPER)
+      browserHostError = failed.length ? `Couldn’t set up the extension for ${failed.join(', ')}. Try again.` : null
+    } catch {
+      browserHostError = 'Couldn’t set up the browser extension. Try again.'
+    }
+  }
+  pushShell()
+  return browserHostError ? { ok: false, error: browserHostError } : { ok: true }
+}
 // Installed over V1 as the same app, the first run keeps V1's pause and exclusions. Runs from source and test builds
 // start clean.
 const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? appData() : undefined, log })
@@ -107,6 +126,7 @@ function shellState(): ShellState {
     helper: capture.helper,
     capture: capture.state,
     capture_error: capture.error,
+    browser_host_error: browserHostError,
     bench: BENCH,
   }
 }
@@ -244,6 +264,7 @@ const requests = new AssistantRequests({
 })
 
 const ctx: Ctx = {
+  retryBrowserHosts: setupBrowserHosts,
   capture,
   win: () => win,
   query,
@@ -308,6 +329,7 @@ app.whenReady().then(() => {
   // Opened at login, Daylens starts in the menu bar; the window opens from there or from the Dock.
   setAppMenu()
   if (!(app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin)) win = createWindow()
+  void setupBrowserHosts()
   if (!BENCH) {
     tray = createTray(paths.trayIcon, {
       now: async () => {
