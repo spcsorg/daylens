@@ -1,5 +1,7 @@
 // A stand-in capture helper for showing the interface on invented data: it reports three invented windows in turn and
-// nothing about the real computer. DEMO_ACCESSIBILITY=denied shows the window-title permission as missing.
+// nothing about the real computer. DEMO_ACCESSIBILITY=denied shows the window-title permission as missing; DEMO_STILL=1
+// stays on the first window, for screenshots. Its times move with the app's test clock (shared/clock.ts).
+import '../shared/childClock.ts'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -40,10 +42,11 @@ snapshot()
 setInterval(() => {
   emit('heartbeat', { awake_us: t().mono_us, permissions: { accessibility }, registrations: { focus: true, session: true, power: true }, titles: accessibility === 'granted' ? 'ok' : 'no_permission', stall_ms: 0, dropped: 0 })
 }, heartbeatS * 1000)
-setInterval(() => {
-  n++
-  focus('app_changed')
-}, 90_000)
+if (process.env.DEMO_STILL !== '1')
+  setInterval(() => {
+    n++
+    focus('app_changed')
+  }, 90_000)
 createInterface({ input: process.stdin })
   .on('line', (l) => {
     const msg = JSON.parse(l) as { op: string }

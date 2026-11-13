@@ -25,6 +25,8 @@ Nothing in Daylens is new. Where these documents are silent, Daylens does what e
 
 ## Shipping
 
+The current beta scope, inherited branch order and approval boundaries are in [Beta work](beta-plan.md). The full-release checklist remains the stable release gate.
+
 | Document | What it settles |
 |---|---|
 | [Billing](billing.md) | Plans, usage, payment methods and the rules payment states follow |

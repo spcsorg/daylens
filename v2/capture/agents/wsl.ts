@@ -46,6 +46,8 @@ export class WslDiscovery {
 
   // Roots not seen before, for distributions running now. Roots of a distribution that stops stay known but unavailable.
   async discover(): Promise<AgentRoot[]> {
+    // A redirected history home is an isolated profile, so host distributions must stay out too.
+    if (process.env.DAYLENS_V2_HISTORY_HOME) return []
     const out = await this.run()
     this.running = new Set(out ? parseDistroList(out) : [])
     const fresh: AgentRoot[] = []

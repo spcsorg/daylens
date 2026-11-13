@@ -63,6 +63,18 @@ Each release covers:
 
 AI evaluations call paid providers. They run on purpose, not on every change.
 
+## End to end
+
+`npm run e2e` in `v2/` drives Daylens with Playwright through every screen and query in `v2/e2e/fixtures.json`: Today's day, a past week and month, an opened hour, four searches and one by keyboard, Apps for a past day and week, Ask without a key on its three examples, every Settings tab, onboarding on an empty record, and the menu bar item's menu: the current hour, the three pauses, Resume, deleting the last 10 minutes, Open Today, Search… and Quit. Each launch gets its own throwaway pricing world at a fixed test time (`DAYLENS_TEST_NOW`), pinned to `America/Phoenix` and `en-US`, at a fixed window size.
+
+- A test fails when its screen doesn't show the expected text where a person can see it (hidden containers and text CSS hides don't count), or the window logs a console error or throws. Errors after launch are collected as they happen; startup errors still depend on Playwright's bounded buffers. The one expected error is an app with no icon: the icon protocol answers 404 by design and the window draws the fallback. Screen tests attach a screenshot for inspection.
+- It runs from source after `npm run app:build`, or on a packaged test build with `DAYLENS_E2E_APP` set to its executable.
+- Functional tests use 900×640, which fits the hosted Mac's 1024×768 desktop without the window manager clamping it. Larger viewports remain part of the separate visual-regression gate.
+- CI (`.github/workflows/e2e.yml`) runs it on the macOS test build, and on Linux from source under `xvfb-run` with Electron's sandbox helper setuid root, never `--no-sandbox`; a test checks Daylens runs without it. The Linux job then breaks a screen three times, logging an error, dropping a line and hiding a list, and checks each run fails.
+- Windows doesn't run it yet: there is no Windows test build [G-3], and the app spawns its helper without a shell, so the stand-in helper can't start there [O-18].
+- On macOS, Search opens from the Edit menu's Search… item, pressed from the main process: Cmd+K is a menu shortcut a test can't press. Elsewhere the window takes Ctrl+K.
+- The menu bar item's menu is native and a test can't open it [O-17]. The test asks main for the menu a click would pop up and clicks its items as the menu would, failing on a disabled one; whether the menu appears on screen stays a manual check. The native confirmation before deleting the last 10 minutes is answered by the test. It runs on macOS only: on Linux the menu never opens [M-1]. Restart to Update and the assistant's question are not covered.
+
 ## Invented data and demos
 
 Screens are checked, and Daylens is shown on camera, only on invented data, never on a real record. `v2/app/tools/worlds.ts` holds two worlds, which `v2/app/tools/seed.ts` writes through the engine's own storage:

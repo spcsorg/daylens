@@ -1,5 +1,9 @@
 // Builds the universal macOS app and its DMG and update ZIP into v2/build/release.
-// Usage: node app/package/build.ts [--dir]   (--dir stops at the .app, without the DMG and ZIP)
+// Usage: node app/package/build.ts [--dir] [--test]
+//   --dir stops at the .app, without the DMG and ZIP.
+//   --test builds a test build into v2/build/test instead: an .app for this Mac's architecture only, which honours the
+//   test switches a release drops (DAYLENS_TEST_NOW, the data, shell and helper overrides; app/main/testEnv.ts) and
+//   lets a debugger attach. checkRelease.ts proves the difference.
 //
 // DAYLENS_MAC_LOCAL_SIGN=1 signs with this Mac's self-signed identity (localSigning.ts), so the helper keeps its
 // Accessibility grant from build to build; Gatekeeper still treats the app as unidentified.
@@ -19,7 +23,9 @@ import { Arch, Platform, build, type Configuration } from 'electron-builder'
 import { assertArm64 } from './arm64.ts'
 import { localIdentity, type LocalIdentity } from './localSigning.ts'
 
-const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false } } })
+const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false }, test: { type: 'boolean', default: false } } })
+const TEST = values.test!
+const ARCH = TEST ? (process.arch === 'arm64' ? Arch.arm64 : Arch.x64) : Arch.universal
 const V2 = path.resolve(import.meta.dirname, '..', '..')
 const ROOT = path.join(V2, '..')
 const PKG = import.meta.dirname
@@ -30,6 +36,7 @@ const bin = (name: string) => path.join(V2, 'node_modules', '.bin', name)
 
 function signing(): { teamId: string } | null {
   if (process.env.DAYLENS_MAC_SIGN !== '1') return null
+  if (TEST) throw new Error('a test build is never signed for release')
   const missing = ['APPLE_TEAM_ID', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'].filter((k) => !process.env[k])
   if (missing.length) throw new Error(`DAYLENS_MAC_SIGN=1 needs ${missing.join(', ')}`)
   const teamId = process.env.APPLE_TEAM_ID!
@@ -39,19 +46,19 @@ function signing(): { teamId: string } | null {
 }
 
 const SQLITE = path.join(V2, 'node_modules', 'better-sqlite3')
-const SQLITE_UNIVERSAL = path.join(SQLITE, 'build', 'Release', 'better_sqlite3.node')
+const SQLITE_BINARY = path.join(SQLITE, 'build', 'Release', 'better_sqlite3.node')
 
-// better-sqlite3 for both architectures, each built with the option storage needs (tools/buildSqlite.ts), joined into
-// one universal binary. The app ships only that one, where better-sqlite3 looks when it has no prebuilt binary: macOS
-// flags any app holding an Intel-only binary, even one Apple silicon never loads.
+// better-sqlite3 for both architectures (a test build: this one), each built with the option storage needs
+// (tools/buildSqlite.ts), joined into one universal binary. The app ships only that one, where better-sqlite3 looks
+// when it has no prebuilt binary: macOS flags any app holding an Intel-only binary, even one Apple silicon never loads.
 function sqlite(): void {
-  const builds = ['arm64', 'x64'].map((arch) => {
+  const builds = (TEST ? [process.arch] : ['arm64', 'x64']).map((arch) => {
     const file = path.join(SQLITE, 'prebuilds', `darwin-${arch}.node`)
     if (!readFileSync(file).includes('ENABLE_DBPAGE_VTAB')) run(process.execPath, [path.join(V2, 'tools', 'buildSqlite.ts'), '--arch', arch])
     return file
   })
-  mkdirSync(path.dirname(SQLITE_UNIVERSAL), { recursive: true })
-  run('lipo', ['-create', ...builds, '-output', SQLITE_UNIVERSAL])
+  mkdirSync(path.dirname(SQLITE_BINARY), { recursive: true })
+  run('lipo', ['-create', ...builds, '-output', SQLITE_BINARY])
 }
 
 function js(): void {
@@ -66,7 +73,8 @@ function js(): void {
 // The capture helper as its own app bundle, named and drawn like Daylens, so System Settings › Accessibility shows it
 // as Daylens. It is the process macOS grants window titles to.
 function helper(): void {
-  const swift = ['build', '-c', 'release', '--package-path', path.join(V2, 'native', 'macos'), '--arch', 'arm64', '--arch', 'x86_64']
+  const archs = TEST ? [process.arch === 'arm64' ? 'arm64' : 'x86_64'] : ['arm64', 'x86_64']
+  const swift = ['build', '-c', 'release', '--package-path', path.join(V2, 'native', 'macos'), ...archs.flatMap((a) => ['--arch', a])]
   run('swift', swift)
   const binDir = execFileSync('swift', [...swift, '--show-bin-path'], { cwd: V2, encoding: 'utf8' }).trim()
   const app = path.join(OUT, 'helper', 'Daylens.app', 'Contents')
@@ -106,7 +114,7 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
     appId: 'com.daylens.desktop',
     productName: 'Daylens',
     copyright: 'Copyright © 2026 Daylens',
-    directories: { output: path.join(OUT, 'release'), buildResources: PKG },
+    directories: { output: path.join(OUT, TEST ? 'test' : 'release'), buildResources: PKG },
     files: [
       'package.json',
       'build/app/**/*',
@@ -118,7 +126,7 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
       '!node_modules/node-addon-api/**',
     ],
     // A separate name keeps electron-updater's cache apart from V1's.
-    extraMetadata: { name: 'daylens-v2', main: 'build/app/app/main/main.js' },
+    extraMetadata: { name: 'daylens-v2', main: 'build/app/app/main/main.js', ...(TEST && { daylensTestBuild: true }) },
     asar: true,
     asarUnpack: ['node_modules/better-sqlite3/build/Release/better_sqlite3.node'],
     npmRebuild: false,
@@ -127,7 +135,8 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
       runAsNode: true,
       enableCookieEncryption: true,
       enableNodeOptionsEnvironmentVariable: false,
-      enableNodeCliInspectArguments: false,
+      // A test build lets Playwright attach to the main process.
+      enableNodeCliInspectArguments: TEST,
       enableEmbeddedAsarIntegrityValidation: true,
       onlyLoadAppFromAsar: true,
     },
@@ -190,9 +199,10 @@ const local = !sign && process.env.DAYLENS_MAC_LOCAL_SIGN === '1' ? localIdentit
 sqlite()
 js()
 helper()
-await build({ projectDir: V2, targets: Platform.MAC.createTarget(values.dir ? ['dir'] : ['dmg', 'zip'], Arch.universal), config: config(sign, local), publish: 'never' })
+// A test build is never handed to anyone, so it stops at the .app.
+await build({ projectDir: V2, targets: Platform.MAC.createTarget(values.dir || TEST ? ['dir'] : ['dmg', 'zip'], ARCH), config: config(sign, local), publish: 'never' })
 
-const app = path.join(OUT, 'release', 'mac-universal', 'Daylens.app')
+const app = path.join(OUT, TEST ? 'test' : 'release', ARCH === Arch.x64 ? 'mac' : `mac-${Arch[ARCH]}`, 'Daylens.app')
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
 if (sign) {
   run('xcrun', ['stapler', 'validate', app])

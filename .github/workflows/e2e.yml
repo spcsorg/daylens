@@ -1,0 +1,139 @@
+name: E2E
+
+on:
+  pull_request:
+    paths:
+      - "v2/**"
+      - ".github/workflows/e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "v2/**"
+      - ".github/workflows/e2e.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# No Windows job: there is no Windows test build [G-3], and the app spawns its helper without a shell, so the stand-in
+# can't start there [O-18].
+jobs:
+  macos:
+    name: test clock, builds and E2E on the test build (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CSC_FOR_PULL_REQUEST: 'true'
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm run build:sqlite
+      - run: npm run app:build
+      - name: Every process runs on DAYLENS_TEST_NOW, from source
+        run: node --test --test-concurrency=1 "tests/launch/*.launch.ts"
+      - name: Release build
+        run: npm run app:package -- --dir
+      - name: The release build ignores the test switches and ships no tool code
+        run: node app/package/checkRelease.ts
+      - name: Test build
+        run: npm run app:package -- --test
+      - name: The test build honours them
+        run: node app/package/checkRelease.ts --test
+      - name: The release check refuses the test build, for the right reasons
+        run: |
+          if node app/package/checkRelease.ts build/test/mac-arm64/Daylens.app > refused.txt; then cat refused.txt; exit 1; fi
+          cat refused.txt
+          grep -q 'the Node inspector fuse is on' refused.txt
+          grep -q 'main ran on the test time' refused.txt
+          grep -q 'the data folder was' refused.txt
+          grep -q 'the shell folder was' refused.txt
+          grep -q 'the stand-in helper ran' refused.txt
+      - name: Every screen on the test build
+        run: npm run e2e
+        env:
+          DAYLENS_E2E_APP: ${{ github.workspace }}/v2/build/test/mac-arm64/Daylens.app/Contents/MacOS/Daylens
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-screens
+          path: v2/build/e2e
+          retention-days: 7
+
+  linux:
+    name: E2E from source (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm run build:sqlite
+      - run: npm run app:build
+      - name: Electron's sandbox helper is setuid root, so Daylens runs sandboxed
+        run: |
+          node -e "require('electron')"
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Every screen, from source
+        run: xvfb-run -a -s '-screen 0 3200x2000x24' npm run e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: linux-screens
+          path: v2/build/e2e
+          retention-days: 7
+      - name: A screen that logs an error fails it
+        run: |
+          sed -i "s/^export function Apps(.*) {$/&\n  console.error('a deliberately broken Apps screen')/" app/renderer/src/screens/apps/Apps.tsx
+          grep -q "console.error('a deliberately broken Apps screen')" app/renderer/src/screens/apps/Apps.tsx
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '2 failed' broken.txt
+          grep -q 'Apps: yesterday' broken.txt
+          grep -q 'Apps: last week' broken.txt
+          grep -q 'console: a deliberately broken Apps screen' broken.txt
+      - name: A screen without its text fails it
+        run: |
+          sed -i "s/asleep: 'Your computer was asleep'/asleep: 'Asleep'/" app/renderer/src/screens/today/Today.tsx
+          grep -q "asleep: 'Asleep'" app/renderer/src/screens/today/Today.tsx
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line --grep 'Today: today' > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '1 failed' broken.txt
+          grep -q 'Your computer was asleep' broken.txt
+          grep -q 'Expected substring' broken.txt
+      - name: A screen whose text is there but hidden fails it
+        run: |
+          git checkout -- app/renderer/src/screens/apps/Apps.tsx app/renderer/src/screens/today/Today.tsx
+          echo '.apps-layout { display: none }' >> app/renderer/src/screens/apps/apps.css
+          npm run app:build
+          if xvfb-run -a -s '-screen 0 3200x2000x24' npx playwright test --config e2e/playwright.config.ts --reporter=line --grep 'Apps:' > broken.txt 2>&1; then cat broken.txt; exit 1; fi
+          cat broken.txt
+          grep -q '2 failed' broken.txt
+          grep -q 'Apps: yesterday' broken.txt
+          grep -q 'Apps: last week' broken.txt
+          grep -q 'Expected substring' broken.txt
+          if grep -q 'console:' broken.txt; then exit 1; fi

@@ -1,5 +1,6 @@
 // The interface's reader, an Electron utility process. It opens the database read-only, answers the screens over a
 // MessagePort the main process hands it, and follows the change log so screens refresh when shared state changes.
+import '../shared/childClock.ts'
 import type Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import path from 'node:path'

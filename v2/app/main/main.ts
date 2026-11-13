@@ -1,5 +1,7 @@
 // Daylens V2 shell. Owns the window, the menu bar item and launch at login, starts the capture service and the reader
 // in their own processes, and routes the interface's actions. It never opens the database.
+// First, so the environment and the clock are settled before any other module reads them.
+import { TEST_BUILD, testOffsetMs } from './testEnv.ts'
 import { BrowserWindow, Menu, MessageChannelMain, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, utilityProcess, type UtilityProcess } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -13,10 +15,11 @@ import { chrome, followTheme } from './chrome.ts'
 import { onKeyChange, savedKey } from './ipc/ai.ts'
 import { act } from './ipc/index.ts'
 import type { Ctx } from './ipc/context.ts'
-import { dataDir, paths } from './paths.ts'
+import { appData, dataDir, paths } from './paths.ts'
 import { loadPrefs, writePrefs, type Prefs } from './prefs.ts'
 import { createTray } from './tray.ts'
 import { installUpdate, startUpdates } from './updates.ts'
+import { OFFSET_ARG } from '../shared/clock.ts'
 
 // A hand-written assistant config that starts the MCP server without ELECTRON_RUN_AS_NODE lands here; it must never open the window.
 if (process.argv.some((a) => a.endsWith('mcp/main.js'))) {
@@ -28,7 +31,7 @@ const BENCH = process.env.DAYLENS_BENCH === '1'
 const log = (line: string) => process.stderr.write(`${line}\n`)
 
 app.setName('Daylens')
-app.setPath('userData', process.env.DAYLENS_SHELL_DIR ?? path.join(app.getPath('appData'), BENCH ? 'Daylens V2 Dev Shell Bench' : paths.shellName))
+app.setPath('userData', process.env.DAYLENS_SHELL_DIR ?? path.join(appData(), BENCH ? 'Daylens V2 Dev Shell Bench' : paths.shellName))
 
 if (!BENCH && !app.requestSingleInstanceLock()) app.exit(0)
 
@@ -46,8 +49,9 @@ let tray: Tray | null = null
 let reader: UtilityProcess | null = null
 let quitting = false
 let updateReady: string | null = null
-// Installed over V1 as the same app, the first run keeps V1's pause and exclusions. Runs from source start clean.
-const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged ? app.getPath('appData') : undefined, log })
+// Installed over V1 as the same app, the first run keeps V1's pause and exclusions. Runs from source and test builds
+// start clean.
+const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? appData() : undefined, log })
 
 // The shell's own channel to the reader, for the menu bar item and app icons.
 let mainPort: Electron.MessagePortMain | null = null
@@ -120,7 +124,7 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'Daylens',
     ...chrome(),
-    webPreferences: { preload: paths.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+    webPreferences: { preload: paths.preload, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, additionalArguments: testOffsetMs ? [`${OFFSET_ARG}${testOffsetMs}`] : [] },
   })
   w.once('ready-to-show', () => {
     if (!BENCH || process.env.DAYLENS_BENCH_SHOW === '1') w.show()
@@ -197,6 +201,8 @@ function bundlePath(id: string): Promise<string | null> {
 
 const iconCache = new Map<string, Buffer>()
 async function appIcon(id: string): Promise<Buffer | null> {
+  // A test build draws every app with its fallback icon, whatever this computer has installed.
+  if (TEST_BUILD) return null
   const hit = iconCache.get(id)
   if (hit) return hit
   const recorded = await query<string | null>({ q: 'app_path', id }).catch(() => null)

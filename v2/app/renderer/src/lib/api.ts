@@ -3,6 +3,7 @@ import type { Action, ActionResult, Query, QueryResult, ReaderEvent, ShellState 
 
 interface Bridge {
   platform: string
+  testOffsetMs: number
   query(q: Query): Promise<unknown>
   onReader(fn: (e: ReaderEvent) => void): () => void
   action(a: Action): Promise<ActionResult>
