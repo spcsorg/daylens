@@ -24,6 +24,7 @@ export interface SettingsResults {
 }
 
 export type SettingsAction =
+  | { a: 'browser_hosts_retry' }
   | { a: 'unexclude'; match: 'app_id' | 'exe' | 'site'; value: string }
   | { a: 'pick_app' }
   | { a: 'retention'; days: number | null }

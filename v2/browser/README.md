@@ -17,7 +17,7 @@ window, and "unknown" for everything else. The wire format and both transports a
 | `extension/manifest.*.json` | Chromium and Firefox manifests. `manifest.chromium-dev.json` adds the public key that fixes the dev build's ID. |
 | `build.ts` | Builds every target and zips the store packages. |
 | `store/` | Listing, permission justifications, data-use answers and reviewer notes for each store. |
-| `tools/register.ts` | Writes the dev host manifest into a test profile. |
+| `tools/register.ts` | CLI to write the dev host manifest into a test profile, using `capture/browserHosts.ts`. |
 | `tools/live.ts` | Live canary and soak runs in real browsers with test profiles. |
 | `tools/activate.swift` | Brings one process to the front by pid, for a second instance of an app that is also in use. |
 
