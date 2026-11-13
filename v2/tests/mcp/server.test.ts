@@ -79,6 +79,31 @@ test('a client lists the tools, reads a day, and the read is logged under its na
   r.close()
 })
 
+test('an hour edited in the app and its Undo are read through the same MCP connection', async () => {
+  const r = seeded()
+  r.clock.t = T0 + 2 * 3_600_000
+  const edit = r.storage.editHour(T0, 'Planned bakery deliveries', 'Agreed the route.')
+  const s = start(r.dir)
+  try {
+    await s.initialize()
+    const args = { name: 'get_hour', arguments: { hour_id: r.storage.hourAt(T0)!.id } }
+    const read = async () => {
+      const got = await s.request('tools/call', args)
+      assert.notEqual(got.result.isError, true, got.result.content[0].text)
+      return JSON.parse(got.result.content[0].text) as { title: string; summary: string }
+    }
+    const edited = await read()
+    assert.deepEqual([edited.title, edited.summary], ['Planned bakery deliveries', 'Agreed the route.'])
+    r.storage.undoHourEdit(T0, edit)
+    const undone = await read()
+    assert.deepEqual([undone.title, undone.summary], ['Budget review', 'Went through Q4 numbers.'])
+  } finally {
+    s.child.stdin!.end()
+    assert.ok(await exited(s.child, 5000))
+    r.close()
+  }
+})
+
 test('the server exits the moment its client closes stdin', async () => {
   const r = seeded()
   const s = start(r.dir)

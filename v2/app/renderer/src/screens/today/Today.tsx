@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MonthView, WeekView } from '../../../../shared/today.ts'
 import type { DayView, GapReason, HourRow, RecordingView, ShellState } from '../../../../shared/types.ts'
-import { useQuery } from '../../lib/api.ts'
+import { act, useQuery } from '../../lib/api.ts'
 import { addDays, addMonths, clock, dateKey, duration, factsTitle, hourLabel, longDay, monthOf, monthTitle, parseKey, rangeTitle, shortDay, span, weekStart } from '../../lib/format.ts'
 import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
-import { IconButton, Segmented } from '../../ui/controls.tsx'
-import { Popover } from '../../ui/overlays.tsx'
+import { Button, IconButton, Segmented } from '../../ui/controls.tsx'
+import { Popover, useToast } from '../../ui/overlays.tsx'
 import { AppIcon, Hour, SourceRow, WeekBlock } from '../../ui/records.tsx'
-import { EmptyState, StatusNotice } from '../../ui/status.tsx'
+import { EmptyState, errorText, StatusNotice } from '../../ui/status.tsx'
 import { dayRows, historyLines, kindOf } from './rows.ts'
 import './today.css'
 
@@ -154,6 +154,7 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
   const kind = kindOf(h)
   const history = kind === 'filled' ? historyLines(h) : null
   const note = [history?.where, h.edited ? 'Edited' : null].filter(Boolean).join(' · ') || null
+  const title = h.title ?? history?.title ?? (factsTitle(h) || 'No apps recorded')
   // Open, the hour and what's in it are one sheet pulled out of the day. The wrapper stays either way, so the hour keeps its focus.
   return (
     <div className={open ? 'hour-item hour-sheet' : 'hour-item'}>
@@ -161,29 +162,82 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
         start={h.start_ms}
         kind={kind}
         current={h.current}
-        title={h.title ?? history?.title ?? (factsTitle(h) || 'No apps recorded')}
+        title={title}
         summary={h.summary ?? (history ? history.summary : factsSummary(h, rec))}
         apps={h.facts.apps}
         note={note}
         open={open}
         onToggle={onToggle}
       />
-      {open && <HourOpen start={h.start_ms} day={day} history={h.from_history} onMark={onMark} />}
+      {open && <HourOpen start={h.start_ms} day={day} history={h.from_history} title={title} summary={h.summary ?? ''} onMark={onMark} />}
     </div>
   )
 }
 
-function HourOpen({ start, day, history, onMark }: { start: number; day: DayView; history: boolean; onMark: (name: string) => void }) {
+function HourOpen({ start, day, history, title, summary, onMark }: { start: number; day: DayView; history: boolean; title: string; summary: string; onMark: (name: string) => void }) {
   const { data } = useQuery({ q: 'hour', start_ms: start }, { live: true })
+  const [edit, setEdit] = useState<{ title: string; summary: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const toast = useToast()
   const detail = data && data.start_ms === start ? data : null
+  const closeEditor = () => {
+    setEdit(null)
+    setError(null)
+    requestAnimationFrame(() => root.current?.parentElement?.querySelector('.hour')?.scrollIntoView({ block: 'start' }))
+  }
+  const undo = async (editId: number) => {
+    setBusy(true)
+    try {
+      const r = await act({ a: 'undo_hour_edit', start_ms: start, edit_id: editId })
+      toast(r.ok ? { text: 'Edit undone' } : { text: errorText(r.error), error: true })
+    } catch {
+      toast({ text: 'Couldn’t undo the edit. Try again.', error: true })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const save = async () => {
+    if (!edit) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await act({ a: 'edit_hour', start_ms: start, title: edit.title, summary: edit.summary })
+      if (!r.ok) return setError(errorText(r.error))
+      const id = (r.result as { edit_id: number }).edit_id
+      closeEditor()
+      toast({ text: 'Hour updated', action: { label: 'Undo', run: () => void undo(id) } })
+    } catch {
+      setError('Couldn’t save the hour. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
   useLayoutEffect(() => {
     if (detail) onMark('hour_painted')
   }, [detail, onMark])
   if (!detail) return <div className="hour-open" />
   return (
-    <div className="hour-open">
+    <div className="hour-open" ref={root}>
+      {edit ? (
+        <form className="hour-editor" onSubmit={(e) => { e.preventDefault(); void save() }}>
+          <label>What were you doing?<input autoFocus value={edit.title} maxLength={200} disabled={busy} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></label>
+          <label>Anything to add?<textarea value={edit.summary} maxLength={512} rows={2} disabled={busy} onChange={(e) => setEdit({ ...edit, summary: e.target.value })} /></label>
+          {error && <p role="alert">{error}</p>}
+          <div className="hour-edit-actions">
+            <Button type="submit" kind="primary" loading={busy} disabled={!edit.title.trim()}>Save</Button>
+            <Button disabled={busy} onClick={closeEditor}>Cancel</Button>
+          </div>
+        </form>
+      ) : (
+        <div className="hour-edit-actions">
+          <Button onClick={() => { setEdit({ title, summary }); setError(null) }}>Edit</Button>
+          {detail.edit_id !== null && <Button kind="quiet" loading={busy} onClick={() => void undo(detail.edit_id!)}>Undo edit</Button>}
+        </div>
+      )}
       {history && <p className="hour-open-why">The times are when each page was opened; how long it stayed open isn’t known.</p>}
-      {detail.detail && <p>{detail.detail}</p>}
+      {!edit && detail.detail && <p>{detail.detail}</p>}
       {detail.sources.length > 0 ? (
         <div>
           {detail.sources.map((s) => (
