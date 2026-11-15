@@ -7,8 +7,6 @@ import { Reader } from '../app/reader/queries.ts'
 import { openReadOnly } from '../retrieval/reader.ts'
 import { close, launch } from './daylens.ts'
 
-test.skip(process.platform === 'win32', 'the isolated stand-in helper cannot launch on Windows yet [O-18]')
-
 test('without a helper the actual utility process initializes an empty readable store and refuses recording', async () => {
   const d = await launch({ world: 'empty' })
   try {

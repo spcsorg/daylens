@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { close, launch, shows } from './daylens.ts'
 
-test.skip(process.platform === 'win32', 'no Windows test build or stand-in helper launch [G-3] [O-18]')
-
 test('hidden hour content cannot satisfy a screen check', async () => {
   const d = await launch({ world: 'empty' })
   try {

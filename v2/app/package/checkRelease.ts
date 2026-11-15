@@ -6,7 +6,7 @@
 import { listPackage } from '@electron/asar'
 import { FuseV1Options, getCurrentFuseWire } from '@electron/fuses'
 import Database from 'better-sqlite3'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -18,6 +18,7 @@ export interface BenchRun {
   now_ms: number
   data_dir: string
   shell_dir: string
+  helper_args?: string[]
 }
 
 // The files in an app.asar listing that are tool code.
@@ -28,15 +29,19 @@ export function toolCode(files: string[]): string[] {
 // The bench mode drives the window, reports what it ran on and quits; anything but a clean exit is a failed run.
 export function benchRun(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<BenchRun> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'inherit'] })
+    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'inherit'], detached: process.platform !== 'win32' })
     const timer = setTimeout(() => {
-      child.kill('SIGKILL')
+      if (child.pid !== undefined) {
+        if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+        else { try { process.kill(-child.pid, 'SIGKILL') } catch {} }
+      }
       reject(new Error('no clean exit within 60 s'))
     }, 60_000)
     let run: BenchRun | null = null
     createInterface({ input: child.stdout! }).on('line', (line) => {
       if (line.startsWith('DAYLENS_BENCH_RUN ')) run = JSON.parse(line.slice('DAYLENS_BENCH_RUN '.length)) as BenchRun
     })
+    child.on('error', (error) => { clearTimeout(timer); reject(error) })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
       if (code !== 0 || signal !== null) reject(new Error(`Daylens exited with ${signal ?? `code ${code}`}`))
@@ -50,8 +55,9 @@ if (import.meta.main) {
   const { values, positionals } = parseArgs({ options: { test: { type: 'boolean', default: false } }, allowPositionals: true })
   const test = values.test!
   const V2 = path.resolve(import.meta.dirname, '..', '..')
-  const app = positionals[0] ?? path.join(V2, 'build', test ? 'test' : 'release', test ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac') : 'mac-universal', 'Daylens.app')
-  const binary = path.join(app, 'Contents', 'MacOS', 'Daylens')
+  const windows = process.platform === 'win32'
+  const app = positionals[0] ?? (windows ? path.join(V2, 'build', test ? 'test' : 'release', 'win-unpacked') : path.join(V2, 'build', test ? 'test' : 'release', test ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac') : 'mac-universal', 'Daylens.app'))
+  const binary = windows ? path.join(app, 'Daylens.exe') : path.join(app, 'Contents', 'MacOS', 'Daylens')
   if (!existsSync(binary)) throw new Error(`no app at ${app}`)
   const problems: string[] = []
 
@@ -59,7 +65,7 @@ if (import.meta.main) {
   const inspector = (await getCurrentFuseWire(binary))[FuseV1Options.EnableNodeCliInspectArguments] === '1'.charCodeAt(0)
   if (inspector !== test) problems.push(`the Node inspector fuse is ${inspector ? 'on' : 'off'}`)
 
-  const tools = toolCode(listPackage(path.join(app, 'Contents', 'Resources', 'app.asar'), { isPack: false }))
+  const tools = toolCode(listPackage(path.join(app, ...(windows ? ['resources'] : ['Contents', 'Resources']), 'app.asar'), { isPack: false }))
   if (tools.length) problems.push(`app.asar holds tool code: ${tools.join(', ')}`)
 
   const TEST_NOW = '2001-01-01T12:00:00Z'
@@ -72,15 +78,16 @@ if (import.meta.main) {
     const clock = run.now_ms >= T && run.now_ms < T + 10 * 60_000 ? 'the test time' : run.now_ms >= started && run.now_ms <= ended ? 'the real time' : 'neither time'
     if (clock !== (test ? 'the test time' : 'the real time')) problems.push(`main ran on ${clock}: ${new Date(run.now_ms).toISOString()}`)
     // A release build's own folders, under the world's home; a test build keeps the world's.
-    const own = path.join(world.home, 'Library', 'Application Support')
+    const own = windows ? world.env.APPDATA! : path.join(world.home, 'Library', 'Application Support')
     const data = test ? world.data : path.join(own, 'Daylens V2')
     if (run.data_dir !== data) problems.push(`the data folder was ${run.data_dir}, not ${data}`)
     const shell = test ? world.shell : path.join(own, 'Daylens V2 Dev Shell Bench')
     if (run.shell_dir !== shell) problems.push(`the shell folder was ${run.shell_dir}, not ${shell}`)
+    if (JSON.stringify(run.helper_args) !== (test ? world.env.DAYLENS_HELPER_ARGS : '[]')) problems.push('the helper arguments did not follow the build mode')
     const db = new Database(path.join(run.data_dir, DB_FILE), { readonly: true, fileMustExist: true })
     const ran = (helper: string) => (db.prepare(`SELECT count(*) AS n FROM capture_runs WHERE helper = ?`).get(helper) as { n: number }).n > 0
     const standIn = ran('demo')
-    const native = ran('daylens-capture-macos')
+    const native = ran(windows ? 'daylens-capture-windows' : 'daylens-capture-macos')
     db.close()
     if (standIn !== test) problems.push(`the stand-in helper ${standIn ? 'ran' : 'did not run'}`)
     if (native === test) problems.push(`the app's own helper ${native ? 'ran' : 'did not run'}`)

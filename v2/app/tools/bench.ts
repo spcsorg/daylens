@@ -13,7 +13,8 @@ if (!values['data-dir']) {
 }
 const v2 = path.resolve(import.meta.dirname, '..', '..')
 const electron = path.join(v2, 'node_modules', '.bin', 'electron')
-const helper = values.helper ?? path.join(v2, 'app', 'tools', 'demo-helper.sh')
+const helper = values.helper ?? process.execPath
+const helperArgs = values.helper ? [] : [path.join(v2, 'app', 'tools', 'demoHelper.ts')]
 
 function once(): Promise<Record<string, number>> {
   return new Promise((resolve, reject) => {
@@ -21,7 +22,7 @@ function once(): Promise<Record<string, number>> {
     const [cmd, args] = values.app ? [path.join(values.app, 'Contents', 'MacOS', 'Daylens'), []] : [electron, [path.join(v2, 'app', 'main', 'main.ts')]]
     const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env
     const child = spawn(cmd, args, {
-      env: { ...env, DAYLENS_BENCH: '1', DAYLENS_BENCH_SHOW: '1', DAYLENS_V2_DATA_DIR: values['data-dir'], DAYLENS_HELPER: helper },
+      env: { ...env, DAYLENS_BENCH: '1', DAYLENS_BENCH_SHOW: '1', DAYLENS_V2_DATA_DIR: values['data-dir'], DAYLENS_HELPER: helper, DAYLENS_HELPER_ARGS: JSON.stringify(helperArgs) },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const timer = setTimeout(() => {

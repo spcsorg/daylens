@@ -5,7 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { app, shell } from 'electron'
 import type { Action } from '../../shared/types.ts'
-import { dataDir } from '../paths.ts'
+import { dataDir, paths } from '../paths.ts'
 import { capture, type ActionHandlers } from './context.ts'
 
 type CoreAction = Extract<Action, { a: 'pause' | 'resume' | 'delete' | 'exclude' | 'open_url' | 'open_app' | 'open_settings_privacy' | 'restart_capture' | 'bench' }>
@@ -52,7 +52,7 @@ export const core: ActionHandlers<CoreAction> = {
   },
   bench: async (ctx, a) => {
     // What this run ran on, apart from the marks, so a check can see a release build ignore the test switches.
-    process.stdout.write(`DAYLENS_BENCH_RUN ${JSON.stringify({ now_ms: Date.now(), data_dir: dataDir(), shell_dir: app.getPath('userData') })}\n`)
+    process.stdout.write(`DAYLENS_BENCH_RUN ${JSON.stringify({ now_ms: Date.now(), data_dir: dataDir(), shell_dir: app.getPath('userData'), helper_args: paths.helperArgs })}\n`)
     process.stdout.write(`DAYLENS_BENCH ${JSON.stringify(a.marks)}\n`)
     setTimeout(() => ctx.quit(), 50)
     return { ok: true }

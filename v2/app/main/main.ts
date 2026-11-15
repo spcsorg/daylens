@@ -70,7 +70,7 @@ async function setupBrowserHosts(): Promise<ActionResult> {
 }
 // Installed over V1 as the same app, the first run keeps V1's pause and exclusions. Runs from source and test builds
 // start clean.
-const capture = new Capture({ service: paths.service, helper: paths.helper, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? appData() : undefined, log })
+const capture = new Capture({ service: paths.service, helper: paths.helper, helperArgs: paths.helperArgs, dataDir: dataDir(), v1AppData: app.isPackaged && !TEST_BUILD ? appData() : undefined, log })
 
 // The shell's own channel to the reader, for the menu bar item and app icons.
 let mainPort: Electron.MessagePortMain | null = null

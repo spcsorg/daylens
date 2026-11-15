@@ -2,8 +2,6 @@ import { test, expect } from '@playwright/test'
 import { close, launch, openSearch, screen, shows, sized, takeErrors } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build or stand-in helper launch [G-3] [O-18]')
-
 for (const failure of ['reply', 'throw'] as const) test(`a Save ${failure} failure remains visible after leaving the hour`, async () => {
   const d = await launch()
   try {
