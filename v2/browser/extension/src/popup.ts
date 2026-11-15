@@ -14,6 +14,7 @@ const choices = $('choices')
 const resumeBtn = $<HTMLButtonElement>('resume')
 const openBtn = $<HTMLButtonElement>('open')
 const error = $('error')
+let refresh: ReturnType<typeof setTimeout> | null = null
 
 function at(ms: number): string {
   const d = new Date(ms)
@@ -58,6 +59,8 @@ async function ask(req: PopupRequest): Promise<PopupState | null> {
   try {
     const s = await ext.runtime.sendMessage(req)
     render(s)
+    if (refresh !== null) clearTimeout(refresh)
+    refresh = s.daylens === 'connecting' || s.connecting_pair || s.awaiting_allow ? setTimeout(() => void ask({ t: 'status' }), 300) : null
     return s
   } catch {
     fail('Couldn’t reach the extension. Close this and try again.')
