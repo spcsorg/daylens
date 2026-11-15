@@ -40,6 +40,8 @@ jobs:
           cache: npm
           cache-dependency-path: v2/package-lock.json
       - run: npm ci
+      - run: npx playwright install chromium
+      - run: node browser/build.ts
       - run: npm run build:sqlite
       - run: npm run app:build
       - name: Every process runs on DAYLENS_TEST_NOW, from source

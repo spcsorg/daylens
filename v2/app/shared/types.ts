@@ -126,6 +126,7 @@ export interface ShellState {
   helper: { running: boolean; accessibility: string | null; titles: string | null }
   capture: 'starting' | 'running' | 'stopped' | 'failed'
   capture_error: string | null
+  browser_host_error: string | null
   bench: boolean
 }
 

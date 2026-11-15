@@ -7,6 +7,7 @@ import { TEST_BUILD } from '../testEnv.ts'
 import { capture, type ActionHandlers } from './context.ts'
 
 export const settings: ActionHandlers<SettingsAction> = {
+  browser_hosts_retry: ctx => ctx.retryBrowserHosts(),
   unexclude: (ctx, a) => capture(ctx, { op: 'unexclude', match: a.match, value: a.value }),
   // An app chosen from Applications, so one never recorded can be kept out before it is.
   pick_app: async () => {

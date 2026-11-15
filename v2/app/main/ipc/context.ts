@@ -13,6 +13,7 @@ export interface Ctx {
   pushShell(): void
   quit(): void
   requests: AssistantRequests
+  retryBrowserHosts(): Promise<ActionResult>
 }
 
 export type ActionHandlers<A extends Action> = { [K in A['a']]: (ctx: Ctx, a: Extract<A, { a: K }>) => Promise<ActionResult> }

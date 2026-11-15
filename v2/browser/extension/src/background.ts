@@ -548,7 +548,7 @@ ext.runtime.onMessage.addListener((req, _sender, reply) => {
     return true
   }
   void readPause().then(() => {
-    nextAttemptAt = 0
+    if (!req.passive) nextAttemptAt = 0
     post({ t: 'status' })
     whenStatus(() => answer())
   })
