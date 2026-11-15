@@ -16,11 +16,11 @@ export interface Turn {
   outdated: Earlier | null
 }
 
-/** The exchange a turn adds to the conversation: one the person saw answered, or searched for with no AI. */
+/** The exchange a turn adds to the conversation: one the person saw answered, or saw search results for. */
 function exchange(t: Turn): Earlier | null {
   if (t.outdated) return t.outdated
   const r = t.result
-  if (t.stale || !r || (r.kind !== 'answer' && r.kind !== 'search_only')) return null
+  if (t.stale || !r || (r.kind !== 'answer' && r.kind !== 'search_only' && r.kind !== 'failed')) return null
   let answer: string | null = null
   if (r.kind === 'answer') {
     answer = ''

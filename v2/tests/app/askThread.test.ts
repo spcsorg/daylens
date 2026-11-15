@@ -12,7 +12,7 @@ const stamp = { changes: 7, deletions: 2 }
 const answer = (text: string): AskResult => ({ kind: 'answer', statements: [{ text, cites: [] }], visual: null, dropped: 0, withdrawn: 0, results: none, stamp })
 const turn = (id: number, question: string, over: Partial<Turn> = {}): Turn => ({ id, question, asked_at: 1000 * id, earlier: [], streamed: [], result: null, error: null, stale: false, outdated: null, ...over })
 
-test('a question carries the answered and searched exchanges before it, never a pending, failed, unanswered or outdated one', () => {
+test('a question carries the answered and searched exchanges before it, a failed one with its search results too, never a pending, errored, unanswered or outdated one', () => {
   const thread = [
     turn(1, 'what did I do on the pricing memo?', { result: answer('You drafted the pricing memo.') }),
     turn(2, 'and the invoices?', { error: 'Claude couldn’t answer that. Try again.' }),
@@ -25,6 +25,8 @@ test('a question carries the answered and searched exchanges before it, never a 
     { question: 'what did I do on the pricing memo?', answer: 'You drafted the pricing memo.', asked_at: 1000, stamp },
     { question: 'invoice 1042', answer: null, asked_at: 4000, stamp },
   ])
+  const failed = turn(7, 'what did I do on the budget?', { result: { kind: 'failed', message: 'Claude couldn’t answer that.', results: none, stamp } })
+  assert.deepEqual(earlierOf([...thread, failed]).at(-1), { question: 'what did I do on the budget?', answer: null, asked_at: 7000, stamp })
 })
 
 test('each turn keeps at most the latest exchanges, each cut short, however long the thread', () => {
