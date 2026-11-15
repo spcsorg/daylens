@@ -5,8 +5,6 @@ import path from 'node:path'
 import { close, launch, shows, sized, takeErrors } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
-
 test('onboarding: the permission, the day so far, then Today', async () => {
   const d = await launch({ world: 'empty', onboarded: false })
   try {

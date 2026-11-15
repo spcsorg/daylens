@@ -70,7 +70,8 @@ export function makeWorld(o: WorldOptions = {}): World {
       CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
       CODEX_HOME: path.join(home, '.codex'),
       DAYLENS_V2_BROWSER_SOCKET: windows ? `\\\\.\\pipe\\daylens-${path.basename(root)}` : path.join(root, 'browser.sock'),
-      DAYLENS_HELPER: path.join(V2, 'app', 'tools', 'demo-helper.sh'),
+      DAYLENS_HELPER: process.execPath,
+      DAYLENS_HELPER_ARGS: JSON.stringify([path.join(V2, 'app', 'tools', 'demoHelper.ts')]),
       ...(o.now !== undefined && { DAYLENS_TEST_NOW: o.now }),
     }
     if (o.world !== 'empty') {

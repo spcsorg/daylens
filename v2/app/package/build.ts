@@ -1,7 +1,7 @@
-// Builds the universal macOS app and its DMG and update ZIP into v2/build/release.
+// Builds macOS apps or unsigned Windows x64 ZIPs into v2/build/release. Build on the target OS.
 // Usage: node app/package/build.ts [--dir] [--test]
-//   --dir stops at the .app, without the DMG and ZIP.
-//   --test builds a test build into v2/build/test instead: an .app for this Mac's architecture only, which honours the
+//   --dir stops at the app folder, without making archives.
+//   --test builds this platform’s test app into v2/build/test, which honours the
 //   test switches a release drops (DAYLENS_TEST_NOW, the data, shell and helper overrides; app/main/testEnv.ts) and
 //   lets a debugger attach. checkRelease.ts proves the difference.
 //
@@ -25,14 +25,16 @@ import { localIdentity, type LocalIdentity } from './localSigning.ts'
 
 const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false }, test: { type: 'boolean', default: false } } })
 const TEST = values.test!
-const ARCH = TEST ? (process.arch === 'arm64' ? Arch.arm64 : Arch.x64) : Arch.universal
+const WINDOWS = process.platform === 'win32'
+if (!WINDOWS && process.platform !== 'darwin') throw new Error('packaging is supported on macOS and Windows only')
+if (WINDOWS && process.arch !== 'x64') throw new Error('the Windows test package currently supports x64 only')
+const ARCH = WINDOWS ? Arch.x64 : TEST ? (process.arch === 'arm64' ? Arch.arm64 : Arch.x64) : Arch.universal
 const V2 = path.resolve(import.meta.dirname, '..', '..')
 const ROOT = path.join(V2, '..')
 const PKG = import.meta.dirname
 const OUT = path.join(V2, 'build')
 const version = (JSON.parse(readFileSync(path.join(V2, 'package.json'), 'utf8')) as { version: string }).version
 const run = (cmd: string, args: string[]) => execFileSync(cmd, args, { cwd: V2, stdio: 'inherit' })
-const bin = (name: string) => path.join(V2, 'node_modules', '.bin', name)
 
 function signing(): { teamId: string } | null {
   if (process.env.DAYLENS_MAC_SIGN !== '1') return null
@@ -52,6 +54,13 @@ const SQLITE_BINARY = path.join(SQLITE, 'build', 'Release', 'better_sqlite3.node
 // (tools/buildSqlite.ts), joined into one universal binary. The app ships only that one, where better-sqlite3 looks
 // when it has no prebuilt binary: macOS flags any app holding an Intel-only binary, even one Apple silicon never loads.
 function sqlite(): void {
+  if (WINDOWS) {
+    const file = path.join(SQLITE, 'prebuilds', 'win32-x64.node')
+    if (!readFileSync(file).includes('ENABLE_DBPAGE_VTAB')) throw new Error('run npm run build:sqlite before packaging')
+    mkdirSync(path.dirname(SQLITE_BINARY), { recursive: true })
+    copyFileSync(file, SQLITE_BINARY)
+    return
+  }
   const builds = (TEST ? [process.arch] : ['arm64', 'x64']).map((arch) => {
     const file = path.join(SQLITE, 'prebuilds', `darwin-${arch}.node`)
     if (!readFileSync(file).includes('ENABLE_DBPAGE_VTAB')) run(process.execPath, [path.join(V2, 'tools', 'buildSqlite.ts'), '--arch', arch])
@@ -63,7 +72,7 @@ function sqlite(): void {
 
 function js(): void {
   rmSync(path.join(OUT, 'app'), { recursive: true, force: true })
-  run(process.execPath, [bin('vite'), 'build', '--config', path.join(V2, 'app', 'vite.config.ts')])
+  run(process.execPath, [path.join(V2, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', path.join(V2, 'app', 'vite.config.ts')])
   run(process.execPath, [path.join(V2, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', path.join(PKG, 'tsconfig.json')])
   mkdirSync(path.join(OUT, 'app', 'app', 'preload'), { recursive: true })
   copyFileSync(path.join(V2, 'app', 'preload', 'preload.cjs'), path.join(OUT, 'app', 'app', 'preload', 'preload.cjs'))
@@ -73,6 +82,10 @@ function js(): void {
 // The capture helper as its own app bundle, named and drawn like Daylens, so System Settings › Accessibility shows it
 // as Daylens. It is the process macOS grants window titles to.
 function helper(): void {
+  if (WINDOWS) {
+    run('dotnet', ['publish', 'native/windows/Daylens.Capture.Windows', '-c', 'Release', '-r', 'win-x64', '-o', 'native/windows/publish', '-p:IncludeNativeLibrariesForSelfExtract=true'])
+    return
+  }
   const archs = TEST ? [process.arch === 'arm64' ? 'arm64' : 'x86_64'] : ['arm64', 'x86_64']
   const swift = ['build', '-c', 'release', '--package-path', path.join(V2, 'native', 'macos'), ...archs.flatMap((a) => ['--arch', a])]
   run('swift', swift)
@@ -144,8 +157,15 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
       { from: path.join(ROOT, 'build', 'trayTemplate.png'), to: 'trayTemplate.png' },
       { from: path.join(ROOT, 'build', 'trayTemplate@2x.png'), to: 'trayTemplate@2x.png' },
       { from: path.join(ROOT, 'build', 'icon.png'), to: 'icon.png' },
+      ...(WINDOWS ? [{ from: path.join(V2, 'native', 'windows', 'publish', 'daylens-capture-windows.exe'), to: 'daylens-capture-windows.exe' }] : []),
     ],
-    extraFiles: [{ from: path.join(OUT, 'helper', 'Daylens.app'), to: 'Helpers/Daylens.app' }],
+    extraFiles: WINDOWS ? [] : [{ from: path.join(OUT, 'helper', 'Daylens.app'), to: 'Helpers/Daylens.app' }],
+    win: {
+      target: ['zip'],
+      icon: path.join(ROOT, 'build', 'icon.png'),
+      artifactName: 'Daylens-${version}-win-x64.${ext}',
+      requestedExecutionLevel: 'asInvoker',
+    },
     mac: {
       icon: path.join(ROOT, 'build', 'icon.icns'),
       category: 'public.app-category.productivity',
@@ -194,18 +214,22 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
   }
 }
 
-const sign = signing()
-const local = !sign && process.env.DAYLENS_MAC_LOCAL_SIGN === '1' ? localIdentity() : null
+const sign = WINDOWS ? null : signing()
+const local = !WINDOWS && !sign && process.env.DAYLENS_MAC_LOCAL_SIGN === '1' ? localIdentity() : null
 sqlite()
 js()
 helper()
-// A test build is never handed to anyone, so it stops at the .app.
-await build({ projectDir: V2, targets: Platform.MAC.createTarget(values.dir || TEST ? ['dir'] : ['dmg', 'zip'], ARCH), config: config(sign, local), publish: 'never' })
+// A test build stops at the app folder; it is never a release artifact.
+await build({ projectDir: V2, targets: (WINDOWS ? Platform.WINDOWS : Platform.MAC).createTarget(values.dir || TEST ? ['dir'] : WINDOWS ? ['zip'] : ['dmg', 'zip'], ARCH), config: config(sign, local), publish: 'never' })
 
-const app = path.join(OUT, TEST ? 'test' : 'release', ARCH === Arch.x64 ? 'mac' : `mac-${Arch[ARCH]}`, 'Daylens.app')
-run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
-if (sign) {
-  run('xcrun', ['stapler', 'validate', app])
-  run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app])
+if (WINDOWS) {
+  process.stdout.write(`${path.join(OUT, TEST ? 'test' : 'release', 'win-unpacked', 'Daylens.exe')}\nunsigned Windows x64 test artifact; not a Store or installer package\n`)
+} else {
+  const app = path.join(OUT, TEST ? 'test' : 'release', ARCH === Arch.x64 ? 'mac' : `mac-${Arch[ARCH]}`, 'Daylens.app')
+  run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
+  if (sign) {
+    run('xcrun', ['stapler', 'validate', app])
+    run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app])
+  }
+  process.stdout.write(`${app}\n${sign ? `signed for team ${sign.teamId}, notarized` : local ? `signed with local identity ${local.hash}` : 'signed ad hoc: opens on this Mac only'}\n`)
 }
-process.stdout.write(`${app}\n${sign ? `signed for team ${sign.teamId}, notarized` : local ? `signed with local identity ${local.hash}` : 'signed ad hoc: opens on this Mac only'}\n`)

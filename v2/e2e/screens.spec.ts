@@ -25,8 +25,6 @@ const test = base.extend<{ window: Page }, { daylens: Daylens }>({
   },
 })
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
-
 test.afterEach(async ({ window }, info) => {
   const file = info.outputPath('screen.png')
   await window.screenshot({ path: file, animations: 'disabled' })

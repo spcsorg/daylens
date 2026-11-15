@@ -10,6 +10,7 @@ export interface CaptureOptions {
   service: string
   // Null where Daylens has no capture helper yet: capture fails at once rather than starting another platform's.
   helper: string | null
+  helperArgs?: string[]
   dataDir: string
   // Where V1 kept its settings; a new store starts with V1's pause and exclusions from there.
   v1AppData?: string
@@ -68,7 +69,7 @@ export class Capture extends EventEmitter {
     this.state = 'starting'
     this.emit('state')
     this.startedAt = Date.now()
-    const child = utilityProcess.fork(this.o.service, ['--helper', this.o.helper, '--data-dir', this.o.dataDir, ...APP_CAPTURE_FLAGS, ...(this.o.v1AppData ? ['--v1-app-data', this.o.v1AppData] : [])], {
+    const child = utilityProcess.fork(this.o.service, ['--helper', this.o.helper, ...(this.o.helperArgs ?? []).flatMap((arg) => ['--helper-arg', arg]), '--data-dir', this.o.dataDir, ...APP_CAPTURE_FLAGS, ...(this.o.v1AppData ? ['--v1-app-data', this.o.v1AppData] : [])], {
       serviceName: 'Daylens Capture',
       stdio: ['ignore', 'pipe', 'pipe'],
     })

@@ -51,7 +51,8 @@ export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}, prepare
 
 export async function close(d: Daylens): Promise<void> {
   await d.app.close()
-  rmSync(d.world.root, { recursive: true, force: true })
+  // On Windows the capture service can still hold a file for a moment after the app has closed.
+  rmSync(d.world.root, { recursive: true, force: true, maxRetries: 10 })
 }
 
 // The window's content at the fixtures' size, measured from inside the page.

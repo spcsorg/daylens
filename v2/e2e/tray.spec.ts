@@ -7,7 +7,6 @@ import { DB_FILE } from '../capture/store.ts'
 import { close, launch, sized, takeErrors, type Daylens } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
 test.skip(process.platform === 'linux', 'the tray menu never opens on Linux: the app never calls setContextMenu [M-1]')
 
 const HOUR_MS = 3_600_000

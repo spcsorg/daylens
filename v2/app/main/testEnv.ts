@@ -9,7 +9,7 @@ import { OFFSET_ENV, shiftClock } from '../shared/clock.ts'
 // app:package --test marks the package.json it builds.
 export const TEST_BUILD = app.isPackaged && (JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as { daylensTestBuild?: unknown }).daylensTestBuild === true
 
-if (app.isPackaged && !TEST_BUILD) for (const k of ['DAYLENS_TEST_NOW', 'DAYLENS_V2_DATA_DIR', 'DAYLENS_SHELL_DIR', 'DAYLENS_HELPER']) delete process.env[k]
+if (app.isPackaged && !TEST_BUILD) for (const k of ['DAYLENS_TEST_NOW', 'DAYLENS_V2_DATA_DIR', 'DAYLENS_SHELL_DIR', 'DAYLENS_HELPER', 'DAYLENS_HELPER_ARGS']) delete process.env[k]
 
 const testNow = process.env.DAYLENS_TEST_NOW === undefined ? null : Date.parse(process.env.DAYLENS_TEST_NOW)
 if (testNow !== null && !Number.isFinite(testNow)) {

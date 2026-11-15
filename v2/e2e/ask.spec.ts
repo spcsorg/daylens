@@ -5,8 +5,6 @@ import { close, launch, screen, shows, sized, takeErrors } from './daylens.ts'
 import type { AskQuery, AskResult } from '../app/shared/ai.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
-test.skip(process.platform === 'win32', 'no Windows test build or stand-in helper launch [G-3] [O-18]')
-
 const [today, yesterday] = fixtures.ask as [(typeof fixtures.ask)[number], (typeof fixtures.ask)[number]]
 
 test('"What did I just do?" after a question about yesterday shows today', async ({}, info) => {

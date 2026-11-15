@@ -25,7 +25,9 @@ export function dataDir(): string {
 // Electron's appData ignores HOME on macOS; this follows it, as dataDir() does, so a launch with another HOME keeps its
 // shell folder there and reads V1's settings from there. For a person HOME is their home, and the two are the same.
 export function appData(): string {
-  return process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : app.getPath('appData')
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support')
+  if (process.platform === 'win32') return process.env.APPDATA ?? app.getPath('appData')
+  return app.getPath('appData')
 }
 
 export const paths = {
@@ -36,6 +38,7 @@ export const paths = {
   preload: path.join(V2, 'app', 'preload', 'preload.cjs'),
   renderer: path.join(V2, 'app', 'renderer', 'dist', 'index.html'),
   helper: process.env.DAYLENS_HELPER ?? helperPath(process.platform, app.isPackaged, V2, process.resourcesPath),
+  helperArgs: JSON.parse(process.env.DAYLENS_HELPER_ARGS ?? '[]') as string[],
   // What onboarding's drag tile hands to System Settings › Accessibility.
   helperDrag: process.env.DAYLENS_HELPER ?? (app.isPackaged ? HELPER_APP : path.join(V2, 'native', 'macos', '.build', 'release', 'daylens-capture-macos')),
   trayIcon: app.isPackaged ? path.join(process.resourcesPath, 'trayTemplate.png') : path.join(V2, '..', 'build', 'trayTemplate.png'),
