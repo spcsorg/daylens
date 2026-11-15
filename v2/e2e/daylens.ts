@@ -2,7 +2,6 @@
 // DAYLENS_E2E_APP names, or from source after `npm run app:build`.
 import { _electron, expect, type ConsoleMessage, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { rmSync } from 'node:fs'
-import path from 'node:path'
 import { makeWorld, source, type World, type WorldOptions } from '../app/tools/world.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
@@ -20,8 +19,6 @@ const isError = (m: ConsoleMessage) => m.type() === 'error' && !(m.location().ur
 const logged = (m: ConsoleMessage) => `console: ${m.text()} (${m.location().url})`
 const uncaught = (e: Error) => `uncaught: ${e.message}`
 
-const hook = ['-r', path.join(import.meta.dirname, 'trayHook.cjs')]
-
 export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}, prepare?: (world: World) => void): Promise<Daylens> {
   const world = makeWorld({ ...o, now: fixtures.now, zone: fixtures.zone })
   const packaged = process.env.DAYLENS_E2E_APP
@@ -29,7 +26,7 @@ export async function launch(o: Omit<WorldOptions, 'now' | 'zone'> = {}, prepare
   try {
     prepare?.(world)
     // Without chromiumSandbox Playwright adds --no-sandbox on Linux.
-    app = await _electron.launch({ ...(packaged ? { executablePath: packaged, args: hook } : { args: [...hook, ...source().args] }), env: world.env as Record<string, string>, timezoneId: fixtures.zone, locale: fixtures.locale, chromiumSandbox: true })
+    app = await _electron.launch({ ...(packaged ? { executablePath: packaged } : { args: source().args }), env: world.env as Record<string, string>, timezoneId: fixtures.zone, locale: fixtures.locale, chromiumSandbox: true })
     const errors: string[] = []
     // What came before the window was ready is only in its buffer, and until the buffer is read an error can arrive both ways.
     let seen: Set<string> | undefined = new Set()

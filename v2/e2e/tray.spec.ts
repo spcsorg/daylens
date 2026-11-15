@@ -11,11 +11,6 @@ test.skip(process.platform === 'linux', 'the tray menu never opens on Linux: the
 
 const HOUR_MS = 3_600_000
 
-// The live Tray, kept by trayHook.cjs as main adds its click listener.
-async function findTray(d: Daylens): Promise<void> {
-  expect(await d.app.evaluate(() => (globalThis as { e2eTrays?: Electron.Tray[] }).e2eTrays?.length)).toBe(1)
-}
-
 interface Item {
   label: string
   enabled: boolean
@@ -24,8 +19,8 @@ interface Item {
 // The menu one click on the tray pops up.
 async function menu(d: Daylens): Promise<Item[]> {
   return d.app.evaluate(async () => {
-    const g = globalThis as { e2eTrays?: Electron.Tray[]; e2eMenu?: Electron.Menu }
-    const tray = g.e2eTrays![0]!
+    const g = globalThis as { daylensTray?: Electron.Tray; e2eMenu?: Electron.Menu }
+    const tray = g.daylensTray!
     g.e2eMenu = await new Promise<Electron.Menu>((resolve) => {
       tray.popUpContextMenu = (m?: Electron.Menu) => resolve(m!)
       tray.emit('click')
@@ -59,7 +54,6 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
   try {
     await sized(d)
     await expect(d.window.locator('[data-current="true"]')).toBeVisible()
-    await findTray(d)
 
     const recording = await menu(d)
     expect(recording[0]!.label.startsWith(`${fixtures.tray.hour} · `), recording[0]!.label).toBe(true)
