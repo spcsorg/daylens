@@ -196,13 +196,16 @@ test('after a restart into a new boot, titles kept earlier stay withheld until a
   await first.storage.keepTitles(notes)
   first.close()
   const errors: string[] = []
-  const r = rig(first.dir, { orderingPoint: slowHelper(700, { boot: 'boot-next', mono_us: 5000, boot_identity: 'kernel' }, errors) })
+  const point = slowHelper(1600, { boot: 'boot-next', mono_us: 5000, boot_identity: 'kernel' }, errors)()
+  const r = rig(first.dir, { orderingPoint: () => point })
   try {
     const before = focus(notes, 'BeforeOrderingReadCanary', T0 + MIN)
     before.boot = 'boot-next'
     before.t.mono_us = 6000
     r.feed(before)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await point
+    // Storage installs the new privacy state in the ordering read's promise continuations.
+    await new Promise<void>((resolve) => setImmediate(resolve))
     const after = focus(notes, 'After the ordering read', T0 + 2 * MIN, 'window_changed', 'after')
     after.boot = 'boot-next'
     after.t.mono_us = 7000

@@ -79,3 +79,27 @@ test('onboarding: a failed finish keeps the unavailable-recording step open and 
     await close(d)
   }
 })
+
+// An upgrade signed differently can leave an old Daylens entry on in the list while the new one is denied.
+test('onboarding: after opening System Settings, a denied permission says how to recover an entry already on', async ({}, info) => {
+  const d = await launch({ world: 'empty', onboarded: false }, w => { w.env.DEMO_ACCESSIBILITY = 'denied' })
+  try {
+    await sized(d)
+    await d.app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('action')
+      ipcMain.handle('action', async (_event, action) => {
+        if (action.a === 'open_settings_privacy') (globalThis as { e2eOpened?: number }).e2eOpened = ((globalThis as { e2eOpened?: number }).e2eOpened ?? 0) + 1
+        return { ok: true }
+      })
+    })
+    const main = d.window.getByRole('main')
+    await shows(main, ['Let Daylens see your windows', 'Waiting for you'])
+    await main.getByRole('button', { name: 'Open System Settings', exact: true }).click()
+    expect(await d.app.evaluate(() => (globalThis as { e2eOpened?: number }).e2eOpened)).toBe(1)
+    await shows(d.window.locator('body'), fixtures.onboarding.recovery)
+    await d.window.screenshot({ path: info.outputPath('onboarding-recovery.png'), animations: 'disabled' })
+    expect(takeErrors(d)).toEqual([])
+  } finally {
+    await close(d)
+  }
+})

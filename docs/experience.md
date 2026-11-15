@@ -153,7 +153,7 @@ Onboarding is where Daylens wins or loses a user. It must feel effortless and po
 
 - Eight moments or fewer.
 - The first thing people see is Daylens doing something useful, such as a search that finds something real, not a form.
-- Permissions are one step with one button. On macOS, the step opens System Settings with a small floating window to drag the Daylens icon into, and turns green on its own when access is granted. Browser access is part of the same step.
+- Permissions are one step with one button. On macOS, the step opens System Settings with a small floating window to drag the Daylens icon into, and turns green on its own when access is granted. Once System Settings has been opened and access is still missing, one line says "Already on? Remove Daylens from the list, then add it again.": macOS can keep an old Daylens entry on while denying a build signed differently, so the recovery is to remove and re-add that entry. Browser access is part of the same step.
 - Privacy is one calm line with a link to the Terms and Privacy page.
 - Assistants on the machine are found automatically and connected with one button, plus setup for any other MCP app. When Claude Code or Codex is found, the same step has one toggle to read their session logs, on by default, with one line saying only times, project folders and branches are read, never what was said.
 - AI: in the beta, the choice is the person's own API key or no AI. Daylens AI joins later as the default, with the other choices one click away.
