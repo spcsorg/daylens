@@ -1,5 +1,5 @@
 // The ways an hour can be written, behind one interface: the Anthropic API on the person's own key, or no AI.
-import Anthropic from '@anthropic-ai/sdk'
+import Anthropic, { type Middleware } from '@anthropic-ai/sdk'
 import type { Packet } from './packet.ts'
 import { writerMessage } from './prompt.ts'
 import type { WrittenHour } from './validate.ts'
@@ -65,6 +65,8 @@ export interface ApiRequest {
   // Each piece of the answer as it arrives.
   onText?: (text: string) => void
   signal?: AbortSignal
+  // Runs before every HTTP attempt, the SDK's own retries included; what it throws ends the call unsent.
+  beforeSend?: () => void
 }
 
 // Thinking counts against it; an hour or an answer is far shorter.
@@ -117,6 +119,8 @@ export function anthropicClient(model: string, opts: ApiOptions): (req: ApiReque
   if (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1) throw new RangeError('timeoutMs must be a positive whole number')
   const client = apiClient(opts)
   return async (req) => {
+    const before = req.beforeSend
+    const middleware: Middleware[] = before ? [(request, next) => (before(), next(request))] : []
     const t0 = performance.now()
     const out: CallResult = { text: null, error: null, quota: false, latency_ms: 0, first_token_ms: null, usage: null, model: null, tool_calls: [] }
     try {
@@ -128,7 +132,7 @@ export function anthropicClient(model: string, opts: ApiOptions): (req: ApiReque
           messages: [{ role: 'user', content: req.message }],
           ...(req.schema || opts.effort ? { output_config: { ...(opts.effort ? { effort: opts.effort } : {}), ...(req.schema ? { format: { type: 'json_schema' as const, schema: req.schema } } : {}) } } : {}),
         },
-        { signal: req.signal },
+        { signal: req.signal, middleware },
       )
       stream.on('text', (t) => {
         out.first_token_ms ??= Math.round(performance.now() - t0)

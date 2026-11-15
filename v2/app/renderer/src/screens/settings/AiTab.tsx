@@ -9,7 +9,7 @@ import './ai.css'
 
 // Settings › Recording & privacy shows this.
 export const WHAT_GOES_TO_AI =
-  'When you ask a question, only the parts of your record it needs. When an hour is written, that hour’s apps, window and page titles, and times. Your record stays on this computer.'
+  'When you ask a question, only the parts of your record it needs, and for a follow-up your last few questions and answers. When an hour is written, that hour’s apps, window and page titles, and times. Your record stays on this computer.'
 
 const KEYS_URL = 'https://console.anthropic.com/settings/keys'
 
