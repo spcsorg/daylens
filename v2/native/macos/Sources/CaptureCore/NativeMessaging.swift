@@ -172,6 +172,9 @@ extension Obs {
   }
 }
 
+/// Browsers that don't tell their extension which tab is in front: Daylens records their time without pages.
+public let frontTabUnreported: Set<String> = ["company.thebrowser.dia"]
+
 /// What the host tells the extension, built from a line the capture service sent or from the host's own state.
 public enum HostReply {
   public static func notRunning() -> String {
@@ -185,7 +188,7 @@ public enum HostReply {
   public static func snapshot() -> String { JSON.object([("t", .string("snapshot"))]).serialized() }
 
   /// Maps one line from the capture service; nil for anything unexpected.
-  public static func fromService(_ line: String) -> String? {
+  public static func fromService(_ line: String, browser: AppInfo) -> String? {
     guard let o = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any], let op = o["op"] as? String else { return nil }
     if op == "snapshot" {
       guard let ep = ExtensionMessage.epoch(o["epoch"]) else { return nil }
@@ -201,7 +204,8 @@ public enum HostReply {
     }
     guard op == "status", let capture = o["capture"] as? String, capture == "running" || capture == "paused" else { return nil }
     let until: JSON = (o["until_wall_ms"] as? NSNumber).map { .int($0.int64Value) } ?? .null
-    return JSON.object([("t", .string("status")), ("daylens", .string("connected")), ("capture", .string(capture)), ("until_wall_ms", until)] + req).serialized()
+    let frontTab: [(String, JSON)] = frontTabUnreported.contains(browser.appId?.lowercased() ?? "") ? [("front_tab", .bool(false))] : []
+    return JSON.object([("t", .string("status")), ("daylens", .string("connected")), ("capture", .string(capture)), ("until_wall_ms", until)] + frontTab + req).serialized()
   }
 
   /// A pause or resume names the browser that started this host: an extension pauses only its own browser.

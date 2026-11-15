@@ -196,7 +196,7 @@ private final class Host {
       while let nl = pending.firstIndex(of: 0x0A) {
         let line = String(decoding: pending[..<nl], as: UTF8.self)
         pending.removeSubrange(...nl)
-        if let reply = HostReply.fromService(line) { replyToExtension(reply) }
+        if let reply = HostReply.fromService(line, browser: browser) { replyToExtension(reply) }
       }
       if pending.count > 16 * 1024 { pending.removeAll() }
     }

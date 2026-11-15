@@ -88,7 +88,7 @@ let pauseTimer: ReturnType<typeof setTimeout> | null = null
 let retryMs = RETRY_MIN_MS
 let nextAttemptAt = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-const state: Pick<PopupState, 'daylens' | 'capture' | 'until_wall_ms'> = { daylens: 'connecting', capture: 'running', until_wall_ms: null }
+const state: Pick<PopupState, 'daylens' | 'capture' | 'until_wall_ms' | 'front_tab'> = { daylens: 'connecting', capture: 'running', until_wall_ms: null, front_tab: true }
 let openReply: ((ok: boolean) => void) | null = null
 let statusWaiters: (() => void)[] = []
 
@@ -322,6 +322,7 @@ function onDaylensMessage(msg: Record<string, unknown>): void {
     state.daylens = msg.daylens === 'connected' ? 'connected' : 'not_running'
     state.capture = msg.capture === 'paused' ? 'paused' : 'running'
     state.until_wall_ms = typeof msg.until_wall_ms === 'number' ? msg.until_wall_ms : null
+    state.front_tab = msg.front_tab !== false
     applyPause()
     if (connected) {
       tellDaylensPause()
