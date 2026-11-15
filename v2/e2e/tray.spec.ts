@@ -65,7 +65,8 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
       await expect.poll(() => pause(d)).not.toBeNull()
       const until = (await pause(d))!.until_ms
       if (p.until === '+1h') {
-        expect(until! - at).toBeGreaterThanOrEqual(HOUR_MS)
+        // The capture service stamps the pause; on Windows its clock can read a millisecond behind main's.
+        expect(until! - at).toBeGreaterThanOrEqual(HOUR_MS - 10)
         expect(until! - at).toBeLessThan(HOUR_MS + 60_000)
       } else expect(until).toBe(p.until === null ? null : Date.parse(p.until))
       const paused = await menu(d)
