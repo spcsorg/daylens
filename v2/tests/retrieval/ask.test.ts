@@ -890,6 +890,8 @@ test('a statement may name several things from what it cites, each file with an 
         { text: 'You wrote up Saturday’s orders on Saturday.', sources: [order] },
         { text: 'You wrote the Saturday order list.', sources: [order] },
         { text: 'You wrote the order list on Saturday morning.', sources: [order] },
+        { text: 'On Saturday orders took most of your time.', sources: [order] },
+        { text: 'You spent Saturday listing orders.', sources: [order] },
       ],
     }
   })
