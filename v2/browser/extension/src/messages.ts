@@ -2,7 +2,7 @@
 
 export type PauseFor = 'hour' | 'tomorrow' | 'until_resumed'
 
-export type PopupRequest = { t: 'status' } | { t: 'pause'; for: PauseFor } | { t: 'resume' } | { t: 'open' } | { t: 'connect' }
+export type PopupRequest = { t: 'status'; passive?: true } | { t: 'pause'; for: PauseFor } | { t: 'resume' } | { t: 'open' } | { t: 'connect' }
 
 export interface PopupState {
   // unpaired: this browser reaches Daylens over the local connection and has not been connected to it yet.

@@ -30,13 +30,16 @@ test('popup status refreshes leave the background reconnect schedule in charge',
     assert.equal(attempts, 1)
     for (let i = 0; i < 3; i++) {
       mock.timers.tick(300)
-      fake.runtime.onMessage.fire({ t: 'status' }, {}, () => {})
+      fake.runtime.onMessage.fire({ t: 'status', passive: true }, {}, () => {})
       await settle()
     }
     assert.equal(attempts, 1, 'status reads cannot force three early connection attempts')
     mock.timers.tick(100)
     await settle()
     assert.equal(attempts, 2, 'the scheduled one-second retry still runs')
+    fake.runtime.onMessage.fire({ t: 'status' }, {}, () => {})
+    await settle()
+    assert.equal(attempts, 3, 'opening the popup after installing Daylens still retries immediately')
   } finally {
     mock.timers.reset()
     delete (globalThis as Record<string, unknown>).chrome

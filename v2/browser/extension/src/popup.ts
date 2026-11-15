@@ -60,7 +60,7 @@ async function ask(req: PopupRequest): Promise<PopupState | null> {
     const s = await ext.runtime.sendMessage(req)
     render(s)
     if (refresh !== null) clearTimeout(refresh)
-    refresh = s.daylens === 'connecting' || s.connecting_pair || s.awaiting_allow ? setTimeout(() => void ask({ t: 'status' }), 300) : null
+    refresh = s.daylens === 'connecting' || s.connecting_pair || s.awaiting_allow ? setTimeout(() => void ask({ t: 'status', passive: true }), 300) : null
     return s
   } catch {
     fail('Couldn’t reach the extension. Close this and try again.')
