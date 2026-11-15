@@ -88,7 +88,12 @@ export function Onboarding({ shell, onDone }: { shell: ShellState | null; onDone
             </>
           )}
         </div>
-        {visited && !allowed && <p className="ob-detail">Without it, Daylens still sees which app is in front, but not its windows.</p>}
+        {visited && !allowed && (
+          <>
+            <p className="ob-detail">Without it, Daylens still sees which app is in front, but not its windows.</p>
+            <p className="ob-detail">Already on? Remove Daylens from the list, then add it again.</p>
+          </>
+        )}
       </div>
       {visited && !allowed && (
         <div className="drag-tile" draggable onDragStart={(e) => (e.preventDefault(), void bridge.action({ a: 'drag_helper' }))}>

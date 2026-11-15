@@ -21,9 +21,9 @@ This is the first beta. It runs on Macs with Apple silicon or Intel, macOS 13 or
 1. Download `Daylens-2.0.0-beta.1-mac.dmg` from [Releases](https://github.com/spcsorg/daylens/releases), open it and drag Daylens to Applications.
 2. Open Daylens. macOS says it can't check it for malicious software. Click **Done**.
 3. Open **System Settings › Privacy & Security** and scroll to Security. Next to "Daylens was blocked", click **Open Anyway** and enter your password. Click **Open Anyway** once more.
-4. To see window titles, Daylens asks for Accessibility. Allow it in **System Settings › Privacy & Security › Accessibility**.
+4. To see window titles, Daylens asks for Accessibility. Allow it in **System Settings › Privacy & Security › Accessibility**; on Macs that show **Device Control and Data Access** under Privacy & Security, the same list is there. If Daylens is already on in the list but window titles stay off, as can happen after installing a build signed differently, remove Daylens from the list and add it again.
 
-The beta isn't notarized by Apple yet, which is why macOS asks. Every beta build is signed with the same certificate, so the Accessibility permission stays when you install the next one. The beta doesn't update itself: download each new build from Releases. The first notarized build needs one more install by hand and asks for Accessibility once more; after that, Daylens updates itself.
+The beta isn't notarized by Apple yet, which is why macOS asks. A signing change can mean allowing window titles again, even if Daylens is already on in the list. The beta doesn't update itself: download each new build from Releases. The first notarized build needs one more install by hand and asks for Accessibility once more; after that, Daylens updates itself.
 
 ## Run from source
 

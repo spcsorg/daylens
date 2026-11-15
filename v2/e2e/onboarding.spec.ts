@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { close, launch, shows, sized, takeErrors } from './daylens.ts'
+import { close, launch, shows, sized, takeErrors, type Daylens } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
 test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
@@ -74,6 +74,36 @@ test('onboarding: a failed finish keeps the unavailable-recording step open and 
     await shows(main, fixtures.onboarding.no_helper)
     await d.window.screenshot({ path: info.outputPath('onboarding-save-error.png'), animations: 'disabled' })
     expect((JSON.parse(readFileSync(path.join(d.world.shell, 'shell.json'), 'utf8')) as { onboarded: boolean }).onboarded).toBe(false)
+    expect(takeErrors(d)).toEqual([])
+  } finally {
+    await close(d)
+  }
+})
+
+// An upgrade signed differently can leave an old Daylens entry on in the list while the new one is denied.
+test('onboarding: after opening System Settings, a denied permission says how to recover an entry already on', async ({}, info) => {
+  process.env.DEMO_ACCESSIBILITY = 'denied'
+  let d: Daylens
+  try {
+    d = await launch({ world: 'empty', onboarded: false })
+  } finally {
+    delete process.env.DEMO_ACCESSIBILITY
+  }
+  try {
+    await sized(d)
+    await d.app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('action')
+      ipcMain.handle('action', async (_event, action) => {
+        if (action.a === 'open_settings_privacy') (globalThis as { e2eOpened?: number }).e2eOpened = ((globalThis as { e2eOpened?: number }).e2eOpened ?? 0) + 1
+        return { ok: true }
+      })
+    })
+    const main = d.window.getByRole('main')
+    await shows(main, ['Let Daylens see your windows', 'Waiting for you'])
+    await main.getByRole('button', { name: 'Open System Settings', exact: true }).click()
+    expect(await d.app.evaluate(() => (globalThis as { e2eOpened?: number }).e2eOpened)).toBe(1)
+    await shows(d.window.locator('body'), fixtures.onboarding.recovery)
+    await d.window.screenshot({ path: info.outputPath('onboarding-recovery.png'), animations: 'disabled' })
     expect(takeErrors(d)).toEqual([])
   } finally {
     await close(d)
