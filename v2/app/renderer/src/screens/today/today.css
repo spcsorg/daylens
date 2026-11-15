@@ -92,6 +92,43 @@
   padding: 0 10px;
 }
 
+.hour-edit-actions {
+  display: flex;
+  gap: var(--space-8);
+  padding: 0 10px;
+}
+
+.hour-editor {
+  display: grid;
+  gap: var(--space-12);
+  padding: 0 10px;
+}
+
+.hour-editor label {
+  display: grid;
+  gap: var(--space-6);
+  font: var(--caption);
+}
+
+.hour-editor input,
+.hour-editor textarea {
+  width: 100%;
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-window);
+  color: var(--text-1);
+  font: var(--body);
+}
+
+.hour-editor textarea {
+  resize: vertical;
+}
+
+.hour-editor .hour-edit-actions {
+  padding: 0;
+}
+
 /* An hour from browser history: its pages, then one quiet line saying where they came from. */
 .hour.filled .hour-note {
   display: flex;

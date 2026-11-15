@@ -694,8 +694,10 @@ export class Storage {
     this.flushOrThrow()
     const start = h.start_wall_ms
     const end = start + HOUR_MS
-    const observations = [...new Set(h.observations ?? [])]
-    const sources = this.citedSources(h.sources ?? [], observations)
+    const corrected = this.hourAt(start)
+    const keep = corrected?.corrected.length ? corrected : null
+    const observations = [...new Set([...(h.observations ?? []), ...(keep?.observations ?? [])])]
+    const sources = this.citedSources([...(h.sources ?? []), ...(keep?.sources ?? [])], observations)
     const current = this.db.prepare('SELECT version FROM hours WHERE start_wall_ms = ?').get(start) as { version: number } | undefined
     if ((current?.version ?? null) !== basis.version) throw new StaleHourError('the hour changed after this text was computed')
     for (const t of this.rules.tombstones) {
@@ -787,6 +789,44 @@ export class Storage {
       const id = Number(this.db.prepare('INSERT INTO corrections (hour_id, field, text, created_wall_ms) VALUES (?, ?, ?, ?)').run(hourId, field, text, this.now()).lastInsertRowid)
       indexHour(this.db, hourId)
       return id
+    })
+  }
+
+  editHour(start: number, title: string, summary: string): number {
+    if (!Number.isSafeInteger(start) || start < 0 || start >= this.now() || start < (this.cutoff() ?? 0)) throw new Error('no_hour')
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 200 || typeof summary !== 'string' || summary.trim().length > 512) throw new Error('bad_correction')
+    this.flushOrThrow()
+    const end = start + HOUR_MS
+    return this.bus.commit('correction', { start_wall_ms: start }, () => {
+      const existing = this.hourAt(start)
+      const facts = readFacts(this.db, this.agentTables(), start, Math.min(end, this.now()))
+      const visits = this.db.prepare("SELECT id FROM observations WHERE kind = 'visit' AND event_wall_ms >= ? AND event_wall_ms < ?").all(start, Math.min(end, this.now())) as { id: number }[]
+      const observations = [...new Set([...facts.intervals.map((i) => i.obs_id), ...visits.map((v) => v.id)])]
+      if (!observations.length && !existing?.title && !existing?.corrected.length) throw new Error('no_hour')
+      const sources = this.citedSources(existing?.sources ?? [], observations)
+      this.refuseFenced(existing ? [existing.id] : [], sources, { from_wall_ms: start, to_wall_ms: end })
+      for (const t of this.rules.tombstones) {
+        if (t.kind === 'range' && (t.from_wall_ms ?? -Infinity) <= start && (t.to_wall_ms ?? Infinity) >= end) throw new Error('no_hour')
+      }
+      const now = this.now()
+      const id = existing?.id ?? Number(this.db.prepare("INSERT INTO hours (start_wall_ms, end_wall_ms, tz, status, sources, observations, updated_wall_ms) VALUES (?, ?, ?, 'facts', ?, ?, ?)").run(start, end, Intl.DateTimeFormat().resolvedOptions().timeZone, JSON.stringify(sources), JSON.stringify(observations), now).lastInsertRowid)
+      if (existing) this.db.prepare('UPDATE hours SET sources = ?, observations = ? WHERE id = ?').run(JSON.stringify(sources), JSON.stringify([...new Set([...existing.observations, ...observations])]), id)
+      const edit = Number(this.db.prepare("INSERT INTO corrections (hour_id, field, text, created_wall_ms) VALUES (?, 'title', ?, ?)").run(id, title.trim(), now).lastInsertRowid)
+      this.db.prepare('UPDATE corrections SET edit_id = ? WHERE id = ?').run(edit, edit)
+      this.db.prepare("INSERT INTO corrections (hour_id, field, text, created_wall_ms, edit_id) VALUES (?, 'summary', ?, ?, ?)").run(id, summary.trim(), now, edit)
+      indexHour(this.db, id)
+      return edit
+    })
+  }
+
+  undoHourEdit(start: number, editId: number): void {
+    if (!Number.isSafeInteger(start) || start < (this.cutoff() ?? 0) || !Number.isSafeInteger(editId)) throw new Error('no_hour')
+    this.bus.commit('correction', { start_wall_ms: start, undone: editId }, () => {
+      const h = this.hourAt(start)
+      if (!h || !this.db.prepare('SELECT 1 FROM corrections WHERE hour_id = ? AND edit_id = ? AND undone_wall_ms IS NULL').get(h.id, editId)) throw new Error('no_edit')
+      this.refuseFenced([h.id], h.sources, { from_wall_ms: start, to_wall_ms: start + HOUR_MS })
+      this.db.prepare('UPDATE corrections SET undone_wall_ms = ? WHERE hour_id = ? AND edit_id = ? AND undone_wall_ms IS NULL').run(this.now(), h.id, editId)
+      indexHour(this.db, h.id)
     })
   }
 

@@ -6,7 +6,7 @@ import type { AssistantsAction, AssistantsQuery, AssistantsResults } from './ass
 import type { OnboardingAction } from './onboarding.ts'
 import type { SearchQuery, SearchResultsByQuery } from './search.ts'
 import type { SettingsAction, SettingsQuery, SettingsResults } from './settings.ts'
-import type { TodayQuery, TodayResults } from './today.ts'
+import type { TodayAction, TodayQuery, TodayResults } from './today.ts'
 
 export interface AppTime {
   id: string
@@ -116,7 +116,7 @@ type CoreAction =
   | { a: 'restart_capture' }
   | { a: 'bench'; marks: Record<string, number> }
 
-export type Action = CoreAction | SettingsAction | OnboardingAction | AiAction | AssistantsAction
+export type Action = CoreAction | SettingsAction | OnboardingAction | AiAction | AssistantsAction | TodayAction
 
 export interface ShellState {
   platform: string

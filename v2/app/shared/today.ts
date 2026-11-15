@@ -5,7 +5,10 @@ export interface HourDetail {
   start_ms: number
   detail: string | null
   sources: Source[]
+  edit_id: number | null
 }
+
+export type TodayAction = { a: 'edit_hour'; start_ms: number; title: string; summary: string } | { a: 'undo_hour_edit'; start_ms: number; edit_id: number }
 
 export interface WeekBlock {
   start_ms: number

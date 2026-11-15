@@ -22,6 +22,7 @@ interface Turn {
   streamed: Statement[]
   result: AskResult | null
   error: string | null
+  stale: boolean
 }
 
 // The thread lives outside the screen, so an answer still lands while another screen is open.
@@ -32,12 +33,14 @@ const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f))
 // An answer can show what was then deleted, so a deletion clears the thread, and an answer still on its way lands nowhere.
 const ERASING = new Set(['deletion', 'retention', 'reset'])
 bridge.onReader((e) => {
-  if (e.e !== 'changed' || !e.kinds.some((k) => ERASING.has(k))) return
-  turns = []
+  if (e.e !== 'changed') return
+  if (e.kinds.some((k) => ERASING.has(k))) turns = []
+  else if (e.kinds.includes('correction')) turns = turns.map(t => ({ ...t, result: null, streamed: [], error: null, stale: true }))
+  else return
   for (const s of subs) s()
 })
 function update(id: number, f: (t: Turn) => Turn): void {
-  turns = turns.map((t) => (t.id === id ? f(t) : t))
+  turns = turns.map((t) => (t.id === id && !t.stale ? f(t) : t))
   for (const s of subs) s()
 }
 
@@ -49,7 +52,7 @@ function again(t: Turn): void {
 
 async function send(question: string): Promise<void> {
   const id = nextId++
-  turns = [...turns, { id, question, streamed: [], result: null, error: null }]
+  turns = [...turns, { id, question, streamed: [], result: null, error: null, stale: false }]
   for (const s of subs) s()
   const off = bridge.onReader((e) => {
     if (e.e === 'ask' && e.ask_id === id) update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }))
@@ -166,7 +169,7 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
   // The whole answer replaces what streamed: a statement can be withdrawn by a deletion made while Claude answered.
   const statements = r ? (r.kind === 'answer' ? r.statements : []) : turn.streamed
   const shown = usePaced(statements.length)
-  const done = r !== null || turn.error !== null
+  const done = r !== null || turn.error !== null || turn.stale
   const settled = done && shown === statements.length
   return (
     <div className="ask-exchange">
@@ -181,6 +184,12 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
         </div>
       )}
       {shown === 0 && !settled && <Typing />}
+      {settled && turn.stale && (
+        <div className="bubble theirs">
+          Your record changed. Ask again.{' '}
+          <button type="button" className="link" onClick={onRetry}>Try again</button>
+        </div>
+      )}
       {settled && turn.error && (
         <div className="bubble theirs problem" role="alert">
           {turn.error}{' '}

@@ -21,6 +21,8 @@ export type ControlMsg =
   | { op: 'retention'; id: string; days: number | null }
   | { op: 'setting'; id: string; key: string; value: unknown }
   | { op: 'correct'; id: string; hour_id: number; field: HourField; text: string }
+  | { op: 'edit_hour'; id: string; start_ms: number; title: string; summary: string }
+  | { op: 'undo_hour_edit'; id: string; start_ms: number; edit_id: number }
   | { op: 'assistant_request'; id: string; request_id: number; state: 'running' | 'done' | 'declined' | 'failed' | 'expired'; error?: string }
 
 export type ControlReply =
@@ -74,7 +76,7 @@ function startDeletion(storage: Storage, what: DeleteWhat, now: number): Deletio
 /** Returns false for a message that is not a control op, so the caller can route it elsewhere. */
 export function handleControl(storage: Storage, raw: Record<string, unknown>, send: (reply: ControlReply) => void, now: () => number = Date.now): boolean {
   const msg = raw as ControlMsg
-  if (!['pause', 'resume', 'delete', 'exclude', 'unexclude', 'retention', 'setting', 'correct', 'assistant_request'].includes(msg.op)) return false
+  if (!['pause', 'resume', 'delete', 'exclude', 'unexclude', 'retention', 'setting', 'correct', 'edit_hour', 'undo_hour_edit', 'assistant_request'].includes(msg.op)) return false
   const id = typeof msg.id === 'string' && msg.id.length <= 64 ? msg.id : null
   if (id === null) return true
   const fail = (err: unknown) => send({ op: 'reply', id, ok: false, error: err instanceof Error ? err.message : 'failed' })
@@ -128,6 +130,13 @@ export function handleControl(storage: Storage, raw: Record<string, unknown>, se
         if (!Number.isInteger(msg.hour_id) || !['title', 'summary'].includes(msg.field) || !isText(msg.text)) throw new Error('bad_correction')
         if (!storage.hour(msg.hour_id)) throw new Error('no_hour')
         send({ op: 'reply', id, ok: true, result: { correction: storage.correct(msg.hour_id, msg.field, msg.text) } })
+        break
+      case 'edit_hour':
+        send({ op: 'reply', id, ok: true, result: { edit_id: storage.editHour(msg.start_ms, msg.title, msg.summary) } })
+        break
+      case 'undo_hour_edit':
+        storage.undoHourEdit(msg.start_ms, msg.edit_id)
+        send({ op: 'reply', id, ok: true })
         break
       case 'assistant_request':
         if (!Number.isInteger(msg.request_id) || !['running', 'done', 'declined', 'failed', 'expired'].includes(msg.state)) throw new Error('bad_request')
