@@ -5,8 +5,6 @@
 import { parseArgs } from 'node:util'
 import { register, unregister } from '../../capture/browserHosts.ts'
 
-if (import.meta.main) {
-  const { values } = parseArgs({ options: { kind: { type: 'string' }, dir: { type: 'string' }, host: { type: 'string' }, remove: { type: 'boolean', default: false } } })
-  if (values.remove) unregister(values.dir!)
-  else process.stdout.write(register(values.kind as 'chromium' | 'firefox', values.dir!, values.host!) + '\n')
-}
+const { values } = parseArgs({ options: { kind: { type: 'string' }, dir: { type: 'string' }, host: { type: 'string' }, remove: { type: 'boolean', default: false } } })
+if (values.remove) unregister(values.dir!)
+else process.stdout.write(register(values.kind as 'chromium' | 'firefox', values.dir!, values.host!) + '\n')

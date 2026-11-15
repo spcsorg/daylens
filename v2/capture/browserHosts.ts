@@ -1,6 +1,7 @@
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { constants, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { CHROMIUM_EXTENSION_IDS } from './pairing.ts'
 
 export const HOST_NAME = 'app.daylens.browser'
@@ -45,7 +46,7 @@ export async function registerMacBrowserHosts(home: string, helper: string): Pro
     const firefox = browser.name === 'Firefox'
     const dir = path.join(support, ...(firefox ? ['Mozilla'] : browser.dir), 'NativeMessagingHosts')
     const file = path.join(dir, `${HOST_NAME}.json`)
-    const tmp = `${file}.tmp`
+    const tmp = `${file}.${randomUUID()}.tmp`
     try {
       const text = JSON.stringify(hostManifest(firefox ? 'firefox' : 'chromium', helper), null, 2) + '\n'
       if (await readFile(file, 'utf8').catch(() => null) === text) continue

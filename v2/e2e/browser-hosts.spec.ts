@@ -12,8 +12,11 @@ test('a fresh browser extension connects through the automatically registered pa
   const profile = (home: string) => path.join(home, 'Library', 'Application Support', 'Google', 'Chrome for Testing')
   const d = await launch({ world: 'empty' }, w => mkdirSync(profile(w.home), { recursive: true }))
   let browser: BrowserContext | undefined
+  const log: string[] = []
+  d.app.process().stderr?.on('data', (chunk: Buffer) => log.push(chunk.toString()))
   try {
     await expect.poll(() => existsSync(path.join(profile(d.world.home), 'NativeMessagingHosts', 'app.daylens.browser.json'))).toBe(true)
+    await expect.poll(() => existsSync(d.world.env.DAYLENS_V2_BROWSER_SOCKET!)).toBe(true)
     const extension = path.resolve(import.meta.dirname, '../browser/dist/chromium-dev')
     browser = await chromium.launchPersistentContext(profile(d.world.home), {
       executablePath: chromium.executablePath(),
@@ -29,6 +32,9 @@ test('a fresh browser extension connects through the automatically registered pa
     await expect(popup.locator('#status')).toHaveText('Connected')
     await popup.screenshot({ path: info.outputPath('extension-connected.png') })
     expect(takeErrors(d)).toEqual([])
+  } catch (error) {
+    await info.attach('app-startup', { body: log.join(''), contentType: 'text/plain' })
+    throw error
   } finally {
     await browser?.close()
     await close(d)
