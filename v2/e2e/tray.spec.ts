@@ -11,22 +11,9 @@ test.skip(process.platform === 'linux', 'the tray menu never opens on Linux: the
 
 const HOUR_MS = 3_600_000
 
-// The live Tray, found on the heap: main.ts keeps it in a module variable nothing outside can reach.
+// The live Tray, kept by trayHook.cjs as main adds its click listener.
 async function findTray(d: Daylens): Promise<void> {
-  const found = await d.app.evaluate(async ({ Tray }) => {
-    const inspector = process.getBuiltinModule('node:inspector') as typeof import('node:inspector')
-    const session = new inspector.Session()
-    session.connect()
-    const post = <T>(method: string, params: object) => new Promise<T>((resolve, reject) => session.post(method, params, (err, r) => (err ? reject(err) : resolve(r as T))))
-    const g = globalThis as { e2eTrayProto?: unknown; e2eTrays?: Electron.Tray[] }
-    g.e2eTrayProto = Tray.prototype
-    const proto = await post<{ result: { objectId: string } }>('Runtime.evaluate', { expression: 'globalThis.e2eTrayProto' })
-    const { objects } = await post<{ objects: { objectId: string } }>('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId })
-    await post('Runtime.callFunctionOn', { objectId: objects.objectId, functionDeclaration: 'function () { globalThis.e2eTrays = this.filter((t) => t.listenerCount("click") > 0) }' })
-    session.disconnect()
-    return g.e2eTrays!.length
-  })
-  expect(found).toBe(1)
+  expect(await d.app.evaluate(() => (globalThis as { e2eTrays?: Electron.Tray[] }).e2eTrays?.length)).toBe(1)
 }
 
 interface Item {
