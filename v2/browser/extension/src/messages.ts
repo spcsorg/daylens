@@ -19,5 +19,7 @@ export interface PopupState {
   connecting_pair: boolean
   // Daylens is asking the person whether this browser may connect.
   awaiting_allow: boolean
+  // False where the browser doesn't tell the extension which tab is in front (Dia): Daylens records it without pages.
+  front_tab: boolean
   opened?: boolean
 }

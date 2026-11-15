@@ -54,6 +54,9 @@ interface Effective {
   gapId: number | null
 }
 
+// Dia doesn't tell its extension which of its windows and tabs is in front, so its time is recorded without pages.
+const FRONT_TAB_UNREPORTED = new Set(['company.thebrowser.dia'])
+
 export function sameBrowser(front: AppIdentity, b: AppIdentity): boolean {
   if (front.identity_state !== 'ok' || b.identity_state !== 'ok') return false
   if (front.pid === null || b.pid === null || front.pid !== b.pid) return false
@@ -133,7 +136,7 @@ export class BrowserPages {
       c.link.send({ op: 'snapshot', epoch: this.front?.epoch ?? null })
       return
     }
-    if (this.privacy.classify(line.obs.browser).excluded) {
+    if (this.privacy.classify(line.obs.browser).excluded || FRONT_TAB_UNREPORTED.has(line.obs.browser.app_id?.toLowerCase() ?? '')) {
       c.claim = null
       return
     }

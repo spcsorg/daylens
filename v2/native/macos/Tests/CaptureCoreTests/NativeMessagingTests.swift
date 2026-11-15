@@ -4,6 +4,7 @@ import XCTest
 final class NativeMessagingTests: XCTestCase {
   let time = EventTime(wallMs: 1_792_130_412_345, monoUs: 881_234_567_890, tz: "Example/Town", tzOffsetMin: -300)
   let dia = AppInfo(appId: "company.thebrowser.dia", name: "Dia", path: "/Applications/Dia.app", pid: 812, registeredBrowser: true, identityState: .ok)
+  let chrome = AppInfo(appId: "com.google.Chrome", name: "Google Chrome", path: "/Applications/Google Chrome.app", pid: 813, registeredBrowser: true, identityState: .ok)
   let devId = "abcdefghijklmnopabcdefghijklmnop"
 
   func fixture(_ name: String) throws -> NSDictionary {
@@ -83,14 +84,14 @@ final class NativeMessagingTests: XCTestCase {
   }
 
   func testServiceLinesBecomeExtensionStatus() {
-    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":1792130412345}"#),
+    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":1792130412345}"#, browser: chrome),
                    #"{"t":"status","daylens":"connected","capture":"paused","until_wall_ms":1792130412345}"#)
-    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot"}"#), #"{"t":"snapshot"}"#)
-    XCTAssertNil(HostReply.fromService(#"{"op":"status","capture":"exfiltrate"}"#))
-    XCTAssertNil(HostReply.fromService("garbage"))
-    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause"}"#), #"{"t":"error","for":"pause"}"#, "a pause Daylens could not record reaches the extension")
-    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_resume"}"#), #"{"t":"error","for":"resume"}"#)
-    XCTAssertNil(HostReply.fromService(#"{"op":"error","for":"exec"}"#))
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot"}"#, browser: chrome), #"{"t":"snapshot"}"#)
+    XCTAssertNil(HostReply.fromService(#"{"op":"status","capture":"exfiltrate"}"#, browser: chrome))
+    XCTAssertNil(HostReply.fromService("garbage", browser: chrome))
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause"}"#, browser: chrome), #"{"t":"error","for":"pause"}"#, "a pause Daylens could not record reaches the extension")
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_resume"}"#, browser: chrome), #"{"t":"error","for":"resume"}"#)
+    XCTAssertNil(HostReply.fromService(#"{"op":"error","for":"exec"}"#, browser: chrome))
     let pause = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.pause(untilWallMs: nil), browser: dia)!.utf8)) as! NSDictionary
     XCTAssertEqual(pause["op"] as? String, "browser_pause")
     XCTAssertTrue(pause["until_wall_ms"] is NSNull)
@@ -107,18 +108,24 @@ final class NativeMessagingTests: XCTestCase {
     XCTAssertEqual(p(#"{"t":"resume","req":"8\n"}"#), .resume(profile: nil, req: nil), "an id with anything but letters, digits, - or _ is none")
     let control = try! JSONSerialization.jsonObject(with: Data(HostReply.control(.pause(untilWallMs: nil, profile: "p-1", req: "7"), browser: dia)!.utf8)) as! NSDictionary
     XCTAssertEqual(control["req"] as? String, "7")
-    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":null,"req":"7"}"#),
+    XCTAssertEqual(HostReply.fromService(#"{"op":"status","capture":"paused","until_wall_ms":null,"req":"7"}"#, browser: chrome),
                    #"{"t":"status","daylens":"connected","capture":"paused","until_wall_ms":null,"req":"7"}"#)
-    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause","req":"7"}"#), #"{"t":"error","for":"pause","req":"7"}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"error","for":"browser_pause","req":"7"}"#, browser: chrome), #"{"t":"error","for":"pause","req":"7"}"#)
+  }
+
+  func testDiaHearsThatItsFrontTabIsNotReported() {
+    let status = #"{"op":"status","capture":"running","until_wall_ms":null}"#
+    XCTAssertEqual(HostReply.fromService(status, browser: dia), #"{"t":"status","daylens":"connected","capture":"running","until_wall_ms":null,"front_tab":false}"#)
+    XCTAssertEqual(HostReply.fromService(status, browser: chrome), #"{"t":"status","daylens":"connected","capture":"running","until_wall_ms":null}"#)
   }
 
   func testTheFocusEpochTravelsBothWays() {
-    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":12}"#), #"{"t":"snapshot","epoch":12}"#)
-    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":null}"#), #"{"t":"snapshot"}"#, "the service sends a null epoch at resume")
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":12}"#, browser: chrome), #"{"t":"snapshot","epoch":12}"#)
+    XCTAssertEqual(HostReply.fromService(#"{"op":"snapshot","epoch":null}"#, browser: chrome), #"{"t":"snapshot"}"#, "the service sends a null epoch at resume")
     guard case .tab(let unnamed)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"unknown","trigger":"snapshot","reason":"no_tab","epoch":null}"#.utf8)) else { return XCTFail() }
     XCTAssertNil(unnamed.epoch)
-    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":true}"#))
-    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":-1}"#))
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":true}"#, browser: chrome))
+    XCTAssertNil(HostReply.fromService(#"{"op":"snapshot","epoch":-1}"#, browser: chrome))
     guard case .tab(let r)? = ExtensionMessage.parse(Array(#"{"t":"tab","state":"page","trigger":"snapshot","window":"1","url":"https://x","epoch":12}"#.utf8)) else { return XCTFail() }
     XCTAssertEqual(r.epoch, 12)
     XCTAssertTrue(Obs.tab(r, browser: dia, extensionId: devId).serialized().hasSuffix(#""epoch":12}"#))
