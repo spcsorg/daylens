@@ -47,6 +47,10 @@ function readText(r: ReadEntry): string {
   switch (r.tool) {
     case 'search':
       return `Searched for ${quoted(r.query ?? '')}`
+    case 'ask_followup_questions':
+      return `Sent your earlier questions to make sense of ${quoted(r.query ?? '')}`
+    case 'ask_followup':
+      return `Sent your earlier questions and answers to make sense of ${quoted(r.query ?? '')}`
     case 'get_hour':
       return `Read ${plainDay(dateKey(new Date(r.from_wall_ms)))}, ${span(r.from_wall_ms, r.to_wall_ms)}`
     case 'get_agent_work':

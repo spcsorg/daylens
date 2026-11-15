@@ -1,10 +1,11 @@
 // Ask, and the person's own Anthropic key. The key goes from the interface to the shell only to be saved; no read or
 // action ever returns it.
 import type { AskResult, Statement } from '../../retrieval/ask.ts'
+import type { Earlier } from './conversation.ts'
 
 export type { AskResult, Citation, Piece, Statement, Thing, Visual } from '../../retrieval/ask.ts'
 
-export type AskQuery = { q: 'ask'; ask_id: number; question: string }
+export type AskQuery = { q: 'ask'; ask_id: number; question: string; asked_at: number; earlier: Earlier[] }
 
 export interface AskResults {
   ask: AskResult
@@ -31,6 +32,7 @@ export function askFailure(message: string): string {
   if (/429|rate limit|credit balance|quota/i.test(message)) return 'Your Anthropic account is out of credit or over its limit, so Claude couldn’t answer.'
   if (NO_INTERNET.test(message)) return OFFLINE
   if (NO_ANTHROPIC.test(message)) return UNREACHABLE
+  if (/record changed/i.test(message)) return 'Your record changed. Ask again.'
   if (/being deleted|deletion began/.test(message)) return 'Part of your record is being deleted. Ask again in a moment.'
   return 'Claude couldn’t answer that. Try again.'
 }

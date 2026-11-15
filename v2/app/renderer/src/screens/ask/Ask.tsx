@@ -1,7 +1,8 @@
 // Ask: questions about any day, answered from the record like a message thread. Your question sits on the right; the
 // answer arrives on the left as one message, a sentence at a time as it streams.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { askFailure, type AskResult, type Citation, type Statement, type Visual } from '../../../../shared/ai.ts'
+import { askFailure, type Citation, type Statement, type Visual } from '../../../../shared/ai.ts'
+import { bounded, type Earlier } from '../../../../shared/conversation.ts'
 import { act, bridge, query } from '../../lib/api.ts'
 import { hourLabel, seenAt } from '../../lib/format.ts'
 import { IconButton } from '../../ui/controls.tsx'
@@ -9,21 +10,13 @@ import { Icon } from '../../ui/Icon.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 import { KeyForm } from '../settings/AiTab.tsx'
+import { corrected, earlierOf, questionOf, type Turn } from './thread.ts'
 import { AnswerVisual, dayWord, FoundCard, opened } from './Visual.tsx'
 import './ask.css'
 
 const TRY = ['What did I do this morning?', 'What did I work on yesterday afternoon?', 'What took most of my time yesterday?']
 // A new statement waits this long after the one before, so a burst still arrives one by one.
 const PACE_MS = 220
-
-interface Turn {
-  id: number
-  question: string
-  streamed: Statement[]
-  result: AskResult | null
-  error: string | null
-  stale: boolean
-}
 
 // The thread lives outside the screen, so an answer still lands while another screen is open.
 let turns: Turn[] = []
@@ -35,7 +28,7 @@ const ERASING = new Set(['deletion', 'retention', 'reset'])
 bridge.onReader((e) => {
   if (e.e !== 'changed') return
   if (e.kinds.some((k) => ERASING.has(k))) turns = []
-  else if (e.kinds.includes('correction')) turns = turns.map(t => ({ ...t, result: null, streamed: [], error: null, stale: true }))
+  else if (e.kinds.includes('correction')) turns = corrected(turns)
   else return
   for (const s of subs) s()
 })
@@ -44,21 +37,23 @@ function update(id: number, f: (t: Turn) => Turn): void {
   for (const s of subs) s()
 }
 
-// Asked again (after a failure, or once a key is saved): the new answer takes the old one's place.
+// Asked again (after a failure, or once a key is saved): the new answer takes the old one's place, asked after the
+// conversation the question first followed.
 function again(t: Turn): void {
   turns = turns.filter((x) => x.id !== t.id)
-  void send(t.question)
+  void send(t.question, t.earlier, t.asked_at)
 }
 
-async function send(question: string): Promise<void> {
+async function send(question: string, earlier: Earlier[] = earlierOf(turns), asked_at = Date.now()): Promise<void> {
+  earlier = bounded(earlier)
   const id = nextId++
-  turns = [...turns, { id, question, streamed: [], result: null, error: null, stale: false }]
+  turns = [...turns, { id, question, asked_at, earlier, streamed: [], result: null, error: null, stale: false, outdated: null }]
   for (const s of subs) s()
   const off = bridge.onReader((e) => {
     if (e.e === 'ask' && e.ask_id === id) update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }))
   })
   try {
-    const result = await query({ q: 'ask', ask_id: id, question })
+    const result = await query({ q: 'ask', ask_id: id, ...questionOf({ question, asked_at, earlier }) })
     update(id, (t) => ({ ...t, result }))
   } catch (err) {
     update(id, (t) => ({ ...t, error: askFailure((err as Error).message) }))
@@ -168,6 +163,7 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
   const r = turn.result
   // The whole answer replaces what streamed: a statement can be withdrawn by a deletion made while Claude answered.
   const statements = r ? (r.kind === 'answer' ? r.statements : []) : turn.streamed
+  const error = r?.kind === 'failed' ? askFailure(r.message) : turn.error
   const shown = usePaced(statements.length)
   const done = r !== null || turn.error !== null || turn.stale
   const settled = done && shown === statements.length
@@ -190,9 +186,9 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
           <button type="button" className="link" onClick={onRetry}>Try again</button>
         </div>
       )}
-      {settled && turn.error && (
+      {settled && error && (
         <div className="bubble theirs problem" role="alert">
-          {turn.error}{' '}
+          {error}{' '}
           <button type="button" className="link" onClick={onRetry}>
             Try again
           </button>
@@ -200,7 +196,7 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
       )}
       {settled && r?.kind === 'no_answer' && <div className="bubble theirs">{r.missing ?? 'Your record doesn’t show that.'}</div>}
       {settled && r?.kind === 'withdrawn' && <div className="bubble theirs">What answered this was just deleted, so there’s nothing left to show.</div>}
-      {settled && r?.kind === 'search_only' && <FoundCard results={r.results} onOpenHour={onOpenHour} />}
+      {settled && (r?.kind === 'search_only' || r?.kind === 'failed') && <FoundCard results={r.results} onOpenHour={onOpenHour} />}
       {settled && r?.kind === 'answer' && (
         <>
           {r.visual && <AnswerVisual visual={r.visual} onOpenHour={onOpenHour} />}

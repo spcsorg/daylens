@@ -106,7 +106,7 @@ On your computer, in a database on your own disk. There's no Daylens cloud copy 
 | What | Goes to | When | How to stop it |
 |---|---|---|---|
 | One hour's facts: window and page titles, addresses, app names and times, agent sessions and their projects, commit messages, calendar events, the previous hour's text, open threads and corrections from nearby hours, plus screen text and transcripts if you turned them on | The AI you chose, directly | Each hour, while AI is on | Choose no AI. Hours stay as plain facts. |
-| The hours relevant to a question | The AI you chose, directly | When you use Ask | Choose no AI. Ask then searches instead. |
+| The hours relevant to a question, and for a follow-up the last few questions and answers before it | The AI you chose, directly | When you use Ask | Choose no AI. Ask then searches instead. |
 | What an assistant reads | That assistant's own AI service | When an assistant you connected reads your days | Disconnect it. Every read is logged in Settings. |
 | Account, plan, usage and payments | Daylens billing | If you have a plan | Never includes activity, prompts or answers |
 | How you use the app: features and screens used, errors, speed, AI usage, app version and system, under a random ID | Daylens | On by default | Turn it off in Settings. Never your record: titles, addresses, file names, screen text, transcripts, prompts or answers. |

@@ -1,6 +1,7 @@
 // Retrieval's own read-only view of the database, for search, Ask and the MCP server. It never migrates or writes:
 // the capture service owns the schema, and a schema this build was not written for is refused, not guessed at.
 import Database from 'better-sqlite3'
+import type { Stamp } from '../app/shared/conversation.ts'
 import { presenceFromCapture } from '../capture/agents/attribution.ts'
 import { dbHostLookup, resolveHost, type HostLookup, type HostSpan } from '../capture/agents/gate.ts'
 import type { Agent } from '../capture/agents/types.ts'
@@ -226,6 +227,16 @@ export class Reader {
   /** The newest deletion so far. Deletion ids only grow, so whatever was read after this can be checked against later ones. */
   deletionMark(): number {
     return (this.db.prepare('SELECT coalesce(max(id), 0) FROM deletions').pluck().get() as number)
+  }
+
+  /** Where the record stands: the change log's last entry and the newest deletion, begun or finished. */
+  stamp(): Stamp {
+    return { changes: this.db.prepare('SELECT coalesce(max(seq), 0) FROM change_log').pluck().get() as number, deletions: this.deletionMark() }
+  }
+
+  /** The kind of each change logged after `seq`. */
+  changesSince(seq: number): string[] {
+    return this.db.prepare('SELECT kind FROM change_log WHERE seq > ? ORDER BY seq').pluck().all(seq) as string[]
   }
 
   /** Every deletion begun after the mark, pending or finished. */
