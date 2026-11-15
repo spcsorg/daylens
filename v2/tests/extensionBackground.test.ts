@@ -49,3 +49,17 @@ test('a lost connection to Daylens comes back on its own, with backoff, and stop
   assert.equal(ports.length, 3, 'no retries while connected')
   mock.timers.reset()
 })
+
+test('the host saying the front tab isn’t reported reaches the popup, and a later status without it clears it', async () => {
+  const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }
+  const popupAfter = async (status: object) => {
+    let reply: { front_tab?: boolean } | null = null
+    fake.runtime.onMessage.fire({ t: 'status', passive: true }, {}, (r: { front_tab?: boolean }) => (reply = r))
+    await settle()
+    ports.at(-1)!.onMessage.fire(status)
+    await settle()
+    return (reply as { front_tab?: boolean } | null)?.front_tab
+  }
+  assert.equal(await popupAfter({ t: 'status', daylens: 'connected', capture: 'running', until_wall_ms: null, front_tab: false }), false)
+  assert.equal(await popupAfter({ t: 'status', daylens: 'connected', capture: 'running', until_wall_ms: null }), true)
+})
