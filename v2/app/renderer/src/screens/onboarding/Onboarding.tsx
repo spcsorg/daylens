@@ -47,6 +47,7 @@ export function Onboarding({ shell, onDone }: { shell: ShellState | null; onDone
   useEffect(() => {
     if (allowed) setVisited(false)
   }, [allowed])
+  if (shell?.capture_error === 'no_helper') return <NoRecording onDone={onDone} />
   if (step === 'morning') return <Morning onBack={notApplicable ? undefined : () => setStep('permission')} onDone={onDone} />
   const openSettings = async () => {
     const r = await act({ a: 'open_settings_privacy' })
@@ -98,6 +99,30 @@ export function Onboarding({ shell, onDone }: { shell: ShellState | null; onDone
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function NoRecording({ onDone }: { onDone: () => void }) {
+  return (
+    <div className="onboarding">
+      <div className="onboarding-col">
+        <h1>Daylens can’t record on Linux yet</h1>
+        <p className="lead">Your days stay empty here for now.</p>
+        <div className="ob-actions">
+          <Button
+            kind="primary"
+            size="large"
+            enter
+            onClick={async () => {
+              await act({ a: 'onboarded' })
+              onDone()
+            }}
+          >
+            Open Today
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

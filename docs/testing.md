@@ -61,13 +61,15 @@ Each release covers:
 (cd v2/native/windows && dotnet test)
 ```
 
+On Windows, `v2/tests/realHelperWindows.test.ts` runs the real helper once it is published (README) and needs its shutdown `bye`, not only a clean exit. CI publishes it before `npm test`, so there a missing helper fails the test; a Windows run from source without it skips, as macOS and Linux always do.
+
 AI evaluations call paid providers. They run on purpose, not on every change.
 
 ## End to end
 
 On a Mac used for daily recording, use the invented world and stand-in helper for local screen checks. Run native-capture and release-package checks in a clean VM or CI: unbundled helpers started from changing build paths leave separate macOS permission entries. Remove temporary app copies after manual checks and keep the installed app at one stable path.
 
-`npm run e2e` in `v2/` drives Daylens with Playwright through every screen and query in `v2/e2e/fixtures.json`: Today's day, a past week and month, an opened hour, four searches and one by keyboard, Apps for a past day and week, Ask without a key on its three examples, every Settings tab, onboarding on an empty record, and the menu bar item's menu: the current hour, the three pauses, Resume, deleting the last 10 minutes, Open Today, Search… and Quit. Each launch gets its own throwaway pricing world at a fixed test time (`DAYLENS_TEST_NOW`), pinned to `America/Phoenix` and `en-US`, at a fixed window size.
+`npm run e2e` in `v2/` drives Daylens with Playwright through every screen and query in `v2/e2e/fixtures.json`: Today's day, a past week and month, an opened hour, four searches and one by keyboard, Apps for a past day and week, Ask without a key on its three examples, every Settings tab, onboarding on an empty record and where Daylens can't record (Linux's shell state, sent to the window), and the menu bar item's menu: the current hour, the three pauses, Resume, deleting the last 10 minutes, Open Today, Search… and Quit. Each launch gets its own throwaway pricing world at a fixed test time (`DAYLENS_TEST_NOW`), pinned to `America/Phoenix` and `en-US`, at a fixed window size.
 
 - A test fails when its screen doesn't show the expected text where a person can see it (hidden containers and text CSS hides don't count), or the window logs a console error or throws. Errors after launch are collected as they happen; startup errors still depend on Playwright's bounded buffers. The one expected error is an app with no icon: the icon protocol answers 404 by design and the window draws the fallback. Screen tests attach a screenshot for inspection.
 - It runs from source after `npm run app:build`, or on a packaged test build with `DAYLENS_E2E_APP` set to its executable.

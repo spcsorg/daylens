@@ -73,14 +73,16 @@ export function RecordingTab({ shell, rec, onDeleted }: { shell: ShellState | nu
         <Row
           label="Window titles"
           detail={
-            shell?.helper.running === false && state === 'stopped'
-              ? 'Daylens isn’t recording right now.'
-              : shell?.helper.accessibility === 'denied'
-                ? 'Not allowed, so Daylens sees which app is in front but not its windows.'
-                : 'Allowed. Daylens notes the app in front and its window title.'
+            shell?.capture_error === 'no_helper'
+              ? 'Daylens can’t record on Linux yet.'
+              : shell?.helper.running === false && state === 'stopped'
+                ? 'Daylens isn’t recording right now.'
+                : shell?.helper.accessibility === 'denied'
+                  ? 'Not allowed, so Daylens sees which app is in front but not its windows.'
+                  : 'Allowed. Daylens notes the app in front and its window title.'
           }
         >
-          {state === 'stopped' ? (
+          {state === 'stopped' && shell?.capture_error !== 'no_helper' ? (
             <Button onClick={() => void act({ a: 'restart_capture' })}>
               Restart recording
             </Button>

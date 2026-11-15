@@ -9,6 +9,8 @@ export function errorText(code: string): string {
   switch (code) {
     case 'capture_stopped':
       return 'Daylens isn’t recording right now, so that couldn’t be saved. Restart recording and try again.'
+    case 'no_helper':
+      return 'Daylens can’t record on Linux yet, so that couldn’t be saved.'
     case 'timeout':
       return 'Daylens didn’t answer in time. Try again.'
     case 'no_hour':
@@ -73,6 +75,7 @@ export function StatusNotice({ shell, rec }: { shell: ShellState | null; rec: Re
     const r = await act(a)
     if (!r.ok) toast({ text: errorText(r.error), error: true })
   }
+  if (state === 'stopped' && shell?.capture_error === 'no_helper') return <Notice kind="problem" text="Daylens can’t record on Linux yet." />
   if (state === 'stopped') {
     const since = rec?.stopped_since_ms
     const text = shell?.capture_error === 'another_writer' ? 'Another copy of Daylens is recording, so this one isn’t.' : since ? `Daylens stopped recording at ${clock(since)}.` : 'Daylens stopped recording.'
