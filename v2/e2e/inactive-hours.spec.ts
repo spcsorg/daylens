@@ -31,7 +31,7 @@ test('saved empty hours appear as one quiet overnight range', async ({}, info) =
     const overnight = list.locator('.hour').first()
     await expect(overnight).toHaveClass('hour gap')
     await expect(overnight).toContainText('12–7 AM')
-    await expect(overnight).toContainText('Nothing recorded')
+    await expect(overnight).toContainText('Daylens wasn’t running')
     await expect(overnight).not.toHaveAttribute('role', 'button')
     await expect(list.getByText('Hour not recorded', { exact: true })).toHaveCount(0)
     await expect(list.getByText('Hacker News and Stripe’s pricing docs', { exact: true })).toBeVisible()

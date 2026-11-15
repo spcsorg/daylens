@@ -12,6 +12,7 @@ import { openReadOnly, Reader as RetrievalReader } from '../../retrieval/reader.
 import { search } from '../../retrieval/search.ts'
 import { handleControl, type ControlReply } from '../../capture/control.ts'
 import { DB_FILE } from '../../capture/store.ts'
+import { AgentStore } from '../../capture/agents/store.ts'
 import { app, focus, line, resetSeq } from '../support/lines.ts'
 import { HOUR, MIN, T0, rig } from '../storage/support.ts'
 import { page } from '../retrieval/support.ts'
@@ -97,12 +98,16 @@ test('saved empty hours batch into gaps without hiding recorded work or correcti
     const saved = r.storage.writeHour({ start_wall_ms: start, tz: 'Example/Town', status: 'written', title: 'Hour not recorded', summary: 'Nothing was recorded.' }, r.storage.hourBasis(start))
     if (h === 11) r.storage.correct(saved.id, 'title', 'Planned the bakery deliveries on paper')
   }
+  new AgentStore(r.store.database).apply('codex', [{ t: 'session', session: 'bakery-plan', origin: 'interactive', parent: null, client: null, dir: '/code/bakery', branch: null, at: T0 + 4 * HOUR }])
+  r.storage.writeHour({ start_wall_ms: T0 + 4 * HOUR, tz: 'Example/Town', status: 'written', title: 'Delivery route with Codex', sources: [{ agent: 'codex', session: 'bakery-plan' }] }, r.storage.hourBasis(T0 + 4 * HOUR))
   const { reader, db } = readOnly(r)
   const rows = dayRows(reader.day(DAY).hours)
   assert.deepEqual(rows.map((row) => row.kind === 'gap'
     ? [row.kind, row.reason, (row.start_ms - T0) / HOUR, (row.end_ms - T0) / HOUR]
     : [row.kind, (row.h.start_ms - T0) / HOUR]), [
-    ['gap', 'nothing', 0, 8],
+    ['gap', 'nothing', 0, 4],
+    ['hour', 4],
+    ['gap', 'nothing', 5, 8],
     ['hour', 8],
     ['gap', 'asleep', 9, 11],
     ['hour', 11],
