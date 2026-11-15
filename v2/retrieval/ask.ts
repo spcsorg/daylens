@@ -350,11 +350,12 @@ export function supported(text: string, cited: readonly Seen[], appNames: readon
   // A day named inside a cited title ("Order list for Saturday") is the title, not a claim about that day.
   const titles = cited.flatMap((s) => s.text.split('\u0000')).filter((t) => t.length > 2)
   // So is one a cited title names, said the way the title uses it: "Saturday’s orders", "the list for Saturday", or
-  // after an article and before a word of that title: "the Saturday order list".
+  // right before a word of that title, unless a word of time comes first: "the Saturday order list", but not "on Saturday
+  // orders took".
   const titled = WEEKDAYS.filter((w) => titles.some((t) => new RegExp(`\\b${w}\\b`).test(t)))
   const asTitled = (w: string) => {
     const words = titles.filter((t) => new RegExp(`\\b${w}\\b`).test(t)).flatMap((t) => t.match(/\p{L}{3,}/gu) ?? []).filter((x) => x !== w && x !== 'for')
-    return `for ${w}|${w}['’]s${words.length ? `|(?:the|a|your|that)\\s+${w}\\s+(?:${words.map(escape).join('|')})\\p{L}*` : ''}`
+    return `for ${w}|${w}['’]s${words.length ? `|(?<!\\b(?:on|by|until|since|before|after|from|this|last|next|every)\\s+)${w}\\s+(?:${words.map(escape).join('|')})s?` : ''}`
   }
   const days = daysIn(titled.reduce((t, w) => t.replace(new RegExp(`\\b(${asTitled(w)})(?![\\p{L}])`, 'gu'), ' '), titles.reduce((t, title) => t.replaceAll(title, ' '), text.toLowerCase())), nowMs)
   const onDay = (s: Seen, [a, b]: [number, number]) => (s.to > a || s.from >= a) && s.from < b
