@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { close, launch, shows, sized, takeErrors, type Daylens } from './daylens.ts'
+import { close, launch, shows, sized, takeErrors } from './daylens.ts'
 import fixtures from './fixtures.json' with { type: 'json' }
 
 test.skip(process.platform === 'win32', 'no Windows test build, and the app spawns its helper without a shell, so the stand-in can’t start on Windows [G-3] [O-18]')
@@ -82,13 +82,7 @@ test('onboarding: a failed finish keeps the unavailable-recording step open and 
 
 // An upgrade signed differently can leave an old Daylens entry on in the list while the new one is denied.
 test('onboarding: after opening System Settings, a denied permission says how to recover an entry already on', async ({}, info) => {
-  process.env.DEMO_ACCESSIBILITY = 'denied'
-  let d: Daylens
-  try {
-    d = await launch({ world: 'empty', onboarded: false })
-  } finally {
-    delete process.env.DEMO_ACCESSIBILITY
-  }
+  const d = await launch({ world: 'empty', onboarded: false }, w => { w.env.DEMO_ACCESSIBILITY = 'denied' })
   try {
     await sized(d)
     await d.app.evaluate(({ ipcMain }) => {
