@@ -83,7 +83,7 @@ test('absent browsers get no new folders, and correct manifests are not rewritte
   assert.equal(statSync(file).mtimeMs, before)
 })
 
-test('overlapping setup calls do not remove each other’s temporary manifests', async () => {
+test('overlapping setup calls do not remove each other’s temporary manifests', { skip: process.platform === 'win32' ? 'Mac host registration uses POSIX file replacement; Windows uses pairing [F-2]' : false }, async () => {
   const { home, helper } = setup()
   const results = await Promise.all(Array.from({ length: 8 }, () => registerMacBrowserHosts(home, helper)))
   for (const failures of results) assert.deepEqual(failures, [])
