@@ -104,6 +104,7 @@ export function Onboarding({ shell, onDone }: { shell: ShellState | null; onDone
 }
 
 function NoRecording({ onDone }: { onDone: () => void }) {
+  const toast = useToast()
   return (
     <div className="onboarding">
       <div className="onboarding-col">
@@ -115,7 +116,8 @@ function NoRecording({ onDone }: { onDone: () => void }) {
             size="large"
             enter
             onClick={async () => {
-              await act({ a: 'onboarded' })
+              const r = await act({ a: 'onboarded' })
+              if (!r.ok) return toast({ text: errorText(r.error), error: true })
               onDone()
             }}
           >

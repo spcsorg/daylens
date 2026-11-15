@@ -53,3 +53,29 @@ test('onboarding: where Daylens can’t record, it says so and opens Today witho
     await close(d)
   }
 })
+
+test('onboarding: a failed finish keeps the unavailable-recording step open and shows an error', async ({}, info) => {
+  const d = await launch({ world: 'empty', onboarded: false })
+  try {
+    await shows(d.window.getByRole('main'), fixtures.onboarding.permission)
+    await d.app.evaluate(({ BrowserWindow, ipcMain }) => {
+      const wc = BrowserWindow.getAllWindows()[0]!.webContents
+      const send = wc.send.bind(wc)
+      const none = { platform: 'linux', helper: { running: false, accessibility: null, titles: null }, capture: 'failed', capture_error: 'no_helper' }
+      wc.send = (channel: string, ...args: unknown[]) => send(channel, ...(channel === 'shell' ? [{ ...(args[0] as object), ...none }] : args))
+      wc.send('shell', { login_item: false, appearance: 'system', onboarded: false, bench: false })
+      ipcMain.removeHandler('action')
+      ipcMain.handle('action', async () => ({ ok: false, error: 'save_failed' }))
+    })
+    const main = d.window.getByRole('main')
+    await shows(main, fixtures.onboarding.no_helper)
+    await main.getByRole('button', { name: 'Open Today', exact: true }).click()
+    await expect(d.window.getByText('That didn’t work. Try again.', { exact: true })).toBeVisible()
+    await shows(main, fixtures.onboarding.no_helper)
+    await d.window.screenshot({ path: info.outputPath('onboarding-save-error.png'), animations: 'disabled' })
+    expect((JSON.parse(readFileSync(path.join(d.world.shell, 'shell.json'), 'utf8')) as { onboarded: boolean }).onboarded).toBe(false)
+    expect(takeErrors(d)).toEqual([])
+  } finally {
+    await close(d)
+  }
+})
