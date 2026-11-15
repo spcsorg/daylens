@@ -59,7 +59,8 @@
   ],
   "onboarding": {
     "permission": ["Let Daylens see your windows", "Windows and their titles", "Allowed"],
-    "morning": ["Your day so far", "Tuesday, 4 March", "Hours appear here from now on.", "Write these hours with Claude"]
+    "morning": ["Your day so far", "Tuesday, 4 March", "Hours appear here from now on.", "Write these hours with Claude"],
+    "no_helper": ["Daylens can’t record on Linux yet", "Your days stay empty here for now."]
   },
   "tray": {
     "hour": "5 PM",

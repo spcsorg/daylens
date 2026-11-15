@@ -1,11 +1,11 @@
 import { app } from 'electron'
 import os from 'node:os'
 import path from 'node:path'
+import { helperPath } from './helperPath.ts'
 
 // From source this is v2/; packaged it is the compiled copy of v2/ inside app.asar, laid out the same way.
 const V2 = path.resolve(import.meta.dirname, '..', '..')
 const EXT = path.extname(import.meta.filename)
-// The capture helper ships as its own app bundle, so System Settings lists it by name and icon.
 const HELPER_APP = path.join(process.resourcesPath, '..', 'Helpers', 'Daylens.app')
 export const PACKAGED_HELPER = path.join(HELPER_APP, 'Contents', 'MacOS', 'daylens-capture-macos')
 export const MOVE_FIRST = /\/AppTranslocation\/|^\/Volumes\//.test(process.execPath) ? 'Move Daylens to Applications, open it from there, then connect.' : null
@@ -35,7 +35,7 @@ export const paths = {
   reader: path.join(V2, 'app', 'reader', `main${EXT}`),
   preload: path.join(V2, 'app', 'preload', 'preload.cjs'),
   renderer: path.join(V2, 'app', 'renderer', 'dist', 'index.html'),
-  helper: process.env.DAYLENS_HELPER ?? (app.isPackaged ? PACKAGED_HELPER : path.join(V2, 'native', 'macos', '.build', 'release', 'daylens-capture-macos')),
+  helper: process.env.DAYLENS_HELPER ?? helperPath(process.platform, app.isPackaged, V2, process.resourcesPath),
   // What onboarding's drag tile hands to System Settings › Accessibility.
   helperDrag: process.env.DAYLENS_HELPER ?? (app.isPackaged ? HELPER_APP : path.join(V2, 'native', 'macos', '.build', 'release', 'daylens-capture-macos')),
   trayIcon: app.isPackaged ? path.join(process.resourcesPath, 'trayTemplate.png') : path.join(V2, '..', 'build', 'trayTemplate.png'),

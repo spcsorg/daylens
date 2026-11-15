@@ -3,6 +3,7 @@
 //        [--agent-sessions]   reads Claude Code and Codex session logs (agent session metadata is recorded only with permission)
 //        [--browser-history]  reads browser history files (macOS), from the start of the day they are first read
 //        [--v1-app-data <dir>] a new store starts with the pause and exclusions V1 kept under this folder
+//        [--init-only]        creates and migrates the store, then exits; needs no --helper
 
 import '../app/shared/childClock.ts'
 import os from 'node:os'
@@ -46,11 +47,12 @@ const { values } = parseArgs({
     'agent-sessions': { type: 'boolean', default: false },
     'browser-history': { type: 'boolean', default: false },
     'v1-app-data': { type: 'string' },
+    'init-only': { type: 'boolean', default: false },
   },
 })
 
 const deletionStallMs = Number(values['deletion-stall-ms'])
-if (!values.helper || !(deletionStallMs > 0)) {
+if ((!values.helper && !values['init-only']) || !(deletionStallMs > 0)) {
   process.stderr.write('usage: service.ts --helper <path> [--data-dir <dir>] [--deletion-stall-ms <ms>]\n')
   process.exit(64)
 }
@@ -77,6 +79,13 @@ const storage = new Storage(store, dataDir, {
   onError: (code) => log(`storage error code=${code}`),
   orderingPoint: () => readOrderingPoint(values.helper!, values['helper-arg'] ?? [], log),
 })
+// Where there is no helper the app still needs a migrated store for its reader to open.
+if (values['init-only']) {
+  storage.stop()
+  store.close()
+  process.exit(0)
+}
+if (!values.helper) process.exit(64)
 // A first read cut short after its merge leaves its staging copy; with or without agent access it is removed here.
 removeStaging(dataDir)
 storage.onDeleted = () => stopBackfills()

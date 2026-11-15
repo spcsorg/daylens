@@ -1,13 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { Reader } from '../app/reader/queries.ts'
 import { APP_CAPTURE_FLAGS } from '../capture/appFlags.ts'
 import { DB_FILE } from '../capture/store.ts'
 import { appsByName, readV1Privacy } from '../capture/v1Privacy.ts'
+import { openReadOnly } from '../retrieval/reader.ts'
 import { claude, claudeCtx } from './agents/fixtures.ts'
 import { tempDir } from './support/tmp.ts'
 
@@ -193,6 +196,20 @@ test('a clean stop and restart records a clean service_down gap with no overlap'
   assert.equal(JSON.parse(g[1]!.detail!).clean_stop, true)
   assert.ok(g[1]!.start_wall_ms >= g[0]!.end_wall_ms!, 'gaps do not overlap')
   assert.ok(g.every((x) => x.end_wall_ms !== null))
+})
+
+// Why the real-helper tests require the bye: a clean exit alone does not show the helper stopped by itself.
+test('a helper that ignores shutdown is killed after the grace: the service still exits 0, with no bye logged', async () => {
+  const { work, dataDir } = setup()
+  const svc = startService(dataDir, work, { FAKE_MODE: 'ignore_shutdown' })
+  try {
+    await waitFor(() => svc.log().includes('helper hello'))
+    await stopService(svc.proc)
+    assert.equal(svc.proc.exitCode, 0)
+    assert.doesNotMatch(svc.log(), /helper bye/)
+  } finally {
+    await stopService(svc.proc)
+  }
 })
 
 test('the stop op stops the service as cleanly as a signal: how the app stops capture in its utility process', async () => {
@@ -452,3 +469,22 @@ test('started the way the app starts it, the service records agent sessions from
   }
 })
 
+test('with no helper, --init-only creates and migrates an empty store the reader opens, then exits without capturing', async () => {
+  const { dataDir } = setup()
+  let log = ''
+  const proc = spawn(process.execPath, [SERVICE, '--init-only', '--data-dir', dataDir], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20_000 })
+  proc.stderr!.setEncoding('utf8').on('data', (c: string) => (log += c))
+  const [code, signal] = (await once(proc, 'exit')) as [number | null, string | null]
+  assert.deepEqual([code, signal], [0, null], log)
+  assert.doesNotMatch(log, /started|helper/)
+  const db = openReadOnly(path.join(dataDir, DB_FILE))
+  try {
+    db.pragma('query_only = ON')
+    const reader = new Reader(db)
+    const day = reader.read(() => reader.day(new Date().toLocaleDateString('en-CA')))
+    assert.ok(Array.isArray(day.hours))
+    assert.equal(reader.read(() => reader.recording()).pause, null)
+  } finally {
+    db.close()
+  }
+})

@@ -158,6 +158,7 @@ Onboarding is where Daylens wins or loses a user. It must feel effortless and po
 - Assistants on the machine are found automatically and connected with one button, plus setup for any other MCP app. When Claude Code or Codex is found, the same step has one toggle to read their session logs, on by default, with one line saying only times, project folders and branches are read, never what was said.
 - AI: in the beta, the choice is the person's own API key or no AI. Daylens AI joins later as the default, with the other choices one click away.
 - Onboarding ends on the user's own morning, already filled in and named, then opens Today.
+- Where Daylens can't record yet (Linux), onboarding is one step that says so and opens Today, with no permission to ask for.
 - No pricing, no "what happens next" lists, no questions Daylens can answer by observing.
 
 ## Plans and payment screens

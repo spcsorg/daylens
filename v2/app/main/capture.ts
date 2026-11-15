@@ -8,7 +8,8 @@ import { APP_CAPTURE_FLAGS } from '../../capture/appFlags.ts'
 
 export interface CaptureOptions {
   service: string
-  helper: string
+  // Null where Daylens has no capture helper yet: capture fails at once rather than starting another platform's.
+  helper: string | null
   dataDir: string
   // Where V1 kept its settings; a new store starts with V1's pause and exclusions from there.
   v1AppData?: string
@@ -30,6 +31,7 @@ export class Capture extends EventEmitter {
   error: string | null = null
   helper: HelperStatus = { running: false, accessibility: null, titles: null }
   private child: UtilityProcess | null = null
+  private init: UtilityProcess | null = null
   private readonly o: CaptureOptions
   private nextId = 1
   private readonly pending = new Map<string, { resolve: (r: Reply) => void; timer: ReturnType<typeof setTimeout> }>()
@@ -45,6 +47,24 @@ export class Capture extends EventEmitter {
 
   start(): void {
     this.stopping = false
+    if (this.o.helper === null) {
+      this.state = 'failed'
+      this.error = 'no_helper'
+      this.emit('state')
+      // Still creates and migrates the store, which the reader waits for; run once per start, never retried.
+      if (!this.init) {
+        const init = utilityProcess.fork(this.o.service, ['--init-only', '--data-dir', this.o.dataDir, ...(this.o.v1AppData ? ['--v1-app-data', this.o.v1AppData] : [])], {
+          serviceName: 'Daylens Capture',
+          stdio: ['ignore', 'ignore', 'inherit'],
+        })
+        this.init = init
+        init.on('exit', (code) => {
+          this.init = null
+          if (code !== 0) this.o.log(`capture init exited code=${code}`)
+        })
+      }
+      return
+    }
     this.state = 'starting'
     this.emit('state')
     this.startedAt = Date.now()
@@ -123,7 +143,7 @@ export class Capture extends EventEmitter {
   /** Sends one control op and waits for its reply. */
   request(op: Record<string, unknown>, onDeletion?: (state: string) => void): Promise<Reply> {
     const child = this.child
-    if (!child) return Promise.resolve({ op: 'reply', id: '', ok: false, error: 'capture_stopped' })
+    if (!child) return Promise.resolve({ op: 'reply', id: '', ok: false, error: this.o.helper === null ? 'no_helper' : 'capture_stopped' })
     const id = String(this.nextId++)
     if (onDeletion) this.deletions.set(id, onDeletion)
     return new Promise((resolve) => {
@@ -142,10 +162,10 @@ export class Capture extends EventEmitter {
     } else this.start()
   }
 
-  /** The stop op stops the service cleanly; it ends its gaps and closes the database. */
+  /** The stop op stops the service cleanly; it ends its gaps and closes the database. A store initializer ignores it and exits once the store is migrated. */
   stop(): Promise<void> {
     this.stopping = true
-    const child = this.child
+    const child = this.child ?? this.init
     if (!child) return Promise.resolve()
     return new Promise((resolve) => {
       const kill = setTimeout(() => {

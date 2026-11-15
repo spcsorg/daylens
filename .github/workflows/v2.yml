@@ -45,14 +45,18 @@ jobs:
       - run: npm run build:sqlite
       - run: npm run typecheck
       - run: npm run app:typecheck
-      - run: npm test
-      - name: Swift helper tests
-        if: runner.os == 'macOS'
-        run: swift test --package-path native/macos
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: runner.os == 'Windows'
         with:
           dotnet-version: 10.0.x
+      # Published before npm test, so tests/realHelperWindows.test.ts runs the real helper where the app starts it.
+      - name: Publish the Windows helper
+        if: runner.os == 'Windows'
+        run: dotnet publish native/windows/Daylens.Capture.Windows -c Release -r win-x64 -o native/windows/publish
+      - run: npm test
+      - name: Swift helper tests
+        if: runner.os == 'macOS'
+        run: swift test --package-path native/macos
       - name: Windows helper tests
         if: runner.os == 'Windows'
         run: dotnet test native/windows/Daylens.Capture.sln

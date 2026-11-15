@@ -38,6 +38,14 @@ npm start
 
 `build:sqlite` rebuilds SQLite with the option Daylens needs to erase deleted data for good; run it after every `npm ci`. The `swift` line builds the Mac capture helper. A run from source keeps its data apart from the installed app, and its helper needs its own Accessibility permission.
 
+On Windows, install the .NET 10 SDK and publish the Windows capture helper in place of the `swift` line (use `win-arm64` on an Arm PC):
+
+```bash
+dotnet publish v2/native/windows/Daylens.Capture.Windows -c Release -r win-x64 -o v2/native/windows/publish
+```
+
+The app starts `v2/native/windows/publish/daylens-capture-windows.exe`. Windows from source is a development run: there is no Windows installer yet. On Linux Daylens has no capture helper yet: the app opens on an empty record, onboarding, Today and Settings say it can't record, and nothing is recorded.
+
 Before you open a pull request, run these in `v2/`:
 
 ```bash
