@@ -119,6 +119,9 @@ test('a question that names its own time keeps it: a rewrite that moves the days
   assert.equal(afternoon?.question ?? 'nothing read', 'nothing read', 'yesterday afternoon has nothing, and the morning is not read for it')
   const kept = await asked('What did I do on the budget yesterday?', 'What did I do on the q4 budget yesterday?')
   assert.equal(kept?.question, 'What did I do on the q4 budget yesterday?', 'a rewrite naming the same day is used')
+  const f = model(() => ({ question: 'What did I do yesterday morning?' }))
+  await s.run('And in the morning?', f.m, [s.said('What did I do yesterday?', REVIEWED)])
+  assert.deepEqual(f.answers()[0]?.days_asked, ['2026-10-16'], 'the day it leaves unsaid comes from the conversation')
   s.close()
 })
 
@@ -278,6 +281,10 @@ test('a provider failure keeps fresh matching search results with the error', as
       assert.ok(e instanceof AskError)
       assert.match(e.message, /credit balance/)
       assert.ok(e.results?.pages.some((p) => p.url === 'https://docs.example.com/d/budget'))
+      return true
+    })
+    await assert.rejects(s.run('What did I do yesterday?', failing, []), (e: unknown) => {
+      assert.ok(e instanceof AskError && e.results && e.results.hours.length > 0, 'a time with nothing to search for keeps its hours')
       return true
     })
   } finally { s.close() }

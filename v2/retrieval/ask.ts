@@ -547,9 +547,13 @@ export async function ask(question: string, deps: AskDeps, limits: AskLimits, co
     bill(reply)
     throw new AskError('invalid_output', `${model.name} returned a follow-up in the wrong shape`)
   }
-  // The days and part of the day the question names are its own: a rewrite that moves them is not used.
-  const times = (q: string) => JSON.stringify([daysIn(q, now), partOfDay(q)])
-  const asked = (daysIn(question, now).length > 0 || partOfDay(question) !== null) && times(rewritten) !== times(question) ? question : rewritten.trim()
+  // The days and part of the day the question names are its own: a rewrite that moves them is not used. What it leaves
+  // unsaid ("And in the morning?" after a question about yesterday) the rewrite may fill in.
+  const same = <T>(a: T, b: T) => JSON.stringify(a) === JSON.stringify(b)
+  const ownDays = daysIn(question, now)
+  const ownPart = partOfDay(question)
+  const moved = (ownDays.length > 0 && !same(daysIn(rewritten, now), ownDays)) || (ownPart !== null && !same(partOfDay(rewritten), ownPart))
+  const asked = moved ? question : rewritten.trim()
   // The rewrite is billed with the answer, as one question; if no answer is asked for, on its own.
   let carried: Omit<AskReply, 'output'> | null = reply
   const log: AskLog = {
@@ -586,9 +590,10 @@ async function answer(question: string, deps: AskDeps, limits: AskLimits): Promi
   const find = (): SearchResults =>
     words ? search(deps.reader, words, { perGroup: limits.perGroup, match: 'any', ...(days.length > 0 ? { ranges: days } : {}) }) : { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
   let results = find()
-  // With no AI, a time whose words match nothing ("what did I do this morning?") shows its hours, written or not.
-  const nothing = results.pages.length + results.files.length + results.windows.length + results.hours.length === 0
-  if (!deps.model) return { kind: 'search_only', results: days.length > 0 && nothing ? { ...results, hours: days.flatMap(([from, to]) => todaysHours(deps.reader, now, from, to)) } : results }
+  // With no AI, or when it fails, a time whose words match nothing ("what did I do this morning?") shows its hours, written or not.
+  const withHours = (r: SearchResults): SearchResults =>
+    days.length > 0 && r.pages.length + r.files.length + r.windows.length + r.hours.length === 0 ? { ...r, hours: days.flatMap(([from, to]) => todaysHours(deps.reader, now, from, to)) } : r
+  if (!deps.model) return { kind: 'search_only', results: withHours(results) }
 
   // Hours: those of the days asked about, else those the search results were seen in. Hours where a result was seen
   // come first, then the busiest; the ones sent are put back in time order.
@@ -799,12 +804,12 @@ async function answer(question: string, deps: AskDeps, limits: AskLimits): Promi
     reply = await deps.model.run({ system: SYSTEM_PROMPT, prompt: JSON.stringify(record), schema: ANSWER_SCHEMA }, onText)
   } catch (err) {
     if (err instanceof ModelError && err.billed) billed(err.billed)
-    throw new AskError('ai_failed', `${deps.model.name} did not answer: ${(err as Error).message}`, find())
+    throw new AskError('ai_failed', `${deps.model.name} did not answer: ${(err as Error).message}`, withHours(find()))
   }
   billed(reply)
 
   const out = reply.output as { answerable?: unknown; statements?: unknown; missing?: unknown } | null
-  if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`, find())
+  if (!out || typeof out.answerable !== 'boolean' || !Array.isArray(out.statements)) throw new AskError('invalid_output', `${deps.model.name} returned an answer in the wrong shape`, withHours(find()))
 
   // A deletion begun since the record was read takes out of the answer everything it covers, though the AI saw it.
   const later = deps.reader.deletionsSince(mark)
