@@ -266,6 +266,18 @@ test('an excluded site leaves only an excluded gap; an excluded browser leaves n
   assert.ok(!sink.rows.some((r) => r.url === 'https://example.com/dia'))
 })
 
+test('Dia, which doesn’t report its front tab, keeps its time in front without pages', () => {
+  const { sink, pages, norm, pageRows } = setup()
+  const hd = new Host(pages, dia)
+  const h = new Host(pages, chrome)
+  norm.handle(focus(dia, null, 1000, 'app_changed'))
+  hd.page('https://example.com/dia', 'Dia page', 1010)
+  norm.handle(focus(chrome, null, 2000, 'app_changed'))
+  h.page('https://example.com/', 'Chrome page', 2010)
+  assert.deepEqual(pageRows().map((r) => [r.t, r.state, r.url]), [[2010, 'normal', 'https://example.com/']])
+  assert.ok(sink.rows.some((r) => r.kind !== 'page' && r.app_id === 'company.thebrowser.dia' && r.event_wall_ms === 1000))
+})
+
 test('a title change in the same tab starts a new row; the same page repeated extends it', () => {
   const { pages, norm, pageRows } = setup()
   const h = new Host(pages, chrome)

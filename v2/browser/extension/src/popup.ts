@@ -32,6 +32,7 @@ function statusLine(s: PopupState): [string, 'ok' | 'warn' | 'none'] {
   if (s.pause_unreadable) return ['Couldn’t read this browser’s pause, so it stays paused. Resume to record it again.', 'warn']
   if (s.paused) return [s.paused_until_wall_ms === null ? 'Paused in this browser' : `Paused in this browser until ${at(s.paused_until_wall_ms)}`, 'warn']
   if (s.capture === 'paused') return [s.until_wall_ms === null ? 'Daylens is paused' : `Daylens is paused until ${at(s.until_wall_ms)}`, 'warn']
+  if (!s.front_tab) return ['Connected. Dia doesn’t report its front tab yet, so Daylens records your time in Dia without its pages.', 'warn']
   return ['Connected', 'ok']
 }
 
