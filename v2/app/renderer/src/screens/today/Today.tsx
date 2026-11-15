@@ -7,7 +7,7 @@ import { CalendarPicker } from '../../ui/CalendarPicker.tsx'
 import { Button, IconButton, Segmented } from '../../ui/controls.tsx'
 import { Popover, useToast } from '../../ui/overlays.tsx'
 import { AppIcon, Hour, SourceRow, WeekBlock } from '../../ui/records.tsx'
-import { EmptyState, errorText, StatusNotice } from '../../ui/status.tsx'
+import { EmptyState, errorText, recordingState, StatusNotice } from '../../ui/status.tsx'
 import { dayRows, historyLines, kindOf } from './rows.ts'
 import './today.css'
 
@@ -34,8 +34,8 @@ const GAP_TEXT: Record<GapReason, string> = {
   nothing: 'Nothing recorded',
 }
 
-function factsSummary(h: HourRow, rec: RecordingView | null): string {
-  if (h.current) return h.recorded_until_ms ? `Recorded until ${clock(h.recorded_until_ms)}.` : rec?.pause ? 'Paused.' : 'Recording now.'
+function factsSummary(h: HourRow, rec: RecordingView | null, stopped: boolean): string {
+  if (h.current) return h.recorded_until_ms ? `Recorded until ${clock(h.recorded_until_ms)}.` : stopped ? 'Not recording.' : rec?.pause ? 'Paused.' : 'Recording now.'
   return h.facts.titles.slice(0, 2).join(', ')
 }
 
@@ -89,14 +89,14 @@ export function Today({ nav, setNav, shell, rec, onMark }: { nav: TodayNav; setN
       <div className="today-notice">
         <StatusNotice shell={shell} rec={rec} />
       </div>
-      {scope === 'day' && <DayList key={nav.date} nav={nav} setNav={setNav} rec={rec} onMark={onMark} />}
+      {scope === 'day' && <DayList key={nav.date} nav={nav} setNav={setNav} rec={rec} stopped={recordingState(shell, rec) === 'stopped'} onMark={onMark} />}
       {scope === 'week' && <WeekGrid start={ws} setNav={setNav} onMark={onMark} />}
       {scope === 'month' && <MonthGrid month={monthOf(date)} setNav={setNav} onMark={onMark} />}
     </>
   )
 }
 
-function DayList({ nav, setNav, rec, onMark }: { nav: TodayNav; setNav: (n: TodayNav) => void; rec: RecordingView | null; onMark: (name: string) => void }) {
+function DayList({ nav, setNav, rec, stopped, onMark }: { nav: TodayNav; setNav: (n: TodayNav) => void; rec: RecordingView | null; stopped: boolean; onMark: (name: string) => void }) {
   const { data } = useQuery({ q: 'day', date: nav.date }, { live: true })
   const scroller = useRef<HTMLDivElement>(null)
   const scrolledFor = useRef<string | null>(null)
@@ -123,6 +123,7 @@ function DayList({ nav, setNav, rec, onMark }: { nav: TodayNav; setNav: (n: Toda
               h={r.h}
               day={day}
               rec={rec}
+              stopped={stopped}
               open={nav.openHour === r.h.start_ms}
               onToggle={() => setNav({ ...nav, openHour: nav.openHour === r.h.start_ms ? null : r.h.start_ms })}
               onMark={onMark}
@@ -150,7 +151,7 @@ function LeftOff({ today }: { today: string }) {
   )
 }
 
-function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: DayView; rec: RecordingView | null; open: boolean; onToggle: () => void; onMark: (name: string) => void }) {
+function HourItem({ h, day, rec, stopped, open, onToggle, onMark }: { h: HourRow; day: DayView; rec: RecordingView | null; stopped: boolean; open: boolean; onToggle: () => void; onMark: (name: string) => void }) {
   const kind = kindOf(h)
   const history = kind === 'filled' ? historyLines(h) : null
   const note = [history?.where, h.edited ? 'Edited' : null].filter(Boolean).join(' · ') || null
@@ -163,7 +164,7 @@ function HourItem({ h, day, rec, open, onToggle, onMark }: { h: HourRow; day: Da
         kind={kind}
         current={h.current}
         title={title}
-        summary={h.summary ?? (history ? history.summary : factsSummary(h, rec))}
+        summary={h.summary ?? (history ? history.summary : factsSummary(h, rec, stopped))}
         apps={h.facts.apps}
         note={note}
         open={open}

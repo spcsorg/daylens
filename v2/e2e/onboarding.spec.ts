@@ -44,6 +44,8 @@ test('onboarding: where Daylens can’t record, it says so and opens Today witho
     for (const text of ['Let Daylens see your windows', 'is noting', 'Starting', 'Open System Settings']) await expect(main).not.toContainText(text)
     await main.getByRole('button', { name: 'Open Today', exact: true }).click()
     await expect(main.getByRole('heading', { level: 1 })).toHaveText(fixtures.today[0]!.title)
+    await expect(main.getByText('Not recording.', { exact: true })).toBeVisible()
+    await expect(main.getByText('Recording now.', { exact: true })).toHaveCount(0)
     await shows(main, ['Daylens can’t record on Linux yet.'])
     expect((JSON.parse(readFileSync(path.join(d.world.shell, 'shell.json'), 'utf8')) as { onboarded: boolean }).onboarded).toBe(true)
     expect(takeErrors(d)).toEqual([])
