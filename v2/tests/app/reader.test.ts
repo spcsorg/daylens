@@ -82,6 +82,38 @@ test('an hour with nothing recorded says why: the computer was asleep', async ()
   r.close()
 })
 
+test('saved empty hours batch into gaps without hiding recorded work or corrections', async () => {
+  resetSeq()
+  const r = rig()
+  work(r, T0 + 8 * HOUR, [[notes, 'Order list', 50]])
+  r.feed(line('power', { state: 'sleep' }, T0 + 9 * HOUR))
+  r.feed(line('power', { state: 'resume_user' }, T0 + 12 * HOUR))
+  work(r, T0 + 12 * HOUR, [[notes, 'Order list', 30]])
+  r.clock.t = T0 + 13 * HOUR + MIN
+  r.storage.start()
+  await r.storage.derivationSettled()
+  for (const h of [0, 1, 2, 8, 9, 10, 11]) {
+    const start = T0 + h * HOUR
+    const saved = r.storage.writeHour({ start_wall_ms: start, tz: 'Example/Town', status: 'written', title: 'Hour not recorded', summary: 'Nothing was recorded.' }, r.storage.hourBasis(start))
+    if (h === 11) r.storage.correct(saved.id, 'title', 'Planned the bakery deliveries on paper')
+  }
+  const { reader, db } = readOnly(r)
+  const rows = dayRows(reader.day(DAY).hours)
+  assert.deepEqual(rows.map((row) => row.kind === 'gap'
+    ? [row.kind, row.reason, (row.start_ms - T0) / HOUR, (row.end_ms - T0) / HOUR]
+    : [row.kind, (row.h.start_ms - T0) / HOUR]), [
+    ['gap', 'nothing', 0, 8],
+    ['hour', 8],
+    ['gap', 'asleep', 9, 11],
+    ['hour', 11],
+    ['hour', 12],
+    ['hour', 13],
+  ])
+  assert.equal(reader.day(DAY).hours.find((h) => h.start_ms === T0 + 11 * HOUR)!.title, 'Planned the bakery deliveries on paper')
+  db.close()
+  r.close()
+})
+
 test('a correction to an hour AI has not written shows on Today, marked Edited, and in the week, until it is undone', async () => {
   resetSeq()
   const r = rig()
