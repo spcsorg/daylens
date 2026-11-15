@@ -888,6 +888,8 @@ test('a statement may name several things from what it cites, each file with an 
         { text: 'On Saturday you wrote the Order list for Saturday in Notes.', sources: [h3, order] },
         { text: 'You wrote up Saturday’s orders.', sources: [order] },
         { text: 'You wrote up Saturday’s orders on Saturday.', sources: [order] },
+        { text: 'You wrote the Saturday order list.', sources: [order] },
+        { text: 'You wrote the order list on Saturday morning.', sources: [order] },
       ],
     }
   })
@@ -898,6 +900,7 @@ test('a statement may name several things from what it cites, each file with an 
     'From 1 to 2 AM you worked on q4-budget.xlsx in Editor and read the budget review in Chrome.',
     'From 3 to 4 AM you wrote the Order list for Saturday in Notes.',
     'You wrote up Saturday’s orders.',
+    'You wrote the Saturday order list.',
   ])
   const record = JSON.parse(sent[0]!.prompt) as { now: string; hours: { start: string; end: string }[] }
   for (const t of [record.now, ...record.hours.flatMap((h) => [h.start, h.end])]) assert.match(t, /^\d{4}-\d\d-\d\d \d{1,2}(:\d\d)? [AP]M$/)
