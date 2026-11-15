@@ -73,7 +73,7 @@ internal static unsafe partial class Native
     [LibraryImport("kernel32.dll")] public static partial int GetApplicationUserModelId(nint process, ref uint length, char* buf);
     [LibraryImport("kernel32.dll")] public static partial int GetPackageFullName(nint process, ref uint length, char* buf);
     [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16)] public static partial int GetPackagePathByFullName(string fullName, ref uint length, char* buf);
-    [LibraryImport("kernel32.dll")] public static partial void QueryInterruptTimePrecise(out ulong time);
+    [LibraryImport("api-ms-win-core-realtime-l1-1-1.dll")] public static partial void QueryInterruptTimePrecise(out ulong time);
     [LibraryImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static partial bool QueryUnbiasedInterruptTime(out ulong time);
     [LibraryImport("kernel32.dll")] public static partial void GetSystemTimePreciseAsFileTime(out long fileTime);
     [LibraryImport("kernel32.dll")] public static partial uint GetTickCount();
