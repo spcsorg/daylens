@@ -53,7 +53,7 @@ test('the Windows package records with its included native helper, reads the sto
     await page.screenshot({ path: info.outputPath('windows-native-capture.png'), animations: 'disabled' })
     await app.close()
     app = undefined
-    expect(db.prepare("SELECT end_reason FROM capture_runs WHERE helper = 'daylens-capture-windows'").get()).toEqual({ end_reason: 'shutdown' })
+    expect(db.prepare("SELECT end_reason FROM capture_runs WHERE helper = 'daylens-capture-windows'").get()).toEqual({ end_reason: 'service_stopped' })
     expect(db.prepare("SELECT count(*) AS n FROM capture_runs WHERE helper = 'demo'").get()).toEqual({ n: 0 })
     expect(log).not.toMatch(/line rejected|helper spawn failed/)
   } finally {
