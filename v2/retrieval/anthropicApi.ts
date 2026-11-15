@@ -16,7 +16,7 @@ export function anthropicApi(model: string, opts: ApiOptions): AskModel {
     name: 'Claude',
     provider: 'anthropic',
     async run(req, onText) {
-      const r = await call({ system: req.system, message: req.prompt, schema: req.schema, onText })
+      const r = await call({ system: req.system, message: req.prompt, schema: req.schema, onText, beforeSend: req.beforeSend })
       // A refused, cut-off or malformed answer was still billed.
       const billed = r.usage && {
         model: r.model ?? model,

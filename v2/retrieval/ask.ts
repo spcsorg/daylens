@@ -25,6 +25,8 @@ export interface AskRequest {
   // The question and the record, as JSON.
   prompt: string
   schema: Record<string, unknown>
+  // A model calls it before every attempt to send the request, retries included, and sends nothing if it throws.
+  beforeSend?: () => void
 }
 
 export interface AskReply {
@@ -523,7 +525,7 @@ export async function ask(question: string, deps: AskDeps, limits: AskLimits, co
       throw new Error('Your record changed. Ask again.')
     }
   }
-  if (original) deps = { ...deps, model: { ...original, run: (request, onText) => { unchanged(); return original.run(request, onText) } } }
+  if (original) deps = { ...deps, model: { ...original, run: (request, onText) => original.run({ ...request, beforeSend: unchanged }, onText) } }
   const earlier = deps.model ? current(deps.reader, stamp, bounded(conversation)) : []
   if (!deps.model || earlier.length === 0) return { ...(await answer(question, deps, limits)), stamp }
   const model = deps.model

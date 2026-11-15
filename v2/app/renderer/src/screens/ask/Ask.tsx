@@ -47,7 +47,7 @@ function again(t: Turn): void {
 async function send(question: string, earlier: Earlier[] = earlierOf(turns), asked_at = Date.now()): Promise<void> {
   earlier = bounded(earlier)
   const id = nextId++
-  turns = [...turns, { id, question, asked_at, earlier, streamed: [], result: null, error: null, stale: false }]
+  turns = [...turns, { id, question, asked_at, earlier, streamed: [], result: null, error: null, stale: false, outdated: null }]
   for (const s of subs) s()
   const off = bridge.onReader((e) => {
     if (e.e === 'ask' && e.ask_id === id) update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }))

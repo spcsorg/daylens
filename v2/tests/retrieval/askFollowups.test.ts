@@ -7,7 +7,9 @@ import { bounded, EARLIER_LIMIT, type Earlier } from '../../app/shared/conversat
 import { DB_FILE } from '../../capture/store.ts'
 import { AssistantStore } from '../../retrieval/assistantStore.ts'
 import { ask, AskError, ModelError, RESOLVE_PROMPT, RESOLVE_SCHEMA, RESOLVED_MAX_CHARS, type AskLog, type AskModel, type AskReply, type AskRequest } from '../../retrieval/ask.ts'
+import { anthropicApi } from '../../retrieval/anthropicApi.ts'
 import { Reader } from '../../retrieval/reader.ts'
+import { fakeAnthropic } from '../support/fakeAnthropic.ts'
 import { HOUR, rig, T0 } from '../storage/support.ts'
 import { day } from './support.ts'
 
@@ -27,6 +29,7 @@ function model(rewrite: (rec: Rec) => unknown, answer: (rec: Rec & { sources: { 
     name: 'Fake',
     provider: 'fake',
     run: async (req): Promise<AskReply> => {
+      req.beforeSend?.()
       seen.push(req)
       const rec = JSON.parse(req.prompt)
       return { output: isRewrite(req) ? rewrite(rec) : answer(rec), ...BILLED }
@@ -235,6 +238,28 @@ test('a correction or deletion during resolution prevents a second request with 
   }
 })
 
+test('a correction or deletion while the provider fails stops its retry: the record is checked before every attempt to send', async () => {
+  for (const kind of ['correction', 'deletion'] as const) {
+    const s = setup()
+    let deletion: Promise<unknown> | undefined
+    const api = await fakeAnthropic(() => {
+      if (kind === 'correction') s.r.storage.correct(s.r.storage.hourAt(T0)!.id, 'title', 'Planned bakery deliveries')
+      else deletion = s.r.storage.deleteRange(T0 + 5 * HOUR, T0 + 6 * HOUR).done
+      return { kind: 'error', status: 500, type: 'api_error', message: 'overloaded' }
+    })
+    try {
+      const real = anthropicApi('claude-haiku-5-5', { apiKey: 'sk-test', baseURL: api.url, timeoutMs: 5000 })
+      // A follow-up's rewrite, and a question with no conversation that goes straight to its answer.
+      const earlier = kind === 'correction' ? [s.said(BUDGET, REVIEWED)] : []
+      await assert.rejects(s.run(kind === 'correction' ? 'How long did that take?' : BUDGET, real, earlier), /record changed/i)
+      assert.equal(api.seen.length, 1, `${kind}: nothing is sent again`)
+    } finally {
+      await deletion
+      await api.close()
+      s.close()
+    }
+  }
+})
 test('the evidence read log keeps the actual user question rather than the derived rewrite', async () => {
   const s = setup()
   try {

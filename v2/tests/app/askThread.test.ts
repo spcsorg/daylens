@@ -10,7 +10,7 @@ import { EARLIER_LIMIT } from '../../app/shared/conversation.ts'
 const none = { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
 const stamp = { changes: 7, deletions: 2 }
 const answer = (text: string): AskResult => ({ kind: 'answer', statements: [{ text, cites: [] }], visual: null, dropped: 0, withdrawn: 0, results: none, stamp })
-const turn = (id: number, question: string, over: Partial<Turn> = {}): Turn => ({ id, question, asked_at: 1000 * id, earlier: [], streamed: [], result: null, error: null, stale: false, ...over })
+const turn = (id: number, question: string, over: Partial<Turn> = {}): Turn => ({ id, question, asked_at: 1000 * id, earlier: [], streamed: [], result: null, error: null, stale: false, outdated: null, ...over })
 
 test('a question carries the answered and searched exchanges before it, never a pending, failed, unanswered or outdated one', () => {
   const thread = [
@@ -35,13 +35,14 @@ test('each turn keeps at most the latest exchanges, each cut short, however long
   assert.ok(kept.every((e) => e.answer!.length <= EARLIER_LIMIT.chars))
 })
 
-test('a correction drops every answer, shown or carried, and keeps the questions a retry was asked after', () => {
+test('a correction drops every answer, shown or carried, and keeps the questions for a retry and for the next question', () => {
   const carried = { question: 'what did I do on the pricing memo?', answer: 'You drafted the pricing memo.', asked_at: 1000, stamp }
   const thread = [turn(1, carried.question, { result: answer(carried.answer) }), turn(2, 'How long did that take?', { earlier: [carried], result: answer('About an hour.') })]
   const after = corrected(thread)
   assert.ok(after.every((t) => t.stale && t.result === null))
   assert.deepEqual(after[1]!.earlier, [{ ...carried, answer: null }])
-  assert.deepEqual(earlierOf(after), [], 'a new question carries nothing the correction outdated')
+  assert.deepEqual(earlierOf(after), [{ ...carried, answer: null }, { question: 'How long did that take?', answer: null, asked_at: 2000, stamp }], 'a new question still knows what was asked, and when')
+  assert.deepEqual(earlierOf(corrected(after)), earlierOf(after), 'a second correction keeps them too')
 })
 
 test('the reader answers again when the conversation before a question differs, and not when only what is never sent does', () => {

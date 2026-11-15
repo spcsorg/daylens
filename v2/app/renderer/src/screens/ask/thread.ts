@@ -12,31 +12,42 @@ export interface Turn {
   result: AskResult | null
   error: string | null
   stale: boolean
+  // Since a correction: the exchange as it was answered, carried on without its answer.
+  outdated: Earlier | null
 }
 
-/** The latest exchanges a new question is asked after: those the person saw answered, or searched for with no AI. */
+/** The exchange a turn adds to the conversation: one the person saw answered, or searched for with no AI. */
+function exchange(t: Turn): Earlier | null {
+  if (t.outdated) return t.outdated
+  const r = t.result
+  if (t.stale || !r || (r.kind !== 'answer' && r.kind !== 'search_only')) return null
+  let answer: string | null = null
+  if (r.kind === 'answer') {
+    answer = ''
+    for (const s of r.statements) {
+      if (answer.length >= EARLIER_LIMIT.chars) break
+      answer = (answer + (answer ? ' ' : '') + s.text.slice(0, EARLIER_LIMIT.chars)).slice(0, EARLIER_LIMIT.chars)
+    }
+  }
+  return { question: t.question.slice(0, EARLIER_LIMIT.chars), answer, asked_at: t.asked_at, stamp: r.stamp }
+}
+
+/** The latest exchanges a new question is asked after. */
 export function earlierOf(turns: readonly Turn[]): Earlier[] {
   const earlier: Earlier[] = []
   for (let i = turns.length - 1; i >= 0 && earlier.length < EARLIER_LIMIT.exchanges; i--) {
-    const t = turns[i]!
-    const r = t.result
-    if (t.stale || !r || (r.kind !== 'answer' && r.kind !== 'search_only')) continue
-    let answer: string | null = null
-    if (r.kind === 'answer') {
-      answer = ''
-      for (const s of r.statements) {
-        if (answer.length >= EARLIER_LIMIT.chars) break
-        answer = (answer + (answer ? ' ' : '') + s.text.slice(0, EARLIER_LIMIT.chars)).slice(0, EARLIER_LIMIT.chars)
-      }
-    }
-    earlier.unshift({ question: t.question.slice(0, EARLIER_LIMIT.chars), answer, asked_at: t.asked_at, stamp: r.stamp })
+    const e = exchange(turns[i]!)
+    if (e) earlier.unshift(e)
   }
   return earlier
 }
 
 /** After a correction every answer may be wrong, so none is shown or carried; the questions stay. */
 export function corrected(turns: readonly Turn[]): Turn[] {
-  return turns.map((t) => ({ ...t, earlier: t.earlier.map((e) => ({ ...e, answer: null })), result: null, streamed: [], error: null, stale: true }))
+  return turns.map((t) => {
+    const e = exchange(t)
+    return { ...t, outdated: e && { ...e, answer: null }, earlier: t.earlier.map((x) => ({ ...x, answer: null })), result: null, streamed: [], error: null, stale: true }
+  })
 }
 
 export function questionOf(t: Pick<Turn, 'question' | 'asked_at' | 'earlier'>) {
