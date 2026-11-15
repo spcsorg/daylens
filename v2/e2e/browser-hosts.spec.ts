@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { chromium, test, expect, type BrowserContext } from '@playwright/test'
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { close, launch, screen, sized, takeErrors } from './daylens.ts'
@@ -7,6 +7,33 @@ test.skip(process.platform !== 'darwin' || !process.env.DAYLENS_E2E_APP, 'instal
 
 const chrome = (home: string) => path.join(home, 'Library', 'Application Support', 'Google', 'Chrome')
 const manifest = (home: string) => path.join(chrome(home), 'NativeMessagingHosts', 'app.daylens.browser.json')
+
+test('a fresh browser extension connects through the automatically registered packaged helper', async ({}, info) => {
+  const profile = (home: string) => path.join(home, 'Library', 'Application Support', 'Google', 'Chrome for Testing')
+  const d = await launch({ world: 'empty' }, w => mkdirSync(profile(w.home), { recursive: true }))
+  let browser: BrowserContext | undefined
+  try {
+    await expect.poll(() => existsSync(path.join(profile(d.world.home), 'NativeMessagingHosts', 'app.daylens.browser.json'))).toBe(true)
+    const extension = path.resolve(import.meta.dirname, '../browser/dist/chromium-dev')
+    browser = await chromium.launchPersistentContext(profile(d.world.home), {
+      executablePath: chromium.executablePath(),
+      headless: true,
+      chromiumSandbox: true,
+      env: d.world.env as Record<string, string>,
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--use-mock-keychain', '--password-store=basic'],
+    })
+    const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker')
+    const popup = await browser.newPage()
+    await popup.setViewportSize({ width: 280, height: 210 })
+    await popup.goto(`chrome-extension://${new URL(worker.url()).host}/popup.html`)
+    await expect(popup.locator('#status')).toHaveText('Connected')
+    await popup.screenshot({ path: info.outputPath('extension-connected.png') })
+    expect(takeErrors(d)).toEqual([])
+  } finally {
+    await browser?.close()
+    await close(d)
+  }
+})
 
 test('first packaged launch registers the native helper, without a manual registration command', async () => {
   const d = await launch({}, w => mkdirSync(chrome(w.home), { recursive: true }))
