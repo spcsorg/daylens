@@ -11,24 +11,6 @@ test.skip(process.platform === 'linux', 'the tray menu never opens on Linux: the
 
 const HOUR_MS = 3_600_000
 
-// The live Tray, found on the heap: main.ts keeps it in a module variable nothing outside can reach.
-async function findTray(d: Daylens): Promise<void> {
-  const found = await d.app.evaluate(async ({ Tray }) => {
-    const inspector = process.getBuiltinModule('node:inspector') as typeof import('node:inspector')
-    const session = new inspector.Session()
-    session.connect()
-    const post = <T>(method: string, params: object) => new Promise<T>((resolve, reject) => session.post(method, params, (err, r) => (err ? reject(err) : resolve(r as T))))
-    const g = globalThis as { e2eTrayProto?: unknown; e2eTrays?: Electron.Tray[] }
-    g.e2eTrayProto = Tray.prototype
-    const proto = await post<{ result: { objectId: string } }>('Runtime.evaluate', { expression: 'globalThis.e2eTrayProto' })
-    const { objects } = await post<{ objects: { objectId: string } }>('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId })
-    await post('Runtime.callFunctionOn', { objectId: objects.objectId, functionDeclaration: 'function () { globalThis.e2eTrays = this.filter((t) => t.listenerCount("click") > 0) }' })
-    session.disconnect()
-    return g.e2eTrays!.length
-  })
-  expect(found).toBe(1)
-}
-
 interface Item {
   label: string
   enabled: boolean
@@ -37,8 +19,8 @@ interface Item {
 // The menu one click on the tray pops up.
 async function menu(d: Daylens): Promise<Item[]> {
   return d.app.evaluate(async () => {
-    const g = globalThis as { e2eTrays?: Electron.Tray[]; e2eMenu?: Electron.Menu }
-    const tray = g.e2eTrays![0]!
+    const g = globalThis as { daylensTray?: Electron.Tray; e2eMenu?: Electron.Menu }
+    const tray = g.daylensTray!
     g.e2eMenu = await new Promise<Electron.Menu>((resolve) => {
       tray.popUpContextMenu = (m?: Electron.Menu) => resolve(m!)
       tray.emit('click')
@@ -72,7 +54,6 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
   try {
     await sized(d)
     await expect(d.window.locator('[data-current="true"]')).toBeVisible()
-    await findTray(d)
 
     const recording = await menu(d)
     expect(recording[0]!.label.startsWith(`${fixtures.tray.hour} · `), recording[0]!.label).toBe(true)
@@ -84,7 +65,8 @@ test('the tray menu: the current hour, the three pauses, deleting the last 10 mi
       await expect.poll(() => pause(d)).not.toBeNull()
       const until = (await pause(d))!.until_ms
       if (p.until === '+1h') {
-        expect(until! - at).toBeGreaterThanOrEqual(HOUR_MS)
+        // The capture service stamps the pause; on Windows its clock can read a millisecond behind main's.
+        expect(until! - at).toBeGreaterThanOrEqual(HOUR_MS - 10)
         expect(until! - at).toBeLessThan(HOUR_MS + 60_000)
       } else expect(until).toBe(p.until === null ? null : Date.parse(p.until))
       const paused = await menu(d)

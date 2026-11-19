@@ -351,6 +351,8 @@ app.whenReady().then(() => {
       restartToUpdate: () => void restartToUpdate(),
       quit: () => void quit(),
     })
+    // The tray end-to-end test opens this menu; a release build never exposes it.
+    if (TEST_BUILD || !app.isPackaged) (globalThis as { daylensTray?: Tray }).daylensTray = tray
     startUpdates({
       log,
       onReady: (version) => {
