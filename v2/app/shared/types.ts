@@ -120,7 +120,8 @@ export type Action = CoreAction | SettingsAction | OnboardingAction | AiAction |
 
 export interface ShellState {
   platform: string
-  login_item: boolean
+  // null when Windows owns it: the Store package's startup task, which only Windows Settings turns on and off.
+  login_item: boolean | null
   appearance: 'light' | 'dark' | 'system'
   onboarded: boolean
   helper: { running: boolean; accessibility: string | null; titles: string | null }

@@ -33,6 +33,6 @@ The current beta scope, inherited branch order and approval boundaries are in [B
 | [Testing](testing.md) | Gold days, acceptance tests for every promise, and the cross-platform test matrix |
 | [Build plan](build-plan.md) | How work happens, the build order, how each step is reviewed, and the release checklist |
 
-Operational runbooks live in [operations](operations/). They were carried over from V1 and must be checked against the code before the V2 release.
+Operational runbooks live in [operations](operations/); [Windows Store package](operations/windows-store.md) covers building, certifying and submitting the Windows package. They were carried over from V1 and must be checked against the code before the V2 release.
 
 The running app and the code are the truth for current behavior. When a document and the code disagree, the code is checked and the document is corrected.

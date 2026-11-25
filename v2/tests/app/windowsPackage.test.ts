@@ -8,11 +8,13 @@ const V2 = path.resolve(import.meta.dirname, '..', '..')
 
 interface PackageRun {
   commands: { command: string; args: string[] }[]
-  config: { extraResources: { from: string; to: string }[] }
+  config: { extraResources: { from: string; to: string }[]; appx: Record<string, string> | null }
 }
 
+const IDENTITY = { DAYLENS_STORE_IDENTITY_NAME: 'Example.Daylens', DAYLENS_STORE_PUBLISHER: 'CN=Example', DAYLENS_STORE_PUBLISHER_DISPLAY_NAME: 'Example' }
+
 // Run the build entry point, but intercept every command and filesystem effect so no native binary is changed or run.
-function windowsPackage(testBuild: boolean): PackageRun {
+function windowsPackage(testBuild: boolean, env: NodeJS.ProcessEnv = IDENTITY): PackageRun {
   const modules = {
     'node:child_process': `export function execFileSync(command, args) { globalThis.commands.push({ command, args }) }`,
     'node:fs': `
@@ -43,13 +45,13 @@ function windowsPackage(testBuild: boolean): PackageRun {
     await import(${JSON.stringify(pathToFileURL(path.join(V2, 'app', 'package', 'build.ts')).href)})
     console.log('PACKAGE_RUN ' + JSON.stringify({ commands, config: packageConfig }))
   `
-  const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 10_000 })
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 10_000, env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('DAYLENS_STORE_'))), ...env }, stdio: 'pipe' })
   const result = output.split('\n').find(line => line.startsWith('PACKAGE_RUN '))
   assert.ok(result, output)
   return JSON.parse(result.slice('PACKAGE_RUN '.length)) as PackageRun
 }
 
-const packages = [false, true].map(windowsPackage)
+const packages = [false, true].map((testBuild) => windowsPackage(testBuild))
 
 test('Windows release and test packages run Vite through its JavaScript entry point, never a shell shim', () => {
   for (const run of packages) {
@@ -70,4 +72,17 @@ test('Windows release and test packages bundle native runtime libraries into the
       to: 'daylens-capture-windows.exe',
     }])
   }
+})
+
+test('the Windows release is the Store package, named by the identity from the environment', () => {
+  const appx = packages[0]!.config.appx!
+  assert.equal(appx.identityName, 'Example.Daylens')
+  assert.equal(appx.publisher, 'CN=Example')
+  assert.equal(appx.publisherDisplayName, 'Example')
+  assert.equal(packages[1]!.config.appx, null)
+})
+
+test('the Store package refuses to build without its identity, and names what is missing', () => {
+  assert.throws(() => windowsPackage(false, { DAYLENS_STORE_PUBLISHER: 'CN=Example' }), /needs DAYLENS_STORE_IDENTITY_NAME, DAYLENS_STORE_PUBLISHER_DISPLAY_NAME/)
+  assert.throws(() => windowsPackage(false, { ...IDENTITY, DAYLENS_STORE_PUBLISHER: 'Example' }), /whole CN=\.\.\. string/)
 })

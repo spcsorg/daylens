@@ -231,6 +231,25 @@ export function check(spec: ServerSpec, timeoutMs = 10_000): Promise<{ ok: true;
   })
 }
 
+/** Whether a Store package can write this app's config where the app reads it. Windows keeps a packaged app's writes
+ *  under %APPDATA% inside the package, so those apps take the copied setup instead. */
+export function writableFromPackage(id: string, w: Where = here()): boolean {
+  const file = path.win32.resolve(def(id).file(w)).toLowerCase()
+  const appData = path.win32.resolve(w.env.APPDATA ?? path.win32.join(w.home, 'AppData', 'Roaming')).toLowerCase()
+  return !file.startsWith(`${appData}\\`)
+}
+
+/** The server inside the Store package, through its app execution alias: a path that stays put across updates, and a
+ *  start inside the package, so the server reads the data folder the app writes there. */
+export function storeSpec(localAppData: string): ServerSpec {
+  const main = "require('path').join(process.execPath, '..', 'resources', 'app.asar', 'build', 'app', 'mcp', 'main.js')"
+  return {
+    command: path.win32.join(localAppData, 'Microsoft', 'WindowsApps', 'daylens.exe'),
+    args: ['-e', `import(require('url').pathToFileURL(${main}).href)`],
+    env: { ELECTRON_RUN_AS_NODE: '1' },
+  }
+}
+
 /** The server inside an installed Daylens: the .app on macOS, the install folder on Windows and Linux. */
 export function installedSpec(appPath: string, platform: NodeJS.Platform = process.platform): ServerSpec {
   const p = platform === 'win32' ? path.win32 : path.posix

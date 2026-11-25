@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chmodSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { check, connect, detect, disconnect, installedSpec, serverSpec, snippet, type Where } from '../../mcp/clients.ts'
+import { spawnSync } from 'node:child_process'
+import { check, connect, detect, disconnect, installedSpec, serverSpec, snippet, storeSpec, writableFromPackage, type Where } from '../../mcp/clients.ts'
 import { tmpDir } from '../storage/support.ts'
 
 const SPEC = serverSpec('/Applications/Daylens.app/Contents/MacOS/Daylens', '/Applications/Daylens.app/Contents/Resources/app.asar/build/app/mcp/main.js', true)
@@ -129,6 +130,21 @@ test('an installed Daylens is started as Node from its own binary on every platf
   assert.deepEqual(JSON.parse(snippet(SPEC)), { mcpServers: { daylens: SPEC } })
 })
 
+test('the Store package is started through its alias, and finds the server beside whichever version is installed', () => {
+  const spec = storeSpec('C:\\Users\\a\\AppData\\Local')
+  assert.equal(spec.command, 'C:\\Users\\a\\AppData\\Local\\Microsoft\\WindowsApps\\daylens.exe')
+  assert.deepEqual(spec.env, { ELECTRON_RUN_AS_NODE: '1' })
+  // The alias runs the installed version's binary; the server is found from that binary's own path.
+  const install = tmpDir()
+  const mcp = path.join(install, 'resources', 'app.asar', 'build', 'app', 'mcp')
+  mkdirSync(mcp, { recursive: true })
+  writeFileSync(path.join(mcp, 'main.js'), "process.stdout.write('server started')\n")
+  const binary = JSON.stringify(path.join(install, 'Daylens.exe'))
+  const r = spawnSync(process.execPath, ['--import', `data:text/javascript,process.execPath=${encodeURIComponent(binary)}`, ...spec.args], { encoding: 'utf8' })
+  assert.equal(r.stderr, '')
+  assert.equal(r.stdout, 'server started')
+})
+
 test('the check starts the server as a client would and lists its tools', async () => {
   const r = await check(serverSpec(process.execPath, path.resolve(import.meta.dirname, '../../mcp/main.ts'), false))
   assert.ok(r.ok && r.tools.includes('get_day'), JSON.stringify(r))
@@ -167,4 +183,11 @@ test('Codex with Daylens written another way TOML allows is reported and never r
     assert.throws(() => connect('codex', SPEC, w))
     assert.equal(read(file), form)
   }
+})
+
+test('a Store package connects only apps whose config sits outside %APPDATA%, which Windows keeps inside the package', () => {
+  const w: Where = { home: 'C:\\Users\\a', platform: 'win32', env: { APPDATA: 'C:\\Users\\a\\AppData\\Roaming' } }
+  assert.equal(writableFromPackage('claude', w), false)
+  assert.equal(writableFromPackage('vscode', w), false)
+  for (const id of ['claude-code', 'codex', 'cursor', 'windsurf', 'gemini']) assert.equal(writableFromPackage(id, w), true, id)
 })

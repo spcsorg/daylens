@@ -10,6 +10,10 @@ const HELPER_APP = path.join(process.resourcesPath, '..', 'Helpers', 'Daylens.ap
 export const PACKAGED_HELPER = path.join(HELPER_APP, 'Contents', 'MacOS', 'daylens-capture-macos')
 export const MOVE_FIRST = /\/AppTranslocation\/|^\/Volumes\//.test(process.execPath) ? 'Move Daylens to Applications, open it from there, then connect.' : null
 
+// Installed from the Microsoft Store: Windows, not Daylens, owns launch at login, and the install folder moves with
+// every update.
+export const STORE = process.windowsStore
+
 // Packaged builds keep their data apart from runs from source, so the two never contend for one database.
 const DATA_NAME = app.isPackaged ? 'Daylens V2' : 'Daylens V2 Dev'
 

@@ -1,4 +1,4 @@
-// Builds macOS apps or unsigned Windows x64 ZIPs into v2/build/release. Build on the target OS.
+// Builds macOS apps or the Windows x64 Store package (MSIX) into v2/build/release. Build on the target OS.
 // Usage: node app/package/build.ts [--dir] [--test]
 //   --dir stops at the app folder, without making archives.
 //   --test builds this platform’s test app into v2/build/test, which honours the
@@ -15,6 +15,13 @@
 //   APPLE_API_KEY      path to the App Store Connect API key (AuthKey_<id>.p8)
 //   APPLE_API_KEY_ID   the key's ID
 //   APPLE_API_ISSUER   the key's issuer ID
+//
+// The Windows package takes its identity from Partner Center (docs/operations/windows-store.md), and every variable is required:
+//   DAYLENS_STORE_IDENTITY_NAME            Package/Identity/Name
+//   DAYLENS_STORE_PUBLISHER                Package/Identity/Publisher, the CN=... string
+//   DAYLENS_STORE_PUBLISHER_DISPLAY_NAME   Package/Properties/PublisherDisplayName
+// The Store signs what is uploaded, so the package is left unsigned. CSC_LINK and CSC_KEY_PASSWORD sign it with a
+// certificate whose subject is DAYLENS_STORE_PUBLISHER, so it installs outside the Store (CI's test identity).
 import { execFileSync } from 'node:child_process'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -27,7 +34,7 @@ const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false
 const TEST = values.test!
 const WINDOWS = process.platform === 'win32'
 if (!WINDOWS && process.platform !== 'darwin') throw new Error('packaging is supported on macOS and Windows only')
-if (WINDOWS && process.arch !== 'x64') throw new Error('the Windows test package currently supports x64 only')
+if (WINDOWS && process.arch !== 'x64') throw new Error('the Windows package currently supports x64 only')
 const ARCH = WINDOWS ? Arch.x64 : TEST ? (process.arch === 'arm64' ? Arch.arm64 : Arch.x64) : Arch.universal
 const V2 = path.resolve(import.meta.dirname, '..', '..')
 const ROOT = path.join(V2, '..')
@@ -45,6 +52,21 @@ function signing(): { teamId: string } | null {
   if (!/^[A-Z0-9]{10}$/.test(teamId)) throw new Error('APPLE_TEAM_ID is not a 10-character Team ID')
   if (!existsSync(process.env.APPLE_API_KEY!)) throw new Error('APPLE_API_KEY is not a file')
   return { teamId }
+}
+
+interface StoreIdentity {
+  identityName: string
+  publisher: string
+  publisherDisplayName: string
+}
+
+function storeIdentity(): StoreIdentity {
+  const names = ['DAYLENS_STORE_IDENTITY_NAME', 'DAYLENS_STORE_PUBLISHER', 'DAYLENS_STORE_PUBLISHER_DISPLAY_NAME']
+  const missing = names.filter((k) => !process.env[k])
+  if (missing.length) throw new Error(`the Store package needs ${missing.join(', ')}; Partner Center lists them under Product identity (docs/operations/windows-store.md)`)
+  const store = { identityName: process.env.DAYLENS_STORE_IDENTITY_NAME!, publisher: process.env.DAYLENS_STORE_PUBLISHER!, publisherDisplayName: process.env.DAYLENS_STORE_PUBLISHER_DISPLAY_NAME! }
+  if (!store.publisher.startsWith('CN=')) throw new Error('DAYLENS_STORE_PUBLISHER is the whole CN=... string from Partner Center')
+  return store
 }
 
 const SQLITE = path.join(V2, 'node_modules', 'better-sqlite3')
@@ -121,7 +143,7 @@ function helper(): void {
   run('plutil', ['-lint', path.join(app, 'Info.plist')])
 }
 
-function config(sign: { teamId: string } | null, local: LocalIdentity | null): Configuration {
+function config(sign: { teamId: string } | null, local: LocalIdentity | null, store: StoreIdentity | null): Configuration {
   const helperPath = 'Contents/Helpers/Daylens.app'
   return {
     appId: 'com.daylens.desktop',
@@ -143,6 +165,8 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
     asar: true,
     asarUnpack: ['node_modules/better-sqlite3/build/Release/better_sqlite3.node'],
     npmRebuild: false,
+    // The default Windows kit's signtool predates MSIX and cannot sign one.
+    toolsets: { winCodeSign: '1.1.0' },
     electronFuses: {
       // The MCP server runs as Node in this binary. Safe only while the main app holds no macOS privacy permission.
       runAsNode: true,
@@ -161,10 +185,22 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
     ],
     extraFiles: WINDOWS ? [] : [{ from: path.join(OUT, 'helper', 'Daylens.app'), to: 'Helpers/Daylens.app' }],
     win: {
-      target: ['zip'],
       icon: path.join(ROOT, 'build', 'icon.png'),
-      artifactName: 'Daylens-${version}-win-x64.${ext}',
       requestedExecutionLevel: 'asInvoker',
+      // A package carries one signature, so it cannot take the default SHA-1 and SHA-256 pair.
+      signtoolOptions: { signingHashAlgorithms: ['sha256'] },
+    },
+    // The logos are in appx/, drawn from build/icon.png by appx.py.
+    appx: store && {
+      ...store,
+      // Start's shell:AppsFolder\<family>!Daylens; Partner Center's identity name can begin with digits, which an Id can't.
+      applicationId: 'Daylens',
+      customManifestPath: 'appxmanifest.xml',
+      artifactName: 'Daylens-${version}-win-x64.msix',
+      backgroundColor: 'transparent',
+      languages: ['en-US'],
+      minVersion: '10.0.17763.0',
+      maxVersionTested: '10.0.26100.0',
     },
     mac: {
       icon: path.join(ROOT, 'build', 'icon.icns'),
@@ -214,16 +250,19 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null): C
   }
 }
 
+const DIR = values.dir || TEST
 const sign = WINDOWS ? null : signing()
+const store = WINDOWS && !DIR ? storeIdentity() : null
 const local = !WINDOWS && !sign && process.env.DAYLENS_MAC_LOCAL_SIGN === '1' ? localIdentity() : null
 sqlite()
 js()
 helper()
 // A test build stops at the app folder; it is never a release artifact.
-await build({ projectDir: V2, targets: (WINDOWS ? Platform.WINDOWS : Platform.MAC).createTarget(values.dir || TEST ? ['dir'] : WINDOWS ? ['zip'] : ['dmg', 'zip'], ARCH), config: config(sign, local), publish: 'never' })
+await build({ projectDir: V2, targets: (WINDOWS ? Platform.WINDOWS : Platform.MAC).createTarget(DIR ? ['dir'] : WINDOWS ? ['appx'] : ['dmg', 'zip'], ARCH), config: config(sign, local, store), publish: 'never' })
 
 if (WINDOWS) {
-  process.stdout.write(`${path.join(OUT, TEST ? 'test' : 'release', 'win-unpacked', 'Daylens.exe')}\nunsigned Windows x64 test artifact; not a Store or installer package\n`)
+  const out = path.join(OUT, TEST ? 'test' : 'release')
+  process.stdout.write(store ? `${path.join(out, `Daylens-${version}-win-x64.msix`)}\n${process.env.CSC_LINK ? `signed as ${store.publisher}` : 'unsigned, for the Store to sign'}\n` : `${path.join(out, 'win-unpacked', 'Daylens.exe')}\n`)
 } else {
   const app = path.join(OUT, TEST ? 'test' : 'release', ARCH === Arch.x64 ? 'mac' : `mac-${Arch[ARCH]}`, 'Daylens.app')
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])

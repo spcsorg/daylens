@@ -1,7 +1,7 @@
 // Settings › General.
 import type { ShellState } from '../../../../shared/types.ts'
 import { act } from '../../lib/api.ts'
-import { Toggle } from '../../ui/controls.tsx'
+import { Button, Toggle } from '../../ui/controls.tsx'
 import { useToast } from '../../ui/overlays.tsx'
 import { errorText } from '../../ui/status.tsx'
 import { Row, Section } from './Row.tsx'
@@ -12,16 +12,29 @@ export function GeneralTab({ shell }: { shell: ShellState | null }) {
   return (
     <>
       <Section title="Startup">
-        <Row label="Open at login" detail="Daylens opens when you log in.">
-          <Toggle
-            label="Open at login"
-            on={shell.login_item}
-            onChange={async (on) => {
-              const r = await act({ a: 'login_item', on })
-              if (!r.ok) toast({ text: errorText(r.error), error: true })
-            }}
-          />
-        </Row>
+        {shell.login_item === null ? (
+          <Row label="Open at login" detail="Windows opens Daylens when you log in. Turn it off or on in Windows Settings.">
+            <Button
+              onClick={async () => {
+                const r = await act({ a: 'open_startup_settings' })
+                if (!r.ok) toast({ text: errorText(r.error), error: true })
+              }}
+            >
+              Open Windows Settings
+            </Button>
+          </Row>
+        ) : (
+          <Row label="Open at login" detail="Daylens opens when you log in.">
+            <Toggle
+              label="Open at login"
+              on={shell.login_item}
+              onChange={async (on) => {
+                const r = await act({ a: 'login_item', on })
+                if (!r.ok) toast({ text: errorText(r.error), error: true })
+              }}
+            />
+          </Row>
+        )}
       </Section>
       <Section title="Appearance">
         <div className="appearance" role="group" aria-label="Appearance">
