@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { check, connect, detect, disconnect, installedSpec, serverSpec, snippet, storeSpec, type Where } from '../../mcp/clients.ts'
+import { check, connect, detect, disconnect, installedSpec, serverSpec, snippet, storeSpec, writableFromPackage, type Where } from '../../mcp/clients.ts'
 import { tmpDir } from '../storage/support.ts'
 
 const SPEC = serverSpec('/Applications/Daylens.app/Contents/MacOS/Daylens', '/Applications/Daylens.app/Contents/Resources/app.asar/build/app/mcp/main.js', true)
@@ -183,4 +183,11 @@ test('Codex with Daylens written another way TOML allows is reported and never r
     assert.throws(() => connect('codex', SPEC, w))
     assert.equal(read(file), form)
   }
+})
+
+test('a Store package connects only apps whose config sits outside %APPDATA%, which Windows keeps inside the package', () => {
+  const w: Where = { home: 'C:\\Users\\a', platform: 'win32', env: { APPDATA: 'C:\\Users\\a\\AppData\\Roaming' } }
+  assert.equal(writableFromPackage('claude', w), false)
+  assert.equal(writableFromPackage('vscode', w), false)
+  for (const id of ['claude-code', 'codex', 'cursor', 'windsurf', 'gemini']) assert.equal(writableFromPackage(id, w), true, id)
 })

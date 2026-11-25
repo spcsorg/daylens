@@ -3,7 +3,7 @@
 import { clipboard } from 'electron'
 import os from 'node:os'
 import path from 'node:path'
-import { check, connect, detect, disconnect, serverSpec, snippet, storeSpec, type ServerSpec } from '../../../mcp/clients.ts'
+import { check, connect, detect, disconnect, serverSpec, snippet, storeSpec, writableFromPackage, type ServerSpec } from '../../../mcp/clients.ts'
 import type { AssistantsAction } from '../../shared/assistants.ts'
 import { MOVE_FIRST, paths, STORE } from '../paths.ts'
 import type { ActionHandlers } from './context.ts'
@@ -15,13 +15,14 @@ function spec(): ServerSpec {
   return s
 }
 
-const apps = () => detect(spec()).map(({ id, name, state }) => ({ id, name, state }))
+const apps = () => detect(spec()).filter((c) => !STORE || writableFromPackage(c.id)).map(({ id, name, state }) => ({ id, name, state }))
 
 export const assistants: ActionHandlers<AssistantsAction> = {
   assistant_request: (ctx, a) => ctx.requests.decide(a.id, a.allow),
   assistant_apps: async () => ({ ok: true, result: apps() }),
   assistant_connect: async (_ctx, a) => {
     if (a.on && MOVE_FIRST) return { ok: false, error: MOVE_FIRST }
+    if (STORE && !writableFromPackage(a.id)) return { ok: false, error: 'Copy the setup and paste it into the app’s MCP settings.' }
     if (a.on) connect(a.id, spec())
     else disconnect(a.id)
     return { ok: true, result: apps() }

@@ -231,6 +231,14 @@ export function check(spec: ServerSpec, timeoutMs = 10_000): Promise<{ ok: true;
   })
 }
 
+/** Whether a Store package can write this app's config where the app reads it. Windows keeps a packaged app's writes
+ *  under %APPDATA% inside the package, so those apps take the copied setup instead. */
+export function writableFromPackage(id: string, w: Where = here()): boolean {
+  const file = path.win32.resolve(def(id).file(w)).toLowerCase()
+  const appData = path.win32.resolve(w.env.APPDATA ?? path.win32.join(w.home, 'AppData', 'Roaming')).toLowerCase()
+  return !file.startsWith(`${appData}\\`)
+}
+
 /** The server inside the Store package, through its app execution alias: a path that stays put across updates, and a
  *  start inside the package, so the server reads the data folder the app writes there. */
 export function storeSpec(localAppData: string): ServerSpec {

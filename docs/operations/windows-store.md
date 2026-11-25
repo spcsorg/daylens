@@ -34,7 +34,7 @@ The manifest is `v2/app/package/appxmanifest.xml`; the logos are `v2/app/package
 - `runFullTrust`, the only capability.
 - A startup task, which Windows enables at the first launch. Settings › General sends the person to Windows Settings › Apps › Startup, because only Windows can turn a startup task back on.
 - The capture helper, `daylens-capture-windows.exe`, as a full-trust process.
-- The app execution alias `daylens.exe`. Settings › Assistants starts the MCP server through it: its path survives updates, while the install folder changes with each version, and it runs inside the package, so the server reads the record the app writes there.
+- The app execution alias `daylens.exe`. Settings › Assistants starts the MCP server through it: its path survives updates, while the install folder changes with each version, and it runs inside the package, so the server reads the record the app writes there. Windows keeps the package's writes under `%APPDATA%` inside the package too, so Claude and VS Code, whose MCP settings live there, aren't connected in one click; they take the copied setup.
 - The `daylens:` link scheme, which a Store package can register only in its manifest.
 
 Updates come from the Store, so the built-in updater stays off on Windows. The browser extension connects over `127.0.0.1` rather than native messaging (see [System design](../system-design.md)).
