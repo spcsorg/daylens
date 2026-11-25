@@ -1,8 +1,9 @@
 // Settings' actions.
-import { app, dialog, nativeTheme } from 'electron'
+import { app, dialog, nativeTheme, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import type { SettingsAction } from '../../shared/settings.ts'
+import { STORE } from '../paths.ts'
 import { TEST_BUILD } from '../testEnv.ts'
 import { capture, type ActionHandlers } from './context.ts'
 
@@ -20,10 +21,14 @@ export const settings: ActionHandlers<SettingsAction> = {
   },
   retention: (ctx, a) => capture(ctx, { op: 'retention', days: a.days }),
   login_item: async (ctx, a) => {
-    if (TEST_BUILD) return { ok: false, error: 'login_item_refused' }
+    if (TEST_BUILD || STORE) return { ok: false, error: 'login_item_refused' }
     app.setLoginItemSettings({ openAtLogin: a.on })
     ctx.pushShell()
     return app.getLoginItemSettings().openAtLogin === a.on ? { ok: true } : { ok: false, error: 'login_item_refused' }
+  },
+  open_startup_settings: async () => {
+    await shell.openExternal('ms-settings:startupapps')
+    return { ok: true }
   },
   appearance: async (ctx, a) => {
     nativeTheme.themeSource = a.mode

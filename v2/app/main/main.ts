@@ -17,7 +17,7 @@ import { chrome, followTheme } from './chrome.ts'
 import { onKeyChange, savedKey } from './ipc/ai.ts'
 import { act } from './ipc/index.ts'
 import type { Ctx } from './ipc/context.ts'
-import { appData, dataDir, MOVE_FIRST, PACKAGED_HELPER, paths } from './paths.ts'
+import { appData, dataDir, MOVE_FIRST, PACKAGED_HELPER, paths, STORE } from './paths.ts'
 import { loadPrefs, writePrefs, type Prefs } from './prefs.ts'
 import { createTray } from './tray.ts'
 import { installUpdate, startUpdates } from './updates.ts'
@@ -120,7 +120,7 @@ function connectWindow(w: BrowserWindow): void {
 function shellState(): ShellState {
   return {
     platform: process.platform,
-    login_item: app.getLoginItemSettings().openAtLogin,
+    login_item: STORE ? null : app.getLoginItemSettings().openAtLogin,
     appearance: prefs.appearance,
     onboarded: prefs.onboarded,
     helper: capture.helper,

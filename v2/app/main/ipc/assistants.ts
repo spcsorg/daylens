@@ -1,14 +1,16 @@
 // Settings › Assistants: connecting the MCP apps on this computer, testing the server, and answering what an
 // assistant asked.
 import { clipboard } from 'electron'
-import { check, connect, detect, disconnect, serverSpec, snippet, type ServerSpec } from '../../../mcp/clients.ts'
+import os from 'node:os'
+import path from 'node:path'
+import { check, connect, detect, disconnect, serverSpec, snippet, storeSpec, type ServerSpec } from '../../../mcp/clients.ts'
 import type { AssistantsAction } from '../../shared/assistants.ts'
-import { MOVE_FIRST, paths } from '../paths.ts'
+import { MOVE_FIRST, paths, STORE } from '../paths.ts'
 import type { ActionHandlers } from './context.ts'
 
 // This app's own binary as Node, so the entry matches what `connect.ts --installed` writes for the same install.
 function spec(): ServerSpec {
-  const s = serverSpec(process.execPath, paths.mcpServer, true)
+  const s = STORE ? storeSpec(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')) : serverSpec(process.execPath, paths.mcpServer, true)
   if (process.env.DAYLENS_V2_DATA_DIR) s.env.DAYLENS_V2_DATA_DIR = process.env.DAYLENS_V2_DATA_DIR
   return s
 }

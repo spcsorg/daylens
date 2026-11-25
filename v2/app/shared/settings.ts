@@ -29,4 +29,5 @@ export type SettingsAction =
   | { a: 'pick_app' }
   | { a: 'retention'; days: number | null }
   | { a: 'login_item'; on: boolean }
+  | { a: 'open_startup_settings' }
   | { a: 'appearance'; mode: 'light' | 'dark' | 'system' }

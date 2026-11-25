@@ -164,8 +164,8 @@ jobs:
       - run: npm run app:build
       - name: Every screen from source, using the Node stand-in
         run: npm run e2e -- --output build/e2e/windows-source
-      - name: Unsigned Windows ZIP with the native helper
-        run: npm run app:package
+      - name: Windows release folder with the native helper
+        run: npm run app:package -- --dir
       - name: The Windows release ignores test overrides and contains no tool code
         run: node app/package/checkRelease.ts
       - name: Windows test package
@@ -197,9 +197,70 @@ jobs:
           name: windows-screens
           path: v2/build/e2e
           retention-days: 7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+
+  windows-store:
+    name: Windows Store package, installed and certified (windows-2025)
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: v2
+    env:
+      # A throwaway identity, so the package is proven without Partner Center's values.
+      DAYLENS_STORE_IDENTITY_NAME: Daylens.Test
+      DAYLENS_STORE_PUBLISHER: CN=Daylens Test
+      DAYLENS_STORE_PUBLISHER_DISPLAY_NAME: Daylens Test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: windows-x64-unsigned
-          path: v2/build/release/*.zip
-          if-no-files-found: error
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - run: npm ci
+      - run: npm run build:sqlite
+      - name: A self-signed certificate for the test identity, trusted on this machine
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $env:DAYLENS_STORE_PUBLISHER -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $password = ConvertTo-SecureString -String 'daylens-test' -Force -AsPlainText
+          $pfx = Join-Path $env:RUNNER_TEMP 'daylens-test.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\LocalMachine\TrustedPeople -Password $password | Out-Null
+          "CSC_LINK=$pfx" >> $env:GITHUB_ENV
+          "CSC_KEY_PASSWORD=daylens-test" >> $env:GITHUB_ENV
+      - name: The Store package
+        run: npm run app:package
+      - name: The Windows App Certification Kit passes it
+        run: |
+          $msix = (Get-ChildItem build\release\*.msix).FullName
+          $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
+          if (!(Test-Path $appcert)) { throw "no Windows App Certification Kit at $appcert" }
+          $report = Join-Path $PWD 'build\wack.xml'
+          & $appcert reset
+          & $appcert test -appxpackagepath $msix -reportoutputpath $report
+          [xml]$xml = Get-Content $report
+          $overall = $xml.REPORT.OVERALL_RESULT
+          $tests = $xml.SelectNodes('//TEST') | ForEach-Object { [pscustomobject]@{ Result = $_.RESULT.InnerText; Test = $_.NAME } }
+          $summary = @("### Windows App Certification Kit: $overall", '', '| Result | Test |', '| --- | --- |') + ($tests | ForEach-Object { "| $($_.Result) | $($_.Test) |" })
+          $summary -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $summary -join "`n"
+          if ($overall -ne 'PASS') { throw "WACK: $overall" }
+      - name: Installs with Add-AppxPackage
+        run: |
+          Add-AppxPackage -Path (Get-ChildItem build\release\*.msix).FullName
+          Get-AppxPackage -Name $env:DAYLENS_STORE_IDENTITY_NAME | Format-List Name, Publisher, Version, PackageFamilyName, InstallLocation, SignatureKind
+      - name: Starts from Start, runs the capture helper from the package, and assistants reach its record
+        run: node app/package/checkStore.ts $env:DAYLENS_STORE_IDENTITY_NAME
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: windows-store-package
+          path: |
+            v2/build/release/*.msix
+            v2/build/wack.xml
           retention-days: 7

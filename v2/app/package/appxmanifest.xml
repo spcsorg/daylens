@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Store package's manifest; electron-builder fills the ${...} values (build.ts). runFullTrust is its only
+     restricted capability; docs/operations/windows-store.md says why. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop rescap">
+  <Identity Name="${identityName}" ProcessorArchitecture="${arch}" Publisher="${publisher}" Version="${version}" />
+  <Properties>
+    <DisplayName>${displayName}</DisplayName>
+    <PublisherDisplayName>${publisherDisplayName}</PublisherDisplayName>
+    <Description>A calendar of what you did.</Description>
+    <Logo>${logo}</Logo>
+  </Properties>
+  <Resources>
+    ${resourceLanguages}
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="${minVersion}" MaxVersionTested="${maxVersionTested}" />
+  </Dependencies>
+  ${capabilities}
+  <Applications>
+    <Application Id="${applicationId}" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements BackgroundColor="${backgroundColor}" DisplayName="${displayName}" Square150x150Logo="${square150x150Logo}" Square44x44Logo="${square44x44Logo}" Description="A calendar of what you did.">
+        ${defaultTile}
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Launch at login. Windows enables it at the first launch; Settings › Apps › Startup turns it off and on. -->
+        <desktop:Extension Category="windows.startupTask" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="DaylensStartup" Enabled="true" DisplayName="${displayName}" />
+        </desktop:Extension>
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="app\resources\daylens-capture-windows.exe" />
+        <!-- A path that survives updates, for assistants to start the MCP server inside the package (mcp/clients.ts). -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="daylens.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+        <!-- A Store package can register a link scheme only here. The browser extension opens Daylens with it. -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="daylens">
+            <uap:DisplayName>Daylens</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
