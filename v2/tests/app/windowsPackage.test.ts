@@ -45,7 +45,7 @@ function windowsPackage(testBuild: boolean, env: NodeJS.ProcessEnv = IDENTITY): 
     await import(${JSON.stringify(pathToFileURL(path.join(V2, 'app', 'package', 'build.ts')).href)})
     console.log('PACKAGE_RUN ' + JSON.stringify({ commands, config: packageConfig }))
   `
-  const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, ...env }, stdio: 'pipe' })
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 10_000, env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('DAYLENS_STORE_'))), ...env }, stdio: 'pipe' })
   const result = output.split('\n').find(line => line.startsWith('PACKAGE_RUN '))
   assert.ok(result, output)
   return JSON.parse(result.slice('PACKAGE_RUN '.length)) as PackageRun
