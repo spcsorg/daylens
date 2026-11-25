@@ -165,6 +165,8 @@ function config(sign: { teamId: string } | null, local: LocalIdentity | null, st
     asar: true,
     asarUnpack: ['node_modules/better-sqlite3/build/Release/better_sqlite3.node'],
     npmRebuild: false,
+    // The default Windows kit's signtool predates MSIX and cannot sign one.
+    toolsets: { winCodeSign: '1.1.0' },
     electronFuses: {
       // The MCP server runs as Node in this binary. Safe only while the main app holds no macOS privacy permission.
       runAsNode: true,
