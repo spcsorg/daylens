@@ -2,6 +2,8 @@
 
 In V2, the Microsoft Store signs the Store package and installs its updates. This runbook applies to Windows builds distributed outside the Store.
 
+**Not built in V2.** This runbook is carried over from V1. V2 has no Windows release workflow, none of the secrets below, no `dist:win` script and no code-signing certificate. The only Windows build is the Store package ([Windows Store package](windows-store.md)). What follows is the requirement a non-Store build must meet, not something that works today.
+
 Production Windows installers must be Authenticode-signed. Unsigned builds are acceptable only for local or internal smoke testing.
 
 ## CI secrets

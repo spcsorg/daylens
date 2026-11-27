@@ -2,6 +2,8 @@
 
 Daylens V2 is one desktop app on Windows, macOS and Linux. A small native helper on each platform records activity. Everything else is shared code: storage, the engine that writes the day, search, the MCP server, AI access, billing and the interface.
 
+This document describes the design. Parts that aren't built yet are marked **Not built yet**. Today there is a macOS helper and a Windows helper, and no Linux helper. AI runs only on the user's own Anthropic key, and there is no billing service. What the code stores and sends is listed in the [data inventory](privacy-and-security.md#data-inventory).
+
 ## Budgets
 
 Speed is the first requirement. These budgets are ceilings, measured on every platform for every change that could affect them; the goal is to be well under them.
@@ -32,7 +34,8 @@ The interface never waits on AI, the network, or a long query. Background work r
    ┌────┼──────────────┬─────────────┬──────────────┐
    ▼    ▼              ▼             ▼              ▼
  Engine  Search index  Interface    MCP server     Day notes
- (writes hours)        (calendar,    (assistants;   (optional files)
+ (writes hours)        (calendar,    (assistants;   (optional files,
+                                                     not built yet)
    │                    Ask, Apps)   writes on a yes)
    ▼
  AI provider: Daylens AI, own key, local CLI, or none
@@ -40,7 +43,7 @@ The interface never waits on AI, the network, or a long query. Background work r
 
 ### The shell
 
-The interface is one shared web codebase in a desktop shell. V1 already ships this way on all three platforms; V2 keeps the shell, moves to the latest stable Electron (45 at launch, for the patched Node 24 it carries; V1's 34 is out of support), and rewrites what runs inside it. Electron 46 removes the synchronous `safeStorage` calls the own-key store uses, so moving to 46 starts with the async API. The interface process only renders and sends user actions. Capture, the engine, search indexing and the MCP server run in separate processes.
+The interface is one shared web codebase in a desktop shell. V1 shipped this way on all three platforms; V2 keeps the shell, moves to the latest stable Electron (45 at launch, for the patched Node 24 it carries; V1's 34 is out of support), and rewrites what runs inside it. Electron 46 removes the synchronous `safeStorage` calls the own-key store uses, so moving to 46 starts with the async API. The interface process only renders and sends user actions. Capture, the engine, search indexing and the MCP server run in separate processes.
 
 Each screen owns its files, so screens change without touching each other: `app/shared/<screen>.ts` (its reads and actions), `app/reader/<screen>.ts` (its reads), `app/main/ipc/<screen>.ts` (its actions) and `app/renderer/src/screens/<screen>/` (its views and stylesheet). Everything more than one screen uses is shared: the record model (`app/reader/queries.ts`), the shared types (`app/shared/types.ts`), the shell (`app/main/main.ts`, `chrome.ts`, the preload, `renderer/src/App.tsx` and `shell/`), and the design system (`renderer/src/ui/`, `styles/`, `lib/`). The design system follows the V4 pages of the design file one to one: the tokens in `styles/tokens.css` carry the design file's variable names, and its components keep their names (Button, Toggle, Hour, Week block and so on).
 
@@ -48,17 +51,17 @@ Each screen owns its files, so screens change without touching each other: `app/
 
 Each platform has a small helper that reports what is happening and nothing else. All helpers speak the same protocol: one JSON line per observation, carrying the event time, the platform, the source, and the observation itself. Normalization and every decision live in shared code, so the platforms cannot drift.
 
-The macOS helper is Swift and the Windows helper is C#. Windows packages publish a self-contained, trimmed single-file executable with `IncludeNativeLibrariesForSelfExtract=true`, bundling the .NET native runtime libraries for extraction at launch so users install nothing extra. Native AOT is not enabled. Both helpers are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang (such as UI Automation on Windows) runs on its own thread so it can never stop capture. Each observation carries a protocol version, a sequence number and defined clock units.
+The macOS helper is Swift and the Windows helper is C#. Windows packages publish a self-contained, trimmed single-file executable with `IncludeNativeLibrariesForSelfExtract=true`, bundling the .NET native runtime libraries for extraction at launch so users install nothing extra. Native AOT is not enabled. Both helpers are rebuilt for V2 to be event-driven: they react to foreground, title, session and power changes instead of polling, with a slow reconciliation check for missed events. Any call that can hang runs on its own thread so it can never stop capture. The Windows helper uses no UI Automation: it reads window text and listens for WinEvents (`v2/native/windows/Daylens.Capture.Windows/Program.cs`). Each observation carries a protocol version, a sequence number and defined clock units.
 
 The app picks the helper for the platform it runs on (`v2/app/main/helperPath.ts`); `DAYLENS_HELPER` overrides it where test switches are honoured; `DAYLENS_HELPER_ARGS` supplies its JSON argument array, forwarded as service `--helper-arg` values. Both overrides are removed before release startup. From source, macOS starts `native/macos/.build/release/daylens-capture-macos` and Windows starts `native/windows/publish/daylens-capture-windows.exe`, the folder `dotnet publish -o` writes to (README). Packaged, macOS starts the helper inside `Helpers/Daylens.app`, and Windows starts `daylens-capture-windows.exe` from the app's `resources` folder, where the Windows package puts it. On Windows x64, `npm run app:package` builds the Store package (MSIX) from the Partner Center identity, and `npm run app:package -- --test` the test app; `--dir` stops at the app folder. CI installs the package under a throwaway identity, starts it, and runs the Windows App Certification Kit on it ([Windows Store package](operations/windows-store.md)). Updates from one Store version to the next remain a release gate. Linux has no helper, so the app starts no capture there and says it can't record, instead of starting another platform's helper. It still starts the capture service once with `--init-only`, which creates and migrates the store and exits, so the reader opens an empty record; it is not restarted if it fails, and every control returns `no_helper`. CI publishes the Windows helper on the Windows job and runs it through the capture service (`v2/tests/realHelperWindows.test.ts`).
 
 ### Packages
 
-- **Windows:** a full-trust Microsoft Store package whose only restricted capability is `runFullTrust`. Microsoft signs it and the Store installs updates. Launch at login is the package's startup task, which Windows registers at the first launch; if the user turns it off in Windows Settings, only Windows Settings can turn it back on.
+- **Windows:** a full-trust Microsoft Store package whose only restricted capability is `runFullTrust`. Microsoft signs it and the Store installs updates. It builds and passes certification in CI, but it hasn't been submitted yet. Launch at login is the package's startup task, which Windows registers at the first launch; if the user turns it off in Windows Settings, only Windows Settings can turn it back on.
 - A packaged app's new files under AppData go to the package's private folder, which processes outside the package cannot see, such as the MCP server an assistant starts or the CLI. The database lives where those processes can read it. V1's database under `%APPDATA%\Daylens` is copied before it is imported, never opened in place.
 - The install folder of a Store package changes with every version, so assistants start the MCP server through the package's app execution alias, `daylens.exe`, a path that survives updates. Started that way it runs inside the package, so it reads the same data folder the app writes, which Windows keeps inside the package.
-- **macOS:** a Developer ID–signed, notarized app, downloaded from the website and updated in the app.
-- **Linux:** nightly packages.
+- **macOS:** a Developer ID–signed, notarized app, downloaded from the website and updated in the app. The beta is signed with a local identity and doesn't update itself (see [Capture health](#capture-health)).
+- **Linux:** nightly packages. Not built yet.
 
 ### Test builds and the test clock
 
@@ -78,11 +81,11 @@ The app picks the helper for the platform it runs on (`v2/app/main/helperPath.ts
 | Browser page | See [Browsers](#browsers) | See [Browsers](#browsers) | See [Browsers](#browsers) |
 | Idle | Time since last input | Time since last input | Idle time from the desktop session |
 | Lock and sleep | Session and power notifications; waking automatically is not the user returning | Screen-lock notifications, display notices (the helper runs as a background application to receive them), and sleep and wake from the power system | Session manager signals |
-| Calendar (optional) | Account calendar through sign-in | Calendar permission (full access is the only level) | Account calendar through sign-in |
+| Calendar (optional, not built yet) | Account calendar through sign-in | Calendar permission (full access is the only level) | Account calendar through sign-in |
 | AI agent sessions | Claude Code and Codex session logs | Same | Same |
-| Commits | Git repositories under the usual code folders | Same | Same |
-| Screen (optional, off by default) | Windows Graphics Capture; text read with the built-in OCR | ScreenCaptureKit with the Screen Recording permission; text read with Vision | Desktop portal screencast through PipeWire; text read with an on-device OCR engine |
-| Audio (optional, off by default) | Microphone and system audio through WASAPI | Microphone permission; system audio through Core Audio | PipeWire or PulseAudio |
+| Commits (not built yet) | Git repositories under the usual code folders | Same | Same |
+| Screen (optional, off by default; not built yet) | Windows Graphics Capture; text read with the built-in OCR | ScreenCaptureKit with the Screen Recording permission; text read with Vision | Desktop portal screencast through PipeWire; text read with an on-device OCR engine |
+| Audio (optional, off by default; not built yet) | Microphone and system audio through WASAPI | Microphone permission; system audio through Core Audio | PipeWire or PulseAudio |
 | Microphone or speaker in use (later) | Audio session state | Audio process state | Audio server state |
 
 No keystrokes are captured on any platform. Screen images and audio are captured only when the user turns them on; see [Screen and audio](#screen-and-audio).
@@ -98,7 +101,7 @@ Every browser window is in one of three states: **normal**, **private** or **unk
 - **Window titles in apps with a browser engine.** An app that ships a browser engine (Chromium, Electron, CEF, Gecko) keeps its window titles only if it is on a built-in list of known non-browser apps with a matching OS-verified signer, or if the user chose to keep titles for it in Settings. Every other such app is recorded with no title.
 - **Threat model.** In scope is everything an honest user's own machine does: installed, portable and packaged apps, app updates, odd install layouts, filesystem and permission errors, and PID reuse. Out of scope is a local attacker who tampers with or re-signs binaries, or renames a browser to impersonate a trusted app, since same-user code can already read the database directly. Also out of scope: macOS accepting a running bundle whose sealed resources changed after launch, and a process re-signed while it runs keeping its cached signer.
 
-- **Pages come from browser history files.** Browsers do not write private browsing to history. Readers take only real visits from verified profiles, skip Guest profiles, and ignore bookmarks, downloads and other history sources. Visits synced from other devices or added by extensions are kept apart where the browser marks them. A page from history is searchable, but it gets no time on its own: a visit shows that a page was opened, not that it was read.
+- **Pages come from browser history files.** History is read on macOS only so far (`v2/capture/history.ts:1`); on Windows, pages come only from the extension, and Linux records nothing yet. Browsers do not write private browsing to history. Readers take only real visits from verified profiles, skip Guest profiles, and ignore bookmarks, downloads and other history sources. Visits synced from other devices or added by extensions are kept apart where the browser marks them. A page from history is searchable, but it gets no time on its own: a visit shows that a page was opened, not that it was read.
 - **Live window titles and addresses are stored only when the window is confirmed normal** by the browser itself: a browser automation property, or the Daylens browser extension. A title that lacks "Incognito", or that matches a history entry, is not confirmation.
 - **The Daylens browser extension** is optional and offered after onboarding, not during it. It is not allowed in private windows, reports the focused tab of normal windows, and gives exact pages and times. It ships at launch for Chrome, Edge and Firefox; Arc and Dia use the Chrome Web Store build, and each is verified on each platform before it is claimed.
   - Permissions: `tabs`, `nativeMessaging` and `alarms` (to retry the connection after the browser suspends the extension), with `"incognito": "not_allowed"`. No content scripts, history or scripting access, and no host permission except `127.0.0.1` where a browser needs it for the Windows connection below.
@@ -127,9 +130,13 @@ Claude Code and Codex write session logs to the user's home folder on every plat
 
 ### Commits
 
+**Not built yet.** No commit reader exists, and the hour writer passes no commit or calendar source to the packet (`v2/engine/hourWriter.ts:119`). Only the gold-replay tool supplies them (`v2/tools/goldReplay.ts`).
+
 Daylens finds git repositories under the usual code folders in the home folder (such as Code, Projects, source and GitHub Desktop's folder) and reads commits by each repository's configured user: message, time and repository. Links are removed from messages before storage. Commits whose author is a coding agent or a bot are marked as the agent's and never credited to the user.
 
 ### Screen and audio
+
+**Not built yet.** Neither helper has screen or audio capture code.
 
 Both are off until the user turns each on in Settings › Recording and privacy, which then asks for the platform's permission.
 
@@ -162,7 +169,7 @@ Capture health is tracked separately from activity. A quiet hour can be reading;
 
 ## Storage
 
-One SQLite database on the user's machine is the single source of truth. Every screen, Ask, the MCP server and day notes read from it. No screen keeps its own copy of any state.
+One SQLite database on the user's machine is the single source of truth. Every screen, Ask, the MCP server and day notes read from it. No screen keeps its own copy of any state. Every table, with what it holds, its retention and how it is deleted, is in the [data inventory](privacy-and-security.md#data-inventory).
 
 | Data | Notes |
 |---|---|
@@ -174,7 +181,7 @@ One SQLite database on the user's machine is the single source of truth. Every s
 | Deletions | Tombstones, so deleted material is never imported again |
 | Exclusions and settings | Including retention and AI choice |
 | Usage ledger | Every AI answer and hour written, with its cost |
-| Plan cache | Entitlement as last confirmed by the billing service |
+| Plan cache | Entitlement as last confirmed by the billing service. The table exists, but nothing fills it until billing is built |
 | Assistant reads | What each assistant read and when |
 | Search index | Full-text index over titles, addresses, file names and hour text |
 
@@ -185,7 +192,7 @@ A change to any shared state (a correction, deletion, exclusion, AI choice, plan
 The engine turns observations into hours. Details and evaluation are in [Engine](engine.md).
 
 1. **Facts.** Plain code groups observations into intervals per app, window and page. This is what the calendar shows first.
-2. **Packet.** When an hour ends, the engine builds a compact packet: merged intervals, short IDs, page and window titles, agent sessions, calendar events, gaps with reasons, the previous hour's summary, open threads, and any corrections.
+2. **Packet.** When an hour ends, the engine builds a compact packet: merged intervals, short IDs, page and window titles, agent sessions, calendar events (not built yet), gaps with reasons, the previous hour's summary, open threads, and any corrections.
 3. **Writing.** The chosen AI writes the hour from the packet as structured output. The writer has no tools and can take no actions.
 4. **Validation.** Code checks the output: valid structure, every cited ID exists in the packet, times are within the hour, and nothing is marked finished without proof. Invalid output is rejected and the hour stays as facts.
 5. **Storage.** The hour is stored with its sources. Corrections override it. A deletion triggers a rewrite from what is left.
@@ -205,7 +212,7 @@ An MCP server lets any MCP app read days, hours, apps, search results and source
 - Known clients on the machine (Claude, Claude Code, Codex, Cursor, VS Code, Windsurf and Gemini CLI) are detected and connected by writing their configuration. Any other MCP app can be set up by copying a snippet. ChatGPT's apps connect only to remote servers, so they can't use this one.
 - Reads change nothing and say so to the client (`readOnlyHint`). Writes never change the record themselves: each files a request (below).
 - Every read is logged and shown in Settings, under the name the client gives itself when it connects.
-- Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting.
+- Optional day notes write each finished day as a readable file, for assistants that read files instead of connecting. Not built yet.
 
 ### The server
 
@@ -236,15 +243,15 @@ An MCP server lets any MCP app read days, hours, apps, search results and source
 
 | Choice | How it works |
 |---|---|
-| Daylens AI | The billing service checks the plan and issues a short-lived token scoped to one request and its cost; the app calls the model provider directly with it, so the hour's content never passes through Daylens servers. Usage is metered from the token's spend. Default. |
-| Your own key | The main process keeps the key and hands it to the reader, which answers Ask, and to the capture service, which writes hours; each calls the provider's API directly, streaming, with no tools. The key is encrypted with Electron's `safeStorage`, as VS Code and other Electron apps keep secrets: its encryption key lives in the Keychain on macOS, user-scoped DPAPI on Windows, and the Secret Service or KWallet on Linux. On Linux with no keyring running, `safeStorage` falls back to a fixed password, so Daylens refuses to save the key and says why. The interface never receives a stored secret. |
+| Daylens AI | The billing service checks the plan and issues a short-lived token scoped to one request and its cost; the app calls the model provider directly with it, so the hour's content never passes through Daylens servers. Usage is metered from the token's spend. Default. **Not built yet.** |
+| Your own key | Built today, for Anthropic only; None is the other choice built. The main process keeps the key and hands it to the reader, which answers Ask, and to the capture service, which writes hours; each calls the provider's API directly, streaming, with no tools. The key is encrypted with Electron's `safeStorage`, as VS Code and other Electron apps keep secrets: its encryption key lives in the Keychain on macOS, user-scoped DPAPI on Windows, and the Secret Service or KWallet on Linux. On Linux with no keyring running, `safeStorage` falls back to a fixed password, so Daylens refuses to save the key and says why. The interface never receives a stored secret. |
 | None | Hours stay as facts. Ask searches instead of answering. |
 
 The model used to write hours is chosen by evaluation, not preference. See [Engine](engine.md).
 
 ## Billing service
 
-The billing service handles accounts, plans, usage and payments. It stores account state, usage metadata and payment events, never activity or prompts. Card payments use the payment provider's hosted checkout; mobile money uses a mobile-money provider. Details and payment-state rules are in [Billing](billing.md).
+**Not built yet** ([Billing](billing.md)). The billing service handles accounts, plans, usage and payments. It stores account state, usage metadata and payment events, never activity or prompts. Card payments use the payment provider's hosted checkout; mobile money uses a mobile-money provider. Details and payment-state rules are in [Billing](billing.md).
 
 ## Security
 
