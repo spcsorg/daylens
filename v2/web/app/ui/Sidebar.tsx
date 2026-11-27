@@ -6,22 +6,13 @@ import { useState } from "react";
 import { initials } from "@/lib/format";
 import { Icon, Mark, type IconName } from "./Icon";
 
-const LATER: [string, IconName][] = [
-  ["Clients and projects", "briefcase"],
-  ["Timesheets", "timesheet"],
-  ["Attendance and leave", "calendar"],
-  ["Ask", "ask"],
-];
-
 export function Sidebar({
   org,
   admin,
-  waiting,
   signOut,
 }: {
   org: string;
   admin: { name: string; role: string; scope: string[] | null };
-  waiting: number;
   signOut: () => Promise<void>;
 }) {
   const path = usePathname();
@@ -43,18 +34,7 @@ export function Sidebar({
       </div>
       {nav("/overview", "Overview", "overview")}
       {nav("/people", "People", "people")}
-      {LATER.map(([label, icon]) => (
-        <span key={label} className="nav" aria-disabled="true" title="Not built yet">
-          <Icon name={icon} />
-          {label}
-          {label === "Timesheets" && waiting > 0 && <span className="count">{waiting}</span>}
-        </span>
-      ))}
       <span className="spacer" />
-      <span className="nav" aria-disabled="true" title="Not built yet">
-        <Icon name="settings" />
-        Settings
-      </span>
       <div style={{ position: "relative" }}>
         {menu && (
           <form action={signOut} className="popover" style={{ top: "auto", bottom: "calc(100% + 6px)" }}>

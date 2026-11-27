@@ -121,12 +121,3 @@ export async function loadTimesheets(tx: Tx, t: Tables, orgId: string, weekStart
     t.timesheetLines = await tx.select().from(s.timesheetLines).where(inArray(s.timesheetLines.timesheetId, rows.map((x) => x.id)));
   }
 }
-
-export async function countSubmitted(tx: Tx, t: Tables, orgId: string, memberIds: string[]) {
-  if (!memberIds.length) return;
-  const rows = await tx
-    .select()
-    .from(s.timesheets)
-    .where(and(eq(s.timesheets.orgId, orgId), eq(s.timesheets.status, "submitted"), inArray(s.timesheets.memberId, memberIds)));
-  t.timesheets = rows.map((x) => ({ ...x, submittedAt: ms(x.submittedAt), approvedAt: ms(x.approvedAt), approvedBy: opt(x.approvedBy) }));
-}

@@ -15,9 +15,10 @@ export type Access = {
 export function requireAdmin(t: Tables, session: Session | null): Access {
   if (!session) throw new AccessError("Not signed in");
   const member = t.members.find((m) => m.id === session.memberId);
-  const org = member && t.orgs.find((o) => o.id === member.orgId);
-  if (!org || !member || member.status !== "active") throw new AccessError("You’re not a member of this organisation");
+  if (!member || member.status !== "active") throw new AccessError("You’re not a member of this organisation");
   if (member.role === "employee") throw new AccessError("Only admins can open the dashboard");
+  const org = t.orgs.find((o) => o.id === member.orgId);
+  if (!org) throw new AccessError("You’re not a member of this organisation");
   if (member.role === "owner" || member.adminScope === "org") return { org, member, teamIds: null };
   const teamIds = t.teamMembers.filter((r) => r.memberId === member.id && r.isAdminScope).map((r) => r.teamId);
   return { org, member, teamIds };

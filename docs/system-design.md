@@ -260,7 +260,7 @@ Daylens Enterprise adds an admin web app for firms. It lives in `v2/web`, beside
 - Development and CI run stock `postgres:17`. CI runs the migrations and every test against a stock Postgres service container, which is the proof it runs on any host.
 - Activity is stored as `blocks` (indexed on org, member and start). `daily_rollups` (member, local date, project) are written by the app from the blocks, as `lib/data/seed.ts`'s `rollupsFor` does today and the ingest path will after each upload.
 
-**Tenant isolation in two layers.** The data-access module filters every query by org and scope. Postgres row-level security checks it again: the app reads as the `daylens_app` role with `app.admin_id` set for the transaction (`asAdmin` in `lib/db/client.ts`), and the policies in `drizzle/0001_row_level_security.sql` return only rows in that admin's org and scope, whatever the query asks for. With no admin set, or an employee set, they return nothing. The connecting user must be a member of `daylens_app` (the migration grants it to the user that runs it). Tests check both layers: an admin scoped to Audit and Tax can't read an Advisory member through the module, or with raw SQL under RLS.
+**Tenant isolation in two layers.** The data-access module filters every query by org and scope. Postgres row-level security checks it again: the app reads as the `daylens_app` role with `app.admin_id` set for the transaction (`asAdmin` in `lib/db/client.ts`), and the policies in `drizzle/0001_row_level_security.sql` return only rows in that admin's org and scope, whatever the query asks for. With no admin set they return nothing. An employee sees only their own `members` row, which is how the app tells a signed-in employee from a stranger and says the dashboard is for admins. The connecting user must be a member of `daylens_app` (the migration grants it to the user that runs it). Tests check both layers: an admin scoped to Audit and Tax can't read an Advisory member through the module, or with raw SQL under RLS.
 
 **Backups.** `npm run db:backup` runs `pg_dump` in custom format to a timestamped file (`daylens-<UTC time>.dump`) in `BACKUP_DIR`, the first argument, or `backups/`. `npm run db:restore -- <file>` creates the `daylens_app` role if the server lacks it (roles live outside a dump) and runs `pg_restore --clean --if-exists --no-owner`. A test seeds a database, backs it up, restores into a fresh one, and compares every table's row count and a rollup. Both need `pg_dump` and `pg_restore` from Postgres 16 or later on the `PATH`, no older than the server. Scheduling and off-site copies come later.
 
@@ -273,13 +273,3 @@ Daylens Enterprise adds an admin web app for firms. It lives in `v2/web`, beside
 **Sign-in.** Sessions live in the `sessions` table, in the shape Auth.js uses for database sessions (session token, user, expiry), so Auth.js with the Microsoft Entra ID provider can take over sign-in later and write to the same table; queries only ever see a member id. Until then a dev-only sign-in picks a seeded member. It is on only when `DAYLENS_DEV_SIGN_IN=1` and never in a production build. Members carry `entra_object_id` and orgs `entra_tenant_id`, which is how an Entra sign-in will find its member.
 
 **Live data.** "Active now" means the Daylens app sent a heartbeat (`devices.last_seen_at`) in the last 5 minutes. The overview re-reads every 30 seconds; nothing pushes.
-
-**Invented data.** `npm run db:seed` replaces everything with Kestrel & Vale Advisory, the invented firm from the design prototype (40 people, 4 teams, 8 clients, 11 projects), with four past weeks and this week up to now. It refuses to run in production.
-
-## Security
-
-See [Privacy and security](privacy-and-security.md). In short: captured text is untrusted input, the writer has no tools, output is validated and rendered as plain text, secrets live in the platform's secure storage, releases are signed on every platform, and every privacy promise has a test.
-
-## Build order
-
-See [Build plan](build-plan.md).

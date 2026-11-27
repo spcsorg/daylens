@@ -1,6 +1,6 @@
 import { addDays, dayStart, datesBetween, DAY_MS, mondayOf } from "../domain/time";
 import { appDb, asAdmin, type Db } from "../db/client";
-import { countSubmitted, loadBlocks, loadDevices, loadOrg, loadRollups, loadTimesheets } from "../db/store";
+import { loadBlocks, loadDevices, loadOrg, loadRollups, loadTimesheets } from "../db/store";
 import { membersInScope, requireAdmin, requireMemberInScope, type Session } from "./access";
 import { me, overview, people, person, type OverviewArgs, type PeopleArgs, type Range } from "./queries";
 
@@ -12,12 +12,7 @@ import { me, overview, people, person, type OverviewArgs, type PeopleArgs, type 
 const isWeek = ({ from, to }: Range) => mondayOf(from) === from && addDays(from, 6) === to;
 
 export function getMe(session: Session, db: Db = appDb()) {
-  return asAdmin(db, session.memberId, async (tx) => {
-    const t = await loadOrg(tx, session.memberId);
-    const access = requireAdmin(t, session);
-    await countSubmitted(tx, t, access.org.id, membersInScope(t, access).map((m) => m.id));
-    return me(t, session);
-  });
+  return asAdmin(db, session.memberId, async (tx) => me(await loadOrg(tx, session.memberId), session));
 }
 
 export function getOverview(session: Session, args: OverviewArgs, now = Date.now(), db: Db = appDb()) {

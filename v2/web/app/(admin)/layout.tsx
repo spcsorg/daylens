@@ -29,7 +29,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
   return (
     <div className="window">
-      <Sidebar org={me.org.shortName} admin={me.member} waiting={me.waitingTimesheets} signOut={signOut} />
+      <Sidebar org={me.org.shortName} admin={me.member} signOut={signOut} />
       <main className="main">{children}</main>
     </div>
   );

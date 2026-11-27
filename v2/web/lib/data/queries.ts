@@ -48,14 +48,12 @@ export type ProjectLabel = ReturnType<typeof projectLabel>;
 export function me(t: Tables, session: Session | null) {
   const { org, member, teamIds } = requireAdmin(t, session);
   const teams = t.teams.filter((x) => x.orgId === org.id && (!teamIds || teamIds.includes(x.id)));
-  const visible = new Set(t.teamMembers.filter((l) => teams.some((x) => x.id === l.teamId)).map((l) => l.memberId));
   return {
     member: { name: member.name, title: member.title, role: member.role, scope: teamIds ? teams.map((x) => x.name) : null },
     org: { name: org.name, shortName: org.shortName, timeZone: org.policy.timeZone, coreStart: org.policy.coreStart, coreEnd: org.policy.coreEnd, workingDays: org.policy.workingDays },
     teams: teams.map((x) => ({ id: x.id, name: x.name })),
     clients: t.clients.filter((c) => c.orgId === org.id).map((c) => ({ id: c.id, name: c.name, billable: c.billable })),
     projects: t.projects.filter((p) => p.orgId === org.id).map((p) => ({ id: p.id, name: p.name, clientId: p.clientId })),
-    waitingTimesheets: t.timesheets.filter((s) => s.orgId === org.id && s.status === "submitted" && visible.has(s.memberId)).length,
   };
 }
 

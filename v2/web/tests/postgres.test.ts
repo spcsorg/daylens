@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccessError } from "@/lib/data/access";
-import { getPeople, getPerson } from "@/lib/data";
+import { getMe, getPeople, getPerson } from "@/lib/data";
 import { rollupsFor } from "@/lib/data/seed";
 import { asAdmin } from "@/lib/db/client";
 import { NOW, seededDatabase } from "./db";
@@ -50,6 +50,16 @@ describe("tenant isolation in Postgres", () => {
       return (await tx.execute(sql`select (select count(*) from members)::int as members, (select count(*) from blocks)::int as blocks`)).rows[0];
     });
     expect(rows).toEqual({ members: 0, blocks: 0 });
+  });
+
+  it("tells an employee only admins can open the dashboard, and a deactivated member they're not a member", async () => {
+    await expect(getMe({ memberId: id("Brian Otieno") }, env.db)).rejects.toThrow("Only admins can open the dashboard");
+    await env.db.execute(sql`update members set status = 'deactivated' where id = ${id("Diane Ingabire")}`);
+    try {
+      await expect(getMe({ memberId: id("Diane Ingabire") }, env.db)).rejects.toThrow("You’re not a member of this organisation");
+    } finally {
+      await env.db.execute(sql`update members set status = 'active' where id = ${id("Diane Ingabire")}`);
+    }
   });
 
   it("returns nothing to an employee", async () => {
