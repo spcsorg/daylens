@@ -8,6 +8,8 @@ export interface Turn {
   asked_at: number
   // The conversation it was asked after, kept so asking it again asks it the same way.
   earlier: Earlier[]
+  // Claude has the record and is reading it; nothing is streamed yet.
+  reading: boolean
   streamed: Statement[]
   result: AskResult | null
   error: string | null

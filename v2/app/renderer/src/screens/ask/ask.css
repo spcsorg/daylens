@@ -117,38 +117,122 @@
   transform-origin: bottom left;
 }
 
-.typing {
+/* Ask's mark is Daylens's window. Its frame stays still in grey; what moves is amber, which means progress. */
+.ask-waiting {
   display: flex;
-  gap: 5px;
-  padding: 15px 16px;
+  padding: 8px 14px;
 }
 
-.typing span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-3);
-  animation: typing 1.2s var(--ease) infinite;
+.ask-mark {
+  display: block;
+  width: 26px;
+  height: 22px;
+  overflow: visible;
 }
 
-.typing span:nth-child(2) {
-  animation-delay: 0.15s;
+.ask-sentence + .ask-mark {
+  display: inline-block;
+  width: 1.1em;
+  height: 0.9em;
+  margin-left: 2px;
+  vertical-align: -0.05em;
 }
 
-.typing span:nth-child(3) {
-  animation-delay: 0.3s;
+.ask-mark .frame {
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 1.75;
 }
 
-@keyframes typing {
-  0%,
-  60%,
-  100% {
-    opacity: 0.35;
+.ask-mark .dot {
+  fill: var(--text-3);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ask-mark .scan,
+.ask-mark .line {
+  fill: var(--focus);
+  opacity: 0;
+  transform-box: fill-box;
+}
+
+/* Thinking: the outer dots gather on the middle one and part again. */
+.ask-mark.thinking .dot {
+  fill: var(--focus);
+}
+
+.ask-mark.thinking .dot:nth-child(1) {
+  animation: mark-gather-right 1.2s var(--ease) infinite;
+}
+
+.ask-mark.thinking .dot:nth-child(3) {
+  animation: mark-gather-left 1.2s var(--ease) infinite;
+}
+
+@keyframes mark-gather-right {
+  45%,
+  60% {
+    transform: translateX(3.5px);
+  }
+}
+
+@keyframes mark-gather-left {
+  45%,
+  60% {
+    transform: translateX(-3.5px);
+  }
+}
+
+/* Reading: a line runs down the window, top to bottom. */
+.ask-mark.reading .scan {
+  animation: mark-scan 1.4s var(--ease) infinite;
+}
+
+@keyframes mark-scan {
+  from {
+    opacity: 0;
     transform: translateY(0);
   }
-  30% {
+  20% {
     opacity: 1;
-    transform: translateY(-3px);
+  }
+  80% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6.5px);
+  }
+}
+
+/* Writing: lines draw in left to right, one after another, then clear. */
+.ask-mark.writing .line {
+  transform-origin: left center;
+  animation: mark-write 1.8s var(--ease) infinite both;
+}
+
+.ask-mark.writing .line:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ask-mark.writing .line:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes mark-write {
+  from {
+    opacity: 1;
+    transform: scaleX(0);
+  }
+  35%,
+  80% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1);
   }
 }
 
@@ -250,9 +334,37 @@
 @media (prefers-reduced-motion: reduce) {
   .bubble,
   .ask-sentence,
-  .ask-sources,
-  .typing span {
+  .ask-sources {
     animation: none;
+  }
+
+  /* The mark keeps going, as a spinner does, but only fades: nothing slides. */
+  .ask-mark.thinking .dot:nth-child(1),
+  .ask-mark.thinking .dot:nth-child(3) {
+    animation: mark-fade 1.2s var(--ease) infinite;
+  }
+
+  .ask-mark.thinking .dot:nth-child(2) {
+    animation: mark-fade 1.2s var(--ease) 0.6s infinite;
+  }
+
+  .ask-mark.reading .scan {
+    transform: translateY(3.25px);
+    animation: mark-fade 1.4s var(--ease) infinite;
+  }
+
+  .ask-mark.writing .line {
+    animation-name: mark-fade;
+  }
+
+  @keyframes mark-fade {
+    from,
+    to {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 }
 

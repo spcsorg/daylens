@@ -47,10 +47,11 @@ function again(t: Turn): void {
 async function send(question: string, earlier: Earlier[] = earlierOf(turns), asked_at = Date.now()): Promise<void> {
   earlier = bounded(earlier)
   const id = nextId++
-  turns = [...turns, { id, question, asked_at, earlier, streamed: [], result: null, error: null, stale: false, outdated: null }]
+  turns = [...turns, { id, question, asked_at, earlier, reading: false, streamed: [], result: null, error: null, stale: false, outdated: null }]
   for (const s of subs) s()
   const off = bridge.onReader((e) => {
     if (e.e === 'ask' && e.ask_id === id) update(id, (t) => ({ ...t, streamed: [...t.streamed, e.statement] }))
+    if (e.e === 'ask_reading' && e.ask_id === id) update(id, (t) => ({ ...t, reading: true }))
   })
   try {
     const result = await query({ q: 'ask', ask_id: id, ...questionOf({ question, asked_at, earlier }) })
@@ -177,9 +178,14 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
               {s.text}{' '}
             </span>
           ))}
+          {!settled && <Mark stage="writing" />}
         </div>
       )}
-      {shown === 0 && !settled && <Typing />}
+      {shown === 0 && !settled && (
+        <div className="bubble theirs ask-waiting">
+          <Mark stage={turn.reading ? 'reading' : 'thinking'} />
+        </div>
+      )}
       {settled && turn.stale && (
         <div className="bubble theirs">
           Your record changed. Ask again.{' '}
@@ -208,13 +214,29 @@ function Exchange({ turn, onOpenHour, onRetry }: { turn: Turn; onOpenHour: (star
   )
 }
 
-function Typing() {
+const SAYS = { thinking: 'Working out your question', reading: 'Reading your day', writing: 'Writing' }
+
+/**
+ * Daylens's window, moving with what Ask is doing: its dots gather while the question is worked out, a line scans it
+ * while Claude reads the record, and lines write into it while the answer arrives.
+ */
+function Mark({ stage }: { stage: keyof typeof SAYS }) {
   return (
-    <div className="bubble theirs typing" aria-label="Claude is answering">
-      <span />
-      <span />
-      <span />
-    </div>
+    <svg className={`ask-mark ${stage}`} viewBox="0 0 24 20" role="img" aria-label={SAYS[stage]}>
+      <rect className="frame" x="1" y="1" width="22" height="18" rx="4" />
+      <path className="frame" d="M1 6.5h22" />
+      <g>
+        <circle className="dot" cx="5" cy="3.75" r="1.3" />
+        <circle className="dot" cx="8.5" cy="3.75" r="1.3" />
+        <circle className="dot" cx="12" cy="3.75" r="1.3" />
+      </g>
+      <rect className="scan" x="4" y="9" width="16" height="1.6" rx="0.8" />
+      <g>
+        <rect className="line" x="4" y="9.5" width="16" height="1.6" rx="0.8" />
+        <rect className="line" x="4" y="12.5" width="12" height="1.6" rx="0.8" />
+        <rect className="line" x="4" y="15.5" width="8" height="1.6" rx="0.8" />
+      </g>
+    </svg>
   )
 }
 

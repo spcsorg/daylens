@@ -52,6 +52,7 @@ export async function answer(file: string, finder: Reader, port: MessagePortMain
           recordUsage: (u) => Number(usage.run(Date.now(), u.kind, u.provider, u.model, u.input_tokens, u.output_tokens, u.cost_micro_usd, u.ref ?? null).lastInsertRowid),
         },
         onStatement: (statement) => port.postMessage({ e: 'ask', ask_id: q.ask_id, statement }),
+        onReading: () => port.postMessage({ e: 'ask_reading', ask_id: q.ask_id }),
       },
       LIMITS,
       q.earlier,
