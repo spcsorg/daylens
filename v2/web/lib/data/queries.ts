@@ -2,7 +2,7 @@ import type { DailyRollup, Org, Tables, TimesheetStatus } from "../domain/model"
 import { coreSecondsPerDay } from "../domain/rollup";
 import { addDays, dayStart, datesBetween, DAY_MS, isoWeekday, localDate, mondayOf } from "../domain/time";
 import { timeline, totalsBy } from "../domain/timeline";
-import { AccessError, membersInScope, requireAdmin, requireMemberInScope, type Session } from "./access";
+import { AccessError, membersInScope, requireAdmin, requireAssignee, requireMemberInScope, type Session } from "./access";
 
 const ACTIVE_WINDOW_MS = 5 * 60_000;
 
@@ -52,8 +52,10 @@ export function me(t: Tables, session: Session | null) {
     member: { name: member.name, title: member.title, role: member.role, scope: teamIds ? teams.map((x) => x.name) : null },
     org: { name: org.name, shortName: org.shortName, timeZone: org.policy.timeZone, coreStart: org.policy.coreStart, coreEnd: org.policy.coreEnd, workingDays: org.policy.workingDays },
     teams: teams.map((x) => ({ id: x.id, name: x.name })),
-    clients: t.clients.filter((c) => c.orgId === org.id).map((c) => ({ id: c.id, name: c.name, billable: c.billable })),
-    projects: t.projects.filter((p) => p.orgId === org.id).map((p) => ({ id: p.id, name: p.name, clientId: p.clientId })),
+    clients: t.clients.filter((c) => c.orgId === org.id && !c.archivedAt).map((c) => ({ id: c.id, name: c.name, billable: c.billable })),
+    projects: t.projects
+      .filter((p) => p.orgId === org.id && !p.archivedAt && !t.clients.find((c) => c.id === p.clientId)?.archivedAt)
+      .map((p) => ({ id: p.id, name: p.name, clientId: p.clientId })),
   };
 }
 
@@ -238,3 +240,80 @@ export function person(t: Tables, session: Session | null, args: Range & { membe
 
 export type Person = ReturnType<typeof person>;
 
+
+/** Clients with their projects, each project's hours in the range from rollups, and who it's assigned to, within the admin's scope. */
+export function catalog(t: Tables, session: Session | null, range: Range) {
+  checkRange(range);
+  const access = requireAdmin(t, session);
+  const { org } = access;
+  const people = membersInScope(t, access);
+  const rows = rollups(t, org.id, range, new Set(people.map((m) => m.id)));
+  const names = new Map(t.members.map((m) => [m.id, m.name]));
+  const teams = new Map(t.teams.filter((x) => x.orgId === org.id).map((x) => [x.id, x.name]));
+  const mayAssign = (a: { memberId?: string; teamId?: string }) => {
+    try {
+      requireAssignee(t, access, a, false);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const projects = t.projects
+    .filter((p) => p.orgId === org.id)
+    .map((p) => {
+      const own = rows.filter((r) => r.projectId === p.id);
+      return {
+        id: p.id,
+        clientId: p.clientId,
+        name: p.name,
+        code: p.code,
+        billable: p.billable,
+        keywords: p.keywords,
+        archived: !!p.archivedAt,
+        seconds: sum(own, (r) => r.seconds),
+        people: new Set(own.filter((r) => r.seconds > 0).map((r) => r.memberId)).size,
+        assignments: t.assignments
+          .filter((a) => a.projectId === p.id)
+          .map((a) => ({
+            id: a.id,
+            team: !!a.teamId,
+            name: a.teamId ? (teams.get(a.teamId) ?? "A team") : (names.get(a.memberId!) ?? "Someone outside your teams"),
+            startsAt: a.startsAt ?? null,
+            endsAt: a.endsAt ?? null,
+            editable: mayAssign(a),
+          }))
+          .sort((a, b) => Number(b.team) - Number(a.team) || a.name.localeCompare(b.name)),
+      };
+    })
+    .sort((a, b) => Number(a.archived) - Number(b.archived) || b.seconds - a.seconds || a.name.localeCompare(b.name));
+  const clients = t.clients
+    .filter((c) => c.orgId === org.id)
+    .map((c) => {
+      const own = projects.filter((p) => p.clientId === c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        code: c.code,
+        billable: c.billable,
+        aliases: c.aliases,
+        domains: c.domains,
+        emailDomains: c.emailDomains,
+        archived: !!c.archivedAt,
+        seconds: sum(own, (p) => p.seconds),
+        projects: own,
+      };
+    })
+    .sort((a, b) => Number(a.archived) - Number(b.archived) || Number(b.billable) - Number(a.billable) || b.seconds - a.seconds || a.name.localeCompare(b.name));
+  const assignTeams = t.teams.filter((x) => x.orgId === org.id && (!access.teamIds || access.teamIds.includes(x.id)));
+  return {
+    clients,
+    assignable: {
+      teams: assignTeams.map((x) => ({ id: x.id, name: x.name })).sort((a, b) => a.name.localeCompare(b.name)),
+      members: people.map((m) => ({ id: m.id, name: m.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    },
+  };
+}
+
+export type Catalog = ReturnType<typeof catalog>;
+export type CatalogClient = Catalog["clients"][number];
+export type CatalogProject = CatalogClient["projects"][number];

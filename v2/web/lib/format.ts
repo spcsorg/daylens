@@ -44,6 +44,7 @@ export const weekdayName = (date: string) => day(date, { weekday: "long" });
 export const weekdayShort = (date: string) => day(date, { weekday: "short" });
 export const dayOfMonth = (date: string) => Number(date.slice(8));
 export const monthName = (date: string) => day(date, { month: "long" });
+export const shortDate = (date: string) => day(date, { day: "numeric", month: "short" });
 export const longDate = (date: string) => day(date, { weekday: "long", day: "numeric", month: "long" });
 
 /** "16–20 November", or "30 November – 4 December" across months. */

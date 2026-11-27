@@ -34,6 +34,7 @@ export function Sidebar({
       </div>
       {nav("/overview", "Overview", "overview")}
       {nav("/people", "People", "people")}
+      {nav("/clients", "Clients and projects", "briefcase")}
       <span className="spacer" />
       <div style={{ position: "relative" }}>
         {menu && (

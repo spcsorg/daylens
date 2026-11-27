@@ -30,8 +30,9 @@ export type Member = {
 export type Team = { id: string; orgId: string; name: string };
 export type TeamMember = { orgId: string; teamId: string; memberId: string; isAdminScope: boolean };
 export type Device = { id: string; orgId: string; memberId: string; platform: "windows" | "macos" | "linux"; appVersion: string; lastSeenAt: number };
-export type Client = { id: string; orgId: string; name: string; code: string; aliases: string[]; domains: string[]; billable: boolean };
-export type Project = { id: string; orgId: string; clientId: string; name: string; code: string; keywords: string[]; billable: boolean; odooId?: number };
+/** An archived client or project leaves the pickers but keeps its history; neither is ever deleted. */
+export type Client = { id: string; orgId: string; name: string; code: string; aliases: string[]; domains: string[]; emailDomains: string[]; billable: boolean; archivedAt?: number };
+export type Project = { id: string; orgId: string; clientId: string; name: string; code: string; keywords: string[]; billable: boolean; odooId?: number; archivedAt?: number };
 export type Assignment = { id: string; orgId: string; projectId: string; memberId?: string; teamId?: string; startsAt?: string; endsAt?: string };
 
 export type Block = {
