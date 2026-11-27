@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rollupDay, type Policy } from "@/lib/domain/rollup";
-import { dayStart } from "@/lib/domain/time";
+import { atLocalTime, dayStart } from "@/lib/domain/time";
 
 const policy: Policy = { timeZone: "Africa/Kigali", coreStart: 8 * 60 + 30, coreEnd: 17 * 60 + 30, workingDays: [1, 2, 3, 4, 5] };
 const thursday = "2026-11-19";
@@ -40,10 +40,15 @@ describe("rollupDay", () => {
   });
 
   it("counts the whole of a day the clocks change on", () => {
-    const newYork: Policy = { ...policy, timeZone: "America/New_York" };
+    // Both clock changes fall on a Sunday, so the test works Sundays to reach core hours.
+    const newYork: Policy = { ...policy, timeZone: "America/New_York", workingDays: [1, 2, 3, 4, 5, 7] };
     const late = dayStart("2026-11-01", newYork.timeZone) + (23 * 60 + 15) * 60_000;
     const rows = rollupDay([{ start: late, end: late + 30 * 60_000, kind: "work", projectId: "audit" }], "2026-11-01", newYork, billable);
     expect(rows).toEqual([{ projectId: "audit", seconds: 1800, billableSeconds: 1800, coreSeconds: 0, idleSeconds: 0 }]);
+    const core = atLocalTime("2026-11-01", 8 * 60 + 30, newYork.timeZone);
+    const morning = rollupDay([{ start: core, end: core + 3600_000, kind: "work", projectId: "audit" }], "2026-11-01", newYork, billable);
+    expect(morning[0]).toMatchObject({ seconds: 3600, coreSeconds: 3600 });
+
     const lastHalfHour = dayStart("2026-03-09", newYork.timeZone) - 30 * 60_000;
     const spring = rollupDay([{ start: lastHalfHour, end: lastHalfHour + 30 * 60_000, kind: "work", projectId: "audit" }], "2026-03-08", newYork, billable);
     expect(spring[0]).toMatchObject({ seconds: 1800 });

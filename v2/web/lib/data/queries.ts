@@ -474,13 +474,14 @@ export function settings(t: Tables, session: Session | null) {
   const access = requireAdmin(t, session);
   const { org } = access;
   const teams = t.teams.filter((x) => x.orgId === org.id).sort((a, b) => a.name.localeCompare(b.name));
+  const inScope = new Set(t.teamMembers.filter((r) => access.teamIds === null || access.teamIds.includes(r.teamId)).map((r) => r.memberId));
   return {
     canEdit: access.member.role === "owner",
     selfId: access.member.id,
     policy: org.policy,
     teams: teams.map((x) => ({ id: x.id, name: x.name })),
     members: t.members
-      .filter((m) => m.orgId === org.id)
+      .filter((m) => m.orgId === org.id && (access.teamIds === null || inScope.has(m.id)))
       .map((m) => {
         const links = t.teamMembers.filter((r) => r.memberId === m.id && teams.some((x) => x.id === r.teamId));
         return {

@@ -6,7 +6,7 @@ import type { Table } from "./tables";
 export type Format = "xlsx" | "csv";
 
 /** CSV text a spreadsheet would run as a formula starts with a quote instead. Excel cells are written as text, so they never run. */
-const inert = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
+const inert = (v: string) => (/^[=+\-@\t\r\n|\uFF1D\uFF0B\uFF0D\uFF20]/.test(v) ? `'${v}` : v);
 
 export function toCsv(table: Table): string {
   const cell = (v: string | number | null) => {

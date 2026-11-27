@@ -1,4 +1,4 @@
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { appDb, type Db, type Tx } from "../db/client";
 import * as s from "../db/schema";
 import { emptyTables, loadBlocks } from "../db/store";
@@ -66,8 +66,10 @@ async function rebuildOrgRollups(tx: Tx, t: Tables, org: Org) {
 export function updatePolicy(session: Session, input: Policy, db: Db = appDb()) {
   return asWriter(session, db, async (tx, t, access) => {
     requireOwner(access);
-    const old = access.org.policy;
     const next = checkPolicy(input);
+    const [locked] = (await tx.execute(sql`select policy from orgs where id = ${access.org.id} for update`)).rows as { policy: Org["policy"] }[];
+    if (!locked) throw new ValidationError({ form: "That firm isn’t there any more." });
+    const old = locked.policy;
     const changes = [
       old.timeZone !== next.timeZone && `time zone ${old.timeZone} to ${next.timeZone}`,
       (old.coreStart !== next.coreStart || old.coreEnd !== next.coreEnd) && `core hours ${hhmm(old.coreStart)}–${hhmm(old.coreEnd)} to ${hhmm(next.coreStart)}–${hhmm(next.coreEnd)}`,

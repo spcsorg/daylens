@@ -1,5 +1,5 @@
 import type { Block, DailyRollup, Org, Project } from "./model";
-import { addDays, dayStart, datesBetween, isoWeekday, localDate } from "./time";
+import { addDays, atLocalTime, dayStart, datesBetween, isoWeekday, localDate } from "./time";
 
 export type Policy = {
   timeZone: string;
@@ -42,8 +42,8 @@ export function rollupDay<P extends string>(
   // The next local midnight, which is 23 or 25 hours away when the clocks change.
   const to = dayStart(addDays(date, 1), policy.timeZone);
   const working = policy.workingDays.includes(isoWeekday(date));
-  const coreFrom = from + policy.coreStart * 60_000;
-  const coreTo = from + policy.coreEnd * 60_000;
+  const coreFrom = atLocalTime(date, policy.coreStart, policy.timeZone);
+  const coreTo = atLocalTime(date, policy.coreEnd, policy.timeZone);
   const rows = new Map<P | undefined, RollupRow<P>>();
   for (const b of blocks) {
     if (b.deleted) continue;

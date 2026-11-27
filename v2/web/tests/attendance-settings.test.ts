@@ -18,6 +18,8 @@ import { asAdmin } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { toCsv, toXlsx } from "@/lib/export";
 import { attendanceTable, peopleTable, type Table } from "@/lib/tables";
+import { settings } from "@/lib/data/queries";
+import { seedTables } from "@/lib/data/seed";
 import { seededDatabase } from "./db";
 
 let env: Awaited<ReturnType<typeof seededDatabase>>;
@@ -266,9 +268,17 @@ describe("exports", () => {
   });
 
   it("quotes text a spreadsheet would run as a formula", () => {
-    const table: Table = { name: "Test", columns: ["Note"], rows: [["=1+1"], ["plain"]] };
-    expect(lines(toCsv(table))[1]).toBe("'=1+1");
-    expect(lines(toCsv(table))[2]).toBe("plain");
+    const table: Table = { name: "Test", columns: ["Note"], rows: [["=1+1"], ["plain"], ["|calc"], ["＋1"]] };
+    expect(lines(toCsv(table)).slice(1)).toEqual(["'=1+1", "plain", "'|calc", "'＋1"]);
+  });
+
+  it("lists only the people in a scoped admin's teams in settings", () => {
+    const t = seedTables(NOW, 1);
+    const diane = t.members.find((m) => m.name === "Diane Ingabire")!;
+    const shown = settings(t, { memberId: diane.id }).members.map((m) => m.name);
+    expect(shown).toContain("Grace Mukamana");
+    expect(shown).not.toContain("Tomás Herrera");
+    expect(settings(t, { memberId: t.members.find((m) => m.role === "owner")!.id }).members.length).toBe(40);
   });
 });
 
