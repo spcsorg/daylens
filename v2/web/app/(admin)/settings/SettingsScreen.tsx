@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import type { Settings, SettingsMember } from "@/lib/data/queries";
 import { coreHours, initials } from "@/lib/format";
 import { Dialog, Field, ToastView, useToast, type Toast } from "../../ui/controls";
@@ -162,6 +162,7 @@ function roleText(m: SettingsMember, teams: Map<string, string>) {
 
 export function MembersTab({ data }: { data: Settings }) {
   const [editing, setEditing] = useState<SettingsMember | null>(null);
+  const close = useCallback(() => setEditing(null), []);
   const [toast, notify] = useToast();
   const teams = new Map(data.teams.map((t) => [t.id, t.name]));
   return (
@@ -203,7 +204,7 @@ export function MembersTab({ data }: { data: Settings }) {
           ))}
         </tbody>
       </table>
-      {editing && <MemberDialog member={editing} data={data} onClose={() => setEditing(null)} notify={notify} />}
+      {editing && <MemberDialog member={editing} data={data} onClose={close} notify={notify} />}
       <ToastView toast={toast} />
     </>
   );

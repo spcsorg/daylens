@@ -31,7 +31,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <>
       <Header title="People" sub={p.current ? `This week · ${p.label}` : `Week of ${p.label}`}>
         <Steps earlier={href(params, { date: p.earlier })} later={p.later && href(params, { date: p.later })} />
-        <ExportButtons table="people" params={params} disabled={!rows.length} />
+        <ExportButtons table="people" params={{ ...params, date: p.from }} disabled={!rows.length} />
       </Header>
       <div className="scroll">
         <Filters

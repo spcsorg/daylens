@@ -115,15 +115,17 @@ export function updateMember(session: Session, id: string, input: MemberInput, d
     const describe = (rows: { teamId: string; isAdminScope: boolean }[]) =>
       rows.map((r) => teams.get(r.teamId)! + (r.isAdminScope ? " (admin)" : "")).sort().join(", ") || "no teams";
     const after = teamIds.map((teamId) => ({ teamId, isAdminScope: adminTeamIds.includes(teamId) }));
-    if (member.role !== input.role || (member.adminScope ?? null) !== adminScope) {
-      await tx.update(s.members).set({ role: input.role, adminScope }).where(and(eq(s.members.id, id), eq(s.members.orgId, access.org.id)));
-      const scope = (role: Role, sc: string | null) => (role === "admin" ? `admin of ${sc === "org" ? "the whole firm" : "chosen teams"}` : role);
-      await audit(tx, access, "member.role_changed", `member:${id}`, `${scope(member.role, member.adminScope ?? null)} to ${scope(input.role, adminScope)}`);
-    }
     if (describe(before) !== describe(after)) {
       await tx.delete(s.teamMembers).where(and(eq(s.teamMembers.memberId, id), eq(s.teamMembers.orgId, access.org.id)));
       if (after.length) await tx.insert(s.teamMembers).values(after.map((r) => ({ ...r, orgId: access.org.id, memberId: id })));
       await audit(tx, access, "member.teams_changed", `member:${id}`, `${describe(before)} to ${describe(after)}`);
+    }
+    // Last, because row-level security reads this row: an owner changing their own role still needs their old one for the writes above.
+    if (member.role !== input.role || (member.adminScope ?? null) !== adminScope) {
+      const scope = (role: Role, sc: string | null) => (role === "admin" ? `admin of ${sc === "org" ? "the whole firm" : "chosen teams"}` : role);
+      await audit(tx, access, "member.role_changed", `member:${id}`, `${scope(member.role, member.adminScope ?? null)} to ${scope(input.role, adminScope)}`);
+      const changed = await tx.update(s.members).set({ role: input.role, adminScope }).where(and(eq(s.members.id, id), eq(s.members.orgId, access.org.id))).returning({ id: s.members.id });
+      if (!changed.length) throw new ValidationError({ form: "Someone changed that person's role while you were editing it." });
     }
   });
 }
@@ -137,7 +139,8 @@ export function setMemberActive(session: Session, id: string, active: boolean, d
     if (!active && member.role === "owner" && !otherActiveOwner(t, access, id)) {
       throw new ValidationError({ form: `${first(member.name)} is the only owner. Make someone else an owner first.` });
     }
-    await tx.update(s.members).set({ status: active ? "active" : "deactivated" }).where(and(eq(s.members.id, id), eq(s.members.orgId, access.org.id)));
     await audit(tx, access, active ? "member.reactivated" : "member.deactivated", `member:${id}`);
+    const changed = await tx.update(s.members).set({ status: active ? "active" : "deactivated" }).where(and(eq(s.members.id, id), eq(s.members.orgId, access.org.id))).returning({ id: s.members.id });
+    if (!changed.length) throw new ValidationError({ form: "Someone changed that person's status while you were editing it." });
   });
 }

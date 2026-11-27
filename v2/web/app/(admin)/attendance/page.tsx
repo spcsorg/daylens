@@ -28,7 +28,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       controls={
         <>
           <Steps earlier={href(params, { date: p.earlier })} later={p.later && href(params, { date: p.later })} />
-          <ExportButtons table="attendance" params={params} disabled={!data.people.length} />
+          <ExportButtons table="attendance" params={{ ...params, date: p.from }} disabled={!data.people.length} />
         </>
       }
       filters={<Filters filters={[{ key: "team", label: "Team", all: "Everyone", options: me.teams.map((t) => ({ value: t.id, label: t.name })) }]} />}

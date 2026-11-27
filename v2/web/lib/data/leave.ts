@@ -1,8 +1,8 @@
-import { and, eq, gte, lte, ne } from "drizzle-orm";
+import { and, eq, gte, lte, ne, sql } from "drizzle-orm";
 import { appDb, type Db, type Tx } from "../db/client";
 import * as s from "../db/schema";
 import type { Tables } from "../domain/model";
-import { datesBetween, isoWeekday } from "../domain/time";
+import { addDays, datesBetween, isoWeekday } from "../domain/time";
 import { requireMemberInScope, type Access, type Session } from "./access";
 import { asWriter, audit, validDate, ValidationError, type Fields } from "./catalog";
 
@@ -26,11 +26,13 @@ async function check(tx: Tx, t: Tables, access: Access, input: LeaveInput, self?
   if (!validDate(input.endsOn)) errors.endsOn = "Pick the last day.";
   else if (!errors.startsOn && input.endsOn < input.startsOn) errors.endsOn = "The last day is before the first.";
   if (Object.keys(errors).length) throw new ValidationError(errors);
+  if (input.endsOn > addDays(input.startsOn, 365)) throw new ValidationError({ endsOn: "Record a year or less at a time." });
   const days = datesBetween(input.startsOn, input.endsOn);
-  if (days.length > 366) throw new ValidationError({ endsOn: "Record a year or less at a time." });
   if (!days.some((d) => access.org.policy.workingDays.includes(isoWeekday(d)))) {
     throw new ValidationError({ endsOn: "Those are all non-working days, so there’s no leave to record." });
   }
+  // Two admins recording leave for one person at once wait here, so the overlap check below can't miss either write.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${member!.id}))`);
   const [clash] = await tx
     .select()
     .from(s.leave)
@@ -74,7 +76,8 @@ export function updateLeave(session: Session, id: string, input: Omit<LeaveInput
   return asWriter(session, db, async (tx, t, access) => {
     const old = await find(tx, t, access, id);
     const row = await check(tx, t, access, { ...input, memberId: old.memberId }, old);
-    await tx.update(s.leave).set({ type: row.type, startsOn: row.startsOn, endsOn: row.endsOn }).where(and(eq(s.leave.id, id), eq(s.leave.orgId, access.org.id)));
+    const changed = await tx.update(s.leave).set({ type: row.type, startsOn: row.startsOn, endsOn: row.endsOn }).where(and(eq(s.leave.id, id), eq(s.leave.orgId, access.org.id))).returning({ id: s.leave.id });
+    if (!changed.length) throw new ValidationError({ form: "Someone removed that leave while you were changing it." });
     await audit(tx, access, "leave.updated", target(old), `${detail(old)} became ${detail(row)}`);
   });
 }
@@ -82,7 +85,8 @@ export function updateLeave(session: Session, id: string, input: Omit<LeaveInput
 export function removeLeave(session: Session, id: string, db: Db = appDb()) {
   return asWriter(session, db, async (tx, t, access) => {
     const old = await find(tx, t, access, id);
-    await tx.delete(s.leave).where(and(eq(s.leave.id, id), eq(s.leave.orgId, access.org.id)));
+    const gone = await tx.delete(s.leave).where(and(eq(s.leave.id, id), eq(s.leave.orgId, access.org.id))).returning({ id: s.leave.id });
+    if (!gone.length) throw new ValidationError({ form: "Someone removed that leave already." });
     await audit(tx, access, "leave.removed", target(old), detail(old));
   });
 }

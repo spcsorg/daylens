@@ -1,5 +1,5 @@
 import type { Block, DailyRollup, Org, Project } from "./model";
-import { addDays, dayStart, datesBetween, DAY_MS, isoWeekday, localDate } from "./time";
+import { addDays, dayStart, datesBetween, isoWeekday, localDate } from "./time";
 
 export type Policy = {
   timeZone: string;
@@ -39,7 +39,8 @@ export function rollupDay<P extends string>(
   billable: (projectId: P) => boolean,
 ): RollupRow<P>[] {
   const from = dayStart(date, policy.timeZone);
-  const to = from + DAY_MS;
+  // The next local midnight, which is 23 or 25 hours away when the clocks change.
+  const to = dayStart(addDays(date, 1), policy.timeZone);
   const working = policy.workingDays.includes(isoWeekday(date));
   const coreFrom = from + policy.coreStart * 60_000;
   const coreTo = from + policy.coreEnd * 60_000;
@@ -74,8 +75,8 @@ export function rollupsFor(blocks: Block[], projects: Project[], org: Org, membe
 }
 
 /**
- * Every rollup row for one member's blocks under the org's policy, and the local dates they span, padded a day each side
- * so rows a different time zone put on a neighbouring day are replaced too.
+ * Every rollup row for one member's blocks under the org's policy, and the local dates they span, padded two days each side
+ * so rows the other time zone put on a neighbouring day are replaced too: between zones 25 hours apart, a block moves two.
  */
 export function rebuildRollups(blocks: Block[], projects: Project[], org: Org, memberId: string): { from: string; to: string; rows: DailyRollup[] } | null {
   const live = blocks.filter((b) => !b.deleted);
@@ -90,8 +91,8 @@ export function rebuildRollups(blocks: Block[], projects: Project[], org: Org, m
   }
   const dates = [...byDate.keys()].sort();
   return {
-    from: addDays(dates[0]!, -1),
-    to: addDays(dates.at(-1)!, 1),
+    from: addDays(dates[0]!, -2),
+    to: addDays(dates.at(-1)!, 2),
     rows: dates.flatMap((date) => rollupsFor(byDate.get(date)!, projects, org, memberId, date)),
   };
 }

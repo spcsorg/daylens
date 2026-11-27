@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition, type ReactNode } from "react";
+import { useCallback, useState, useTransition, type ReactNode } from "react";
 import type { Attendance, AttendanceLeave } from "@/lib/data/queries";
 import { dayOfMonth, dayRange, hm, initials, longDate, monthName, weekdayShort } from "@/lib/format";
 import { Dialog, Field, ToastView, useToast, type Toast } from "../../ui/controls";
@@ -18,6 +18,7 @@ const dayLink = (memberId: string, date: string) => `/people/${memberId}?range=d
 
 export function AttendanceScreen({ data, month, sub, controls, filters, today }: { data: Attendance; month: string; sub: string; controls: ReactNode; filters: ReactNode; today: string }) {
   const [open, setOpen] = useState<Open>(null);
+  const close = useCallback(() => setOpen(null), []);
   const [toast, notify] = useToast();
 
   const head = (
@@ -141,7 +142,7 @@ export function AttendanceScreen({ data, month, sub, controls, filters, today }:
           </>
         )}
       </div>
-      {open && <LeaveDialog open={open} data={data} today={today} onClose={() => setOpen(null)} notify={notify} />}
+      {open && <LeaveDialog open={open} data={data} today={today} onClose={close} notify={notify} />}
       <ToastView toast={toast} />
     </>
   );
@@ -170,6 +171,7 @@ function LeaveDialog({ open, data, today, onClose, notify }: { open: NonNullable
       notify({ text: editing ? `Changed ${first(name)}’s leave` : `${type} recorded for ${name}` });
       onClose();
     });
+
 
   const remove = () =>
     start(async () => {
@@ -224,7 +226,7 @@ function LeaveDialog({ open, data, today, onClose, notify }: { open: NonNullable
             Remove
           </button>
         )}
-        <button type="button" className="btn quiet small" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn quiet small" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="submit" className="btn primary small" disabled={busy} aria-busy={busy}>
           {editing ? "Save" : "Record leave"}
         </button>

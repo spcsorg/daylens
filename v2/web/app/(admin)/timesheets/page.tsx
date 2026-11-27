@@ -37,7 +37,7 @@ export default async function TimesheetsPage({ searchParams }: { searchParams: P
     <>
       <Header title="Timesheets" sub={`Week of ${p.label} · due Friday 6:00 PM`}>
         <Steps earlier={href(params, { ...step, date: p.earlier })} later={p.later && href(params, { ...step, date: p.later })} />
-        <ExportButtons table="timesheets" params={{ ...params, sheet: undefined }} />
+        <ExportButtons table="timesheets" params={{ ...params, date: p.from, sheet: undefined }} />
       </Header>
       <div className="scroll">
         <Filters filters={[{ key: "team", label: "Team", all: "All teams", options: me.teams.map((t) => ({ value: t.id, label: t.name })) }]} />

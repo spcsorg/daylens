@@ -141,6 +141,7 @@ describe("recording leave", () => {
     await expect(recordLeave(as("Paul Mwangi"), { memberId: moses, type: "Annual leave", startsOn: "2026-11-21", endsOn: "2026-11-22" }, env.db)).rejects.toThrow(/non-working days/);
     await expect(recordLeave(as("Paul Mwangi"), { memberId: moses, type: "Unpaid sabbatical", startsOn: "2026-12-01", endsOn: "2026-12-02" }, env.db)).rejects.toThrow(ValidationError);
     await expect(recordLeave(as("Paul Mwangi"), { memberId: moses, type: "Annual leave", startsOn: "2026-12-03", endsOn: "2026-12-01" }, env.db)).rejects.toThrow(ValidationError);
+    await expect(recordLeave(as("Paul Mwangi"), { memberId: moses, type: "Annual leave", startsOn: "2027-01-04", endsOn: "2030-01-04" }, env.db)).rejects.toThrow(/a year or less/);
   });
 });
 
@@ -185,6 +186,17 @@ describe("settings", () => {
 
     await setMemberActive(as("Paul Mwangi"), eric, true, env.db);
     expect((await getPeople(as("Paul Mwangi"), WEEK, NOW, env.db)).map((r) => r.memberId)).toContain(eric);
+  });
+
+  it("lets an owner step down when another owner is there, with their teams and the audit row", async () => {
+    const diane = id("Diane Ingabire");
+    const tax = env.tables.teams.find((t) => t.name === "Tax")!.id;
+    await updateMember(as("Paul Mwangi"), diane, { role: "owner", adminScope: null, teamIds: [tax], adminTeamIds: [] }, env.db);
+    await updateMember(as("Diane Ingabire"), diane, { role: "admin", adminScope: "teams", teamIds: [tax], adminTeamIds: [tax] }, env.db);
+    const after = (await getSettings(as("Paul Mwangi"), env.db).then((d) => d.members.find((m) => m.id === diane)!));
+    expect(after).toMatchObject({ role: "admin", adminScope: "teams", adminTeamIds: [tax] });
+    expect((await audits(`member:${diane}`)).map((a) => a.action)).toEqual(expect.arrayContaining(["member.teams_changed", "member.role_changed"]));
+    await updateMember(as("Paul Mwangi"), diane, { role: "admin", adminScope: "teams", teamIds: [tax], adminTeamIds: [tax] }, env.db);
   });
 
   it("keeps the last active owner, in the module and in Postgres", async () => {

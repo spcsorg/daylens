@@ -39,6 +39,18 @@ describe("rollupDay", () => {
     expect(rows[0]).toMatchObject({ seconds: 7200, coreSeconds: 0 });
   });
 
+  it("counts the whole of a day the clocks change on", () => {
+    const newYork: Policy = { ...policy, timeZone: "America/New_York" };
+    const late = dayStart("2026-11-01", newYork.timeZone) + (23 * 60 + 15) * 60_000;
+    const rows = rollupDay([{ start: late, end: late + 30 * 60_000, kind: "work", projectId: "audit" }], "2026-11-01", newYork, billable);
+    expect(rows).toEqual([{ projectId: "audit", seconds: 1800, billableSeconds: 1800, coreSeconds: 0, idleSeconds: 0 }]);
+    const lastHalfHour = dayStart("2026-03-09", newYork.timeZone) - 30 * 60_000;
+    const spring = rollupDay([{ start: lastHalfHour, end: lastHalfHour + 30 * 60_000, kind: "work", projectId: "audit" }], "2026-03-08", newYork, billable);
+    expect(spring[0]).toMatchObject({ seconds: 1800 });
+    const spill = rollupDay([{ start: lastHalfHour, end: lastHalfHour + 30 * 60_000, kind: "work", projectId: "audit" }], "2026-03-09", newYork, billable);
+    expect(spill).toEqual([]);
+  });
+
   it("ignores deleted blocks", () => {
     expect(rollupDay([{ start: at(thursday, 9), end: at(thursday, 10), kind: "work", projectId: "audit", deleted: true }], thursday, policy, billable)).toEqual([]);
   });
