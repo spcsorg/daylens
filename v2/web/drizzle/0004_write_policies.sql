@@ -1,5 +1,6 @@
 -- Writes go through the same two layers as reads. Owners and admins write clients and projects in their org;
--- an admin scoped to teams assigns only people and teams in that scope. Clients and projects are archived, never deleted.
+-- an admin scoped to teams assigns only people and teams in that scope, and only to projects that aren't archived.
+-- Clients and projects are archived, never deleted.
 -- Every write adds an audit_log row as the signed-in admin.
 GRANT INSERT, UPDATE ON clients, projects TO daylens_app;
 --> statement-breakpoint
@@ -32,11 +33,13 @@ CREATE POLICY own_org_update ON projects FOR UPDATE TO daylens_app USING (org_id
   WITH CHECK (org_id = app_org_id() AND EXISTS (SELECT 1 FROM clients c WHERE c.id = client_id AND c.org_id = app_org_id()));
 --> statement-breakpoint
 CREATE POLICY in_scope_insert ON assignments FOR INSERT TO daylens_app
-  WITH CHECK (org_id = app_org_id() AND app_can_assign(member_id, team_id) AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.org_id = app_org_id()));
+  WITH CHECK (org_id = app_org_id() AND app_can_assign(member_id, team_id)
+    AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.org_id = app_org_id() AND p.archived_at IS NULL));
 --> statement-breakpoint
 CREATE POLICY in_scope_update ON assignments FOR UPDATE TO daylens_app
   USING (org_id = app_org_id() AND app_can_assign(member_id, team_id))
-  WITH CHECK (org_id = app_org_id() AND app_can_assign(member_id, team_id) AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.org_id = app_org_id()));
+  WITH CHECK (org_id = app_org_id() AND app_can_assign(member_id, team_id)
+    AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.org_id = app_org_id() AND p.archived_at IS NULL));
 --> statement-breakpoint
 CREATE POLICY in_scope_delete ON assignments FOR DELETE TO daylens_app USING (org_id = app_org_id() AND app_can_assign(member_id, team_id));
 --> statement-breakpoint

@@ -7,14 +7,34 @@ export function Toggle({ checked, label, onChange, disabled }: { checked: boolea
   return <button type="button" className="toggle" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)} />;
 }
 
-/** A modal form: Escape or a click outside closes it, and Enter submits. */
+const FOCUSABLE = "input:not([disabled]), select:not([disabled]), textarea, button:not([disabled]), [href]";
+
+/** A modal form: Escape or a click outside closes it, Enter submits, Tab stays inside it, and focus goes back where it was. */
 export function Dialog({ title, onClose, onSubmit, children }: { title: string; onClose: () => void; onSubmit: () => void; children: ReactNode }) {
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
-    const close = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", close);
+    const opener = document.activeElement as HTMLElement | null;
     ref.current?.querySelector<HTMLElement>("input, select")?.focus();
-    return () => document.removeEventListener("keydown", close);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key !== "Tab" || !ref.current) return;
+      const inside = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const first = inside[0];
+      const last = inside.at(-1);
+      if (!first || !last) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("keydown", key);
+      if (opener?.isConnected) opener.focus();
+    };
   }, [onClose]);
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

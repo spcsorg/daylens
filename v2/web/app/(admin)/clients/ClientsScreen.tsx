@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { clientColors } from "@/lib/colors";
 import type { Catalog, CatalogClient, CatalogProject } from "@/lib/data/queries";
 import { hrs, initials, shortDate, wholeHours } from "@/lib/format";
@@ -257,13 +257,13 @@ function ProjectDetail({ project, client, notify, open }: { project: CatalogProj
         <div className="settings-card" style={{ padding: "16px 20px" }}>
           <dl className="kv">
             <dt>Client names</dt>
-            <dd><Chips label="Other name" fixed={client.name} items={client.aliases} onChange={(aliases, done) => setClient({ aliases }, done)} /></dd>
+            <dd><Chips label="Other name" fixed={client.name} busy={busy} items={client.aliases} onChange={(aliases, done) => setClient({ aliases }, done)} /></dd>
             <dt>Keywords</dt>
-            <dd><Chips label="Keyword" items={project.keywords} onChange={(keywords, done) => save(() => saveProject(project.id, { keywords }), done)} /></dd>
+            <dd><Chips label="Keyword" busy={busy} items={project.keywords} onChange={(keywords, done) => save(() => saveProject(project.id, { keywords }), done)} /></dd>
             <dt>Websites</dt>
-            <dd><Chips label="Website" items={client.domains} onChange={(domains, done) => setClient({ domains }, done)} /></dd>
+            <dd><Chips label="Website" busy={busy} items={client.domains} onChange={(domains, done) => setClient({ domains }, done)} /></dd>
             <dt>Email domains</dt>
-            <dd><Chips label="Email domain" items={client.emailDomains} onChange={(emailDomains, done) => setClient({ emailDomains }, done)} /></dd>
+            <dd><Chips label="Email domain" busy={busy} items={client.emailDomains} onChange={(emailDomains, done) => setClient({ emailDomains }, done)} /></dd>
           </dl>
         </div>
       </div>
@@ -315,7 +315,7 @@ function ProjectDetail({ project, client, notify, open }: { project: CatalogProj
   );
 }
 
-function Chips({ items, fixed, label, onChange }: { items: string[]; fixed?: string; label: string; onChange: (next: string[], done: string) => Promise<boolean> }) {
+function Chips({ items, fixed, label, busy, onChange }: { items: string[]; fixed?: string; label: string; busy: boolean; onChange: (next: string[], done: string) => Promise<boolean> }) {
   const [adding, setAdding] = useState<string | null>(null);
   const add = async () => {
     const v = adding?.trim();
@@ -328,13 +328,13 @@ function Chips({ items, fixed, label, onChange }: { items: string[]; fixed?: str
       {items.map((x) => (
         <span key={x} className="chip-x">
           {x}
-          <button type="button" aria-label={`Remove ${x}`} onClick={() => onChange(items.filter((y) => y !== x), `Removed ${x}`)}>
+          <button type="button" aria-label={`Remove ${x}`} disabled={busy} onClick={() => onChange(items.filter((y) => y !== x), `Removed ${x}`)}>
             <Icon name="x" size={12} />
           </button>
         </span>
       ))}
       {adding === null ? (
-        <button type="button" className="chip-x add" onClick={() => setAdding("")}>
+        <button type="button" className="chip-x add" disabled={busy} onClick={() => setAdding("")}>
           <Icon name="plus" size={12} />
           Add
         </button>
@@ -362,6 +362,13 @@ function useForm<T extends Record<string, string | boolean>>(initial: T) {
   const [values, setValues] = useState(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, start] = useTransition();
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const set = (k: keyof T) => (v: string | boolean) => setValues((x) => ({ ...x, [k]: v }));
   const submit = (call: () => Promise<Result>, ok: (r: Extract<Result, { ok: true }>) => void) =>
     start(async () => {
@@ -369,7 +376,7 @@ function useForm<T extends Record<string, string | boolean>>(initial: T) {
       if (r.ok) return ok(r);
       setErrors(r.fields ?? { form: r.message });
     });
-  return { values, set, errors, busy, submit };
+  return { values, set, errors, busy, submit, alive };
 }
 
 function Actions({ busy, label, onClose, left }: { busy: boolean; label: string; onClose: () => void; left?: ReactNode }) {
@@ -391,7 +398,7 @@ function ClientDialog({ client, onClose, notify, onCreated }: { client?: Catalog
     start(async () => {
       const r = await archiveClient(client!.id, !client!.archived).catch((): Result => ({ ok: false, message: "Couldn’t archive the client: Daylens didn’t answer. Try again." }));
       notify(r.ok ? { text: client!.archived ? `Restored ${client!.name}` : `Archived ${client!.name} and hid its projects from pickers` } : { text: r.message, error: true });
-      if (r.ok) onClose();
+      if (r.ok && f.alive.current) onClose();
     });
   return (
     <Dialog
@@ -401,6 +408,7 @@ function ClientDialog({ client, onClose, notify, onCreated }: { client?: Catalog
         f.submit(
           () => saveClient(client?.id ?? null, client ? { name: v.name, code: v.code, billable: v.billable } : { name: v.name, code: v.code, billable: v.billable, emailDomains: csv(v.email) }),
           (r) => {
+            if (!f.alive.current) return;
             if (client) {
               notify({ text: `Saved ${v.name.trim()}` });
               onClose();
@@ -464,7 +472,7 @@ function ProjectDialog({
     start(async () => {
       const r = await archiveProject(project!.id, !project!.archived).catch((): Result => ({ ok: false, message: "Couldn’t archive the project: Daylens didn’t answer. Try again." }));
       notify(r.ok ? { text: project!.archived ? `Restored ${project!.name}` : `Archived ${project!.name}. Its hours stay in every report` } : { text: r.message, error: true });
-      if (r.ok) onClose();
+      if (r.ok && f.alive.current) onClose();
     });
   return (
     <Dialog
@@ -475,6 +483,7 @@ function ProjectDialog({
           () => saveProject(project?.id ?? null, { name: v.name, clientId: v.clientId, code: v.code, keywords: csv(v.keywords), billable: v.billable }),
           (r) => {
             notify({ text: project ? `Saved ${v.name.trim()}` : `Created ${v.name.trim()}` });
+            if (!f.alive.current) return;
             if (!project) onCreated(r.id!);
             onClose();
           },
@@ -531,7 +540,7 @@ function AssignDialog({ project, data, onClose, notify }: { project: CatalogProj
           () => saveAssignment(null, { projectId: project.id, [kind === "team" ? "teamId" : "memberId"]: id, startsAt: v.startsAt, endsAt: v.endsAt }),
           () => {
             notify({ text: `${name} assigned to ${project.name}` });
-            onClose();
+            if (f.alive.current) onClose();
           },
         )
       }
@@ -566,7 +575,7 @@ function DatesDialog({ assignment, onClose, notify }: { assignment: Assignment; 
           () => saveAssignment(assignment.id, f.values),
           () => {
             notify({ text: `Saved ${assignment.name}’s dates` });
-            onClose();
+            if (f.alive.current) onClose();
           },
         )
       }

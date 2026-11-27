@@ -90,9 +90,29 @@ describe("client and project codes", () => {
     await env.db.execute(sql`delete from orgs where id = ${other.id}`);
   });
 
+  it("reject a date that isn't one, as a field error rather than a crash", async () => {
+    const err = (await assign(as("Paul Mwangi"), { projectId: project("LKB-AUD-26"), teamId: team("Audit"), endsAt: "2026-02-31" }, env.db).catch((e: unknown) => e)) as ValidationError;
+    expect(err.fields).toEqual({ endsAt: "Pick an end date." });
+    const impossible = (await assign(as("Paul Mwangi"), { projectId: project("LKB-AUD-26"), teamId: team("Audit"), startsAt: "2026-13-01" }, env.db).catch((e: unknown) => e)) as ValidationError;
+    expect(impossible.fields).toEqual({ startsAt: "Pick a start date." });
+  });
+
   it("show what's missing or malformed beside each field", async () => {
     const err = (await createClient(as("Paul Mwangi"), { name: " ", code: "", billable: true, aliases: [], domains: ["not a domain"], emailDomains: ["@mara.example"] }, env.db).catch((e: unknown) => e)) as ValidationError;
     expect(Object.keys(err.fields).sort()).toEqual(["code", "domains", "name"]);
+  });
+});
+
+describe("editing one field", () => {
+  it("leaves the other fields as they stand, including someone else's change", async () => {
+    const owner = as("Paul Mwangi");
+    const projectId = await createProject(owner, { clientId: client("LKB"), name: "Reworked audit", code: "LKB-AUD-27", billable: true, keywords: ["year-end"] }, env.db);
+    await env.db.execute(sql`update projects set keywords = '{year-end, stock count}' where id = ${projectId}`);
+    await updateProject(owner, projectId, { billable: false }, env.db);
+    const row = (await env.db.execute(sql`select billable, keywords from projects where id = ${projectId}`)).rows[0];
+    expect(row).toEqual({ billable: false, keywords: ["year-end", "stock count"] });
+    await setProjectArchived(owner, projectId, true, env.db);
+    await env.db.execute(sql`update projects set archived_at = null where id = ${projectId}`);
   });
 });
 
@@ -156,6 +176,9 @@ describe("archiving a project", () => {
     expect(listed).toMatchObject({ archived: true, seconds: hours.seconds });
     expect(await count(sql`select count(*)::int as n from blocks where project_id = ${tp}`)).toBeGreaterThan(0);
     await expect(assign(owner, { projectId: tp, teamId: team("Tax") }, env.db)).rejects.toThrow("is archived");
+    const org = env.tables.orgs[0]!.id;
+    const raced = asAdmin(env.db, owner.memberId, (tx) => tx.execute(sql`insert into assignments (org_id, project_id, team_id) values (${org}, ${tp}, ${team("Tax")}) returning id`));
+    expect(await pgError(raced)).toMatch(/row-level security/);
     await setProjectArchived(owner, tp, false, env.db);
   });
 });

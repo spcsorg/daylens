@@ -88,14 +88,24 @@ function checkProject(t: Tables, access: Access, input: ProjectInput, self?: str
   return row;
 }
 
+const validDate = (d: string) => {
+  const at = Date.parse(d + "T00:00:00Z");
+  return DATE.test(d) && !Number.isNaN(at) && new Date(at).toISOString().startsWith(d);
+};
+
 function checkDates(startsAt: string | undefined, endsAt: string | undefined) {
   const errors: Fields = {};
-  const valid = (d: string) => DATE.test(d) && new Date(d + "T00:00:00Z").toISOString().startsWith(d);
+  const valid = validDate;
   if (startsAt && !valid(startsAt)) errors.startsAt = "Pick a start date.";
   if (endsAt && !valid(endsAt)) errors.endsAt = "Pick an end date.";
   if (startsAt && endsAt && !errors.startsAt && !errors.endsAt && endsAt < startsAt) errors.endsAt = "The end date is before the start date.";
   if (Object.keys(errors).length) throw new ValidationError(errors);
   return { startsAt: startsAt || null, endsAt: endsAt || null };
+}
+
+/** The checked row, cut to the fields this call was given, so two admins changing different fields don't overwrite each other. */
+function given<T extends object>(row: T, changes: Partial<T>): Partial<T> {
+  return Object.fromEntries(Object.entries(row).filter(([k]) => k in changes)) as Partial<T>;
 }
 
 /** A unique-code race that slipped past the check above still reads as the form error. */
@@ -146,7 +156,7 @@ export function updateClient(session: Session, id: string, changes: Partial<Clie
   return asWriter(session, db, async (tx, t, access) => {
     const client = findClient(t, access, id);
     const row = checkClient(t, access, { ...client, ...changes }, id);
-    await codeConflict("client", row.code, () => tx.update(s.clients).set(row).where(and(eq(s.clients.id, id), eq(s.clients.orgId, access.org.id))));
+    await codeConflict("client", row.code, () => tx.update(s.clients).set(given(row, changes)).where(and(eq(s.clients.id, id), eq(s.clients.orgId, access.org.id))));
     await audit(tx, access, "client.updated", `client:${id}`);
   });
 }
@@ -172,7 +182,7 @@ export function updateProject(session: Session, id: string, changes: Partial<Pro
   return asWriter(session, db, async (tx, t, access) => {
     const project = findProject(t, access, id);
     const row = checkProject(t, access, { ...project, ...changes }, id);
-    await codeConflict("project", row.code, () => tx.update(s.projects).set(row).where(and(eq(s.projects.id, id), eq(s.projects.orgId, access.org.id))));
+    await codeConflict("project", row.code, () => tx.update(s.projects).set(given(row, changes)).where(and(eq(s.projects.id, id), eq(s.projects.orgId, access.org.id))));
     await audit(tx, access, "project.updated", `project:${id}`);
   });
 }
