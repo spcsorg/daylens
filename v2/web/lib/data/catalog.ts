@@ -7,7 +7,7 @@ import { loadAssignments, loadOrg } from "../db/store";
 import type { Tables } from "../domain/model";
 
 /**
- * Writes to clients, projects and assignments. Each runs as daylens_app with the admin set, so row-level security
+ * Writes to clients, projects and assignments, and the helpers every write shares. Each runs as daylens_app with the admin set, so row-level security
  * checks it again, and adds its audit_log row in the same transaction.
  */
 
@@ -119,11 +119,11 @@ async function codeConflict<T>(what: "client" | "project", codeValue: string, wr
   }
 }
 
-async function audit(tx: Tx, access: Access, action: string, target: string) {
-  await tx.insert(s.auditLog).values({ orgId: access.org.id, actorId: access.member.id, action, target });
+export async function audit(tx: Tx, access: Access, action: string, target: string, detail?: string) {
+  await tx.insert(s.auditLog).values({ orgId: access.org.id, actorId: access.member.id, action, target, detail });
 }
 
-function asWriter<T>(session: Session, db: Db, fn: (tx: Tx, t: Tables, access: Access) => Promise<T>) {
+export function asWriter<T>(session: Session, db: Db, fn: (tx: Tx, t: Tables, access: Access) => Promise<T>) {
   return asAdmin(db, session.memberId, async (tx) => {
     const t = await loadOrg(tx, session.memberId);
     const access = requireAdmin(t, session);

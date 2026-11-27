@@ -172,8 +172,17 @@ export const timesheets = pgTable(
     submittedAt: at(),
     approvedBy: uuid().references(() => members.id),
     approvedAt: at(),
+    /** Bumped by a trigger on every change to the timesheet or its lines, so a review of an older copy is refused. */
+    version: integer().notNull().default(1),
+    /** Why it was sent back, or why it was reopened. */
+    reviewNote: text(),
   },
-  (t) => [index().on(t.orgId, t.weekStart), index().on(t.memberId, t.weekStart)],
+  (t) => [
+    index().on(t.orgId, t.weekStart),
+    index().on(t.memberId, t.weekStart),
+    check("timesheets_rejected_has_note", sql`${t.status} <> 'rejected' or coalesce(${t.reviewNote}, '') ~ '\\S'`),
+    check("timesheets_approved_has_approver", sql`${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null)`),
+  ],
 );
 
 export const timesheetLines = pgTable(
@@ -185,7 +194,7 @@ export const timesheetLines = pgTable(
     hours: real().notNull(),
     description: text().notNull(),
   },
-  (t) => [index().on(t.timesheetId)],
+  (t) => [index().on(t.timesheetId), check("timesheet_lines_quarter_hours", sql`${t.hours} > 0 and ${t.hours} <= 24 and ${t.hours} * 4 = trunc(${t.hours} * 4)`)],
 );
 
 export const auditLog = pgTable(
@@ -196,6 +205,8 @@ export const auditLog = pgTable(
     actorId: uuid().references(() => members.id),
     action: text().notNull(),
     target: text().notNull(),
+    /** The reason given, for actions that need one: a send-back comment or a reopen reason. */
+    detail: text(),
     at: at().notNull().default(sql`now()`),
   },
   (t) => [index().on(t.orgId, t.at)],

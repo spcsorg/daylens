@@ -317,3 +317,83 @@ export function catalog(t: Tables, session: Session | null, range: Range) {
 export type Catalog = ReturnType<typeof catalog>;
 export type CatalogClient = Catalog["clients"][number];
 export type CatalogProject = CatalogClient["projects"][number];
+
+export type Waiting = { weekStart: string; count: number }[];
+
+/** Everyone in scope for one week, with their timesheet's status, the hours they claimed and the time Daylens tracked. */
+export function timesheetQueue(t: Tables, session: Session | null, args: { weekStart: string; teamId?: string }, waiting: Waiting) {
+  const week = { from: args.weekStart, to: addDays(args.weekStart, 6) };
+  checkRange(week);
+  if (mondayOf(args.weekStart) !== args.weekStart) throw new AccessError("A timesheet week starts on a Monday");
+  const access = requireAdmin(t, session);
+  const { org } = access;
+  const members = membersInScope(t, access, args.teamId);
+  const rows = rollups(t, org.id, week, new Set(members.map((m) => m.id)));
+  const billable = new Map(t.projects.map((p) => [p.id, p.billable]));
+  const teams = teamsByMember(t, org.id);
+  return {
+    people: members
+      .map((m) => {
+        const sheet = t.timesheets.find((s) => s.memberId === m.id && s.weekStart === args.weekStart);
+        const lines = sheet ? t.timesheetLines.filter((l) => l.timesheetId === sheet.id) : [];
+        const own = rows.filter((r) => r.memberId === m.id);
+        return {
+          memberId: m.id,
+          name: m.name,
+          teams: teams.get(m.id) ?? [],
+          sheet: sheet ? { id: sheet.id, version: sheet.version, submittedAt: sheet.submittedAt ?? null } : null,
+          status: (sheet?.status ?? "missing") as TimesheetStatus | "missing",
+          hours: sum(lines, (l) => l.hours),
+          billableHours: sum(lines.filter((l) => billable.get(l.projectId)), (l) => l.hours),
+          trackedSeconds: sum(own, (r) => r.seconds),
+          unattributedSeconds: sum(own.filter((r) => !r.projectId), (r) => r.seconds),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    waitingElsewhere: waiting.filter((w) => w.weekStart !== args.weekStart),
+  };
+}
+
+export type TimesheetQueue = ReturnType<typeof timesheetQueue>;
+export type QueueRow = TimesheetQueue["people"][number];
+
+/** One timesheet for review: hours by project and day with the descriptions, beside what Daylens tracked each day. */
+export function timesheetReview(t: Tables, session: Session | null, id: string, last: { action: string; actorId: string | null; at: number } | null) {
+  const access = requireAdmin(t, session);
+  const sheet = t.timesheets.find((s) => s.id === id && s.orgId === access.org.id);
+  if (!sheet) throw new AccessError("That timesheet is outside your admin scope");
+  requireAssignee(t, access, { memberId: sheet.memberId }, false);
+  const member = t.members.find((m) => m.id === sheet.memberId)!;
+  const lines = t.timesheetLines.filter((l) => l.timesheetId === sheet.id);
+  const tracked = t.dailyRollups.filter((r) => r.memberId === member.id);
+  const week = datesBetween(sheet.weekStart, addDays(sheet.weekStart, 6));
+  const days = week.filter((d) => access.org.policy.workingDays.includes(isoWeekday(d)) || lines.some((l) => l.date === d) || sum(tracked.filter((r) => r.date === d), (r) => r.seconds) >= 900);
+  const byProject = [...new Set(lines.map((l) => l.projectId))].map((projectId) => {
+    const own = lines.filter((l) => l.projectId === projectId).sort((a, b) => a.date.localeCompare(b.date));
+    return {
+      projectId,
+      project: projectLabel(t, projectId),
+      hours: days.map((d) => sum(own.filter((l) => l.date === d), (l) => l.hours)),
+      descriptions: [...new Set(own.map((l) => l.description.trim()).filter(Boolean))],
+      total: sum(own, (l) => l.hours),
+    };
+  });
+  const name = (who: string | null | undefined) => (!who ? null : who === access.member.id ? "you" : (t.members.find((m) => m.id === who)?.name ?? "another admin"));
+  return {
+    id: sheet.id,
+    version: sheet.version,
+    status: sheet.status,
+    weekStart: sheet.weekStart,
+    member: { id: member.id, name: member.name, teams: teamsByMember(t, access.org.id).get(member.id) ?? [] },
+    submittedAt: sheet.submittedAt ?? null,
+    approved: sheet.approvedAt ? { by: name(sheet.approvedBy), at: sheet.approvedAt } : null,
+    note: sheet.reviewNote ?? null,
+    lastReview: last && { reopened: last.action === "timesheet.reopened", by: name(last.actorId), at: last.at },
+    days,
+    rows: byProject.sort((a, b) => b.total - a.total),
+    claimed: days.map((d) => sum(lines.filter((l) => l.date === d), (l) => l.hours)),
+    tracked: days.map((d) => sum(tracked.filter((r) => r.date === d), (r) => r.seconds) / 3600),
+  };
+}
+
+export type TimesheetReview = ReturnType<typeof timesheetReview>;

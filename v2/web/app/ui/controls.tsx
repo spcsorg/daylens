@@ -10,11 +10,11 @@ export function Toggle({ checked, label, onChange, disabled }: { checked: boolea
 const FOCUSABLE = "input:not([disabled]), select:not([disabled]), textarea, button:not([disabled]), [href]";
 
 /** A modal form: Escape or a click outside closes it, Enter submits, Tab stays inside it, and focus goes back where it was. */
-export function Dialog({ title, onClose, onSubmit, children }: { title: string; onClose: () => void; onSubmit: () => void; children: ReactNode }) {
+export function Dialog({ title, heading, wide, onClose, onSubmit, children }: { title: string; heading?: ReactNode; wide?: boolean; onClose: () => void; onSubmit: () => void; children: ReactNode }) {
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>("input, select")?.focus();
+    (ref.current?.querySelector<HTMLElement>("input, select, textarea") ?? ref.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") return onClose();
       if (e.key !== "Tab" || !ref.current) return;
@@ -40,7 +40,7 @@ export function Dialog({ title, onClose, onSubmit, children }: { title: string; 
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form
         ref={ref}
-        className="dialog"
+        className={wide ? "dialog wide" : "dialog"}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -49,7 +49,7 @@ export function Dialog({ title, onClose, onSubmit, children }: { title: string; 
           onSubmit();
         }}
       >
-        <h2>{title}</h2>
+        {heading ?? <h2>{title}</h2>}
         {children}
       </form>
     </div>

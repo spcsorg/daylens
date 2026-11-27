@@ -271,6 +271,15 @@ Daylens Enterprise adds an admin web app for firms. It lives in `v2/web`, beside
 - Clients and projects are archived, never deleted. Archived ones leave every picker and can't be assigned; their hours, blocks and timesheet lines stay, and Restore brings them back. Archiving a client hides its projects from pickers too.
 - An assignment names one person or one team, with optional start and end dates (end on or after start). Hours on the screen are this week's rollups for the people in the admin's scope.
 
+**Timesheet review.** The Timesheets screen lists one week's timesheets for the people in the admin's scope, in tabs by status (waiting, sent back, approved, not sent yet, which holds drafts and people with none), with each person's claimed hours beside the time Daylens tracked that week. The sidebar shows how many are waiting in the admin's scope across all weeks, and the screen points to other weeks that still have some. Writes go through `lib/data/review.ts` with the same two layers and an audit row per timesheet (`timesheet.approved`, `timesheet.rejected`, `timesheet.reopened`, target `timesheet:<id>`, the comment or reason in `audit_log.detail`).
+
+- An admin approves, sends back or bulk approves submitted timesheets of people in their scope, and reopens approved ones. Sending back needs a comment and reopening needs a reason; both are kept on the timesheet (`review_note`), where the employee's app will show them. Bulk approve is all or nothing.
+- Every change to a timesheet or its lines bumps `timesheets.version` (a trigger), and each review names the version it was shown. A timesheet that changed since is refused with a message saying so, and the screen re-reads.
+- Approved timesheets are locked in Postgres, for every role: their lines can't be added, changed or removed, and the only allowed change is back to submitted with a reason (FR-42). `drizzle/0006_timesheet_review_policies.sql` holds the triggers and the UPDATE policy; the app role may change only the review columns.
+- Hours are quarter hours, at most 24 a line, enforced by a check on `timesheet_lines`.
+- An admin can review their own timesheet if it's in their scope; owners have nobody above them in the org model yet.
+- Not built yet: export of approved timesheets and the Odoo push (FR-41), reminders (FR-40), and the deadline setting (FR-38); the screen shows the SRS default, Friday 6:00 PM.
+
 **Backups.** `npm run db:backup` runs `pg_dump` in custom format to a timestamped file (`daylens-<UTC time>.dump`) in `BACKUP_DIR`, the first argument, or `backups/`. `npm run db:restore -- <file>` creates the `daylens_app` role if the server lacks it (roles live outside a dump) and runs `pg_restore --clean --if-exists --no-owner`. A test seeds a database, backs it up, restores into a fresh one, and compares every table's row count and a rollup. Both need `pg_dump` and `pg_restore` from Postgres 16 or later on the `PATH`, no older than the server. Scheduling and off-site copies come later.
 
 **Moving hosts.**

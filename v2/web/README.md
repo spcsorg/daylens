@@ -1,6 +1,6 @@
 # Daylens Enterprise admin
 
-The admin dashboard for firms: Overview, People, with each person's day, week and month, and Clients and projects with their assignments. Design and decisions: [System design](../../docs/system-design.md#enterprise-admin-dashboard-and-org-database).
+The admin dashboard for firms: Overview, People, with each person's day, week and month, Clients and projects with their assignments, and Timesheets, where admins approve, send back and reopen them. Design and decisions: [System design](../../docs/system-design.md#enterprise-admin-dashboard-and-org-database).
 
 ## Run it locally
 

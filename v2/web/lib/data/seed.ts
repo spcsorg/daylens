@@ -141,7 +141,8 @@ export function seedTables(now: number, weeks = 4): Tables {
       if (status === "missing") continue;
       const sheetId = randomUUID();
       const friday = dayStart(addDays(weekStart, 4), ORG.timeZone) + 16 * 3_600_000;
-      const sheet: Timesheet = { id: sheetId, orgId, memberId: id(m.key), weekStart, status };
+      const sheet: Timesheet = { id: sheetId, orgId, memberId: id(m.key), weekStart, status, version: 1 };
+      if (status === "rejected") sheet.reviewNote = "Split Tuesday between the VAT return and the WHT schedules, then send it again.";
       if (status !== "draft") sheet.submittedAt = Math.min(friday, now);
       if (status === "approved") Object.assign(sheet, { approvedBy: owner, approvedAt: Math.min(friday + 3 * 3_600_000, now) });
       t.timesheets.push(sheet);

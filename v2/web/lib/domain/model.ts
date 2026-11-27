@@ -77,9 +77,11 @@ export type Timesheet = {
   submittedAt?: number;
   approvedBy?: string;
   approvedAt?: number;
+  version: number;
+  reviewNote?: string;
 };
 export type TimesheetLine = { timesheetId: string; date: string; projectId: string; hours: number; description: string };
-export type AuditEntry = { orgId: string; actorId?: string; action: string; target: string; at: number };
+export type AuditEntry = { orgId: string; actorId?: string; action: string; target: string; detail?: string; at: number };
 
 export type Tables = {
   orgs: Org[];

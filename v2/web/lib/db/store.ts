@@ -1,5 +1,5 @@
-import { and, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
-import type { Block, Tables } from "../domain/model";
+import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import type { Block, Tables, Timesheet } from "../domain/model";
 import type { Db, Tx } from "./client";
 import * as s from "./schema";
 
@@ -30,12 +30,20 @@ export async function replaceAll(db: Db, t: Tables) {
     await insertAll(t.assignments, (b) => tx.insert(s.assignments).values(b));
     await insertAll(t.blocks, (b) => tx.insert(s.blocks).values(b.map((x) => ({ ...x, start: new Date(x.start), end: new Date(x.end) }))));
     await insertAll(t.dailyRollups, (b) => tx.insert(s.dailyRollups).values(b));
+    // Lines can't go into an approved timesheet, so approved ones arrive as submitted and are approved once their lines are in.
     await insertAll(t.timesheets, (b) =>
       tx.insert(s.timesheets).values(
-        b.map((x) => ({ ...x, submittedAt: x.submittedAt ? new Date(x.submittedAt) : null, approvedAt: x.approvedAt ? new Date(x.approvedAt) : null })),
+        b.map((x) => ({
+          ...x,
+          status: x.status === "approved" ? ("submitted" as const) : x.status,
+          submittedAt: x.submittedAt ? new Date(x.submittedAt) : null,
+          approvedAt: x.approvedAt ? new Date(x.approvedAt) : null,
+        })),
       ),
     );
     await insertAll(t.timesheetLines, (b) => tx.insert(s.timesheetLines).values(b));
+    const approved = t.timesheets.filter((x) => x.status === "approved").map((x) => x.id);
+    await insertAll(approved, (b) => tx.update(s.timesheets).set({ status: "approved" }).where(inArray(s.timesheets.id, b)));
     await insertAll(t.auditLog, (b) => tx.insert(s.auditLog).values(b.map((x) => ({ ...x, at: new Date(x.at) }))));
   });
 }
@@ -116,14 +124,50 @@ export async function loadBlocks(tx: Tx, t: Tables, orgId: string, from: number,
   );
 }
 
+const sheet = (x: typeof s.timesheets.$inferSelect): Timesheet => ({
+  ...x,
+  submittedAt: ms(x.submittedAt),
+  approvedAt: ms(x.approvedAt),
+  approvedBy: opt(x.approvedBy),
+  reviewNote: opt(x.reviewNote),
+});
+
 export async function loadTimesheets(tx: Tx, t: Tables, orgId: string, weekStart: string, memberIds: string[], withLines: boolean) {
   if (!memberIds.length) return;
   const rows = await tx
     .select()
     .from(s.timesheets)
     .where(and(eq(s.timesheets.orgId, orgId), eq(s.timesheets.weekStart, weekStart), inArray(s.timesheets.memberId, memberIds)));
-  t.timesheets = rows.map((x) => ({ ...x, submittedAt: ms(x.submittedAt), approvedAt: ms(x.approvedAt), approvedBy: opt(x.approvedBy) }));
+  t.timesheets = rows.map(sheet);
   if (withLines && rows.length) {
     t.timesheetLines = await tx.select().from(s.timesheetLines).where(inArray(s.timesheetLines.timesheetId, rows.map((x) => x.id)));
   }
+}
+
+export async function loadTimesheet(tx: Tx, t: Tables, orgId: string, id: string) {
+  const rows = await tx.select().from(s.timesheets).where(and(eq(s.timesheets.orgId, orgId), eq(s.timesheets.id, id)));
+  t.timesheets = rows.map(sheet);
+  if (rows.length) t.timesheetLines = await tx.select().from(s.timesheetLines).where(eq(s.timesheetLines.timesheetId, id));
+}
+
+/** Submitted timesheets per week, for the people given: what's waiting for the admin. */
+export async function loadWaiting(tx: Tx, orgId: string, memberIds: string[]) {
+  if (!memberIds.length) return [];
+  return tx
+    .select({ weekStart: s.timesheets.weekStart, count: sql<number>`count(*)::int` })
+    .from(s.timesheets)
+    .where(and(eq(s.timesheets.orgId, orgId), eq(s.timesheets.status, "submitted"), inArray(s.timesheets.memberId, memberIds)))
+    .groupBy(s.timesheets.weekStart)
+    .orderBy(s.timesheets.weekStart);
+}
+
+/** The newest send-back or reopen of a timesheet, for who did it and when. */
+export async function loadLastReview(tx: Tx, orgId: string, timesheetId: string) {
+  const [row] = await tx
+    .select({ action: s.auditLog.action, actorId: s.auditLog.actorId, at: s.auditLog.at })
+    .from(s.auditLog)
+    .where(and(eq(s.auditLog.orgId, orgId), eq(s.auditLog.target, `timesheet:${timesheetId}`), inArray(s.auditLog.action, ["timesheet.rejected", "timesheet.reopened"])))
+    .orderBy(desc(s.auditLog.at))
+    .limit(1);
+  return row ? { action: row.action, actorId: row.actorId, at: row.at.getTime() } : null;
 }
