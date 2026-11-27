@@ -50,6 +50,20 @@
       "when": 1795788170095,
       "tag": "0006_timesheet_review_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795790548094,
+      "tag": "0007_leave",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795790554746,
+      "tag": "0008_leave_settings_policies",
+      "breakpoints": true
     }
   ]
 }

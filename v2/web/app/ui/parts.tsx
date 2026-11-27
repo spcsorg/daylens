@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { initials } from "@/lib/format";
 import type { ProjectLabel } from "@/lib/data/queries";
+import { STATUS } from "@/lib/tables";
 import { Icon } from "./Icon";
 
 export function Header({ title, sub, back, avatar, children }: { title: string; sub: string; back?: string; avatar?: string; children?: ReactNode }) {
@@ -101,7 +102,6 @@ export function ProjectTag({ project, color }: { project: ProjectLabel | null; c
   );
 }
 
-const STATUS = { draft: "Draft", submitted: "Submitted", approved: "Approved", rejected: "Rejected", missing: "Not started" };
 
 export function TimesheetStatus({ status }: { status: keyof typeof STATUS }) {
   return <span className={`status ${status}`}>{STATUS[status]}</span>;

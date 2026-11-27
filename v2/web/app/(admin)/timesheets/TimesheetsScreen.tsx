@@ -5,13 +5,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { QueueRow, TimesheetQueue, TimesheetReview } from "@/lib/data/queries";
 import { addDays, localDate } from "@/lib/domain/time";
-import { clock, dayOfMonth, dayRange, hm, hrs, initials, pct, weekdayName, weekdayShort } from "@/lib/format";
+import { dayOfMonth, dayRange, hrs, initials, pct, weekdayName, weekdayShort } from "@/lib/format";
+import { inTab, sentAt, timesheetFlags as flags, type Tab } from "@/lib/tables";
 import { Dialog, Field, ToastView, useToast, type Toast } from "../../ui/controls";
 import { Icon } from "../../ui/Icon";
 import { Empty, TimesheetStatus } from "../../ui/parts";
 import { approve, reopen, sendBack, type Result } from "./actions";
 
-export type Tab = "submitted" | "rejected" | "approved" | "missing";
 type Notify = (t: Toast) => void;
 
 const TABS: [Tab, string][] = [
@@ -21,21 +21,9 @@ const TABS: [Tab, string][] = [
   ["missing", "Not sent yet"],
 ];
 
-const inTab = (tab: Tab, r: QueueRow) => (tab === "missing" ? r.status === "missing" || r.status === "draft" : r.status === tab);
 const first = (name: string) => name.split(" ")[0];
 const quarter = (h: number) => (h ? h.toFixed(2) : "—");
 const failed = (): Result => ({ ok: false, message: "Couldn’t save: Daylens didn’t answer. Try again." });
-
-/** What's worth a second look before approving: hours far from what Daylens tracked, time with no project, a long week. */
-function flags(r: QueueRow) {
-  if (r.status === "missing") return [];
-  const out: string[] = [];
-  const gap = r.hours * 3600 - r.trackedSeconds;
-  if (Math.abs(gap) >= 2 * 3600) out.push(`${hrs(Math.abs(gap))} ${gap > 0 ? "more" : "less"} than tracked`);
-  if (r.unattributedSeconds >= 1.5 * 3600) out.push(`${hm(r.unattributedSeconds)} needs a project`);
-  if (r.hours > 45) out.push("Over 45 h");
-  return out;
-}
 
 function useLink() {
   const path = usePathname();
@@ -87,11 +75,7 @@ export function TimesheetsScreen({
       setPicked(new Set());
     });
 
-  const sent = (r: QueueRow) => {
-    if (r.status === "missing") return "—";
-    if (!r.sheet?.submittedAt) return "Draft, not sent";
-    return `${weekdayShort(localDate(r.sheet.submittedAt, timeZone))} ${clock(r.sheet.submittedAt, timeZone)}`;
-  };
+  const sent = (r: QueueRow) => sentAt(r, timeZone);
 
   return (
     <>

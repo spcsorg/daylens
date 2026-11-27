@@ -197,6 +197,20 @@ export const timesheetLines = pgTable(
   (t) => [index().on(t.timesheetId), check("timesheet_lines_quarter_hours", sql`${t.hours} > 0 and ${t.hours} <= 24 and ${t.hours} * 4 = trunc(${t.hours} * 4)`)],
 );
 
+/** Leave an admin recorded for a person: whole days from startsOn to endsOn, inclusive. Only working days inside it count. */
+export const leave = pgTable(
+  "leave",
+  {
+    id: id(),
+    orgId: orgId(),
+    memberId: memberId(),
+    type: text().notNull(),
+    startsOn: date({ mode: "string" }).notNull(),
+    endsOn: date({ mode: "string" }).notNull(),
+  },
+  (t) => [index().on(t.orgId, t.startsOn), index().on(t.memberId, t.startsOn), check("leave_dates_in_order", sql`${t.endsOn} >= ${t.startsOn}`)],
+);
+
 export const auditLog = pgTable(
   "audit_log",
   {

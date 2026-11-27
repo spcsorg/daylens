@@ -1,21 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { CLIENTS, graceDateFor, MEMBERS, ORG, PROJECTS, rng, seedDay, TEAMS } from "../domain/firm";
-import type { Block, DailyRollup, Org, Project, Tables, Timesheet, TimesheetLine } from "../domain/model";
-import { rollupDay } from "../domain/rollup";
+import type { Leave, Org, Tables, Timesheet, TimesheetLine } from "../domain/model";
+import { rollupsFor } from "../domain/rollup";
 import { addDays, dayStart, datesBetween, localDate, mondayOf } from "../domain/time";
 
 const CURRENT_WEEK_STATUS = ["submitted", "submitted", "approved", "submitted", "draft", "submitted", "missing", "rejected", "submitted", "approved"] as const;
-
-/** Rebuilds a member's rollup rows for one local day from their blocks, as the ingest path will after each upload. */
-export function rollupsFor(blocks: Block[], projects: Project[], org: Org, memberId: string, date: string): DailyRollup[] {
-  const billable = new Map(projects.map((p) => [p.id, p.billable]));
-  return rollupDay(blocks, date, org.policy, (id) => billable.get(id) ?? false).map((row) => ({
-    orgId: org.id,
-    memberId,
-    date,
-    ...row,
-  }));
-}
 
 /** Kestrel & Vale with four past weeks and this week up to now, all invented. */
 export function seedTables(now: number, weeks = 4): Tables {
@@ -77,6 +66,7 @@ export function seedTables(now: number, weeks = 4): Tables {
     dailyRollups: [],
     timesheets: [],
     timesheetLines: [],
+    leave: [],
     auditLog: [{ orgId, action: "org.seeded", target: ORG.name, at: now }],
   };
 
@@ -97,6 +87,20 @@ export function seedTables(now: number, weeks = 4): Tables {
       endsAt: to === null ? undefined : addDays(thisWeek, to),
     });
   }
+  const memberId = (name: string) => id(MEMBERS.find((m) => m.name === name)!.key);
+  // The prototype's month: leave that matches an empty day, one leave day with activity, one working day with neither, and leave still to come.
+  const leave: [string, string, number, number][] = [
+    ["Claudine Umutoni", "Annual leave", -21, -17],
+    ["Esther Mutoni", "Study leave", -14, -13],
+    ["Olivier Habimana", "Annual leave", -11, -11],
+    ["Moses Tumusiime", "Sick leave", -7, -5],
+    ["Leah Wanjiru", "Annual leave", 7, 8],
+  ];
+  t.leave = leave.map(([name, type, from, to]): Leave => ({ id: randomUUID(), orgId, memberId: memberId(name), type, startsOn: addDays(thisWeek, from), endsOn: addDays(thisWeek, to) }));
+  const activeOnLeave = { memberId: memberId("Olivier Habimana"), date: addDays(thisWeek, -11), minutes: 126 };
+  const noActivity = { memberId: memberId("Aline Uwera"), date: addDays(thisWeek, -14) };
+  const away = (who: string, date: string) =>
+    (who === noActivity.memberId && date === noActivity.date) || t.leave.some((l) => l.memberId === who && l.startsOn <= date && l.endsOn >= date);
   const dates = datesBetween(addDays(thisWeek, -7 * weeks), today);
   const graceDate = graceDateFor(today);
   const clientOf = new Map(PROJECTS.map((p) => [p.key, p.client]));
@@ -104,7 +108,12 @@ export function seedTables(now: number, weeks = 4): Tables {
 
   for (const [i, m] of MEMBERS.entries()) {
     for (const date of dates) {
-      seedDay(m, i, date, now, graceDate).forEach((b, n) =>
+      let day = seedDay(m, i, date, now, graceDate);
+      if (id(m.key) === activeOnLeave.memberId && date === activeOnLeave.date) {
+        const cut = day[0]!.start + activeOnLeave.minutes * 60_000;
+        day = day.filter((b) => b.start < cut).map((b) => ({ ...b, end: Math.min(b.end, cut) }));
+      } else if (away(id(m.key), date)) day = [];
+      day.forEach((b, n) =>
         t.blocks.push({
           id: `${id(m.key)}-${date}-${n}`,
           orgId,

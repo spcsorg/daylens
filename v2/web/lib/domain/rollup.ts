@@ -1,4 +1,5 @@
-import { dayStart, DAY_MS, isoWeekday } from "./time";
+import type { Block, DailyRollup, Org, Project } from "./model";
+import { addDays, atLocalTime, dayStart, datesBetween, isoWeekday, localDate } from "./time";
 
 export type Policy = {
   timeZone: string;
@@ -38,10 +39,11 @@ export function rollupDay<P extends string>(
   billable: (projectId: P) => boolean,
 ): RollupRow<P>[] {
   const from = dayStart(date, policy.timeZone);
-  const to = from + DAY_MS;
+  // The next local midnight, which is 23 or 25 hours away when the clocks change.
+  const to = dayStart(addDays(date, 1), policy.timeZone);
   const working = policy.workingDays.includes(isoWeekday(date));
-  const coreFrom = from + policy.coreStart * 60_000;
-  const coreTo = from + policy.coreEnd * 60_000;
+  const coreFrom = atLocalTime(date, policy.coreStart, policy.timeZone);
+  const coreTo = atLocalTime(date, policy.coreEnd, policy.timeZone);
   const rows = new Map<P | undefined, RollupRow<P>>();
   for (const b of blocks) {
     if (b.deleted) continue;
@@ -59,6 +61,40 @@ export function rollupDay<P extends string>(
     rows.set(key, row);
   }
   return [...rows.values()];
+}
+
+/** Rebuilds a member's rollup rows for one local day from their blocks, as the ingest path will after each upload. */
+export function rollupsFor(blocks: Block[], projects: Project[], org: Org, memberId: string, date: string): DailyRollup[] {
+  const billable = new Map(projects.map((p) => [p.id, p.billable]));
+  return rollupDay(blocks, date, org.policy, (id) => billable.get(id) ?? false).map((row) => ({
+    orgId: org.id,
+    memberId,
+    date,
+    ...row,
+  }));
+}
+
+/**
+ * Every rollup row for one member's blocks under the org's policy, and the local dates they span, padded two days each side
+ * so rows the other time zone put on a neighbouring day are replaced too: between zones 25 hours apart, a block moves two.
+ */
+export function rebuildRollups(blocks: Block[], projects: Project[], org: Org, memberId: string): { from: string; to: string; rows: DailyRollup[] } | null {
+  const live = blocks.filter((b) => !b.deleted);
+  if (!live.length) return null;
+  const tz = org.policy.timeZone;
+  const byDate = new Map<string, Block[]>();
+  for (const b of live) {
+    for (const date of datesBetween(localDate(b.start, tz), localDate(Math.max(b.start, b.end - 1), tz))) {
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date)!.push(b);
+    }
+  }
+  const dates = [...byDate.keys()].sort();
+  return {
+    from: addDays(dates[0]!, -2),
+    to: addDays(dates.at(-1)!, 2),
+    rows: dates.flatMap((date) => rollupsFor(byDate.get(date)!, projects, org, memberId, date)),
+  };
 }
 
 export function coreSecondsPerDay(policy: Policy): number {

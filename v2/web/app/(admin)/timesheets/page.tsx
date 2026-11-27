@@ -3,8 +3,10 @@ import { AccessError } from "@/lib/data/access";
 import { period } from "@/lib/period";
 import { loadMe, requireSession, today } from "@/lib/session";
 import { Filters } from "../../ui/Filters";
+import type { Tab } from "@/lib/tables";
+import { ExportButtons } from "../../ui/ExportButtons";
 import { Header, Steps } from "../../ui/parts";
-import { TimesheetsScreen, type Tab } from "./TimesheetsScreen";
+import { TimesheetsScreen } from "./TimesheetsScreen";
 
 type Params = Record<string, string | undefined>;
 
@@ -35,6 +37,7 @@ export default async function TimesheetsPage({ searchParams }: { searchParams: P
     <>
       <Header title="Timesheets" sub={`Week of ${p.label} · due Friday 6:00 PM`}>
         <Steps earlier={href(params, { ...step, date: p.earlier })} later={p.later && href(params, { ...step, date: p.later })} />
+        <ExportButtons table="timesheets" params={{ ...params, date: p.from, sheet: undefined }} />
       </Header>
       <div className="scroll">
         <Filters filters={[{ key: "team", label: "Team", all: "All teams", options: me.teams.map((t) => ({ value: t.id, label: t.name })) }]} />

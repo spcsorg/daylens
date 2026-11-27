@@ -20,10 +20,15 @@ export function localDate(ms: number, timeZone: string): string {
   return new Date(ms + offsetMinutes(ms, timeZone) * MINUTE).toISOString().slice(0, 10);
 }
 
+/** The instant a local wall-clock time on a date falls at, which is what a firm means by "core hours start at 8:30". */
+export function atLocalTime(date: string, minutes: number, timeZone: string): number {
+  const utc = Date.parse(`${date}T00:00:00Z`) + minutes * MINUTE;
+  const guess = utc - offsetMinutes(utc, timeZone) * MINUTE;
+  return utc - offsetMinutes(guess, timeZone) * MINUTE;
+}
+
 export function dayStart(date: string, timeZone: string): number {
-  const utcMidnight = Date.parse(`${date}T00:00:00Z`);
-  const guess = utcMidnight - offsetMinutes(utcMidnight, timeZone) * MINUTE;
-  return utcMidnight - offsetMinutes(guess, timeZone) * MINUTE;
+  return atLocalTime(date, 0, timeZone);
 }
 
 export function addDays(date: string, days: number): string {

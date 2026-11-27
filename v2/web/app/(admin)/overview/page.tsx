@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { clientColors } from "@/lib/colors";
 import { getOverview } from "@/lib/data";
-import { hm, hrs, initials, pct, wholeHours, weekdayShort } from "@/lib/format";
+import { coreHours, hm, hrs, initials, pct, wholeHours, weekdayShort, workingDays } from "@/lib/format";
 import { isoWeekday } from "@/lib/domain/time";
 import { period } from "@/lib/period";
 import { loadMe, requireSession, today } from "@/lib/session";
@@ -86,7 +86,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
                 label="Core-hours coverage"
                 value={o.coverage === null ? "—" : pct(o.coverage)}
                 share={o.coverage ?? 0}
-                note={`Of ${clockOf(me.org.coreStart)}–${clockOf(me.org.coreEnd)}, Monday to Friday`}
+                note={`Of ${coreHours(me.org.coreStart, me.org.coreEnd)}, ${workingDays(me.org.workingDays)}`}
               />
               <Stat label="Active now" value={o.activeCount} unit={`of ${o.people}`} note={<><span className="dot-now" />Working in the last 5 minutes</>} />
             </div>
@@ -175,10 +175,4 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       </div>
     </>
   );
-}
-
-function clockOf(minutes: number) {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }

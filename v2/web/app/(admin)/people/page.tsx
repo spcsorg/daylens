@@ -1,38 +1,18 @@
 import Link from "next/link";
 import { getPeople } from "@/lib/data";
-import type { PersonRow } from "@/lib/data/queries";
 import { hm, hrs, initials, pct } from "@/lib/format";
 import { period } from "@/lib/period";
 import { loadMe, requireSession, today } from "@/lib/session";
+import { PEOPLE_COLUMNS as COLUMNS, sortPeople } from "@/lib/tables";
+import { ExportButtons } from "../../ui/ExportButtons";
 import { Filters } from "../../ui/Filters";
 import { Empty, Header, Share, Steps, TimesheetStatus } from "../../ui/parts";
 
 type Params = Record<string, string | undefined>;
-type SortKey = "name" | "seconds" | "billableShare" | "coverage" | "idleSeconds" | "outsideCoreSeconds" | "unattributedSeconds" | "timesheet";
-
-const COLUMNS: [SortKey, string, boolean][] = [
-  ["name", "Person", false],
-  ["seconds", "Hours", true],
-  ["billableShare", "Billable", true],
-  ["coverage", "Core-hours coverage", false],
-  ["idleSeconds", "Idle", true],
-  ["outsideCoreSeconds", "Evenings", true],
-  ["unattributedSeconds", "Needs a project", true],
-  ["timesheet", "Timesheet", false],
-];
 
 function href(params: Params, changes: Params) {
   const next = new URLSearchParams(Object.entries({ ...params, ...changes }).filter((e): e is [string, string] => !!e[1]));
   return `/people?${next}`;
-}
-
-function compare(key: SortKey) {
-  return (a: PersonRow, b: PersonRow) => {
-    const x = a[key];
-    const y = b[key];
-    if (typeof x === "string" || typeof y === "string") return String(x ?? "").localeCompare(String(y ?? ""));
-    return (x ?? -1) - (y ?? -1);
-  };
 }
 
 export default async function PeoplePage({ searchParams }: { searchParams: Promise<Params> }) {
@@ -40,11 +20,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const [session, me, now] = [await requireSession(), await loadMe(), await today()];
   const p = period("week", params.date, now);
   const rows = await getPeople(session, { from: p.from, to: p.to, teamId: params.team, clientId: params.client });
-  const sort = (COLUMNS.find((c) => c[0] === params.sort)?.[0] ?? "seconds") as SortKey;
-  const textual = sort === "name" || sort === "timesheet";
-  const dir = params.dir === "asc" || params.dir === "desc" ? params.dir : textual ? "asc" : "desc";
-  rows.sort(compare(sort));
-  if (dir === "desc") rows.reverse();
+  const { sort, dir } = sortPeople(rows, params.sort, params.dir);
   const total = (k: "seconds" | "outsideCoreSeconds" | "unattributedSeconds") => rows.reduce((a, r) => a + r[k], 0);
   const avg = (k: "billableShare" | "coverage") => {
     const xs = rows.map((r) => r[k]).filter((x): x is number => x !== null);
@@ -55,6 +31,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <>
       <Header title="People" sub={p.current ? `This week · ${p.label}` : `Week of ${p.label}`}>
         <Steps earlier={href(params, { date: p.earlier })} later={p.later && href(params, { date: p.later })} />
+        <ExportButtons table="people" params={{ ...params, date: p.from }} disabled={!rows.length} />
       </Header>
       <div className="scroll">
         <Filters

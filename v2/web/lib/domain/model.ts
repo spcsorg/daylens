@@ -81,6 +81,8 @@ export type Timesheet = {
   reviewNote?: string;
 };
 export type TimesheetLine = { timesheetId: string; date: string; projectId: string; hours: number; description: string };
+/** Whole days, startsOn to endsOn inclusive; the type is one of the org's leave types when it was recorded. */
+export type Leave = { id: string; orgId: string; memberId: string; type: string; startsOn: string; endsOn: string };
 export type AuditEntry = { orgId: string; actorId?: string; action: string; target: string; detail?: string; at: number };
 
 export type Tables = {
@@ -96,5 +98,6 @@ export type Tables = {
   dailyRollups: DailyRollup[];
   timesheets: Timesheet[];
   timesheetLines: TimesheetLine[];
+  leave: Leave[];
   auditLog: AuditEntry[];
 };

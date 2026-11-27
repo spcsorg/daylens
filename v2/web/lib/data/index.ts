@@ -1,15 +1,17 @@
 import { addDays, dayStart, datesBetween, DAY_MS, mondayOf } from "../domain/time";
 import { appDb, asAdmin, type Db } from "../db/client";
-import { loadAssignments, loadBlocks, loadDevices, loadLastReview, loadOrg, loadRollups, loadTimesheet, loadTimesheets, loadWaiting } from "../db/store";
+import { loadAssignments, loadBlocks, loadDevices, loadFirstDays, loadLastReview, loadLeave, loadOrg, loadRollups, loadTimesheet, loadTimesheets, loadWaiting } from "../db/store";
 import { AccessError, membersInScope, requireAdmin, requireMemberInScope, type Session } from "./access";
-import { catalog, me, overview, people, person, timesheetQueue, timesheetReview, type OverviewArgs, type PeopleArgs, type Range } from "./queries";
+import { attendance, catalog, me, overview, people, person, settings, timesheetQueue, timesheetReview, type AttendanceArgs, type OverviewArgs, type PeopleArgs, type Range } from "./queries";
 
 export { approveTimesheets, rejectTimesheet, reopenTimesheet } from "./review";
+export { recordLeave, removeLeave, updateLeave } from "./leave";
+export { setMemberActive, updateMember, updatePolicy } from "./settings";
 export { assign, createClient, createProject, setClientArchived, setProjectArchived, unassign, updateAssignment, updateClient, updateProject, ValidationError } from "./catalog";
 
 /**
  * The one way screens read and write org data. Each call loads only the admin's org and scope, as daylens_app,
- * then hands the rows to the pure functions in queries.ts; writes live in catalog.ts and review.ts.
+ * then hands the rows to the pure functions in queries.ts; writes live in catalog.ts, review.ts, leave.ts and settings.ts.
  */
 
 const isWeek = ({ from, to }: Range) => mondayOf(from) === from && addDays(from, 6) === to;
@@ -96,4 +98,19 @@ export function getTimesheetReview(session: Session, id: string, db: Db = appDb(
     if (sheet) await loadRollups(tx, t, access.org.id, sheet.weekStart, addDays(sheet.weekStart, 6), [sheet.memberId]);
     return timesheetReview(t, session, id, await loadLastReview(tx, access.org.id, id));
   });
+}
+
+export function getAttendance(session: Session, args: AttendanceArgs, now = Date.now(), db: Db = appDb()) {
+  return asAdmin(db, session.memberId, async (tx) => {
+    const t = await loadOrg(tx, session.memberId);
+    const access = requireAdmin(t, session);
+    const ids = membersInScope(t, access, args.teamId).map((m) => m.id);
+    await loadRollups(tx, t, access.org.id, args.from, args.to, ids);
+    await loadLeave(tx, t, access.org.id, args.from, args.to, ids);
+    return attendance(t, session, args, await loadFirstDays(tx, access.org.id, ids), now);
+  });
+}
+
+export function getSettings(session: Session, db: Db = appDb()) {
+  return asAdmin(db, session.memberId, async (tx) => settings(await loadOrg(tx, session.memberId), session));
 }
