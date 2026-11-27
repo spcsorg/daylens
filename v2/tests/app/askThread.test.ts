@@ -10,7 +10,7 @@ import { EARLIER_LIMIT } from '../../app/shared/conversation.ts'
 const none = { pages: [], files: [], windows: [], hours: [], more: [], looser: false }
 const stamp = { changes: 7, deletions: 2 }
 const answer = (text: string): AskResult => ({ kind: 'answer', statements: [{ text, cites: [] }], visual: null, dropped: 0, withdrawn: 0, results: none, stamp })
-const turn = (id: number, question: string, over: Partial<Turn> = {}): Turn => ({ id, question, asked_at: 1000 * id, earlier: [], streamed: [], result: null, error: null, stale: false, outdated: null, ...over })
+const turn = (id: number, question: string, over: Partial<Turn> = {}): Turn => ({ id, question, asked_at: 1000 * id, earlier: [], reading: false, streamed: [], result: null, error: null, stale: false, outdated: null, ...over })
 
 test('a question carries the answered and searched exchanges before it, a failed one with its search results too, never a pending, errored, unanswered or outdated one', () => {
   const thread = [

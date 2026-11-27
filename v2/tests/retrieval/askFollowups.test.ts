@@ -289,3 +289,17 @@ test('a provider failure keeps fresh matching search results with the error', as
     })
   } finally { s.close() }
 })
+
+test('Ask says when the record goes to Claude to be read: after a follow-up is rewritten, before the answer is asked for, and never without a key', async () => {
+  const s = setup()
+  const steps: string[] = []
+  const f = model((rec) => (steps.push('rewrite'), { question: rec.question }), () => (steps.push('answer'), { answerable: false, statements: [], missing: 'x' }))
+  const onReading = () => void steps.push('reading')
+  await ask('And the budget yesterday?', { reader: s.reader, model: f.m, log: s.log, now: () => NEXT_DAY, onReading }, LIMITS, [s.said(BUDGET, REVIEWED)])
+  assert.deepEqual(steps, ['rewrite', 'reading', 'answer'])
+
+  steps.length = 0
+  await ask(BUDGET, { reader: s.reader, model: null, log: s.log, now: () => NEXT_DAY, onReading }, LIMITS)
+  assert.deepEqual(steps, [], 'search alone sends nothing to be read')
+  s.close()
+})

@@ -479,7 +479,8 @@ function todaysHours(reader: Reader, now: number, from: number, to: number): Fou
   })
 }
 
-type AskDeps = { reader: Reader; model: AskModel | null; log: AskLog; now?: () => number; onStatement?: (s: Statement) => void }
+// onReading: the record is on its way to the model, which reads it before the first statement.
+type AskDeps = { reader: Reader; model: AskModel | null; log: AskLog; now?: () => number; onStatement?: (s: Statement) => void; onReading?: () => void }
 
 export const RESOLVE_SCHEMA = {
   type: 'object',
@@ -800,6 +801,7 @@ async function answer(question: string, deps: AskDeps, limits: AskLimits): Promi
   const billed = (b: Omit<AskReply, 'output'>) =>
     deps.log.recordUsage({ kind: 'answer', provider: deps.model!.provider, model: b.model, input_tokens: b.input_tokens, output_tokens: b.output_tokens, cost_micro_usd: b.cost_micro_usd, ref: `read:${readId}` })
   let reply: AskReply
+  deps.onReading?.()
   try {
     reply = await deps.model.run({ system: SYSTEM_PROMPT, prompt: JSON.stringify(record), schema: ANSWER_SCHEMA }, onText)
   } catch (err) {

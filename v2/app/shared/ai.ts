@@ -11,8 +11,9 @@ export interface AskResults {
   ask: AskResult
 }
 
-// Each statement as soon as it is complete and has passed the checks, before the whole answer arrives.
-export type AskEvent = { e: 'ask'; ask_id: number; statement: Statement }
+// Each statement as soon as it is complete and has passed the checks, before the whole answer arrives; and the moment
+// the record goes to Claude to be read.
+export type AskEvent = { e: 'ask'; ask_id: number; statement: Statement } | { e: 'ask_reading'; ask_id: number }
 
 export type AiAction = { a: 'ai_status' } | { a: 'ai_key_save'; key: string } | { a: 'ai_key_test' } | { a: 'ai_key_clear' }
 
