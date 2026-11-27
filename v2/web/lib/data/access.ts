@@ -34,6 +34,18 @@ export function membersInScope(t: Tables, access: Access, teamId?: string): Memb
   return t.members.filter((m) => m.orgId === access.org.id && m.status === "active" && (!ids || ids.has(m.id)));
 }
 
+/** The person or team an admin may assign: one of the two, in the org and in the admin's scope. New assignments need an active person. */
+export function requireAssignee(t: Tables, access: Access, who: { memberId?: string; teamId?: string }, isNew: boolean) {
+  if (who.memberId) {
+    const member = t.members.find((m) => m.id === who.memberId && m.orgId === access.org.id);
+    const inTeams = !access.teamIds || t.teamMembers.some((r) => r.memberId === who.memberId && access.teamIds!.includes(r.teamId));
+    if (!member || !inTeams || (isNew && member.status !== "active")) throw new AccessError("That person is outside your admin scope");
+    return;
+  }
+  const team = t.teams.find((x) => x.id === who.teamId && x.orgId === access.org.id);
+  if (!team || (access.teamIds && !access.teamIds.includes(team.id))) throw new AccessError("That team is outside your admin scope");
+}
+
 export function requireMemberInScope(t: Tables, access: Access, memberId: string): Member {
   const member = membersInScope(t, access).find((m) => m.id === memberId);
   if (!member) throw new AccessError("That person is outside your admin scope");

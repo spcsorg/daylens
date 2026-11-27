@@ -40,7 +40,7 @@ export function seedTables(now: number, weeks = 4): Tables {
   const t: Tables = {
     orgs: [org],
     teams: TEAMS.map((name) => ({ id: id("team_" + name), orgId, name })),
-    clients: CLIENTS.map((c) => ({ id: id("client_" + c.key), orgId, name: c.name, code: c.code, aliases: c.aliases, domains: c.domains, billable: c.billable })),
+    clients: CLIENTS.map((c) => ({ id: id("client_" + c.key), orgId, name: c.name, code: c.code, aliases: c.aliases, domains: c.domains, emailDomains: c.domains, billable: c.billable })),
     projects: PROJECTS.map((p) => ({ id: id("project_" + p.key), orgId, clientId: id("client_" + p.client), name: p.name, code: p.code, keywords: p.keywords, billable: p.billable })),
     members: MEMBERS.map((m) => ({
       id: id(m.key),
@@ -82,6 +82,21 @@ export function seedTables(now: number, weeks = 4): Tables {
 
   const today = localDate(now, ORG.timeZone);
   const thisWeek = mondayOf(today);
+  const personal: [string, string, number, number | null][] = [
+    ["Leah Wanjiru", "lkb-aud", -7, 11],
+    ["Leah Wanjiru", "lkb-tax", -14, 11],
+    ["Tomás Herrera", "twg-erp", -21, null],
+  ];
+  for (const [name, project, from, to] of personal) {
+    t.assignments.push({
+      id: randomUUID(),
+      orgId,
+      projectId: id("project_" + project),
+      memberId: id(MEMBERS.find((m) => m.name === name)!.key),
+      startsAt: addDays(thisWeek, from),
+      endsAt: to === null ? undefined : addDays(thisWeek, to),
+    });
+  }
   const dates = datesBetween(addDays(thisWeek, -7 * weeks), today);
   const graceDate = graceDateFor(today);
   const clientOf = new Map(PROJECTS.map((p) => [p.key, p.client]));

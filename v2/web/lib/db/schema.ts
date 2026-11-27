@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, date, index, uniqueIndex, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, uniqueIndex, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const role = pgEnum("member_role", ["owner", "admin", "employee"]);
 export const adminScope = pgEnum("admin_scope", ["org", "teams"]);
@@ -80,9 +80,11 @@ export const clients = pgTable(
     code: text().notNull(),
     aliases: text().array().notNull(),
     domains: text().array().notNull(),
+    emailDomains: text().array().notNull().default(sql`'{}'`),
     billable: boolean().notNull(),
+    archivedAt: at(),
   },
-  (t) => [index().on(t.orgId)],
+  (t) => [index().on(t.orgId), uniqueIndex("clients_org_id_code_index").on(t.orgId, sql`lower(${t.code})`)],
 );
 
 export const projects = pgTable(
@@ -96,8 +98,9 @@ export const projects = pgTable(
     keywords: text().array().notNull(),
     billable: boolean().notNull(),
     odooId: integer(),
+    archivedAt: at(),
   },
-  (t) => [index().on(t.orgId)],
+  (t) => [index().on(t.orgId), uniqueIndex("projects_org_id_code_index").on(t.orgId, sql`lower(${t.code})`)],
 );
 
 export const assignments = pgTable(
@@ -111,7 +114,11 @@ export const assignments = pgTable(
     startsAt: date({ mode: "string" }),
     endsAt: date({ mode: "string" }),
   },
-  (t) => [index().on(t.projectId)],
+  (t) => [
+    index().on(t.projectId),
+    check("assignments_one_assignee", sql`(${t.memberId} is null) <> (${t.teamId} is null)`),
+    check("assignments_dates_in_order", sql`${t.endsAt} is null or ${t.startsAt} is null or ${t.endsAt} >= ${t.startsAt}`),
+  ],
 );
 
 export const blocks = pgTable(

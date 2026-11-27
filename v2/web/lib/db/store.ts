@@ -6,6 +6,7 @@ import * as s from "./schema";
 const BATCH = 1000;
 const opt = <T>(v: T | null) => v ?? undefined;
 const ms = (d: Date | null) => (d ? d.getTime() : undefined);
+const date = (x: number | undefined) => (x === undefined ? null : new Date(x));
 
 export function emptyTables(): Tables {
   return { orgs: [], members: [], teams: [], teamMembers: [], devices: [], clients: [], projects: [], assignments: [], blocks: [], dailyRollups: [], timesheets: [], timesheetLines: [], auditLog: [] };
@@ -24,8 +25,8 @@ export async function replaceAll(db: Db, t: Tables) {
     await insertAll(t.teams, (b) => tx.insert(s.teams).values(b));
     await insertAll(t.teamMembers, (b) => tx.insert(s.teamMembers).values(b));
     await insertAll(t.devices, (b) => tx.insert(s.devices).values(b.map((d) => ({ ...d, lastSeenAt: new Date(d.lastSeenAt) }))));
-    await insertAll(t.clients, (b) => tx.insert(s.clients).values(b));
-    await insertAll(t.projects, (b) => tx.insert(s.projects).values(b));
+    await insertAll(t.clients, (b) => tx.insert(s.clients).values(b.map((x) => ({ ...x, archivedAt: date(x.archivedAt) }))));
+    await insertAll(t.projects, (b) => tx.insert(s.projects).values(b.map((x) => ({ ...x, archivedAt: date(x.archivedAt) }))));
     await insertAll(t.assignments, (b) => tx.insert(s.assignments).values(b));
     await insertAll(t.blocks, (b) => tx.insert(s.blocks).values(b.map((x) => ({ ...x, start: new Date(x.start), end: new Date(x.end) }))));
     await insertAll(t.dailyRollups, (b) => tx.insert(s.dailyRollups).values(b));
@@ -54,9 +55,14 @@ export async function loadOrg(tx: Tx, adminId: string): Promise<Tables> {
   t.members = members.map((m) => ({ ...m, adminScope: opt(m.adminScope) }));
   t.teams = teams;
   t.teamMembers = links;
-  t.clients = clients;
-  t.projects = projects.map((p) => ({ ...p, odooId: opt(p.odooId) }));
+  t.clients = clients.map((c) => ({ ...c, archivedAt: ms(c.archivedAt) }));
+  t.projects = projects.map((p) => ({ ...p, odooId: opt(p.odooId), archivedAt: ms(p.archivedAt) }));
   return t;
+}
+
+export async function loadAssignments(tx: Tx, t: Tables, orgId: string) {
+  const rows = await tx.select().from(s.assignments).where(eq(s.assignments.orgId, orgId));
+  t.assignments = rows.map((a) => ({ ...a, memberId: opt(a.memberId), teamId: opt(a.teamId), startsAt: opt(a.startsAt), endsAt: opt(a.endsAt) }));
 }
 
 export async function loadRollups(tx: Tx, t: Tables, orgId: string, from: string, to: string, memberIds: string[]) {
