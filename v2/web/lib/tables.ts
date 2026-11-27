@@ -10,7 +10,7 @@ import { clock, dayOfMonth, hm, hrs, weekdayShort } from "./format";
 export type Cell = string | number | null;
 export type Table = { name: string; columns: string[]; rows: Cell[][] };
 
-export type PeopleSort = "name" | "seconds" | "billableShare" | "coverage" | "idleSeconds" | "outsideCoreSeconds" | "unattributedSeconds" | "timesheet";
+type PeopleSort = "name" | "seconds" | "billableShare" | "coverage" | "idleSeconds" | "outsideCoreSeconds" | "unattributedSeconds" | "timesheet";
 
 export const PEOPLE_COLUMNS: [PeopleSort, string, boolean][] = [
   ["name", "Person", false],

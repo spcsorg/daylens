@@ -399,7 +399,7 @@ export function timesheetReview(t: Tables, session: Session | null, id: string, 
 export type TimesheetReview = ReturnType<typeof timesheetReview>;
 
 /** Less than this in a day reads as no activity: a glance at email on a day off isn't a day worked. */
-export const ACTIVE_DAY_SECONDS = 15 * 60;
+const ACTIVE_DAY_SECONDS = 15 * 60;
 
 /**
  * worked; leave (a working day inside recorded leave); none (a past working day with neither); off (a non-working day);
@@ -467,7 +467,6 @@ export function attendance(t: Tables, session: Session | null, args: AttendanceA
 }
 
 export type Attendance = ReturnType<typeof attendance>;
-export type AttendanceRow = Attendance["people"][number];
 export type AttendanceLeave = Attendance["leave"][number];
 
 /** The org's policy and its people with their role, admin scope, teams and status, for Settings. Only owners may change them. */
