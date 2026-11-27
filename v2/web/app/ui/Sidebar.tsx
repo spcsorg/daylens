@@ -9,20 +9,23 @@ import { Icon, Mark, type IconName } from "./Icon";
 export function Sidebar({
   org,
   admin,
+  waiting,
   signOut,
 }: {
   org: string;
+  waiting: number;
   admin: { name: string; role: string; scope: string[] | null };
   signOut: () => Promise<void>;
 }) {
   const path = usePathname();
   const [menu, setMenu] = useState(false);
-  const nav = (href: string, label: string, icon: IconName) => {
+  const nav = (href: string, label: string, icon: IconName, count?: number) => {
     const current = path === href || path.startsWith(href + "/");
     return (
       <Link className="nav" href={href} aria-current={current ? "page" : undefined}>
         <Icon name={icon} filled={current} />
         {label}
+        {!!count && <span className="count" aria-label={`${count} waiting`}>{count}</span>}
       </Link>
     );
   };
@@ -35,6 +38,7 @@ export function Sidebar({
       {nav("/overview", "Overview", "overview")}
       {nav("/people", "People", "people")}
       {nav("/clients", "Clients and projects", "briefcase")}
+      {nav("/timesheets", "Timesheets", "timesheet", waiting)}
       <span className="spacer" />
       <div style={{ position: "relative" }}>
         {menu && (
