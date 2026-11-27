@@ -37,7 +37,7 @@ Every release is tested on Windows 11, macOS and Linux (X11 and at least one Way
 
 | Environment | Used for |
 |---|---|
-| Windows 11 on ARM in Parallels on a Mac | Everyday development: interface, Win32 and UI Automation behavior, browser privacy tests, install and update flows |
+| Windows 11 on ARM in Parallels on a Mac | Everyday development: interface, Win32 behavior, browser privacy tests, install and update flows |
 | A Windows 11 x64 cloud desktop (a client image, not Windows Server) | Native x64 behavior, browser integrations, signed updates |
 | CI runners | Builds, unit and contract tests, signature checks, installer automation. GitHub's default Windows runner is Windows Server, so it never counts as client testing |
 | A physical Windows 11 x64 laptop | Battery, sleep, Modern Standby, lid close, docking, mixed scaling, antivirus, and the Windows gold day |

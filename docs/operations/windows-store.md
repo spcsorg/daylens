@@ -2,6 +2,8 @@
 
 On Windows, Daylens ships only through the Microsoft Store, as a full-trust MSIX whose only restricted capability is `runFullTrust`. The Store signs what is uploaded and installs its updates.
 
+The package builds and passes the App Certification Kit in CI under a throwaway identity. It has not been submitted to the Store, has no Partner Center identity yet, and hasn't been tested on a Windows 11 client.
+
 ## Building it
 
 On Windows x64, from `v2/`, with the three identity values from Partner Center:
@@ -47,4 +49,4 @@ The `windows-store` job in `.github/workflows/e2e.yml` builds the package with a
 
 Paste into Partner Center's submission options, under **Restricted capabilities**:
 
-> Daylens is a desktop app that records which apps and windows a person uses so it can show them a calendar of their day, stored only on their own computer. It needs runFullTrust for two things a sandboxed app cannot do. First, it reads the foreground window: which app is in front and its window title, using the Win32 foreground-window and UI Automation APIs, as the person switches between apps. Second, it runs its capture helper, a separate full-trust process included in the package, which watches for foreground, title, idle, lock and sleep changes and reports them to the app. Nothing is read from private or incognito browser windows, recording can be paused or limited at any time, and nothing leaves the computer unless the person asks an AI provider a question themselves.
+> Daylens is a desktop app that records which apps and windows a person uses so it can show them a calendar of their day, stored only on their own computer. It needs runFullTrust for two things a sandboxed app cannot do. First, it reads the foreground window: which app is in front and its window title, using the Win32 foreground-window, window-text and WinEvent APIs, as the person switches between apps. Second, it runs its capture helper, a separate full-trust process included in the package, which watches for foreground, title, idle, lock and sleep changes and reports them to the app. Nothing is read from private or incognito browser windows, recording can be paused or limited at any time, and nothing leaves the computer unless the person adds their own AI provider key, which Daylens then uses to write their hours and answer their questions, or connects an AI assistant that reads their day.
