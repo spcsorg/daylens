@@ -397,3 +397,108 @@ export function timesheetReview(t: Tables, session: Session | null, id: string, 
 }
 
 export type TimesheetReview = ReturnType<typeof timesheetReview>;
+
+/** Less than this in a day reads as no activity: a glance at email on a day off isn't a day worked. */
+export const ACTIVE_DAY_SECONDS = 15 * 60;
+
+/**
+ * worked; leave (a working day inside recorded leave); none (a past working day with neither); off (a non-working day);
+ * later (today so far, or after); before (before the person's first day in Daylens, so nothing to compare).
+ */
+export type AttendanceKind = "worked" | "leave" | "none" | "off" | "later" | "before";
+
+export type AttendanceArgs = Range & { teamId?: string };
+
+/** Each person in scope by day: time active, leave recorded, and the days where the two don't agree (FR-23). */
+export function attendance(t: Tables, session: Session | null, args: AttendanceArgs, firstDays: Map<string, string>, now: number) {
+  checkRange(args);
+  const access = requireAdmin(t, session);
+  const { org } = access;
+  const today = localDate(now, org.policy.timeZone);
+  const members = membersInScope(t, access, args.teamId).sort((a, b) => a.name.localeCompare(b.name));
+  const ids = new Set(members.map((m) => m.id));
+  const rows = rollups(t, org.id, args, ids);
+  const seconds = new Map<string, number>();
+  for (const r of rows) seconds.set(`${r.memberId}|${r.date}`, (seconds.get(`${r.memberId}|${r.date}`) ?? 0) + r.seconds);
+  const isWorking = (date: string) => org.policy.workingDays.includes(isoWeekday(date));
+  const days = datesBetween(args.from, args.to).map((date) => ({ date, working: isWorking(date), today: date === today }));
+  const leave = t.leave
+    .filter((l) => l.orgId === org.id && ids.has(l.memberId) && l.startsOn <= args.to && l.endsOn >= args.from)
+    .sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.endsOn.localeCompare(b.endsOn));
+  const names = new Map(members.map((m) => [m.id, m.name]));
+  const flags: { memberId: string; name: string; date: string; leaveType: string | null; seconds: number; mostly: ProjectLabel | null }[] = [];
+
+  const people = members.map((m) => {
+    let daysWorked = 0;
+    let leaveDays = 0;
+    const cells = days.map(({ date, working }) => {
+      const s = seconds.get(`${m.id}|${date}`) ?? 0;
+      const active = s >= ACTIVE_DAY_SECONDS;
+      const on = working ? leave.find((l) => l.memberId === m.id && l.startsOn <= date && l.endsOn >= date) : undefined;
+      if (active) daysWorked++;
+      if (on) leaveDays++;
+      const first = firstDays.get(m.id);
+      const kind: AttendanceKind = on ? "leave" : active ? "worked" : date >= today ? "later" : !first || date < first ? "before" : working ? "none" : "off";
+      const flag = (on && active) || kind === "none";
+      if (flag) {
+        const top = rows.filter((r) => r.memberId === m.id && r.date === date && r.projectId).sort((a, b) => b.seconds - a.seconds)[0];
+        flags.push({ memberId: m.id, name: m.name, date, leaveType: on?.type ?? null, seconds: s, mostly: active && top ? projectLabel(t, top.projectId!) : null });
+      }
+      return { date, kind, seconds: s, leaveType: on?.type ?? null, flag };
+    });
+    return { memberId: m.id, name: m.name, title: m.title, cells, daysWorked, leaveDays };
+  });
+
+  return {
+    days,
+    people,
+    flags: flags.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name)),
+    leave: leave.map((l) => ({
+      id: l.id,
+      memberId: l.memberId,
+      name: names.get(l.memberId)!,
+      type: l.type,
+      startsOn: l.startsOn,
+      endsOn: l.endsOn,
+      days: datesBetween(l.startsOn, l.endsOn).filter(isWorking).length,
+    })),
+    leaveTypes: org.policy.leaveTypes,
+  };
+}
+
+export type Attendance = ReturnType<typeof attendance>;
+export type AttendanceRow = Attendance["people"][number];
+export type AttendanceLeave = Attendance["leave"][number];
+
+/** The org's policy and its people with their role, admin scope, teams and status, for Settings. Only owners may change them. */
+export function settings(t: Tables, session: Session | null) {
+  const access = requireAdmin(t, session);
+  const { org } = access;
+  const teams = t.teams.filter((x) => x.orgId === org.id).sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    canEdit: access.member.role === "owner",
+    selfId: access.member.id,
+    policy: org.policy,
+    teams: teams.map((x) => ({ id: x.id, name: x.name })),
+    members: t.members
+      .filter((m) => m.orgId === org.id)
+      .map((m) => {
+        const links = t.teamMembers.filter((r) => r.memberId === m.id && teams.some((x) => x.id === r.teamId));
+        return {
+          id: m.id,
+          name: m.name,
+          email: m.email,
+          title: m.title,
+          role: m.role,
+          adminScope: m.adminScope ?? null,
+          teamIds: links.map((r) => r.teamId),
+          adminTeamIds: links.filter((r) => r.isAdminScope).map((r) => r.teamId),
+          active: m.status === "active",
+        };
+      })
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
+  };
+}
+
+export type Settings = ReturnType<typeof settings>;
+export type SettingsMember = Settings["members"][number];

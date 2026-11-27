@@ -1,4 +1,5 @@
-import { dayStart, DAY_MS, isoWeekday } from "./time";
+import type { Block, DailyRollup, Org, Project } from "./model";
+import { addDays, dayStart, datesBetween, DAY_MS, isoWeekday, localDate } from "./time";
 
 export type Policy = {
   timeZone: string;
@@ -59,6 +60,40 @@ export function rollupDay<P extends string>(
     rows.set(key, row);
   }
   return [...rows.values()];
+}
+
+/** Rebuilds a member's rollup rows for one local day from their blocks, as the ingest path will after each upload. */
+export function rollupsFor(blocks: Block[], projects: Project[], org: Org, memberId: string, date: string): DailyRollup[] {
+  const billable = new Map(projects.map((p) => [p.id, p.billable]));
+  return rollupDay(blocks, date, org.policy, (id) => billable.get(id) ?? false).map((row) => ({
+    orgId: org.id,
+    memberId,
+    date,
+    ...row,
+  }));
+}
+
+/**
+ * Every rollup row for one member's blocks under the org's policy, and the local dates they span, padded a day each side
+ * so rows a different time zone put on a neighbouring day are replaced too.
+ */
+export function rebuildRollups(blocks: Block[], projects: Project[], org: Org, memberId: string): { from: string; to: string; rows: DailyRollup[] } | null {
+  const live = blocks.filter((b) => !b.deleted);
+  if (!live.length) return null;
+  const tz = org.policy.timeZone;
+  const byDate = new Map<string, Block[]>();
+  for (const b of live) {
+    for (const date of datesBetween(localDate(b.start, tz), localDate(Math.max(b.start, b.end - 1), tz))) {
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date)!.push(b);
+    }
+  }
+  const dates = [...byDate.keys()].sort();
+  return {
+    from: addDays(dates[0]!, -1),
+    to: addDays(dates.at(-1)!, 1),
+    rows: dates.flatMap((date) => rollupsFor(byDate.get(date)!, projects, org, memberId, date)),
+  };
 }
 
 export function coreSecondsPerDay(policy: Policy): number {

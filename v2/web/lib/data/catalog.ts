@@ -88,7 +88,7 @@ function checkProject(t: Tables, access: Access, input: ProjectInput, self?: str
   return row;
 }
 
-const validDate = (d: string) => {
+export const validDate = (d: string) => {
   const at = Date.parse(d + "T00:00:00Z");
   return DATE.test(d) && !Number.isNaN(at) && new Date(at).toISOString().startsWith(d);
 };

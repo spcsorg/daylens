@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccessError } from "@/lib/data/access";
 import { getMe, getPeople, getPerson } from "@/lib/data";
-import { rollupsFor } from "@/lib/data/seed";
+import { rollupsFor } from "@/lib/domain/rollup";
 import { asAdmin } from "@/lib/db/client";
 import { NOW, seededDatabase } from "./db";
 

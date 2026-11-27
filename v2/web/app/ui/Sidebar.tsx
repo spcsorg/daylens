@@ -39,7 +39,9 @@ export function Sidebar({
       {nav("/people", "People", "people")}
       {nav("/clients", "Clients and projects", "briefcase")}
       {nav("/timesheets", "Timesheets", "timesheet", waiting)}
+      {nav("/attendance", "Attendance and leave", "calendar")}
       <span className="spacer" />
+      {nav("/settings", "Settings", "settings")}
       <div style={{ position: "relative" }}>
         {menu && (
           <form action={signOut} className="popover" style={{ top: "auto", bottom: "calc(100% + 6px)" }}>

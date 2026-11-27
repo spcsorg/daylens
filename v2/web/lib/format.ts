@@ -52,3 +52,24 @@ export function dayRange(from: string, to: string): string {
   if (from.slice(0, 7) === to.slice(0, 7)) return `${dayOfMonth(from)}–${dayOfMonth(to)} ${monthName(to)}`;
   return `${dayOfMonth(from)} ${monthName(from)} – ${dayOfMonth(to)} ${monthName(to)}`;
 }
+
+/** Minutes after midnight as "8:30 AM". */
+export function clockOf(minutes: number): string {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+export const coreHours = (start: number, end: number) => `${clockOf(start)}–${clockOf(end)}`;
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** ISO weekdays as "Monday to Friday", or "Monday, Wednesday and Friday" when they don't run on. */
+export function workingDays(days: number[]): string {
+  const xs = [...days].sort();
+  if (!xs.length) return "no working days";
+  if (xs.length === 7) return "every day";
+  if (xs.length > 2 && xs.every((d, i) => i === 0 || d === xs[i - 1]! + 1)) return `${DAYS[xs[0]! - 1]} to ${DAYS[xs.at(-1)! - 1]}`;
+  const names = xs.map((d) => DAYS[d - 1]!);
+  return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}

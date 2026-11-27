@@ -9,7 +9,7 @@ const ms = (d: Date | null) => (d ? d.getTime() : undefined);
 const date = (x: number | undefined) => (x === undefined ? null : new Date(x));
 
 export function emptyTables(): Tables {
-  return { orgs: [], members: [], teams: [], teamMembers: [], devices: [], clients: [], projects: [], assignments: [], blocks: [], dailyRollups: [], timesheets: [], timesheetLines: [], auditLog: [] };
+  return { orgs: [], members: [], teams: [], teamMembers: [], devices: [], clients: [], projects: [], assignments: [], blocks: [], dailyRollups: [], timesheets: [], timesheetLines: [], leave: [], auditLog: [] };
 }
 
 async function insertAll<T>(rows: T[], insert: (batch: T[]) => Promise<unknown>) {
@@ -44,6 +44,7 @@ export async function replaceAll(db: Db, t: Tables) {
     await insertAll(t.timesheetLines, (b) => tx.insert(s.timesheetLines).values(b));
     const approved = t.timesheets.filter((x) => x.status === "approved").map((x) => x.id);
     await insertAll(approved, (b) => tx.update(s.timesheets).set({ status: "approved" }).where(inArray(s.timesheets.id, b)));
+    await insertAll(t.leave, (b) => tx.insert(s.leave).values(b));
     await insertAll(t.auditLog, (b) => tx.insert(s.auditLog).values(b.map((x) => ({ ...x, at: new Date(x.at) }))));
   });
 }
@@ -148,6 +149,26 @@ export async function loadTimesheet(tx: Tx, t: Tables, orgId: string, id: string
   const rows = await tx.select().from(s.timesheets).where(and(eq(s.timesheets.orgId, orgId), eq(s.timesheets.id, id)));
   t.timesheets = rows.map(sheet);
   if (rows.length) t.timesheetLines = await tx.select().from(s.timesheetLines).where(eq(s.timesheetLines.timesheetId, id));
+}
+
+/** Each person's first day with any activity, so attendance doesn't count the days before they had Daylens. */
+export async function loadFirstDays(tx: Tx, orgId: string, memberIds: string[]) {
+  if (!memberIds.length) return new Map<string, string>();
+  const rows = await tx
+    .select({ memberId: s.dailyRollups.memberId, first: sql<string>`min(${s.dailyRollups.date})::text` })
+    .from(s.dailyRollups)
+    .where(and(eq(s.dailyRollups.orgId, orgId), inArray(s.dailyRollups.memberId, memberIds)))
+    .groupBy(s.dailyRollups.memberId);
+  return new Map(rows.map((r) => [r.memberId, r.first]));
+}
+
+/** Leave overlapping the range, for the people given. */
+export async function loadLeave(tx: Tx, t: Tables, orgId: string, from: string, to: string, memberIds: string[]) {
+  if (!memberIds.length) return;
+  t.leave = await tx
+    .select()
+    .from(s.leave)
+    .where(and(eq(s.leave.orgId, orgId), lte(s.leave.startsOn, to), gte(s.leave.endsOn, from), inArray(s.leave.memberId, memberIds)));
 }
 
 /** Submitted timesheets per week, for the people given: what's waiting for the admin. */
