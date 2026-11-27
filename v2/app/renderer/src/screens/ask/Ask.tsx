@@ -99,6 +99,9 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
   const started = thread.length > 0
   // One key form, after the thread and always at the same place, so what is typed in it survives another question.
   const lastNoKey = thread.findLast((t) => t.result?.kind === 'search_only')
+  // Screen readers hear each step from a region that is always there; one inserted with its first words isn't read.
+  const last = thread.at(-1)
+  const step = !last || last.result || last.error || last.stale ? null : last.streamed.length > 0 ? 'writing' : last.reading ? 'reading' : 'thinking'
   useEffect(() => {
     const el = scroller.current
     const content = el?.firstElementChild
@@ -110,6 +113,9 @@ export function Ask({ onOpenHour }: { onOpenHour: (start: number) => void }) {
 
   return (
     <div className="ask">
+      <p className="ask-status" role="status">
+        {step && SAYS[step]}
+      </p>
       <div
         className="scroll ask-scroll"
         ref={scroller}
