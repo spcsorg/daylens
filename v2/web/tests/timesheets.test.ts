@@ -124,6 +124,7 @@ describe("sending back", () => {
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.fields).toEqual({ comment: "Say what should change, so they know what to fix." });
     expect(await pgError(env.db.execute(sql`update timesheets set status = 'rejected', review_note = null where id = ${s!.id}`))).toMatch(/timesheets_rejected_has_note/);
+    expect(await pgError(env.db.execute(sql`update timesheets set status = 'rejected', review_note = E'\t\n' where id = ${s!.id}`))).toMatch(/timesheets_rejected_has_note/);
     expect((await row(s!.id)).status).toBe("submitted");
 
     const fresh = await row(s!.id);
@@ -147,6 +148,7 @@ describe("an approved timesheet", () => {
     expect(await pgError(env.db.execute(sql`delete from timesheet_lines where timesheet_id = ${s!.id}`))).toMatch(/approved and locked/);
     expect(await pgError(env.db.execute(sql`update timesheets set status = 'rejected', review_note = 'x' where id = ${s!.id}`))).toMatch(/approved and locked/);
     expect(await pgError(env.db.execute(sql`update timesheets set status = 'submitted', review_note = null where id = ${s!.id}`))).toMatch(/needs a reason/);
+    expect(await pgError(env.db.execute(sql`update timesheets set status = 'submitted', review_note = E'\t\n' where id = ${s!.id}`))).toMatch(/needs a reason/);
     await expect(reopenTimesheet(diane, { id: s!.id, version: approved.version }, " ", env.db)).rejects.toThrow("Say why it needs reopening");
     expect((await row(s!.id)).version).toBe(approved.version);
 

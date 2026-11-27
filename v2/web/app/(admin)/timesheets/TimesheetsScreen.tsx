@@ -109,13 +109,13 @@ export function TimesheetsScreen({
           <Link className="notice-action" href={link({ date: earlier.weekStart, tab: null, sheet: null })}>Open that week</Link>
         </div>
       )}
-      <div className="settings-tabs" role="tablist">
+      <nav className="settings-tabs" aria-label="Timesheets by status">
         {TABS.map(([key, label]) => (
-          <Link key={key} role="tab" aria-selected={tab === key} href={link({ tab: key === "submitted" ? null : key, sheet: null })} scroll={false}>
+          <Link key={key} aria-current={tab === key ? "page" : undefined} href={link({ tab: key === "submitted" ? null : key, sheet: null })} scroll={false}>
             {label} <span className="faint">{queue.people.filter((r) => inTab(key, r)).length}</span>
           </Link>
         ))}
-      </div>
+      </nav>
       {tab === "submitted" && rows.length > 0 && (
         <div className="toolbar" style={{ marginBottom: 12, minHeight: 32, paddingLeft: 12 }}>
           <button
@@ -229,7 +229,7 @@ function ReviewDialog({ review, timeZone, onClose, notify }: { review: Timesheet
         save={(note) => sendBack(seen, note)}
         done={() => {
           notify({ text: `Sent back to ${name}` });
-          onClose();
+          if (new URLSearchParams(window.location.search).get("sheet") === review.id) onClose();
         }}
         onFail={notify}
       />
@@ -257,7 +257,7 @@ function ReviewDialog({ review, timeZone, onClose, notify }: { review: Timesheet
       const r = await approve([seen]).catch(failed);
       if (!r.ok) return notify({ text: r.message, error: true });
       notify({ text: `Approved ${review.member.name}’s timesheet` });
-      onClose();
+      if (new URLSearchParams(window.location.search).get("sheet") === review.id) onClose();
     });
 
   const last = review.lastReview;

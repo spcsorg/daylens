@@ -14,7 +14,7 @@ export function Dialog({ title, heading, wide, onClose, onSubmit, children }: { 
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>("input, select, textarea")?.focus();
+    (ref.current?.querySelector<HTMLElement>("input, select, textarea") ?? ref.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") return onClose();
       if (e.key !== "Tab" || !ref.current) return;

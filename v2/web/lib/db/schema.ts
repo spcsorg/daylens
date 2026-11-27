@@ -180,7 +180,7 @@ export const timesheets = pgTable(
   (t) => [
     index().on(t.orgId, t.weekStart),
     index().on(t.memberId, t.weekStart),
-    check("timesheets_rejected_has_note", sql`${t.status} <> 'rejected' or length(trim(coalesce(${t.reviewNote}, ''))) > 0`),
+    check("timesheets_rejected_has_note", sql`${t.status} <> 'rejected' or coalesce(${t.reviewNote}, '') ~ '\\S'`),
     check("timesheets_approved_has_approver", sql`${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null)`),
   ],
 );

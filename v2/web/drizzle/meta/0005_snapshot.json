@@ -1,5 +1,5 @@
 {
-  "id": "3b3a8ad6-af91-48c9-81a7-aa10db752422",
+  "id": "6d62b204-9f12-4a76-bdce-a36399c1df4e",
   "prevId": "65089ca0-7698-47a3-b800-c5246592dc83",
   "version": "7",
   "dialect": "postgresql",
@@ -1607,7 +1607,7 @@
       "checkConstraints": {
         "timesheets_rejected_has_note": {
           "name": "timesheets_rejected_has_note",
-          "value": "\"timesheets\".\"status\" <> 'rejected' or length(trim(coalesce(\"timesheets\".\"review_note\", ''))) > 0"
+          "value": "\"timesheets\".\"status\" <> 'rejected' or coalesce(\"timesheets\".\"review_note\", '') ~ '\\S'"
         },
         "timesheets_approved_has_approver": {
           "name": "timesheets_approved_has_approver",

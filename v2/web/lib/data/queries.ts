@@ -367,7 +367,7 @@ export function timesheetReview(t: Tables, session: Session | null, id: string, 
   const lines = t.timesheetLines.filter((l) => l.timesheetId === sheet.id);
   const tracked = t.dailyRollups.filter((r) => r.memberId === member.id);
   const week = datesBetween(sheet.weekStart, addDays(sheet.weekStart, 6));
-  const days = week.filter((d) => access.org.policy.workingDays.includes(isoWeekday(d)) || lines.some((l) => l.date === d) || tracked.some((r) => r.date === d && r.seconds >= 900));
+  const days = week.filter((d) => access.org.policy.workingDays.includes(isoWeekday(d)) || lines.some((l) => l.date === d) || sum(tracked.filter((r) => r.date === d), (r) => r.seconds) >= 900);
   const byProject = [...new Set(lines.map((l) => l.projectId))].map((projectId) => {
     const own = lines.filter((l) => l.projectId === projectId).sort((a, b) => a.date.localeCompare(b.date));
     return {

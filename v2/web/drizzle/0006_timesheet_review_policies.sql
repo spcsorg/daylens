@@ -18,7 +18,7 @@ BEGIN
   IF OLD.status = 'approved' AND NEW.status <> 'submitted' THEN
     RAISE EXCEPTION 'Timesheet % is approved and locked. Reopen it first', OLD.id USING ERRCODE = 'check_violation';
   END IF;
-  IF OLD.status = 'approved' AND length(trim(coalesce(NEW.review_note, ''))) = 0 THEN
+  IF OLD.status = 'approved' AND (coalesce(NEW.review_note, '') !~ '\S' OR NEW.review_note IS NOT DISTINCT FROM OLD.review_note) THEN
     RAISE EXCEPTION 'Reopening timesheet % needs a reason', OLD.id USING ERRCODE = 'check_violation';
   END IF;
   NEW.version := OLD.version + 1;
@@ -35,6 +35,9 @@ BEGIN
     RAISE EXCEPTION 'That timesheet is approved and locked. Reopen it first' USING ERRCODE = 'check_violation';
   END IF;
   UPDATE timesheets SET version = version + 1 WHERE id = ANY (sheets);
+  IF TG_OP <> 'DELETE' AND NOT FOUND THEN
+    RAISE EXCEPTION 'That timesheet doesn''t exist' USING ERRCODE = 'foreign_key_violation';
+  END IF;
   RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
 END $$;
 --> statement-breakpoint
