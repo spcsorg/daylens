@@ -246,6 +246,36 @@ The model used to write hours is chosen by evaluation, not preference. See [Engi
 
 The billing service handles accounts, plans, usage and payments. It stores account state, usage metadata and payment events, never activity or prompts. Card payments use the payment provider's hosted checkout; mobile money uses a mobile-money provider. Details and payment-state rules are in [Billing](billing.md).
 
+## Enterprise admin dashboard and org database
+
+Daylens Enterprise adds an admin web app for firms. It lives in `v2/web`, beside the desktop app, rather than in `apps/web` as the SRS suggests: V1's Next.js and Convex app is not in this repository, and `v2/web` imports V2's tokens and fonts (`app/renderer/src/styles/tokens.css`) so the dashboard and the desktop app stay one product. It is Next.js with server components; every screen reads on the server and ships no data layer to the browser.
+
+**One data-access module.** Screens read only through `v2/web/lib/data`. Each call resolves the signed-in admin, loads only that admin's org and scope (`lib/db/store.ts`), and hands the rows to pure functions (`lib/data/queries.ts`) that do the arithmetic. Admin scope is the whole org for an owner or an admin with `admin_scope = 'org'`, and otherwise the teams whose `team_members` row has `is_admin_scope`. A person outside the scope is an error the screen shows, never an empty page.
+
+**Database: plain PostgreSQL.** The org data lives in standard Postgres (16 or later), reached through the `pg` driver and Drizzle ORM. It has to stay portable, so Daylens can move hosts when cost or law requires it, for example to keep a firm's data in its own country:
+
+- Standard Postgres only: no vendor SDKs or features (no supabase-js, PostgREST, Supabase Auth or realtime, edge functions, Neon or Convex APIs), and extensions only if stock Postgres 16+ ships them. Today it uses none.
+- The connection string comes from `DATABASE_URL` and nothing else.
+- The schema is `v2/web/lib/db/schema.ts`; the generated SQL migrations in `v2/web/drizzle/` are committed and are the source of truth for the database. `npm run db:generate` writes a new one after a schema change; `npm run db:migrate` applies them.
+- Development and CI run stock `postgres:17`. CI runs the migrations and every test against a stock Postgres service container, which is the proof it runs on any host.
+- Activity is stored as `blocks` (indexed on org, member and start). `daily_rollups` (member, local date, project) are written by the app from the blocks, as `lib/data/seed.ts`'s `rollupsFor` does today and the ingest path will after each upload.
+
+**Tenant isolation in two layers.** The data-access module filters every query by org and scope. Postgres row-level security checks it again: the app reads as the `daylens_app` role with `app.admin_id` set for the transaction (`asAdmin` in `lib/db/client.ts`), and the policies in `drizzle/0001_row_level_security.sql` return only rows in that admin's org and scope, whatever the query asks for. With no admin set, or an employee set, they return nothing. The connecting user must be a member of `daylens_app` (the migration grants it to the user that runs it). Tests check both layers: an admin scoped to Audit and Tax can't read an Advisory member through the module, or with raw SQL under RLS.
+
+**Backups.** `npm run db:backup` runs `pg_dump` in custom format to a timestamped file (`daylens-<UTC time>.dump`) in `BACKUP_DIR`, the first argument, or `backups/`. `npm run db:restore -- <file>` creates the `daylens_app` role if the server lacks it (roles live outside a dump) and runs `pg_restore --clean --if-exists --no-owner`. A test seeds a database, backs it up, restores into a fresh one, and compares every table's row count and a rollup. Both need `pg_dump` and `pg_restore` from Postgres 16 or later on the `PATH`, no older than the server. Scheduling and off-site copies come later.
+
+**Moving hosts.**
+
+1. `npm run db:backup` against the old host.
+2. Create an empty database on the new host, then `DATABASE_URL=<new> npm run db:restore -- <file>`.
+3. Switch `DATABASE_URL` everywhere the app runs, and retire the old database once the app reads from the new one.
+
+**Sign-in.** Sessions live in the `sessions` table, in the shape Auth.js uses for database sessions (session token, user, expiry), so Auth.js with the Microsoft Entra ID provider can take over sign-in later and write to the same table; queries only ever see a member id. Until then a dev-only sign-in picks a seeded member. It is on only when `DAYLENS_DEV_SIGN_IN=1` and never in a production build. Members carry `entra_object_id` and orgs `entra_tenant_id`, which is how an Entra sign-in will find its member.
+
+**Live data.** "Active now" means the Daylens app sent a heartbeat (`devices.last_seen_at`) in the last 5 minutes. The overview re-reads every 30 seconds; nothing pushes.
+
+**Invented data.** `npm run db:seed` replaces everything with Kestrel & Vale Advisory, the invented firm from the design prototype (40 people, 4 teams, 8 clients, 11 projects), with four past weeks and this week up to now. It refuses to run in production.
+
 ## Security
 
 See [Privacy and security](privacy-and-security.md). In short: captured text is untrusted input, the writer has no tools, output is validated and rendered as plain text, secrets live in the platform's secure storage, releases are signed on every platform, and every privacy promise has a test.

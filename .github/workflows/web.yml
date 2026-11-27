@@ -1,0 +1,68 @@
+name: Web
+
+on:
+  pull_request:
+    paths:
+      - "v2/web/**"
+      - "v2/app/renderer/src/styles/**"
+      - "v2/app/renderer/src/fonts/**"
+      - ".github/workflows/web.yml"
+  push:
+    branches: [main]
+    paths:
+      - "v2/web/**"
+      - "v2/app/renderer/src/styles/**"
+      - "v2/app/renderer/src/fonts/**"
+      - ".github/workflows/web.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: v2/web
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: daylens
+          POSTGRES_PASSWORD: daylens
+          POSTGRES_DB: daylens
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U daylens"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://daylens:daylens@localhost:5432/daylens
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/web/package-lock.json
+      # pg_dump must be at least the server's version; Ubuntu 24.04 ships 16.
+      - name: Postgres 17 client
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm run build
